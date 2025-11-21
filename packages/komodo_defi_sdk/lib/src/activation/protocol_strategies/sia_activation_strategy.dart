@@ -8,9 +8,13 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
 class SiaActivationStrategy extends ProtocolActivationStrategy {
-  SiaActivationStrategy(super.client);
+  SiaActivationStrategy(
+    super.client, {
+    this.pollingInterval = const Duration(milliseconds: 500),
+  });
 
-  static const Duration kPollInterval = Duration(milliseconds: 500);
+  /// Delay added between activation task status RPC requests. Defaults to 500ms
+  final Duration pollingInterval;
   static final Logger _log = Logger('SiaActivationStrategy');
 
   @override
@@ -74,25 +78,16 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
 
-      while (true) {
+      var isComplete = false;
+      while (!isComplete) {
         final status = await KomodoDefiRpcMethods(
           client,
         ).sia.enableSiaStatus(taskId);
 
-        yield ActivationProgress(
-          status: 'SIA activation in progress',
-          progressDetails: ActivationProgressDetails(
-            currentStep: ActivationStep.processing,
-            stepCount: 3,
-            additionalInfo: {'status': status.status},
-          ),
-        );
-
-        // Stop polling on any terminal state
-        if (status.status != 'InProgress') {
+        if (status.isCompleted) {
           if (status.status == 'Ok') {
             if (KdfLoggingConfig.verboseLogging) {
-              _log.info('[SIA] Activation completed for ${asset.id.id}');
+              _log.info('[ELECTRUM] Activation completed for ${asset.id.id}');
             }
 
             yield ActivationProgress(
@@ -107,7 +102,8 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
           } else {
             if (KdfLoggingConfig.verboseLogging) {
               _log.warning(
-                '[SIA] Activation failed for ${asset.id.id}: ${status.status} - ${status.details}',
+                '[ELECTRUM] Activation failed for ${asset.id.id}: '
+                '${status.status} - ${status.details}',
               );
             }
 
@@ -125,33 +121,32 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
               ),
             );
           }
+          isComplete = true;
+        } else {
           yield ActivationProgress(
-            status: 'SIA activation concluded',
-            isComplete: true,
+            status: 'SIA activation in progress',
             progressDetails: ActivationProgressDetails(
-              currentStep: status.status == 'Ok'
-                  ? ActivationStep.complete
-                  : ActivationStep.error,
+              currentStep: ActivationStep.processing,
               stepCount: 3,
+              additionalInfo: {'status': status.status},
             ),
           );
-          break;
+          await Future<void>.delayed(pollingInterval);
         }
-
-        await Future<void>.delayed(kPollInterval);
       }
-    } on Exception catch (e) {
-      if (KdfLoggingConfig.verboseLogging) {
-        _log.severe('[SIA] Activation exception for ${asset.id.id}: $e');
-      }
+    } catch (e, s) {
+      _log.severe('[ELECTRUM] Activation exception for ${asset.id.id}', e, s);
 
       yield ActivationProgress(
         status: 'SIA activation failed',
         isComplete: true,
+        errorMessage: e.toString(),
         progressDetails: ActivationProgressDetails(
           currentStep: ActivationStep.error,
           stepCount: 3,
           additionalInfo: {'error': e.toString()},
+          errorDetails: e.toString(),
+          stackTrace: s.toString(),
         ),
       );
       rethrow;
