@@ -37,6 +37,17 @@ sealed class FeeInfo with _$FeeInfo {
           coin: json['coin'] as String? ?? '',
           amount: Decimal.parse(json['amount'] as String),
         );
+      case 'Sia':
+        final rawTotal =
+            json['total_amount'] ??
+            json['amount']; // some examples use total_amount
+        if (rawTotal == null) {
+          throw ArgumentError('Sia fee_details missing total_amount/amount');
+        }
+        return FeeInfo.utxoFixed(
+          coin: json['coin'] as String? ?? '',
+          amount: Decimal.parse(rawTotal.toString()),
+        );
       case 'EthGas' || 'Eth':
         final totalGasFee = json['total_fee'] != null
             ? Decimal.parse(json['total_fee'].toString())

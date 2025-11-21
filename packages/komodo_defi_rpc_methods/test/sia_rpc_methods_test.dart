@@ -16,27 +16,46 @@ void main() {
       );
       final json = req.toJson();
       expect(json['method'], 'task::enable_sia::init');
-      final p = (json['params'] as Map)['activation_params'] as Map;
-      final clientConf = p['client_conf'] as Map;
+      final activationParams =
+          (json['params'] as Map)['activation_params'] as Map;
+      final clientConf = activationParams['client_conf'] as Map;
       expect(clientConf['server_url'], 'https://api.siascan.com/wallet/api');
-      expect(p['tx_history'], true);
-      expect(p['required_confirmations'], 1);
+      expect(activationParams['tx_history'], true);
+      expect(activationParams['required_confirmations'], 1);
     });
 
-    test('SiaWithdrawResponse parses nullable fee_details safely', () {
+    test('SiaWithdrawResponse parses full SIA withdraw shape', () {
       final response = {
         'mmrpc': '2.0',
         'result': {
-          'status': 'Ok',
+          'tx_json': <String, dynamic>{'siacoinOutputs': <dynamic>[]},
+          'tx_hash': 'hash',
+          'from': ['from_addr'],
+          'to': ['to_addr'],
+          'total_amount': '10',
           'spent_by_me': '0',
           'received_by_me': '100',
           'my_balance_change': '100',
-          // fee_details intentionally omitted
+          'block_height': 1,
+          'timestamp': 123456,
+          'fee_details': {
+            'type': 'Sia',
+            'coin': 'SC',
+            'policy': 'Fixed',
+            'total_amount': '0.1',
+          },
+          'coin': 'SC',
+          'internal_id': '',
+          'transaction_type': 'SiaV2Transaction',
+          'memo': null,
         },
       };
       final parsed = SiaWithdrawResponse.parse(JsonMap.of(response));
-      expect(parsed.status, 'Ok');
-      expect(parsed.feeDetails, isNull);
+      expect(parsed.txHash, 'hash');
+      expect(parsed.from, <String>['from_addr']);
+      expect(parsed.to, <String>['to_addr']);
+      expect(parsed.totalAmount, '10');
+      expect(parsed.feeDetails.coin, 'SC');
     });
   });
 }
