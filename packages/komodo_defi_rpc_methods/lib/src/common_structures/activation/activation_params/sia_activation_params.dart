@@ -16,7 +16,7 @@ class SiaActivationParams extends ActivationParams {
     this.password,
     this.txHistory = true,
     super.requiredConfirmations,
-    PrivateKeyPolicy super.privKeyPolicy,
+    super.privKeyPolicy,
   });
 
   /// Creates [SiaActivationParams] from a coins-config JSON entry.

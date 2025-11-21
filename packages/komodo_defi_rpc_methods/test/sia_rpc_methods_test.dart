@@ -1,6 +1,8 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 void main() {
   group('SIA RPC', () {
@@ -25,37 +27,34 @@ void main() {
     });
 
     test('SiaWithdrawResponse parses full SIA withdraw shape', () {
-      final response = {
-        'mmrpc': '2.0',
-        'result': {
-          'tx_json': <String, dynamic>{'siacoinOutputs': <dynamic>[]},
-          'tx_hash': 'hash',
-          'from': ['from_addr'],
-          'to': ['to_addr'],
-          'total_amount': '10',
-          'spent_by_me': '0',
-          'received_by_me': '100',
-          'my_balance_change': '100',
-          'block_height': 1,
-          'timestamp': 123456,
-          'fee_details': {
-            'type': 'Sia',
-            'coin': 'SC',
-            'policy': 'Fixed',
-            'total_amount': '0.1',
-          },
+      final responseResult = {
+        'tx_json': <String, dynamic>{'siacoinOutputs': <dynamic>[]},
+        'tx_hash': 'hash',
+        'from': ['from_addr'],
+        'to': ['to_addr'],
+        'total_amount': '10',
+        'spent_by_me': '0',
+        'received_by_me': '100',
+        'my_balance_change': '100',
+        'block_height': 1,
+        'timestamp': 123456,
+        'fee_details': {
+          'type': 'Sia',
           'coin': 'SC',
-          'internal_id': '',
-          'transaction_type': 'SiaV2Transaction',
-          'memo': null,
+          'policy': 'Fixed',
+          'total_amount': '0.1',
         },
+        'coin': 'SC',
+        'internal_id': '',
+        'transaction_type': 'SiaV2Transaction',
+        'memo': null,
       };
-      final parsed = SiaWithdrawResponse.parse(JsonMap.of(response));
+      final parsed = WithdrawResult.fromJson(JsonMap.of(responseResult));
       expect(parsed.txHash, 'hash');
       expect(parsed.from, <String>['from_addr']);
       expect(parsed.to, <String>['to_addr']);
-      expect(parsed.totalAmount, '10');
-      expect(parsed.feeDetails.coin, 'SC');
+      expect(parsed.balanceChanges.totalAmount, Decimal.fromInt(10));
+      expect(parsed.fee.coin, 'SC');
     });
   });
 }
