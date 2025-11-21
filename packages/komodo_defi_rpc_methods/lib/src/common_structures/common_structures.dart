@@ -19,7 +19,6 @@ export 'activation/activation_params/utxo_activation_params.dart';
 export 'activation/activation_params/zhtlc_activation_params.dart';
 export 'activation/coin_protocol.dart';
 export 'activation/evm_node.dart';
-export 'activation/strategies/utxo_activation_strategy.dart';
 export 'activation/tokens_request.dart';
 export 'activation/utxo_merge_params.dart';
 export 'general/address_format.dart';

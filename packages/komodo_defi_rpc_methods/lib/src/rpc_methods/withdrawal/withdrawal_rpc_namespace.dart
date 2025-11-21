@@ -1,4 +1,3 @@
-import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -21,32 +20,6 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
         memo: params.memo,
         max: params.isMax ?? false,
         ibcSourceChannel: params.ibcSourceChannel,
-      ),
-    );
-  }
-
-  /// Convenience wrapper for SIA withdrawals with SIA-specific response parsing.
-  ///
-  /// Uses the v2 `withdraw` RPC but parses the result into [SiaWithdrawResponse],
-  /// exposing the SIA `tx_json` payload that should later be passed to
-  /// [sendRawTransactionSia].
-  Future<SiaWithdrawResponse> withdrawSia({
-    required String coin,
-    required String to,
-    Decimal? amount,
-    FeeInfo? fee,
-    WithdrawalSource? from,
-    bool max = false,
-  }) {
-    return execute(
-      SiaWithdrawRequest(
-        rpcPass: rpcPass ?? '',
-        coin: coin,
-        to: to,
-        amount: amount,
-        fee: fee,
-        from: from,
-        max: max,
       ),
     );
   }
@@ -98,9 +71,6 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
   }
 
   /// SIA-specific `send_raw_transaction` using a `tx_json` payload.
-  ///
-  /// This should be used together with [withdrawSia], passing the
-  /// [SiaWithdrawResponse.txJson] value as [txJson].
   Future<SendRawTransactionResponse> sendRawTransactionSia({
     required String coin,
     required JsonMap txJson,
