@@ -85,15 +85,9 @@ sealed class FeeInfo with _$FeeInfo {
           gasLimit: json['gas_limit'] as int,
         );
       case 'Sia':
-        final rawTotal =
-            json['total_amount'] ??
-            json['amount']; // some examples use total_amount
-        if (rawTotal == null) {
-          throw ArgumentError('Sia fee_details missing total_amount/amount');
-        }
         return FeeInfo.sia(
           coin: json['coin'] as String? ?? '',
-          amount: Decimal.parse(rawTotal.toString()),
+          amount: Decimal.parse(json['total_amount'].toString()),
           policy: json['policy'] as String? ?? 'Fixed',
         );
       default:
