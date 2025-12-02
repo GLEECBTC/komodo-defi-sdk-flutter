@@ -208,7 +208,7 @@ class WssWebsocketTransform implements CoinConfigTransform {
 enum ElectrumServerType { wssOnly, nonWssOnly }
 
 /// Filters out insecure connections on non-web platforms, emulating the
-/// filtering applied to the coins_config_ssl.json file in KomodoPlatform/coins
+/// filtering applied to the coins_config_ssl.json file in GLEECBTC/coins
 /// On non-web platforms, only SSL electrum servers and HTTPS URLs are
 /// supported for security.
 // TODO: move this to a build-time step via the coins config and/or the

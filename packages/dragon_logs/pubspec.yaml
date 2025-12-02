@@ -28,7 +28,7 @@ dependencies:
   # # Secure code review approved via PR #1106
   # hive:
   #   git:
-  #     url: https://github.com/KomodoPlatform/hive.git
+  #     url: https://github.com/GLEECBTC/hive.git
   #     path: hive/
   #     ref: 470473ffc1ba39f6c90f31ababe0ee63b76b69fe #2.2.3
 

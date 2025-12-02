@@ -1,5 +1,5 @@
 <p align="center">
-    <a href="https://github.com/KomodoPlatform/komodo-defi-framework" alt="Komodo DeFi Framework">
+    <a href="https://github.com/GLEECBTC/komodo-defi-framework" alt="Komodo DeFi Framework">
         <img width="420" src="https://user-images.githubusercontent.com/24797699/252396802-de8f9264-8056-4430-a17d-5ecec9668dfc.png" />
     </a>
 </p>
@@ -21,7 +21,7 @@ Maintained by [GLEEC](https://www.gleec.com).
 
 Supported platforms: Android, iOS, macOS, Windows, Linux, and Web (WASM).
 
-See the Komodo DeFi Framework (API) source at `https://github.com/KomodoPlatform/komodo-defi-framework` and a hosted demo at `https://gleec-sdk-playground.web.app`.
+See the Komodo DeFi Framework (API) source at `https://github.com/GLEECBTC/komodo-defi-framework` and a hosted demo at `https://gleec-sdk-playground.web.app`.
 
 ## Quick start (SDK)
 

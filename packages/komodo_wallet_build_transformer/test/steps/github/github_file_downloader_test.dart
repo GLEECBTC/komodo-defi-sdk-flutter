@@ -190,7 +190,7 @@ void main() {
         final realisticUrls = [
           'https://coins-cdn.komodoplatform.com/master',
           'https://coins-cdn.komodoplatform.com/dev',
-          'https://raw.githubusercontent.com/KomodoPlatform/coins',
+          'https://raw.githubusercontent.com/GLEECBTC/coins',
         ];
 
         for (final url in realisticUrls) {
@@ -280,7 +280,7 @@ void main() {
 
           const cdnUrl = 'https://coins-cdn.komodoplatform.com/master';
           const originalGitHubUrl =
-              'https://raw.githubusercontent.com/KomodoPlatform/coins';
+              'https://raw.githubusercontent.com/GLEECBTC/coins';
 
           // Test with CDN URL (what should happen when CDN mirrors are configured)
           final downloaderWithCDN = GitHubFileDownloader(
@@ -332,13 +332,13 @@ void main() {
           {
             'scenario': 'Feature branch without CDN',
             'contentUrl':
-                'https://raw.githubusercontent.com/KomodoPlatform/coins',
+                'https://raw.githubusercontent.com/GLEECBTC/coins',
             'description': 'Feature branches falling back to GitHub raw',
           },
           {
             'scenario': 'Custom jsDelivr CDN',
             'contentUrl':
-                'https://cdn.jsdelivr.net/gh/KomodoPlatform/coins@master',
+                'https://cdn.jsdelivr.net/gh/GLEECBTC/coins@master',
             'description': 'Alternative CDN provider for coin assets',
           },
         ];
@@ -371,7 +371,7 @@ void main() {
         // BuildConfig -> effectiveContentUrl -> GitHubFileDownloader -> CDN URLs
 
         const originalContentUrl =
-            'https://raw.githubusercontent.com/KomodoPlatform/coins';
+            'https://raw.githubusercontent.com/GLEECBTC/coins';
         const cdnMirrorUrl = 'https://coins-cdn.komodoplatform.com/master';
 
         // When GitHubFileDownloader receives the effective content URL,

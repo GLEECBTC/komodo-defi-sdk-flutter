@@ -93,7 +93,7 @@ void main() {
     test('load returns config on success', () async {
       // Construct a valid JSON manually to avoid map toString issues
       const valid =
-          '{"coins": {"fetch_at_build_enabled": true, "update_commit_on_build": true, "bundled_coins_repo_commit": "master", "coins_repo_api_url": "https://api.github.com/repos/KomodoPlatform/coins", "coins_repo_content_url": "https://raw.githubusercontent.com/KomodoPlatform/coins", "coins_repo_branch": "master", "runtime_updates_enabled": true, "mapped_files": {"assets/config/coins_config.json": "utils/coins_config_unfiltered.json", "assets/config/coins.json": "coins", "assets/config/seed_nodes.json": "seed-nodes.json"}, "mapped_folders": {"assets/coin_icons/png/": "icons"}, "concurrent_downloads_enabled": false, "cdn_branch_mirrors": {"master": "https://komodoplatform.github.io/coins", "main": "https://komodoplatform.github.io/coins"}}}';
+          '{"coins": {"fetch_at_build_enabled": true, "update_commit_on_build": true, "bundled_coins_repo_commit": "master", "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins", "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins", "coins_repo_branch": "master", "runtime_updates_enabled": true, "mapped_files": {"assets/config/coins_config.json": "utils/coins_config_unfiltered.json", "assets/config/coins.json": "coins", "assets/config/seed_nodes.json": "seed-nodes.json"}, "mapped_folders": {"assets/coin_icons/png/": "icons"}, "concurrent_downloads_enabled": false, "cdn_branch_mirrors": {"master": "https://gleecbtc.github.io/coins", "main": "https://gleecbtc.github.io/coins"}}}';
 
       final repo = AssetRuntimeUpdateConfigRepository(
         bundle: _FakeBundle({

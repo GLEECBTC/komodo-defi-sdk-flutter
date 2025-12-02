@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 ///
 /// There may be breaking changes in the near future that enhance
 /// re-usability and customization, but the initial version will be focused on
-/// migrating from the Komodo Wallet app to the new SDK repository.
+/// migrating from the Gleec Wallet app to the new SDK repository.
 ///
 /// E.g.:
 /// - Currently tied to FilledButton styling

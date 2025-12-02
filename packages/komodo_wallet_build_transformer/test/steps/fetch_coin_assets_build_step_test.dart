@@ -177,9 +177,9 @@ void main() {
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: false,
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,
           mappedFiles: {'config/coins.json': 'coins/coins.json'},
@@ -214,7 +214,7 @@ void main() {
         // Config should preserve original GitHub URL
         expect(
           buildStep.config.coinsRepoContentUrl,
-          equals('https://raw.githubusercontent.com/KomodoPlatform/coins'),
+          equals('https://raw.githubusercontent.com/GLEECBTC/coins'),
         );
 
         // But downloader should receive the CDN URL
@@ -579,13 +579,13 @@ void main() {
 
         // Setup: User has a custom content URL and CDN mirrors configured
         final userConfiguredUrl =
-            'https://my-custom-github-mirror.example.com/KomodoPlatform/coins';
+            'https://my-custom-github-mirror.example.com/GLEECBTC/coins';
 
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: true, // This triggers config save
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl: userConfiguredUrl, // User's custom URL
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,

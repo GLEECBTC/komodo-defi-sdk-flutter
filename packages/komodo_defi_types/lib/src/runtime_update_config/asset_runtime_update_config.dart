@@ -17,9 +17,9 @@ abstract class AssetRuntimeUpdateConfig with _$AssetRuntimeUpdateConfig {
     @Default(true) bool fetchAtBuildEnabled,
     @Default(true) bool updateCommitOnBuild,
     @Default('master') String bundledCoinsRepoCommit,
-    @Default('https://api.github.com/repos/KomodoPlatform/coins')
+    @Default('https://api.github.com/repos/GLEECBTC/coins')
     String coinsRepoApiUrl,
-    @Default('https://raw.githubusercontent.com/KomodoPlatform/coins')
+    @Default('https://raw.githubusercontent.com/GLEECBTC/coins')
     String coinsRepoContentUrl,
     @Default('master') String coinsRepoBranch,
     @Default(true) bool runtimeUpdatesEnabled,
@@ -33,8 +33,8 @@ abstract class AssetRuntimeUpdateConfig with _$AssetRuntimeUpdateConfig {
     Map<String, String> mappedFolders,
     @Default(false) bool concurrentDownloadsEnabled,
     @Default(<String, String>{
-      'master': 'https://komodoplatform.github.io/coins',
-      'main': 'https://komodoplatform.github.io/coins',
+      'master': 'https://gleecbtc.github.io/coins',
+      'main': 'https://gleecbtc.github.io/coins',
     })
     Map<String, String> cdnBranchMirrors,
   }) = _AssetRuntimeUpdateConfig;
