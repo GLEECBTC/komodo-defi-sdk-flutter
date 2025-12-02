@@ -491,10 +491,11 @@ class WithdrawalManager {
           .findAssetsByConfigId(parameters.asset)
           .single;
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
+      final isSiaProtocol = asset.protocol is SiaProtocol;
 
       // Tendermint assets are not yet supported by the task-based API
       // and require a legacy implementation
-      if (isTendermintProtocol) {
+      if (isTendermintProtocol || isSiaProtocol) {
         return await _legacyManager.previewWithdrawal(parameters);
       }
 
@@ -537,76 +538,154 @@ class WithdrawalManager {
     }
   }
 
-  /// Executes a withdrawal operation and provides a progress stream.
+  /// Executes a withdrawal from a previously generated preview.
+  ///
+  /// This method broadcasts a transaction that was already signed during the
+  /// preview phase. This is the ONLY recommended way to execute withdrawals,
+  /// as it ensures:
+  /// - The transaction is signed only once
+  /// - The user sees and confirms the exact transaction that will be broadcast
+  /// - No risk of parameters changing between preview and execution
+  ///
+  /// **Workflow:**
+  /// 1. Call [previewWithdrawal] to generate and sign the transaction
+  /// 2. Show the preview to the user for confirmation
+  /// 3. Call [executeWithdrawal] to broadcast the signed transaction
+  ///
+  /// Parameters:
+  /// - [preview] - The preview result from [previewWithdrawal]
+  /// - [assetId] - The asset identifier (coin symbol)
+  ///
+  /// Returns a [Stream<WithdrawalProgress>] that emits progress updates.
+  ///
+  /// Example:
+  /// ```dart
+  /// // 1. Preview the withdrawal
+  /// final preview = await withdrawalManager.previewWithdrawal(
+  ///   WithdrawParameters(
+  ///     asset: 'BTC',
+  ///     toAddress: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
+  ///     amount: Decimal.parse('0.001'),
+  ///   ),
+  /// );
+  ///
+  /// // 2. Show preview to user, get confirmation...
+  ///
+  /// // 3. Execute the previewed transaction
+  /// await for (final progress in withdrawalManager.executeWithdrawal(
+  ///   preview,
+  ///   'BTC',
+  /// )) {
+  ///   print('Status: ${progress.status}');
+  /// }
+  /// ```
+  Stream<WithdrawalProgress> executeWithdrawal(
+    WithdrawalPreview preview,
+    String assetId,
+  ) async* {
+    try {
+      final asset = _assetProvider.findAssetsByConfigId(assetId).single;
+      final isTendermintProtocol = asset.protocol is TendermintProtocol;
+
+      // Tendermint assets are not yet supported by the task-based API
+      if (isTendermintProtocol) {
+        yield* _legacyManager.executeWithdrawal(preview, assetId);
+        return;
+      }
+
+      // Ensure asset is activated before broadcasting
+      final activationResult = await _activationCoordinator.activateAsset(asset);
+      if (activationResult.isFailure) {
+        throw WithdrawalException(
+          'Failed to activate asset $assetId: ${activationResult.errorMessage ?? activationResult.toString()}',
+          WithdrawalErrorCode.unknownError,
+        );
+      }
+
+      // Initial progress
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.inProgress,
+        message: 'Broadcasting signed transaction...',
+        withdrawalResult: WithdrawalResult(
+          txHash: preview.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+
+      // Broadcast the pre-signed transaction
+      final response = await _client.rpc.withdraw.sendRawTransaction(
+        coin: assetId,
+        txHex: preview.txHex,
+        txJson: preview.txJson,
+      );
+
+      // Final success
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.complete,
+        message: 'Withdrawal complete',
+        withdrawalResult: WithdrawalResult(
+          txHash: response.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+    } catch (e) {
+      yield* Stream.error(
+        WithdrawalException(
+          'Failed to broadcast transaction: $e',
+          WithdrawalErrorCode.networkError,
+        ),
+      );
+    }
+  }
+
+  /// Creates a preview and immediately executes the withdrawal.
+  ///
+  /// **DEPRECATED:** This method is provided for convenience but is NOT the
+  /// recommended approach. It's better to use the two-step process:
+  /// 1. [previewWithdrawal] - Generate and show preview to user
+  /// 2. [executeWithdrawal] - Execute after user confirmation
+  ///
+  /// This ensures users can review the transaction details (fees, amounts)
+  /// before broadcasting.
   ///
   /// This method performs the full withdrawal process:
   /// 1. Ensures the asset is activated
-  /// 2. Creates the transaction
+  /// 2. Creates and signs the transaction
   /// 3. Broadcasts it to the network
   /// 4. Tracks and reports progress
-  ///
-  /// **Note:** Fee estimation is currently disabled as the API endpoints are not yet available.
-  /// When fee estimation is disabled, withdrawals will proceed without automatic fee estimation.
-  /// TODO: Enable when the fee estimation API endpoints become available.
   ///
   /// Parameters:
   /// - [parameters] - The withdrawal parameters defining the asset, amount,
   ///   destination, and optional fee priority
   ///
-  /// Returns a [Stream<WithdrawalProgress>] that emits progress updates
-  /// throughout the operation. The final event will either contain the
-  /// completed withdrawal result or an error.
+  /// Returns a [Stream<WithdrawalProgress>] that emits progress updates.
   ///
-  /// Fee Priority:
-  /// - If no fee is specified, the method will estimate fees based on the
-  ///   feePriority parameter (defaults to medium) when fee estimation is enabled
-  /// - Low: Lowest cost, slowest confirmation
-  /// - Medium: Balanced cost and confirmation time
-  /// - High: Highest cost, fastest confirmation
-  ///
-  /// Error handling:
-  /// - Errors are emitted through the stream's error channel
-  /// - All errors are wrapped in [WithdrawalException] with appropriate
-  ///   error codes
-  ///
-  /// Protocol handling:
-  /// - For Tendermint-based assets, this method uses a legacy implementation
-  /// - For other asset types, it uses the task-based API
-  ///
-  /// Example:
+  /// **Recommended alternative:**
   /// ```dart
-  /// // Basic withdrawal with default (medium) priority
-  /// final progressStream = withdrawalManager.withdraw(
-  ///   WithdrawParameters(
-  ///     asset: 'BTC',
-  ///     toAddress: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-  ///     amount: Decimal.parse('0.001'),
-  ///   ),
-  /// );
+  /// // Instead of this:
+  /// await for (final progress in manager.withdraw(params)) { }
   ///
-  /// // Withdrawal with high priority for faster confirmation
-  /// final fastProgressStream = withdrawalManager.withdraw(
-  ///   WithdrawParameters(
-  ///     asset: 'BTC',
-  ///     toAddress: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-  ///     amount: Decimal.parse('0.001'),
-  ///     feePriority: WithdrawalFeeLevel.high,
-  ///   ),
-  /// );
-  ///
-  /// try {
-  ///   await for (final progress in progressStream) {
-  ///     if (progress.status == WithdrawalStatus.complete) {
-  ///       final result = progress.withdrawalResult!;
-  ///       print('Withdrawal complete! TX: ${result.txHash}');
-  ///     } else {
-  ///       print('Progress: ${progress.message}');
-  ///     }
-  ///   }
-  /// } catch (e) {
-  ///   print('Withdrawal failed: $e');
-  /// }
+  /// // Do this:
+  /// final preview = await manager.previewWithdrawal(params);
+  /// // Show preview to user...
+  /// await for (final progress in manager.executeWithdrawal(preview, assetId)) { }
   /// ```
+  @Deprecated(
+    'Use previewWithdrawal() followed by executeWithdrawal() instead. '
+    'This ensures users can review transaction details before broadcasting.',
+  )
   Stream<WithdrawalProgress> withdraw(WithdrawParameters parameters) async* {
     int? taskId;
     try {
@@ -614,10 +693,11 @@ class WithdrawalManager {
           .findAssetsByConfigId(parameters.asset)
           .single;
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
+      final isSiaProtocol = asset.protocol is SiaProtocol;
 
       // Tendermint assets are not yet supported by the task-based API
       // and require a legacy implementation
-      if (isTendermintProtocol) {
+      if (isTendermintProtocol || isSiaProtocol) {
         yield* _legacyManager.withdraw(parameters);
         return;
       }
@@ -672,6 +752,7 @@ class WithdrawalManager {
           final response = await _client.rpc.withdraw.sendRawTransaction(
             coin: parameters.asset,
             txHex: details.txHex,
+            txJson: details.txJson,
           );
           yield WithdrawalProgress(
             status: WithdrawalStatus.complete,

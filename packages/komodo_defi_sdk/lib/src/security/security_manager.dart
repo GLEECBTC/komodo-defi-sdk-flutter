@@ -117,17 +117,25 @@ class SecurityManager {
               ..._activationCoordinator.failedActivations,
             };
 
+    // Filter out coins whose RPCs don't implement get_private_keys / show_priv_key.
+    // Currently, SIA-based assets would throw "Unsupported" errors if included.
+    final filteredTargetAssets =
+        targetAssets
+            .where((assetId) => assetId.subClass != CoinSubClass.sia)
+            .toSet();
+
     // Validate parameters
-    if (targetAssets.isEmpty) {
+    if (filteredTargetAssets.isEmpty) {
       return {};
     }
 
     // Convert AssetId objects to coin ticker strings for the RPC call
-    final coinTickers = targetAssets.map((assetId) => assetId.id).toList();
+    final coinTickers =
+        filteredTargetAssets.map((assetId) => assetId.id).toList();
 
     // Create a map from coin ticker to AssetId for conversion
     final assetMap = <String, AssetId>{
-      for (final assetId in targetAssets) assetId.id: assetId,
+      for (final assetId in filteredTargetAssets) assetId.id: assetId,
     };
 
     // If HD mode parameters are provided, ensure they're valid

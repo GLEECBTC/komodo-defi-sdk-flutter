@@ -128,9 +128,8 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
 
     if (!_addressValidation!.isValid) {
       setState(
-        () =>
-            _error =
-                _addressValidation!.invalidReason ?? 'Invalid address format',
+        () => _error =
+            _addressValidation!.invalidReason ?? 'Invalid address format',
       );
       return;
     }
@@ -146,17 +145,17 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
         amount: _isMaxAmount ? null : Decimal.parse(_amountController.text),
         fee: _selectedFee,
         feePriority: _selectedPriority,
-        from:
-            _selectedFromAddress?.derivationPath != null
-                ? WithdrawalSource.hdDerivationPath(
-                  _selectedFromAddress!.derivationPath!,
-                )
-                : null,
+        from: _selectedFromAddress?.derivationPath != null
+            ? WithdrawalSource.hdDerivationPath(
+                _selectedFromAddress!.derivationPath!,
+              )
+            : null,
         memo: _memoController.text.isEmpty ? null : _memoController.text,
         isMax: _isMaxAmount,
         ibcTransfer: _isIbcTransfer ? true : null,
-        ibcSourceChannel:
-            _isIbcTransfer ? int.tryParse(_ibcChannelController.text) : null,
+        ibcSourceChannel: _isIbcTransfer
+            ? int.tryParse(_ibcChannelController.text)
+            : null,
       );
 
       final preview = await _sdk.withdrawals.previewWithdrawal(params);
@@ -178,48 +177,50 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
   Future<void> _showPreviewDialog(WithdrawParameters params) async {
     return showDialog<void>(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Withdrawal Preview'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Asset: ${params.asset}'),
-                Text('To: ${params.toAddress}'),
-                if (params.amount != null)
-                  Text('Amount: ${params.amount} ${params.asset}'),
-                if (_selectedFee != null) ...[
-                  const SizedBox(height: 8),
-                  FeeInfoDisplay(feeInfo: _selectedFee!),
-                ],
-                if (_preview != null) ...[
-                  const SizedBox(height: 8),
-                  Text('Estimated fee: ${_preview!.fee.formatTotal()}'),
-                  Text('Balance change: ${_preview!.balanceChanges.netChange}'),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _executeWithdrawal(params);
-                },
-                child: const Text('Confirm'),
-              ),
+      builder: (context) => AlertDialog(
+        title: const Text('Withdrawal Preview'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Asset: ${params.asset}'),
+            Text('To: ${params.toAddress}'),
+            if (params.amount != null)
+              Text('Amount: ${params.amount} ${params.asset}'),
+            if (_selectedFee != null) ...[
+              const SizedBox(height: 8),
+              FeeInfoDisplay(feeInfo: _selectedFee!),
             ],
+            if (_preview != null) ...[
+              const SizedBox(height: 8),
+              Text('Estimated fee: ${_preview!.fee.formatTotal()}'),
+              Text('Balance change: ${_preview!.balanceChanges.netChange}'),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
           ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _executeWithdrawal(params);
+            },
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _executeWithdrawal(WithdrawParameters params) async {
     try {
-      final progressStream = _sdk.withdrawals.withdraw(params);
+      // Execute the previewed withdrawal (transaction already signed)
+      final progressStream = _preview != null
+          ? _sdk.withdrawals.executeWithdrawal(_preview!, params.asset)
+          : _sdk.withdrawals.withdraw(params);
 
       await for (final progress in progressStream) {
         if (!mounted) return;
@@ -349,13 +350,12 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
               ),
               CheckboxListTile(
                 value: _isMaxAmount,
-                onChanged:
-                    (value) => setState(() {
-                      _isMaxAmount = value == true;
-                      if (_isMaxAmount) {
-                        _amountController.clear();
-                      }
-                    }),
+                onChanged: (value) => setState(() {
+                  _isMaxAmount = value == true;
+                  if (_isMaxAmount) {
+                    _amountController.clear();
+                  }
+                }),
                 title: const Text('Send maximum amount'),
               ),
               const SizedBox(height: 16),
@@ -368,8 +368,9 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
                   setState(() {
                     _selectedPriority = priority;
                     if (_feeOptions != null) {
-                      _selectedFee =
-                          _feeOptions!.getByPriority(priority).feeInfo;
+                      _selectedFee = _feeOptions!
+                          .getByPriority(priority)
+                          .feeInfo;
                     }
                   });
                 },
@@ -454,10 +455,9 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
 
     return Icon(
       _addressValidation!.isValid ? Icons.check_circle : Icons.error,
-      color:
-          _addressValidation!.isValid
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.error,
+      color: _addressValidation!.isValid
+          ? Theme.of(context).colorScheme.primary
+          : Theme.of(context).colorScheme.error,
     );
   }
 

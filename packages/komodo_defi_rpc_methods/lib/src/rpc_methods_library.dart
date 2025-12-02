@@ -37,6 +37,7 @@ class KomodoDefiRpcMethods {
   UtxoMethodsNamespace get utxo => UtxoMethodsNamespace(_client);
   SlpMethodsNamespace get slp => SlpMethodsNamespace(_client);
   QtumMethodsNamespace get qtum => QtumMethodsNamespace(_client);
+  SiaMethodsNamespace get sia => SiaMethodsNamespace(_client);
   TendermintMethodsNamespace get tendermint =>
       TendermintMethodsNamespace(_client);
   NftMethodsNamespace get nft => NftMethodsNamespace(_client);

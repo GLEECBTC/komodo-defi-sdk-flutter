@@ -7,7 +7,8 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// Raw API response for a withdrawal operation
 class WithdrawResult {
   WithdrawResult({
-    required this.txHex,
+    this.txHex,
+    this.txJson,
     required this.txHash,
     required this.from,
     required this.to,
@@ -19,11 +20,15 @@ class WithdrawResult {
     this.internalId,
     this.kmdRewards,
     this.memo,
-  });
+  }) : assert(
+          txHex != null || txJson != null,
+          'Either txHex or txJson must be provided',
+        );
 
   factory WithdrawResult.fromJson(JsonMap json) {
     return WithdrawResult(
-      txHex: json.value<String>('tx_hex'),
+      txHex: json.valueOrNull<String>('tx_hex'),
+      txJson: json.valueOrNull<JsonMap>('tx_json'),
       txHash: json.value<String>('tx_hash'),
       from: List<String>.from(json.value('from')),
       to: List<String>.from(json.value('to')),
@@ -40,7 +45,8 @@ class WithdrawResult {
     );
   }
 
-  final String txHex;
+  final String? txHex;
+  final JsonMap? txJson;
   final String txHash;
   final List<String> from;
   final List<String> to;
@@ -54,7 +60,8 @@ class WithdrawResult {
   final String? memo;
 
   JsonMap toJson() => {
-        'tx_hex': txHex,
+        if (txHex != null) 'tx_hex': txHex,
+        if (txJson != null) 'tx_json': txJson,
         'tx_hash': txHash,
         'from': from,
         'to': to,

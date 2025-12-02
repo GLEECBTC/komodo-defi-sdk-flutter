@@ -64,12 +64,11 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
           configToUse,
           supportedProtocols: otherTypes,
         ),
-        CoinSubClass.sia when kDebugMode => SiaProtocol.fromJson(
+        CoinSubClass.sia => SiaProtocol.fromJson(
           configToUse,
           supportedProtocols: otherTypes,
         ),
         // ignore: deprecated_member_use_from_same_package
-        CoinSubClass.sia ||
         CoinSubClass.slp ||
         CoinSubClass.smartBch ||
         CoinSubClass.unknown => throw UnsupportedProtocolException(
@@ -162,7 +161,8 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
     }
     // Unsupported: QRC20 tokens, SLP tokens, Tendermint tokens
     if (subClass == CoinSubClass.slp ||
-        subClass == CoinSubClass.tendermintToken) {
+        subClass == CoinSubClass.tendermintToken ||
+        subClass == CoinSubClass.sia) {
       return false;
     }
     if (subClass == CoinSubClass.qrc20 && isChildAsset) {

@@ -1,4 +1,3 @@
-// TODO!
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -22,27 +21,39 @@ class SiaProtocol extends ProtocolClass {
   }
 
   static void _validateSiaConfig(JsonMap json) {
+    // Minimal required fields for SIA protocol configuration
     final requiredFields = {
-      'nodes': 'RPC URLs',
+      'nodes': 'Seed nodes list',
     };
-
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }
 
-  JsonList get rpcUrlsMap => config.value<JsonList>('rpc_urls');
+  /// Optional SiaScan-compatible server URL used by SDK activation defaults.
+  /// Resolves from `server_url` or falls back to first `nodes[i].url`.
+  String? get serverUrl {
+    final direct = config.valueOrNull<String>('server_url');
+    if (direct != null) return direct;
+    if (config.containsKey('nodes')) {
+      final nodes = config.value<List<dynamic>>('nodes');
+      if (nodes.isNotEmpty) {
+        final first = nodes.first;
+        if (first is Map<String, dynamic> && first.containsKey('url')) {
+          return first['url'] as String?;
+        }
+      }
+    }
+    return null;
+  }
 
-  String? get accountPrefix => config.valueOrNull<String>('account_prefix');
+  /// Number of confirmations required for steps like swaps
+  int? get requiredConfirmations =>
+      config.valueOrNull<int>('required_confirmations');
 
-  String get chainId =>
-      config.value<String>('protocol', 'protocol_data', 'chain_id');
-
+  /// SIA protocol does not support multiple addresses per account in KDF
   @override
   bool get supportsMultipleAddresses => false;
 
@@ -53,17 +64,13 @@ class SiaProtocol extends ProtocolClass {
   bool get isMemoSupported => false;
 
   @override
-  Uri? explorerTxUrl(String txHash) {
-    // SIA uses address-based event URLs instead of transaction hashes
-    return null;
-  }
+  Uri? explorerTxUrl(String txHash) => null;
 
   @override
   Uri? explorerAddressUrl(String address) {
-    // SIA has a special address events URL format
-    return explorerPattern.buildUrl(
-      'addresses/{ADDRESS}/events/',
-      {'ADDRESS': address},
-    );
+    // Use configured address pattern if present, otherwise fall back to SiaScan events URL
+    final pattern =
+        explorerPattern.addressPattern ?? 'addresses/{ADDRESS}/events/';
+    return explorerPattern.buildUrl(pattern, {'ADDRESS': address});
   }
 }

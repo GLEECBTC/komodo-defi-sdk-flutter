@@ -10,7 +10,13 @@ class LegacyWithdrawalManager implements WithdrawalManager {
 
   final ApiClient _client;
 
-  /// Start a withdrawal operation and return a progress stream
+  /// Creates a preview and immediately executes the withdrawal.
+  ///
+  /// **DEPRECATED:** Use [previewWithdrawal] followed by [executeWithdrawal]
+  /// instead to ensure users can review transaction details before broadcasting.
+  @Deprecated(
+    'Use previewWithdrawal() followed by executeWithdrawal() instead.',
+  )
   @override
   Stream<WithdrawalProgress> withdraw(WithdrawParameters parameters) async* {
     try {
@@ -56,6 +62,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
         final broadcastResponse = await _client.rpc.withdraw.sendRawTransaction(
           coin: parameters.asset,
           txHex: result.txHex,
+          txJson: result.txJson,
         );
 
         // Final success update with actual broadcast transaction hash
@@ -121,6 +128,71 @@ class LegacyWithdrawalManager implements WithdrawalManager {
       throw WithdrawalException(
         'Preview failed: $e',
         WithdrawalErrorCode.unknownError,
+      );
+    }
+  }
+
+  /// Execute a withdrawal from a previously generated preview.
+  ///
+  /// This method broadcasts the pre-signed transaction from the preview,
+  /// avoiding the need to sign the transaction again. This is the ONLY
+  /// recommended way to execute withdrawals for Tendermint assets.
+  ///
+  /// Parameters:
+  /// - [preview] - The preview result from [previewWithdrawal]
+  /// - [assetId] - The asset identifier (coin symbol)
+  ///
+  /// Returns a [Stream<WithdrawalProgress>] that emits progress updates.
+  @override
+  Stream<WithdrawalProgress> executeWithdrawal(
+    WithdrawalPreview preview,
+    String assetId,
+  ) async* {
+    try {
+      // Initial progress update
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.inProgress,
+        message: 'Broadcasting signed transaction...',
+        withdrawalResult: WithdrawalResult(
+          txHash: preview.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+
+      // Broadcast the pre-signed transaction
+      final broadcastResponse = await _client.rpc.withdraw.sendRawTransaction(
+        coin: assetId,
+        txHex: preview.txHex,
+        txJson: preview.txJson,
+      );
+
+      // Final success update with actual broadcast transaction hash
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.complete,
+        message: 'Withdrawal completed successfully',
+        withdrawalResult: WithdrawalResult(
+          txHash: broadcastResponse.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+    } catch (e) {
+      yield* Stream.error(
+        WithdrawalException(
+          'Failed to broadcast transaction: $e',
+          WithdrawalErrorCode.networkError,
+        ),
       );
     }
   }

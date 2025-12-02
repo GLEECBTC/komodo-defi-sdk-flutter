@@ -3,6 +3,7 @@
 /// Internal/private classes related to the activation of the Komodo DeFi Framework ecosystem.
 library _activation;
 
+export 'activation_exceptions.dart';
 export 'activation_manager.dart';
 export 'base_strategies/activation_strategy_base.dart';
 export 'base_strategies/activation_strategy_factory.dart';
@@ -16,6 +17,7 @@ export 'protocol_strategies/eth_task_activation_strategy.dart';
 export 'protocol_strategies/eth_with_tokens_activation_strategy.dart';
 export 'protocol_strategies/protocol_error_handler.dart';
 export 'protocol_strategies/qtum_activation_strategy.dart';
+export 'protocol_strategies/sia_activation_strategy.dart';
 export 'protocol_strategies/slp_activation_strategy.dart';
 export 'protocol_strategies/tendermint_activation_strategy.dart';
 export 'protocol_strategies/tendermint_task_activation_strategy.dart';

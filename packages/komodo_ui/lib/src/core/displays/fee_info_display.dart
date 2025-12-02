@@ -5,8 +5,9 @@ import 'package:komodo_ui/src/utils/formatters/fee_info_formatters.dart';
 
 /// A widget for displaying FeeInfo details in a consistent format.
 ///
-/// This widget handles all fee types (ETH gas, QRC20 gas, Cosmos gas, UTXO)
-/// and displays their relevant details in a clear, formatted way.
+/// This widget handles all fee types (ETH gas, QRC20 gas, Cosmos gas, UTXO, 
+/// Tendermint, and SIA) and displays their relevant details in a clear, 
+/// formatted way.
 ///
 /// **Note:** Fee estimation features are currently disabled as the API endpoints
 /// are not yet available. This widget will display fee information when provided
@@ -144,6 +145,19 @@ class FeeInfoDisplay extends StatelessWidget {
               Text('Gas Limit:', style: Theme.of(context).textTheme.bodyMedium),
               Text(
                 '${fee.gasLimit}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text('Amount:', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                fee.formatTotal(precision: 8),
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ],
+
+            final FeeInfoSia fee => [
+              Text('Policy:', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                fee.policy,
                 style: Theme.of(context).textTheme.labelLarge,
               ),
               Text('Amount:', style: Theme.of(context).textTheme.bodyMedium),

@@ -7,18 +7,25 @@ class SendRawTransactionLegacyRequest
   SendRawTransactionLegacyRequest({
     required super.rpcPass,
     required this.coin,
-    required this.txHex,
-  }) : super(method: 'send_raw_transaction', mmrpc: null);
+    this.txHex,
+    this.txJson,
+  })  : assert(
+          txHex != null || txJson != null,
+          'Either txHex or txJson must be provided',
+        ),
+        super(method: 'send_raw_transaction', mmrpc: null);
 
   final String coin;
-  final String txHex;
+  final String? txHex;
+  final Map<String, dynamic>? txJson;
 
   @override
   Map<String, dynamic> toJson() => {
-    ...super.toJson(),
-    'coin': coin,
-    'tx_hex': txHex,
-  };
+        ...super.toJson(),
+        'coin': coin,
+        if (txHex != null) 'tx_hex': txHex,
+        if (txJson != null) 'tx_json': txJson,
+      };
 
   @override
   SendRawTransactionResponse parse(Map<String, dynamic> json) =>

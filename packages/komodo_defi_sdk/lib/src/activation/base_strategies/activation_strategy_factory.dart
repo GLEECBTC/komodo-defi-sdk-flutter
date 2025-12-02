@@ -34,6 +34,7 @@ class ActivationStrategyFactory {
         TendermintWithTokensActivationStrategy(client, privKeyPolicy),
         TendermintTokenActivationStrategy(client, privKeyPolicy),
         QtumActivationStrategy(client, privKeyPolicy),
+        SiaActivationStrategy(client),
         ZhtlcActivationStrategy(client, privKeyPolicy, configService),
         CustomErc20ActivationStrategy(client),
       ]),

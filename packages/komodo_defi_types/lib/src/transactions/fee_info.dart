@@ -5,7 +5,7 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 part 'fee_info.freezed.dart';
 // We are doing manual fromJson/toJson, so no need for part 'fee_info.g.dart';
 
-/// A union representing seven possible fee types:
+/// A union representing eight possible fee types:
 /// - UtxoFixed
 /// - UtxoPerKbyte
 /// - EthGas (legacy)
@@ -13,6 +13,7 @@ part 'fee_info.freezed.dart';
 /// - Qrc20Gas
 /// - CosmosGas
 /// - Tendermint
+/// - Sia
 @Freezed()
 sealed class FeeInfo with _$FeeInfo {
   //////////////////////////////////////////////////////////////////////////////
@@ -82,6 +83,12 @@ sealed class FeeInfo with _$FeeInfo {
           // so we convert it to string, then parse:
           gasPrice: Decimal.parse(json['gas_price'].toString()),
           gasLimit: json['gas_limit'] as int,
+        );
+      case 'Sia':
+        return FeeInfo.sia(
+          coin: json['coin'] as String? ?? '',
+          amount: Decimal.parse(json['total_amount'].toString()),
+          policy: json['policy'] as String? ?? 'Fixed',
         );
       default:
         throw ArgumentError('Unknown fee type: $type');
@@ -223,6 +230,28 @@ sealed class FeeInfo with _$FeeInfo {
     required int gasLimit,
   }) = FeeInfoTendermint;
 
+  /// 8) SIA fee, with fixed `amount` and `policy`.
+  ///
+  /// Example JSON:
+  /// ```json
+  /// {
+  ///   "type": "Sia",
+  ///   "coin": "SC",
+  ///   "policy": "Fixed",
+  ///   "total_amount": "0.000010000000000000000000"
+  /// }
+  /// ```
+  /// Total fee is just the amount
+  const factory FeeInfo.sia({
+    required String coin,
+
+    /// The fee amount in coin units
+    required Decimal amount,
+
+    /// The fee policy (e.g., "Fixed")
+    required String policy,
+  }) = FeeInfoSia;
+
   /// A convenience getter returning the *total fee* in the coin's main units.
   Decimal get totalFee => switch (this) {
         FeeInfoUtxoFixed(:final amount) => amount,
@@ -240,6 +269,7 @@ sealed class FeeInfo with _$FeeInfo {
         FeeInfoCosmosGas(:final gasPrice, :final gasLimit) =>
           gasPrice * Decimal.fromInt(gasLimit),
         FeeInfoTendermint(:final amount) => amount,
+        FeeInfoSia(:final amount) => amount,
       };
 
   /// Convert this [FeeInfo] to a JSON object matching the mmRPC 2.0 docs.
@@ -309,6 +339,12 @@ sealed class FeeInfo with _$FeeInfo {
                 ? (amount / Decimal.fromInt(gasLimit)).toDouble()
                 : 0.0,
             'gas_limit': gasLimit,
+          },
+        FeeInfoSia(:final coin, :final amount, :final policy) => {
+            'type': 'Sia',
+            'coin': coin,
+            'total_amount': amount.toString(),
+            'policy': policy,
           },
       };
 }
