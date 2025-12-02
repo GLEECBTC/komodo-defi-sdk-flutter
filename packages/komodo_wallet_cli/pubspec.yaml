@@ -12,7 +12,7 @@
 name: komodo_wallet_cli
 description: Developer CLI package for Komodo Wallet tooling.
 version: 0.4.0+1
-repository: https://github.com/KomodoPlatform/komodo-defi-sdk-flutter/
+repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/
 
 environment:
   sdk: ^3.8.1

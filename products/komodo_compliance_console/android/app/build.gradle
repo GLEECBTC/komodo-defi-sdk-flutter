@@ -29,7 +29,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace "com.komodoplatform.komodo_compliance_console"
+    namespace "com.gleec.compliance_console"
     compileSdkVersion flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
@@ -48,7 +48,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId "com.komodoplatform.komodo_compliance_console"
+        applicationId "com.gleec.compliance_console"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
         minSdkVersion flutter.minSdkVersion
@@ -80,17 +80,17 @@ android {
         production {
             dimension "default"
             applicationIdSuffix ""
-            manifestPlaceholders = [appName: "Komodo Compliance Console"]
+            manifestPlaceholders = [appName: "GLEEC Compliance Console"]
         }
         staging {
             dimension "default"
             applicationIdSuffix ".stg"
-            manifestPlaceholders = [appName: "[STG] Komodo Compliance Console"]
+            manifestPlaceholders = [appName: "[STG] GLEEC Compliance Console"]
         }
         development {
             dimension "default"
             applicationIdSuffix ".dev"
-            manifestPlaceholders = [appName: "[DEV] Komodo Compliance Console"]
+            manifestPlaceholders = [appName: "[DEV] GLEEC Compliance Console"]
         }
     }
 

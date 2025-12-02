@@ -4,10 +4,10 @@ This document provides instructions for setting up Firebase GitHub secrets using
 
 ## Overview
 
-The Komodo DeFi SDK Flutter project uses Firebase Hosting for deploying two web applications:
+The GLEEC DeFi SDK Flutter project uses Firebase Hosting for deploying two web applications:
 
-1. **SDK Example** - Deployed to `komodo-defi-sdk` Firebase project
-2. **Playground** - Deployed to `komodo-playground` Firebase project
+1. **SDK Example** - Deployed to `gleec-defi-sdk` Firebase project
+2. **Playground** - Deployed to `gleec-sdk-playground` Firebase project
 
 GitHub Actions workflows require service account credentials to deploy to these Firebase projects.
 
@@ -22,8 +22,8 @@ GitHub Actions workflows require service account credentials to deploy to these 
 ### Required Access
 
 - Admin access to both Firebase projects:
-  - `komodo-defi-sdk`
-  - `komodo-playground`
+  - `gleec-defi-sdk`
+  - `gleec-sdk-playground`
 - Write access to the GitHub repository secrets
 
 ## Automated Setup
@@ -76,19 +76,19 @@ gcloud auth application-default login
 
 ### Step 2: Create Service Accounts
 
-For komodo-defi-sdk:
+For gleec-defi-sdk:
 
 ```bash
-gcloud config set project komodo-defi-sdk
+gcloud config set project gleec-defi-sdk
 gcloud iam service-accounts create github-actions-deploy \
     --display-name="GitHub Actions Deploy" \
     --description="Service account for GitHub Actions Firebase deployments"
 ```
 
-For komodo-playground:
+For gleec-sdk-playground:
 
 ```bash
-gcloud config set project komodo-playground
+gcloud config set project gleec-sdk-playground
 gcloud iam service-accounts create github-actions-deploy \
     --display-name="GitHub Actions Deploy" \
     --description="Service account for GitHub Actions Firebase deployments"
@@ -99,8 +99,8 @@ gcloud iam service-accounts create github-actions-deploy \
 For each project, grant the required roles:
 
 ```bash
-# Set project (komodo-defi-sdk or komodo-playground)
-PROJECT_ID="komodo-defi-sdk"  # or "komodo-playground"
+# Set project (gleec-defi-sdk or gleec-sdk-playground)
+PROJECT_ID="gleec-defi-sdk"  # or "gleec-sdk-playground"
 SERVICE_ACCOUNT_EMAIL="github-actions-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Grant roles
@@ -119,20 +119,20 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
 
 ### Step 4: Generate Service Account Keys
 
-For komodo-defi-sdk:
+For gleec-defi-sdk:
 
 ```bash
-gcloud iam service-accounts keys create komodo-defi-sdk-key.json \
-    --iam-account="github-actions-deploy@komodo-defi-sdk.iam.gserviceaccount.com" \
-    --project="komodo-defi-sdk"
+gcloud iam service-accounts keys create gleec-defi-sdk-key.json \
+    --iam-account="github-actions-deploy@gleec-defi-sdk.iam.gserviceaccount.com" \
+    --project="gleec-defi-sdk"
 ```
 
-For komodo-playground:
+For gleec-sdk-playground:
 
 ```bash
-gcloud iam service-accounts keys create komodo-playground-key.json \
-    --iam-account="github-actions-deploy@komodo-playground.iam.gserviceaccount.com" \
-    --project="komodo-playground"
+gcloud iam service-accounts keys create gleec-sdk-playground-key.json \
+    --iam-account="github-actions-deploy@gleec-sdk-playground.iam.gserviceaccount.com" \
+    --project="gleec-sdk-playground"
 ```
 
 ### Step 5: Create GitHub Secrets
@@ -142,13 +142,13 @@ gcloud iam service-accounts keys create komodo-playground-key.json \
 gh auth login
 
 # Create secrets
-gh secret set FIREBASE_SERVICE_ACCOUNT_KOMODO_DEFI_SDK \
-    < komodo-defi-sdk-key.json \
-    --repo KomodoPlatform/komodo-defi-sdk-flutter
+gh secret set FIREBASE_SERVICE_ACCOUNT_GLEEC_DEFI_SDK \
+    < gleec-defi-sdk-key.json \
+    --repo GLEECBTC/komodo-defi-sdk-flutter
 
-gh secret set FIREBASE_SERVICE_ACCOUNT_KOMODO_PLAYGROUND \
-    < komodo-playground-key.json \
-    --repo KomodoPlatform/komodo-defi-sdk-flutter
+gh secret set FIREBASE_SERVICE_ACCOUNT_GLEEC_SDK_PLAYGROUND \
+    < gleec-sdk-playground-key.json \
+    --repo GLEECBTC/komodo-defi-sdk-flutter
 ```
 
 ### Step 6: Clean Up Key Files
@@ -156,8 +156,8 @@ gh secret set FIREBASE_SERVICE_ACCOUNT_KOMODO_PLAYGROUND \
 ⚠️ **IMPORTANT**: Delete the key files after creating GitHub secrets:
 
 ```bash
-rm -f komodo-defi-sdk-key.json
-rm -f komodo-playground-key.json
+rm -f gleec-defi-sdk-key.json
+rm -f gleec-sdk-playground-key.json
 ```
 
 ## Testing the Setup
@@ -199,21 +199,21 @@ gcloud auth list
 List service accounts:
 
 ```bash
-gcloud iam service-accounts list --project=komodo-defi-sdk
-gcloud iam service-accounts list --project=komodo-playground
+gcloud iam service-accounts list --project=gleec-defi-sdk
+gcloud iam service-accounts list --project=gleec-sdk-playground
 ```
 
 Check IAM bindings:
 
 ```bash
-gcloud projects get-iam-policy komodo-defi-sdk
-gcloud projects get-iam-policy komodo-playground
+gcloud projects get-iam-policy gleec-defi-sdk
+gcloud projects get-iam-policy gleec-sdk-playground
 ```
 
 List GitHub secrets:
 
 ```bash
-gh secret list --repo KomodoPlatform/komodo-defi-sdk-flutter
+gh secret list --repo GLEECBTC/komodo-defi-sdk-flutter
 ```
 
 ## Security Best Practices
