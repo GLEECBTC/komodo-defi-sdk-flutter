@@ -3,8 +3,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:komodo_ui/komodo_ui.dart';
 
 /// Model representing metric data
-typedef MetricData =
-    ({double value, double trendPercentage, AssetId? selectedAsset});
+typedef MetricData = ({
+  double value,
+  double trendPercentage,
+  AssetId? selectedAsset,
+});
 
 extension MetricDataMethods on MetricData {
   MetricData copyWith({
@@ -15,8 +18,9 @@ extension MetricDataMethods on MetricData {
     return (
       value: value ?? this.value,
       trendPercentage: trendPercentage ?? this.trendPercentage,
-      selectedAsset:
-          selectedAsset == null ? this.selectedAsset : selectedAsset.call(),
+      selectedAsset: selectedAsset == null
+          ? this.selectedAsset
+          : selectedAsset.call(),
     );
   }
 }

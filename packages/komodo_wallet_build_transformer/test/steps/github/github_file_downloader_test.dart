@@ -331,14 +331,12 @@ void main() {
           },
           {
             'scenario': 'Feature branch without CDN',
-            'contentUrl':
-                'https://raw.githubusercontent.com/GLEECBTC/coins',
+            'contentUrl': 'https://raw.githubusercontent.com/GLEECBTC/coins',
             'description': 'Feature branches falling back to GitHub raw',
           },
           {
             'scenario': 'Custom jsDelivr CDN',
-            'contentUrl':
-                'https://cdn.jsdelivr.net/gh/GLEECBTC/coins@master',
+            'contentUrl': 'https://cdn.jsdelivr.net/gh/GLEECBTC/coins@master',
             'description': 'Alternative CDN provider for coin assets',
           },
         ];
