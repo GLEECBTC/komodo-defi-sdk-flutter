@@ -70,7 +70,7 @@ class NftProvider {
   factory NftProvider.moralis() => const NftProvider(
     type: 'Moralis',
     info: NftProviderInfo(
-      url: 'https://moralis-proxy.komodo.earth',
+      url: 'https://moralis.gleec.com',
       komodoProxy: true,
     ),
   );
