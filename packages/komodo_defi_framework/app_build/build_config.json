@@ -5,7 +5,7 @@
         "fetch_at_build_enabled": true,
         "concurrent_downloads_enabled": true,
         "source_urls": [
-            "https://api.github.com/repos/KomodoPlatform/komodo-defi-framework",
+            "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
             "https://sdk.devbuilds.komodo.earth/"
         ],
         "platforms": {
@@ -67,9 +67,9 @@
     "coins": {
         "fetch_at_build_enabled": true,
         "update_commit_on_build": true,
-        "bundled_coins_repo_commit": "848138a249a7d4a589eaea5c8d7a3407c7e70ab9",
-        "coins_repo_api_url": "https://api.github.com/repos/KomodoPlatform/coins",
-        "coins_repo_content_url": "https://raw.githubusercontent.com/KomodoPlatform/coins",
+        "bundled_coins_repo_commit": "c8a2f49fc2a53ffdf405fec22a090cb2f8a88d18",
+        "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
+        "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
         "coins_repo_branch": "master",
         "runtime_updates_enabled": true,
         "mapped_files": {
@@ -82,8 +82,8 @@
         },
         "concurrent_downloads_enabled": false,
         "cdn_branch_mirrors": {
-            "master": "https://komodoplatform.github.io/coins",
-            "main": "https://komodoplatform.github.io/coins"
+            "master": "https://gleecbtc.github.io/coins",
+            "main": "https://gleecbtc.github.io/coins"
         }
     }
 }
