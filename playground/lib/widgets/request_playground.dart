@@ -167,7 +167,7 @@ class _RequestPlaygroundState extends State<RequestPlayground> {
           final response = await http
               .get(
                 Uri.parse(
-                  'https://raw.githubusercontent.com/KomodoPlatform/komodo-docs-mdx/refs/heads/dev/postman/collections/komodo_defi.postman_collection.json',
+                  'https://raw.githubusercontent.com/GLEECBTC/komodo-docs-mdx/refs/heads/dev/postman/collections/komodo_defi.postman_collection.json',
                 ),
               )
               .timeout(const Duration(seconds: 10));

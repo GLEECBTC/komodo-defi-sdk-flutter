@@ -35,7 +35,7 @@ final config = AssetRuntimeUpdateConfig(
     'assets/config/coins.json': 'coins',
   },
   cdnBranchMirrors: {
-    'master': 'https://komodoplatform.github.io/coins',
+    'master': 'https://gleecbtc.github.io/coins',
   },
 );
 ```

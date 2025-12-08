@@ -141,7 +141,7 @@ class _AssetIconResolver extends StatelessWidget {
 
   static const _coinImagesFolder =
       'packages/komodo_defi_framework/assets/coin_icons/png/';
-  static const _mediaCdnUrl = 'https://komodoplatform.github.io/coins/icons/';
+  static const _mediaCdnUrl = 'https://gleecbtc.github.io/coins/icons/';
 
   static final Map<String, bool> _assetExistenceCache = {};
   static final Map<String, bool> _cdnExistenceCache = {};

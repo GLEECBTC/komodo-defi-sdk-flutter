@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.komodoplatform.dex-dungeon" "\0"
-            VALUE "FileDescription", "dex_dungeon" "\0"
+            VALUE "CompanyName", "GLEEC" "\0"
+            VALUE "FileDescription", "Dex Dungeon" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "dex_dungeon" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.komodoplatform.dex-dungeon. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 GLEEC. All rights reserved." "\0"
             VALUE "OriginalFilename", "dex_dungeon.exe" "\0"
             VALUE "ProductName", "Dex Dungeon" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="KomodoPlatform/komodo-defi-sdk-flutter"
+GITHUB_REPO="GLEECBTC/komodo-defi-sdk-flutter"
 SDK_PROJECT_ID="komodo-defi-sdk"
 PLAYGROUND_PROJECT_ID="komodo-playground"
 # Updated to use the actual service account names

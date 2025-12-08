@@ -94,7 +94,7 @@ extension KdfExtensions on KdfAuthService {
       // enters the wrong password. However (!!) we must migrate soon to a
       // more robust error handling system. Either log scanning, or a more
       // reliable solution as detailed in:
-      // https://github.com/KomodoPlatform/komodo-defi-framework/issues/2383
+      // https://github.com/GLEECBTC/komodo-defi-framework/issues/2383
       // TODO(takenagain): Integrate the log scanning if KDF team does not
       // implement the proposal in the GH Issue above.
       case KdfStartupResult.initError:

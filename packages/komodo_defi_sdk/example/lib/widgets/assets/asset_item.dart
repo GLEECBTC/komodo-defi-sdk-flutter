@@ -93,7 +93,7 @@ class _AssetItemTrailing extends StatelessWidget {
         CircleAvatar(
           radius: 12,
           foregroundImage: NetworkImage(
-            'https://komodoplatform.github.io/coins/icons/${protocolTicker?.toLowerCase()}.png',
+            'https://gleecbtc.github.io/coins/icons/${protocolTicker?.toLowerCase()}.png',
           ),
           backgroundColor: Colors.white70,
         ),

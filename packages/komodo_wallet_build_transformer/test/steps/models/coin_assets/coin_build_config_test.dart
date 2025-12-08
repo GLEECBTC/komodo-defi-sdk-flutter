@@ -416,9 +416,9 @@ void main() {
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'latest',
           updateCommitOnBuild: true,
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,
           mappedFiles: {'config/coins.json': 'coins/coins.json'},
@@ -441,9 +441,9 @@ void main() {
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: true,
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsRepoBranch: 'feature/new-coin-support',
           runtimeUpdatesEnabled: true,
           mappedFiles: {'config/coins.json': 'coins/coins.json'},
@@ -457,7 +457,7 @@ void main() {
 
         expect(
           config.effectiveContentUrl,
-          equals('https://raw.githubusercontent.com/KomodoPlatform/coins'),
+          equals('https://raw.githubusercontent.com/GLEECBTC/coins'),
         );
       });
 
@@ -466,9 +466,9 @@ void main() {
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: true,
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,
           mappedFiles: {},
@@ -479,7 +479,7 @@ void main() {
 
         expect(
           config.effectiveContentUrl,
-          equals('https://raw.githubusercontent.com/KomodoPlatform/coins'),
+          equals('https://raw.githubusercontent.com/GLEECBTC/coins'),
         );
       });
     });

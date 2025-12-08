@@ -122,10 +122,7 @@ void main() {
 
       // Verify watchPubkeys can be called with and without optional parameters
       expect(() => manager.watchPubkeys(asset), returnsNormally);
-      expect(
-        () => manager.watchPubkeys(asset, activateIfNeeded: true),
-        returnsNormally,
-      );
+      expect(() => manager.watchPubkeys(asset), returnsNormally);
       expect(
         () => manager.watchPubkeys(asset, activateIfNeeded: false),
         returnsNormally,
@@ -200,10 +197,7 @@ void main() {
 
       // Verify watchBalance can be called with and without optional parameters
       expect(() => manager.watchBalance(assetId), returnsNormally);
-      expect(
-        () => manager.watchBalance(assetId, activateIfNeeded: true),
-        returnsNormally,
-      );
+      expect(() => manager.watchBalance(assetId), returnsNormally);
       expect(
         () => manager.watchBalance(assetId, activateIfNeeded: false),
         returnsNormally,
@@ -280,7 +274,7 @@ void main() {
 
       // Simulate auth state changes
       authController.add(
-        KdfUser(
+        const KdfUser(
           walletId: WalletId(
             name: 'test-wallet',
             authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
@@ -290,7 +284,7 @@ void main() {
       );
 
       // Allow auth state change to be processed
-      await Future<void>.delayed(Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Verify managers are still functional after auth state change
       expect(testPubkeyManager, isNotNull);

@@ -136,8 +136,8 @@ class FetchCoinAssetsBuildStep extends BuildStep {
         can manually run `flutter clean && flutter build bundle` but this is
         not recommended since the double build will be fixed in the future.
 
-        For more details, follow the KomodoPlatform Flutter fork:
-        https://github.com/KomodPlatform/flutter
+        For more details, follow the GLEECBTC Flutter fork:
+        https://github.com/GLEECBTC/flutter
         ${'=-' * 20}
         \n
       ''';
