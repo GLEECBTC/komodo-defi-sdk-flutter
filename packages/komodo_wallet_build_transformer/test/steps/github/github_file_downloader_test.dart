@@ -176,7 +176,7 @@ void main() {
       test('should receive effective content URL from build step', () {
         // This test verifies that when a build step passes an effective content URL
         // (which could be a CDN URL), the downloader uses it correctly
-        const effectiveUrl = 'https://coins-cdn.komodoplatform.com/master';
+        const effectiveUrl = 'https://gleecbtc.github.io/coins';
 
         final downloader = GitHubFileDownloader(
           apiProvider: mockApiProvider,
@@ -188,8 +188,8 @@ void main() {
 
       test('should work with realistic Komodo platform CDN URLs', () {
         final realisticUrls = [
-          'https://coins-cdn.komodoplatform.com/master',
-          'https://coins-cdn.komodoplatform.com/dev',
+          'https://gleecbtc.github.io/coins',
+          'https://gleecbtc.github.io/coins',
           'https://raw.githubusercontent.com/GLEECBTC/coins',
         ];
 
@@ -278,7 +278,7 @@ void main() {
           // CDN URLs when provided, which is critical for downloading hundreds
           // of coin assets efficiently without hitting rate limits
 
-          const cdnUrl = 'https://coins-cdn.komodoplatform.com/master';
+          const cdnUrl = 'https://gleecbtc.github.io/coins';
           const originalGitHubUrl =
               'https://raw.githubusercontent.com/GLEECBTC/coins';
 
@@ -321,12 +321,12 @@ void main() {
         final testScenarios = [
           {
             'scenario': 'Production with master branch CDN',
-            'contentUrl': 'https://coins-cdn.komodoplatform.com/master',
+            'contentUrl': 'https://gleecbtc.github.io/coins',
             'description': 'Production builds using CDN for master branch',
           },
           {
             'scenario': 'Development with dev branch CDN',
-            'contentUrl': 'https://coins-cdn.komodoplatform.com/dev',
+            'contentUrl': 'https://gleecbtc.github.io/coins',
             'description': 'Development builds using CDN for dev branch',
           },
           {
@@ -370,7 +370,7 @@ void main() {
 
         const originalContentUrl =
             'https://raw.githubusercontent.com/GLEECBTC/coins';
-        const cdnMirrorUrl = 'https://coins-cdn.komodoplatform.com/master';
+        const cdnMirrorUrl = 'https://gleecbtc.github.io/coins';
 
         // When GitHubFileDownloader receives the effective content URL,
         // it should use the CDN mirror for efficiency

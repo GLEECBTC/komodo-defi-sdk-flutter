@@ -425,14 +425,14 @@ void main() {
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
         expect(
           config.effectiveContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
         );
       });
 
@@ -450,8 +450,8 @@ void main() {
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
