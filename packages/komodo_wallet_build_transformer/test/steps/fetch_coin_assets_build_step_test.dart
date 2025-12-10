@@ -186,8 +186,8 @@ void main() {
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -220,7 +220,7 @@ void main() {
         // But downloader should receive the CDN URL
         expect(
           buildStep.downloader.repoContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
         );
       });
 
@@ -593,8 +593,8 @@ void main() {
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -641,14 +641,14 @@ void main() {
         // CRITICAL VERIFICATION: The downloader should use the CDN mirror (effective URL)
         expect(
           buildStep.downloader.repoContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
           reason: 'Downloader should use CDN mirror for efficiency',
         );
 
         // CRITICAL VERIFICATION: The effective URL logic should work correctly
         expect(
           buildStep.config.effectiveContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
           reason: 'Effective URL should return CDN mirror when available',
         );
 
@@ -674,8 +674,8 @@ void main() {
         expect(
           savedCoinsConfig['cdn_branch_mirrors'],
           equals({
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           }),
           reason:
               'CDN mirrors configuration should be preserved in saved config',
