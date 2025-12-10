@@ -296,15 +296,13 @@ class DefaultSelectedItemView extends StatelessWidget {
       if (dropdownItem.child is Row) {
         return dropdownItem.child;
       } else {
-        final textStyle = theme.textTheme.bodyLarge ??
-            const TextStyle(fontSize: 14);
+        final textStyle =
+            theme.textTheme.bodyLarge ?? const TextStyle(fontSize: 14);
         return Row(
           children: [
             Expanded(
               child: DefaultTextStyle(
-                style: textStyle.copyWith(
-                  color: theme.colorScheme.onSurface,
-                ),
+                style: textStyle.copyWith(color: theme.colorScheme.onSurface),
                 child: dropdownItem.child,
               ),
             ),
@@ -743,8 +741,8 @@ class SelectItemWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final textStyle = theme.textTheme.bodyLarge ??
-        const TextStyle(fontSize: 14);
+    final textStyle =
+        theme.textTheme.bodyLarge ?? const TextStyle(fontSize: 14);
 
     return InkWell(
       onTap: onTap,
@@ -753,9 +751,7 @@ class SelectItemWidget extends StatelessWidget {
           if (leading != null) ...[leading!, const SizedBox(width: 12)],
           Expanded(
             child: DefaultTextStyle(
-              style: textStyle.copyWith(
-                color: theme.colorScheme.onSurface,
-              ),
+              style: textStyle.copyWith(color: theme.colorScheme.onSurface),
               child: title,
             ),
           ),
