@@ -245,10 +245,9 @@ class SearchableSelectView<T> extends StatelessWidget {
         width: isExpanded ? double.infinity : null,
         decoration: BoxDecoration(
           border: Border.all(
-            color:
-                hasError
-                    ? theme.colorScheme.error
-                    : theme.colorScheme.onSurface.withOpacity(0.1),
+            color: hasError
+                ? theme.colorScheme.error
+                : theme.colorScheme.onSurface.withOpacity(0.1),
           ),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -261,29 +260,21 @@ class SearchableSelectView<T> extends StatelessWidget {
                   color: theme.colorScheme.onSurfaceVariant,
                   fontSize: theme.textTheme.bodyLarge?.fontSize,
                 ),
-                errorStyle:
-                    hasError
-                        ? TextStyle(
-                          color: theme.colorScheme.error,
-                          fontSize: 12,
-                        )
-                        : null,
-                errorBorder:
-                    hasError
-                        ? OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: theme.colorScheme.error,
-                          ),
-                        )
-                        : null,
+                errorStyle: hasError
+                    ? TextStyle(color: theme.colorScheme.error, fontSize: 12)
+                    : null,
+                errorBorder: hasError
+                    ? OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: theme.colorScheme.error),
+                      )
+                    : null,
               ),
           isEmpty: selectedItem == null,
-          child:
-              selectedItem == null
-                  ? null
-                  : selectedItemBuilder?.call(context, selectedItem) ??
-                      DefaultSelectedItemView(item: selectedItem),
+          child: selectedItem == null
+              ? null
+              : selectedItemBuilder?.call(context, selectedItem) ??
+                    DefaultSelectedItemView(item: selectedItem),
         ),
       ),
     );
@@ -305,11 +296,13 @@ class DefaultSelectedItemView extends StatelessWidget {
       if (dropdownItem.child is Row) {
         return dropdownItem.child;
       } else {
+        final textStyle = theme.textTheme.bodyLarge ??
+            const TextStyle(fontSize: 14);
         return Row(
           children: [
             Expanded(
               child: DefaultTextStyle(
-                style: theme.textTheme.bodyLarge!.copyWith(
+                style: textStyle.copyWith(
                   color: theme.colorScheme.onSurface,
                 ),
                 child: dropdownItem.child,
@@ -375,14 +368,12 @@ class SearchableSelectorDelegate<T> extends SearchDelegate<T?> {
 
   @override
   Widget buildResults(BuildContext context) {
-    final results =
-        items
-            .where(
-              (item) => _getItemText(
-                item,
-              ).toLowerCase().contains(query.toLowerCase()),
-            )
-            .toList();
+    final results = items
+        .where(
+          (item) =>
+              _getItemText(item).toLowerCase().contains(query.toLowerCase()),
+        )
+        .toList();
 
     return ListView.builder(
       itemCount: results.length,
@@ -415,8 +406,14 @@ class _DropdownItemWidget<T> extends StatelessWidget {
     final theme = Theme.of(context);
     final inputTheme = theme.inputDecorationTheme;
 
+    // Use the text color from textTheme since some themes misuse onSurface
+    // as a background color.
+    final textColor =
+        theme.textTheme.bodyLarge?.color ??
+        (theme.brightness == Brightness.dark ? Colors.white : Colors.black);
+
     final defaultTextStyle = theme.textTheme.bodyLarge?.copyWith(
-      color: inputTheme.labelStyle?.color ?? theme.colorScheme.onSurface,
+      color: textColor,
     );
 
     return InkWell(
@@ -425,10 +422,9 @@ class _DropdownItemWidget<T> extends StatelessWidget {
         padding:
             inputTheme.contentPadding ??
             const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child:
-            defaultTextStyle == null
-                ? item.child
-                : DefaultTextStyle(style: defaultTextStyle, child: item.child),
+        child: defaultTextStyle == null
+            ? item.child
+            : DefaultTextStyle(style: defaultTextStyle, child: item.child),
       ),
     );
   }
@@ -495,10 +491,9 @@ Future<T?> showDropdownSearch<T>(
   _overlayEntry = OverlayEntry(
     builder: (context) {
       // Calculate width based on minWidth parameter if provided
-      final dropdownWidth =
-          minWidth != null
-              ? math.max(renderBox.size.width, minWidth)
-              : renderBox.size.width;
+      final dropdownWidth = minWidth != null
+          ? math.max(renderBox.size.width, minWidth)
+          : renderBox.size.width;
 
       return GestureDetector(
         onTap: () => onItemSelected(null),
@@ -508,10 +503,9 @@ Future<T?> showDropdownSearch<T>(
             Positioned(
               left: offset.dx,
               // Position above or below based on available space
-              top:
-                  showAbove
-                      ? offset.dy - requiredSpace
-                      : offset.dy + renderBox.size.height,
+              top: showAbove
+                  ? offset.dy - requiredSpace
+                  : offset.dy + renderBox.size.height,
               width: dropdownWidth,
               child: _SearchOverlay(
                 items: items,
@@ -565,14 +559,12 @@ class _SearchOverlayState<T> extends State<_SearchOverlay<T>> {
   void updateSearchQuery(String newQuery) {
     setState(() {
       query = newQuery;
-      filteredItems =
-          widget.items
-              .where(
-                (item) => _getItemText(
-                  item,
-                ).toLowerCase().contains(query.toLowerCase()),
-              )
-              .toList();
+      filteredItems = widget.items
+          .where(
+            (item) =>
+                _getItemText(item).toLowerCase().contains(query.toLowerCase()),
+          )
+          .toList();
       // Reset focus when items change
       _focusedIndex = filteredItems.isNotEmpty ? 0 : -1;
     });
@@ -595,8 +587,9 @@ class _SearchOverlayState<T> extends State<_SearchOverlay<T>> {
         });
       } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
         setState(() {
-          _focusedIndex =
-              _focusedIndex <= 0 ? filteredItems.length - 1 : _focusedIndex - 1;
+          _focusedIndex = _focusedIndex <= 0
+              ? filteredItems.length - 1
+              : _focusedIndex - 1;
         });
       } else if (event.logicalKey == LogicalKeyboardKey.enter ||
           event.logicalKey == LogicalKeyboardKey.space) {
@@ -704,10 +697,9 @@ InputDecorationTheme defaultSearchableSelectTheme(
 ) {
   final isDark = themeMode == Brightness.dark;
   final surfaceColor = isDark ? Colors.grey[900] : Colors.grey[50];
-  final borderColor =
-      isDark
-          ? colorScheme.onSurface.withOpacity(0.1)
-          : colorScheme.outline.withOpacity(0.2);
+  final borderColor = isDark
+      ? colorScheme.onSurface.withOpacity(0.1)
+      : colorScheme.outline.withOpacity(0.2);
 
   return InputDecorationTheme(
     filled: true,
@@ -751,6 +743,9 @@ class SelectItemWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final textStyle = theme.textTheme.bodyLarge ??
+        const TextStyle(fontSize: 14);
+
     return InkWell(
       onTap: onTap,
       child: Row(
@@ -758,7 +753,7 @@ class SelectItemWidget extends StatelessWidget {
           if (leading != null) ...[leading!, const SizedBox(width: 12)],
           Expanded(
             child: DefaultTextStyle(
-              style: theme.textTheme.bodyLarge!.copyWith(
+              style: textStyle.copyWith(
                 color: theme.colorScheme.onSurface,
               ),
               child: title,
