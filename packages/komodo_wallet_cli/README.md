@@ -73,7 +73,7 @@ Options:
 - `-t, --token <token>` – GitHub token (or env `GITHUB_API_PUBLIC_READONLY_TOKEN`)
 - `-p, --platform <name|all>` – Specific platform to update or `all` (default: all)
 - `-s, --source <github|mirror>` – Source for artifacts (default: github)
-- `--mirror-url <url>` – Mirror base URL (default: https://sdk.devbuilds.komodo.earth)
+- `--mirror-url <url>` – Mirror base URL (default: https://devbuilds.gleec.com)
 - `-v, --verbose` – Verbose logging
 - `-h, --help` – Show help
 

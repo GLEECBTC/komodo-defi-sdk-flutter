@@ -67,7 +67,7 @@ jobs:
           # Get latest commit for the branch
           TOKEN=${{ secrets.GITHUB_TOKEN }}
           RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
-            "https://api.github.com/repos/KomodoPlatform/komodo-defi-framework/commits/$BRANCH")
+            "https://api.github.com/repos/GLEECBTC/komodo-defi-framework/commits/$BRANCH")
           NEW_COMMIT=$(echo $RESPONSE | jq -r '.sha')
 
           echo "Current commit: $CURRENT_COMMIT"

@@ -11,6 +11,7 @@ api:
 
   source_urls:
     - "https://api.github.com/repos/GLEECBTC/komodo-defi-framework"
+    - "https://devbuilds.gleec.com/"
     - "https://sdk.devbuilds.komodo.earth"
 
   platforms:
