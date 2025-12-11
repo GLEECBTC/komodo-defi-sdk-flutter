@@ -244,3 +244,4 @@ class CaddyArtefactDownloader implements ArtefactDownloader {
     }
   }
 }
+
