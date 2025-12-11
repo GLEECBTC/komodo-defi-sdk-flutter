@@ -68,12 +68,12 @@ void main(List<String> arguments) async {
     ..addOption(
       'source',
       abbr: 's',
-      help: 'Source to fetch from (github or mirror)',
+      help: 'Source to fetch from (github, mirror, or caddy)',
       defaultsTo: 'github',
     )
     ..addOption(
       'mirror-url',
-      help: 'Mirror URL if using mirror source',
+      help: 'Mirror URL if using mirror or caddy source',
       defaultsTo: 'https://sdk.devbuilds.komodo.earth',
     )
     ..addFlag(
@@ -205,8 +205,10 @@ calculates their checksums, and updates the build config with this information i
 the branch name and commit hash. It does not extract or set up the files - that is the 
 responsibility of the build step.
 
-It supports both GitHub releases and the internal mirror site at:
-https://sdk.devbuilds.komodo.earth/
+Supported sources:
+- github: GitHub releases API
+- mirror: HTML-based mirror sites (e.g., sdk.devbuilds.komodo.earth, nebula.decker.im)
+- caddy:  Caddy file servers with JSON API (e.g., devbuilds.gleec.com)
 
 Usage:
   dart run komodo_wallet_cli:update_api_config [options]
@@ -243,7 +245,15 @@ Examples:
     --config packages/komodo_defi_framework/app_build/build_config.json \
     --output-dir packages/komodo_defi_framework/app_build/temp_downloads
 
-  # Using a custom mirror URL
+  # Using GLEEC Caddy mirror (JSON API)
+  dart run komodo_wallet_cli:update_api_config \
+    --branch dev \
+    --source caddy \
+    --mirror-url https://devbuilds.gleec.com \
+    --config packages/komodo_defi_framework/app_build/build_config.json \
+    --output-dir packages/komodo_defi_framework/app_build/temp_downloads
+
+  # Using a custom HTML mirror URL
   dart run komodo_wallet_cli:update_api_config \
     --branch dev \
     --source mirror \
@@ -279,8 +289,8 @@ class KdfFetcher {
       outputDirObj.createSync(recursive: true);
     }
 
-    if (source != 'github' && source != 'mirror') {
-      throw ArgumentError('Source must be either "github" or "mirror"');
+    if (source != 'github' && source != 'mirror' && source != 'caddy') {
+      throw ArgumentError('Source must be "github", "mirror", or "caddy"');
     }
   }
 
@@ -482,6 +492,14 @@ class KdfFetcher {
 
     if (source == 'github') {
       return _fetchGithubDownloadUrl(
+        platform,
+        commitHash,
+        matchingPattern,
+        matchingKeyword,
+        matchingPreference,
+      );
+    } else if (source == 'caddy') {
+      return _fetchCaddyDownloadUrl(
         platform,
         commitHash,
         matchingPattern,
@@ -736,6 +754,173 @@ class KdfFetcher {
     throw Exception(
       'No matching asset found for platform $platform and commit $commitHash',
     );
+  }
+
+  /// Fetches download URL from a Caddy file server using JSON API.
+  ///
+  /// Caddy provides JSON directory listings when the `Accept: application/json`
+  /// header is included. This is more reliable than HTML scraping.
+  Future<String> _fetchCaddyDownloadUrl(
+    String platform,
+    String commitHash,
+    String? matchingPattern,
+    String? matchingKeyword,
+    List<String> matchingPreference,
+  ) async {
+    final normalizedMirror = mirrorUrl.endsWith('/')
+        ? mirrorUrl
+        : '$mirrorUrl/';
+    final mirrorUri = Uri.parse(normalizedMirror);
+    final listingUrls = <Uri>{
+      if (branch.isNotEmpty) mirrorUri.resolve('$branch/'),
+      mirrorUri,
+    };
+
+    final fullHash = commitHash;
+    final shortHash = commitHash.substring(0, 7);
+    log.info(
+      'Looking for files with hash $fullHash or $shortHash (Caddy JSON)',
+    );
+
+    for (final baseUrl in listingUrls) {
+      log.fine('Fetching files from Caddy mirror: $baseUrl');
+      try {
+        final candidates = await _searchCaddyDirectory(
+          baseUrl: baseUrl,
+          matchingPattern: matchingPattern,
+          matchingKeyword: matchingKeyword,
+          fullHash: fullHash,
+          shortHash: shortHash,
+        );
+
+        if (candidates.isNotEmpty) {
+          final preferred = _choosePreferred(
+            candidates.keys,
+            matchingPreference,
+          );
+          final resolved = candidates[preferred] ?? candidates.values.first;
+          log.info('Found matching files for commit; selected: $resolved');
+          return resolved;
+        }
+
+        // Second pass without commit constraint (only when not strict)
+        if (!strict) {
+          final looseCandidates = await _searchCaddyDirectory(
+            baseUrl: baseUrl,
+            matchingPattern: matchingPattern,
+            matchingKeyword: matchingKeyword,
+            fullHash: null,
+            shortHash: null,
+          );
+          if (looseCandidates.isNotEmpty) {
+            final preferred = _choosePreferred(
+              looseCandidates.keys,
+              matchingPreference,
+            );
+            final resolved =
+                looseCandidates[preferred] ?? looseCandidates.values.first;
+            log.warning(
+              'Could not find exact commit match. Using latest matching asset: $resolved',
+            );
+            return resolved;
+          }
+        }
+
+        log.fine('No matching files found in $baseUrl');
+      } catch (e) {
+        log.fine('Error querying Caddy mirror $baseUrl: $e');
+      }
+    }
+
+    throw Exception(
+      'No matching asset found for platform $platform and commit $commitHash',
+    );
+  }
+
+  /// Recursively searches a Caddy directory for matching files using JSON API.
+  Future<Map<String, String>> _searchCaddyDirectory({
+    required Uri baseUrl,
+    required String? matchingPattern,
+    required String? matchingKeyword,
+    required String? fullHash,
+    required String? shortHash,
+    int maxDepth = 3,
+    int currentDepth = 0,
+  }) async {
+    if (currentDepth >= maxDepth) {
+      return {};
+    }
+
+    final candidates = <String, String>{};
+
+    try {
+      final response = await http.get(
+        baseUrl,
+        headers: {'Accept': 'application/json'},
+      );
+
+      if (response.statusCode != 200) {
+        log.fine('Caddy listing failed at $baseUrl: ${response.statusCode}');
+        return {};
+      }
+
+      final List<dynamic> entries = jsonDecode(response.body) as List<dynamic>;
+
+      for (final entry in entries) {
+        final entryMap = entry as Map<String, dynamic>;
+        final name = entryMap['name'] as String;
+        final url = entryMap['url'] as String;
+        final isDir = entryMap['is_dir'] as bool;
+
+        if (isDir) {
+          // Recursively search subdirectories
+          final subUrl = baseUrl.resolve(url);
+          final subCandidates = await _searchCaddyDirectory(
+            baseUrl: subUrl,
+            matchingPattern: matchingPattern,
+            matchingKeyword: matchingKeyword,
+            fullHash: fullHash,
+            shortHash: shortHash,
+            maxDepth: maxDepth,
+            currentDepth: currentDepth + 1,
+          );
+          candidates.addAll(subCandidates);
+        } else {
+          // Check if file matches criteria
+          if (!name.endsWith('.zip')) continue;
+          if (name.contains('wallet')) continue;
+
+          var matches = false;
+          if (matchingPattern != null) {
+            try {
+              final regex = RegExp(matchingPattern);
+              matches = regex.hasMatch(name);
+            } catch (e) {
+              log.warning('Invalid regex pattern: $matchingPattern');
+            }
+          } else if (matchingKeyword != null) {
+            matches = name.contains(matchingKeyword);
+          }
+
+          if (!matches) continue;
+
+          // Check hash match if hashes are provided
+          if (fullHash != null && shortHash != null) {
+            final containsHash =
+                name.contains(fullHash) || name.contains(shortHash);
+            if (!containsHash) continue;
+          }
+
+          final resolvedUrl = baseUrl.resolve(url).toString();
+          candidates[name] = resolvedUrl;
+          log.fine('Found candidate: $name at $resolvedUrl');
+        }
+      }
+    } catch (e) {
+      log.fine('Failed to fetch Caddy directory listing from $baseUrl: $e');
+    }
+
+    return candidates;
   }
 
   /// Downloads a binary from the given URL

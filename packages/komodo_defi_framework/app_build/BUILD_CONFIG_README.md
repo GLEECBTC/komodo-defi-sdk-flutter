@@ -40,19 +40,26 @@ Paths in the config are relative to that package directory.
 - Use `--concurrent` for faster downloads in development
 - Override behavior per build via env `OVERRIDE_DEFI_API_DOWNLOAD=true|false`
 
-### Using Nebula mirror and short commit hashes
+### Using mirror sites and short commit hashes
 
-- You can add Nebula as an additional source in `api.source_urls`:
+- You can add mirror sites as additional sources in `api.source_urls`:
 
 ```
 "source_urls": [
     "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
-    "https://sdk.devbuilds.komodo.earth/",
-    "https://nebula.decker.im/kdf/"
+    "https://devbuilds.gleec.com/",
+    "https://nebula.decker.im/kdf/",
+    "https://sdk.devbuilds.komodo.earth/"
 ]
 ```
 
-- The downloader expects branch-scoped directory listings (e.g., `.../dev/`) on both devbuilds and Nebula mirrors and will fallback to the base listing when available. It searches for artifacts that match the platform patterns and contain either the full commit hash or a 7-char short hash.
+#### Supported mirror types
+
+- **GLEEC DevBuilds** (`devbuilds.gleec.com`): Caddy-based file server with JSON API support. Uses `Accept: application/json` header for structured directory listings.
+- **Nebula** (`nebula.decker.im`): HTML-based directory listing.
+- **Komodo DevBuilds** (`sdk.devbuilds.komodo.earth`): HTML-based directory listing.
+
+- The downloader expects branch-scoped directory listings (e.g., `.../dev/`) on mirror sites and will fallback to the base listing when available. It searches for artifacts that match the platform patterns and contain either the full commit hash or a 7-char short hash.
 - To pin a specific commit (e.g., `4025b8c`) without changing branches, update `api.api_commit_hash` or use the CLI with `--commit`:
 
 ```bash
@@ -70,6 +77,7 @@ dart run packages/komodo_wallet_cli/bin/update_api_config.dart \
   - Re-run the CLI with a different `--commit <hash>` value.
 
 Notes:
+
 - Nebula index includes additional files like `komodo-wallet-*`; these are automatically ignored by the downloader.
 - macOS on Nebula uses `kdf-macos-universal2-<hash>.zip` (special case handled in `matching_pattern`). Other platforms use `kdf_<hash>-<platform>.zip`.
 
