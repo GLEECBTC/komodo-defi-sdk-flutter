@@ -33,6 +33,7 @@ class TaskShepherd {
     required bool Function(T) checkTaskStatus,
     Future<void> Function(int taskId)? cancelTask,
     Duration pollingInterval = const Duration(seconds: 1),
+    Duration Function(T status)? pollingIntervalForStatus,
   }) {
     final controller = StreamController<T>();
     var taskCompletedNaturally = false;
@@ -79,7 +80,9 @@ class TaskShepherd {
             return;
           }
 
-          await Future<void>.delayed(pollingInterval);
+          final nextDelay =
+              pollingIntervalForStatus != null ? pollingIntervalForStatus(status) : null;
+          await Future<void>.delayed(nextDelay ?? pollingInterval);
         }
       } catch (e, stackTrace) {
         controller.addError(e, stackTrace);
@@ -97,6 +100,7 @@ extension TaskRpcBuddy on NewTaskResponse {
     required bool Function(T) isTaskComplete,
     Future<void> Function(int taskId)? cancelTask,
     Duration pollingInterval = const Duration(seconds: 1),
+    Duration Function(T status)? pollingIntervalForStatus,
   }) {
     return TaskShepherd.executeTask<T>(
       initTask: () async => this,
@@ -104,6 +108,7 @@ extension TaskRpcBuddy on NewTaskResponse {
       checkTaskStatus: isTaskComplete,
       cancelTask: cancelTask,
       pollingInterval: pollingInterval,
+      pollingIntervalForStatus: pollingIntervalForStatus,
     );
   }
 }
@@ -114,6 +119,7 @@ extension TaskRpcBuddyFuture on Future<NewTaskResponse> {
     required bool Function(T) isTaskComplete,
     Future<void> Function(int taskId)? cancelTask,
     Duration pollingInterval = const Duration(seconds: 1),
+    Duration Function(T status)? pollingIntervalForStatus,
   }) {
     return TaskShepherd.executeTask<T>(
       initTask: () async => this,
@@ -121,6 +127,7 @@ extension TaskRpcBuddyFuture on Future<NewTaskResponse> {
       checkTaskStatus: isTaskComplete,
       cancelTask: cancelTask,
       pollingInterval: pollingInterval,
+      pollingIntervalForStatus: pollingIntervalForStatus,
     );
   }
 }
