@@ -158,11 +158,8 @@ class GithubArtefactDownloader implements ArtefactDownloader {
       } else if (Platform.isWindows) {
         // For Windows, use PowerShell's Expand-Archive command
         final result = await Process.run('powershell', [
-          'Expand-Archive',
-          '-Path',
-          filePath,
-          '-DestinationPath',
-          destinationFolder,
+          '-Command',
+          'Expand-Archive -Path "$filePath" -DestinationPath "$destinationFolder" -Force',
         ]);
         if (result.exitCode != 0) {
           throw Exception('Error extracting zip file: ${result.stderr}');
