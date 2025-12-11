@@ -490,6 +490,9 @@ class WithdrawalManager {
       final asset = _assetProvider
           .findAssetsByConfigId(parameters.asset)
           .single;
+
+      // TODO: refactor into strategy pattern or add a getter to the protocol
+      // class to check if the protocol requires the legacy withdrawals
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
       final isSiaProtocol = asset.protocol is SiaProtocol;
 
@@ -585,16 +588,23 @@ class WithdrawalManager {
   ) async* {
     try {
       final asset = _assetProvider.findAssetsByConfigId(assetId).single;
+
+      // TODO: refactor into strategy pattern or add a getter to the protocol
+      // class to check if the protocol requires the legacy withdrawals
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
+      final isSiaProtocol = asset.protocol is SiaProtocol;
 
       // Tendermint assets are not yet supported by the task-based API
-      if (isTendermintProtocol) {
+      // and require a legacy implementation
+      if (isTendermintProtocol || isSiaProtocol) {
         yield* _legacyManager.executeWithdrawal(preview, assetId);
         return;
       }
 
       // Ensure asset is activated before broadcasting
-      final activationResult = await _activationCoordinator.activateAsset(asset);
+      final activationResult = await _activationCoordinator.activateAsset(
+        asset,
+      );
       if (activationResult.isFailure) {
         throw WithdrawalException(
           'Failed to activate asset $assetId: ${activationResult.errorMessage ?? activationResult.toString()}',
