@@ -125,8 +125,9 @@ class MnemonicValidator {
       }
 
       // Convert indices to binary string (11 bits per word)
-      final binaryString =
-          indices.map((i) => i.toRadixString(2).padLeft(11, '0')).join();
+      final binaryString = indices
+          .map((i) => i.toRadixString(2).padLeft(11, '0'))
+          .join();
 
       // Calculate entropy and checksum lengths
       final totalBits = binaryString.length;
@@ -198,4 +199,61 @@ class MnemonicValidator {
 
   /// Checks if the wordlist has been initialized
   bool get isInitialized => _validMnemonicWords.isNotEmpty;
+
+  /// Returns a set of BIP39 words that start with the given prefix.
+  ///
+  /// This method is useful for implementing autocomplete functionality
+  /// when users are entering their seed phrase word by word.
+  ///
+  /// [prefix] - The prefix to search for (case-insensitive)
+  /// [maxResults] - Maximum number of results to return (default: 10)
+  ///
+  /// Returns an empty set if the wordlist is not initialized or if no matches
+  /// are found.
+  ///
+  /// Example:
+  /// ```dart
+  /// final validator = MnemonicValidator();
+  /// await validator.init();
+  /// final matches = validator.getAutocompleteMatches('aba');
+  /// // Returns: {'abandon', 'ability', 'about'}
+  /// ```
+  Set<String> getAutocompleteMatches(String prefix, {int maxResults = 10}) {
+    assert(
+      _validMnemonicWords.isNotEmpty,
+      'Mnemonic wordlist is not initialized. '
+      'Call MnemonicValidator.init() first.',
+    );
+
+    if (prefix.isEmpty) {
+      return {};
+    }
+
+    final lowerPrefix = prefix.toLowerCase().trim();
+    final matches = <String>{};
+
+    for (final word in _validMnemonicWords) {
+      if (word.startsWith(lowerPrefix)) {
+        matches.add(word);
+        if (matches.length >= maxResults) {
+          break;
+        }
+      }
+    }
+
+    return matches;
+  }
+
+  /// Returns all valid BIP39 words for reference.
+  ///
+  /// This can be useful for implementing custom autocomplete UIs.
+  Set<String> getAllWords() {
+    assert(
+      _validMnemonicWords.isNotEmpty,
+      'Mnemonic wordlist is not initialized. '
+      'Call MnemonicValidator.init() first.',
+    );
+
+    return Set<String>.from(_validMnemonicWords);
+  }
 }
