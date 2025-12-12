@@ -280,6 +280,16 @@ class BalanceManager implements IBalanceManager {
     }
 
     if (!activateIfNeeded) {
+      // If activation isn't allowed but one is in progress, join it to avoid races
+      if (_activationCoordinator!.isActivationInProgress(asset.id)) {
+        try {
+          final result = await _activationCoordinator!.activateAsset(asset);
+          return result.isSuccess;
+        } catch (e) {
+          _logger.fine('Failed while awaiting in-progress activation: $e');
+          return false;
+        }
+      }
       return _activationCoordinator!.isAssetActive(asset.id);
     }
 

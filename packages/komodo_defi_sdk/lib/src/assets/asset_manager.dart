@@ -1,4 +1,4 @@
-import 'dart:async' show StreamSubscription;
+import 'dart:async' show StreamSubscription, StreamController, scheduleMicrotask;
 
 import 'package:flutter/foundation.dart' show ValueGetter;
 import 'package:komodo_coins/komodo_coins.dart';
@@ -48,8 +48,10 @@ class AssetManager implements IAssetProvider {
     ValueGetter<ActivationManager> activationManager,
     this._coins,
     ValueGetter<ActivatedAssetsCache> activatedAssetsCache,
+    [ValueGetter<SharedActivationCoordinator>? activationCoordinator],
   ) : _activationManager = activationManager,
-      _activatedAssetsCache = activatedAssetsCache {
+      _activatedAssetsCache = activatedAssetsCache,
+      _activationCoordinator = activationCoordinator {
     _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChange);
   }
   final KomodoDefiLocalAuth _auth;
@@ -60,6 +62,9 @@ class AssetManager implements IAssetProvider {
   /// to publicly expose the activation manager's activation methods.
   /// See [activateAsset] and [activateAssets] for more details.
   final ValueGetter<ActivationManager> _activationManager;
+
+  /// Lazily resolved shared activation coordinator to ensure global dedup.
+  final ValueGetter<SharedActivationCoordinator>? _activationCoordinator;
 
   /// Activated assets cache shared across SDK consumers.
   final ValueGetter<ActivatedAssetsCache> _activatedAssetsCache;
@@ -198,8 +203,13 @@ class AssetManager implements IAssetProvider {
   /// activation logic internally and seamlessly.
   ///
   /// Returns a stream of [ActivationProgress] updates.
-  Stream<ActivationProgress> activateAsset(Asset asset) =>
-      _activationManager().activateAsset(asset);
+  Stream<ActivationProgress> activateAsset(Asset asset) {
+    final coordinator = _activationCoordinator?.call();
+    if (coordinator != null) {
+      return coordinator.activateAssetStream(asset);
+    }
+    return _activationManager().activateAsset(asset);
+  }
 
   /// Activates multiple assets at once.
   ///
@@ -211,8 +221,24 @@ class AssetManager implements IAssetProvider {
   /// activation logic internally and seamlessly.
   ///
   /// Returns a stream of [ActivationProgress] updates.
-  Stream<ActivationProgress> activateAssets(List<Asset> assets) =>
-      _activationManager().activateAssets(assets);
+  Stream<ActivationProgress> activateAssets(List<Asset> assets) {
+    final coordinator = _activationCoordinator?.call();
+    if (coordinator == null) {
+      return _activationManager().activateAssets(assets);
+    }
+
+    final controller = StreamController<ActivationProgress>.broadcast();
+
+    scheduleMicrotask(() {
+      for (final asset in assets) {
+        coordinator
+            .activateAssetStream(asset)
+            .listen(controller.add, onError: controller.addError);
+      }
+    });
+
+    return controller.stream;
+  }
 
   /// Disposes of the asset manager, cleaning up resources.
   ///

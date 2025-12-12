@@ -111,6 +111,7 @@ Future<void> bootstrap({
       () => container<ActivationManager>(),
       container<KomodoAssetsUpdateManager>(),
       () => container<ActivatedAssetsCache>(),
+      () => container<SharedActivationCoordinator>(),
     );
     await assetManager.init();
     // Will be removed in near future after KW is fully migrated to KDF

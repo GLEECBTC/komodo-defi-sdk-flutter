@@ -70,12 +70,32 @@ class ActivationManager {
         continue;
       }
 
-      // Register activation attempt
+      // Register activation attempt; if one is already in progress, join it
       final primaryCompleter = await _registerActivation(group.primary.id);
       if (primaryCompleter == null) {
         debugPrint(
-          'Activation already in progress for ${group.primary.id.name}',
+          'Activation already in progress for ${group.primary.id.name} (joining)',
         );
+        // Join the existing activation and emit a synthetic completion when done
+        final existing = _activationCompleters[group.primary.id];
+        if (existing != null) {
+          yield ActivationProgress(
+            status: 'Joining existing activation for ${group.primary.id.name}...',
+            progressDetails: const ActivationProgressDetails(
+              currentStep: ActivationStep.initialization,
+              stepCount: 1,
+            ),
+          );
+          try {
+            await existing.future;
+            yield ActivationProgress.alreadyActiveSuccess(
+              assetName: group.primary.id.name,
+              childCount: group.children?.length ?? 0,
+            );
+          } catch (e) {
+            yield ActivationProgress.error(message: e.toString());
+          }
+        }
         continue;
       }
 
@@ -172,10 +192,9 @@ class ActivationManager {
   /// Register new activation attempt
   Future<Completer<void>?> _registerActivation(AssetId assetId) async {
     return _protectedOperation(() async {
-      // Return the existing completer if activation is already in progress
-      // This ensures subsequent callers properly wait for the activation to complete
+      // If activation is already in progress for this asset, signal caller to join
       if (_activationCompleters.containsKey(assetId)) {
-        return _activationCompleters[assetId];
+        return null;
       }
 
       final completer = Completer<void>();
