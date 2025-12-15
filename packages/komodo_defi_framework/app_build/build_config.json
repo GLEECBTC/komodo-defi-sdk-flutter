@@ -7,7 +7,7 @@
         "source_urls": [
             "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
             "https://devbuilds.gleec.com/",
-            "https://nebula.decker.im/kdf/",
+            "https://nebula.decker.im/",
             "https://sdk.devbuilds.komodo.earth/"
         ],
         "platforms": {
