@@ -47,9 +47,8 @@ Paths in the config are relative to that package directory.
 ```
 "source_urls": [
     "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
-    "https://devbuilds.gleec.com/",
-    "https://sdk.devbuilds.komodo.earth/",
-    "https://nebula.decker.im/"
+    "https://devbuilds.gleec.com",
+    "https://nebula.decker.im"
 ]
 ```
 
@@ -59,7 +58,7 @@ Paths in the config are relative to that package directory.
 ```bash
 dart run packages/komodo_wallet_cli/bin/update_api_config.dart \
   --source mirror \
-  --mirror-url https://nebula.decker.im/ \
+  --mirror-url https://nebula.decker.im \
   --commit 4025b8c \
   --config packages/komodo_defi_framework/app_build/build_config.json \
   --output-dir packages/komodo_defi_framework/app_build/temp_downloads \

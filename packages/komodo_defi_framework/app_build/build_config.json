@@ -1,91 +1,87 @@
 {
-    "api": {
-        "api_commit_hash": "475cdb49bc343a8fefdc2caaa1635d5ec426990b",
-        "branch": "v2.6.0-beta",
-        "fetch_at_build_enabled": true,
-        "concurrent_downloads_enabled": true,
-        "source_urls": [
-            "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
-            "https://devbuilds.gleec.com/",
-            "https://nebula.decker.im/",
-            "https://sdk.devbuilds.komodo.earth/"
+  "api": {
+    "api_commit_hash": "475cdb49bc343a8fefdc2caaa1635d5ec426990b",
+    "branch": "v2.6.0-beta",
+    "fetch_at_build_enabled": true,
+    "concurrent_downloads_enabled": true,
+    "source_urls": [
+      "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
+      "https://devbuilds.gleec.com",
+      "https://nebula.decker.im"
+    ],
+    "platforms": {
+      "web": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "8f16eaf4cc401bad35f8a5c47c512b232d20f2501b38ec6c2b4bcd015c76c32f"
         ],
-        "platforms": {
-            "web": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "8f16eaf4cc401bad35f8a5c47c512b232d20f2501b38ec6c2b4bcd015c76c32f"
-                ],
-                "path": "web/kdf/bin"
-            },
-            "ios": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "aa791e8f269dc56c0fc80c5ca224839074ea2ae554993ee237b98599fe0e659f"
-                ],
-                "path": "ios"
-            },
-            "macos": {
-                "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
-                "matching_preference": [
-                    "universal2",
-                    "mac-arm64"
-                ],
-                "valid_zip_sha256_checksums": [
-                    "90e7ad6c9cc084cb7a9ae2da0b3f375081a03f3ae265b316a342b63525cb6a8d"
-                ],
-                "path": "macos/bin"
-            },
-            "windows": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "1b845b4b36aa27a122edfd291dfe01cc8581083da4bd99941c8a66b1de069c27"
-                ],
-                "path": "windows/bin"
-            },
-            "android-armv7": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "b21e17f04df13d9b600405f880663f0fdf99c85b2b1e53db4bd85bc933345831"
-                ],
-                "path": "android/app/src/main/cpp/libs/armeabi-v7a"
-            },
-            "android-aarch64": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "56b79ab33f4b86236c120ce982b04ccc23d8cdd43b34f66398ea1f8b011becd3"
-                ],
-                "path": "android/app/src/main/cpp/libs/arm64-v8a"
-            },
-            "linux": {
-                "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
-                "valid_zip_sha256_checksums": [
-                    "4bfabfcfe44b33b32799a90dcd8d373ba5847d8b56e820a1ce5d702dfb76e2cc"
-                ],
-                "path": "linux/bin"
-            }
-        }
-    },
-    "coins": {
-        "fetch_at_build_enabled": true,
-        "update_commit_on_build": true,
-        "bundled_coins_repo_commit": "b8f85666325ca1cc6306ca113e7129d73e77e0f0",
-        "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
-        "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
-        "coins_repo_branch": "master",
-        "runtime_updates_enabled": true,
-        "mapped_files": {
-            "assets/config/coins_config.json": "utils/coins_config_unfiltered.json",
-            "assets/config/coins.json": "coins",
-            "assets/config/seed_nodes.json": "seed-nodes.json"
-        },
-        "mapped_folders": {
-            "assets/coin_icons/png/": "icons"
-        },
-        "concurrent_downloads_enabled": false,
-        "cdn_branch_mirrors": {
-            "master": "https://gleecbtc.github.io/coins",
-            "main": "https://gleecbtc.github.io/coins"
-        }
+        "path": "web/kdf/bin"
+      },
+      "ios": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "aa791e8f269dc56c0fc80c5ca224839074ea2ae554993ee237b98599fe0e659f"
+        ],
+        "path": "ios"
+      },
+      "macos": {
+        "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
+        "matching_preference": ["universal2", "mac-arm64"],
+        "valid_zip_sha256_checksums": [
+          "90e7ad6c9cc084cb7a9ae2da0b3f375081a03f3ae265b316a342b63525cb6a8d"
+        ],
+        "path": "macos/bin"
+      },
+      "windows": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "1b845b4b36aa27a122edfd291dfe01cc8581083da4bd99941c8a66b1de069c27"
+        ],
+        "path": "windows/bin"
+      },
+      "android-armv7": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "b21e17f04df13d9b600405f880663f0fdf99c85b2b1e53db4bd85bc933345831"
+        ],
+        "path": "android/app/src/main/cpp/libs/armeabi-v7a"
+      },
+      "android-aarch64": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "56b79ab33f4b86236c120ce982b04ccc23d8cdd43b34f66398ea1f8b011becd3"
+        ],
+        "path": "android/app/src/main/cpp/libs/arm64-v8a"
+      },
+      "linux": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "4bfabfcfe44b33b32799a90dcd8d373ba5847d8b56e820a1ce5d702dfb76e2cc"
+        ],
+        "path": "linux/bin"
+      }
     }
+  },
+  "coins": {
+    "fetch_at_build_enabled": true,
+    "update_commit_on_build": true,
+    "bundled_coins_repo_commit": "b8f85666325ca1cc6306ca113e7129d73e77e0f0",
+    "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
+    "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
+    "coins_repo_branch": "master",
+    "runtime_updates_enabled": true,
+    "mapped_files": {
+      "assets/config/coins_config.json": "utils/coins_config_unfiltered.json",
+      "assets/config/coins.json": "coins",
+      "assets/config/seed_nodes.json": "seed-nodes.json"
+    },
+    "mapped_folders": {
+      "assets/coin_icons/png/": "icons"
+    },
+    "concurrent_downloads_enabled": false,
+    "cdn_branch_mirrors": {
+      "master": "https://gleecbtc.github.io/coins",
+      "main": "https://gleecbtc.github.io/coins"
+    }
+  }
 }
