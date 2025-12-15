@@ -498,7 +498,7 @@ return $default(_that.paramFiles,_that.primaryUrl,_that.backupUrl,_that.download
 
 @JsonSerializable(fieldRename: FieldRename.snake)
 class _ZcashParamsConfig extends ZcashParamsConfig {
-  const _ZcashParamsConfig({required final  List<ZcashParamFile> paramFiles, this.primaryUrl = 'https://komodoplatform.com/downloads/', this.backupUrl = 'https://z.cash/downloads/', this.downloadTimeoutSeconds = 1800, this.maxRetries = 3, this.retryDelaySeconds = 5, this.downloadBufferSize = 1048576}): _paramFiles = paramFiles,super._();
+  const _ZcashParamsConfig({required final  List<ZcashParamFile> paramFiles, this.primaryUrl = 'https://z.cash/downloads/', this.backupUrl = 'https://komodoplatform.com/downloads/', this.downloadTimeoutSeconds = 1800, this.maxRetries = 3, this.retryDelaySeconds = 5, this.downloadBufferSize = 1048576}): _paramFiles = paramFiles,super._();
   factory _ZcashParamsConfig.fromJson(Map<String, dynamic> json) => _$ZcashParamsConfigFromJson(json);
 
 /// List of ZCash parameter files to download.
