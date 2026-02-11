@@ -56,6 +56,7 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
         CoinSubClass.ewt ||
         CoinSubClass.hecoChain ||
         CoinSubClass.rskSmartBitcoin ||
+        CoinSubClass.grc20 ||
         CoinSubClass.erc20 => Erc20Protocol.fromJson(json),
         CoinSubClass.qrc20 => QtumProtocol.fromJson(json),
         CoinSubClass.zhtlc => ZhtlcProtocol.fromJson(json),
