@@ -28,6 +28,7 @@ enum CoinSubClass {
   hrc20,
   hecoChain,
   rskSmartBitcoin,
+  grc20,
   zhtlc,
   unknown;
 
@@ -146,6 +147,8 @@ enum CoinSubClass {
         return 'HT';
       case CoinSubClass.rskSmartBitcoin:
         return 'RBTC';
+      case CoinSubClass.grc20:
+        return 'GLEEC';
       case CoinSubClass.zhtlc:
         return 'ARRR';
       case CoinSubClass.unknown:
@@ -304,6 +307,8 @@ enum CoinSubClass {
         return 'Huobi ECO Chain';
       case CoinSubClass.rskSmartBitcoin:
         return 'RSK Smart Bitcoin';
+      case CoinSubClass.grc20:
+        return 'Gleec';
       case CoinSubClass.zhtlc:
         return 'Pirate Network';
       case CoinSubClass.unknown:
@@ -362,6 +367,8 @@ enum CoinSubClass {
         return const Color(0xFF2A3069); // ht: "#2a3069"
       case CoinSubClass.rskSmartBitcoin:
         return const Color(0xFFFC9D37); // rbtc: "#fc9d37"
+      case CoinSubClass.grc20:
+        return const Color(0xFF8C41FF); // gleec: "#8c41ff"
       case CoinSubClass.zhtlc:
         return const Color(0xFFC29F47); // arrr: "#c29f47"
       case CoinSubClass.unknown:
@@ -400,6 +407,8 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'HRC20';
       case CoinSubClass.hecoChain:
         return 'HCO20';
+      case CoinSubClass.grc20:
+        return 'GRC20';
       // Subclasses without a canonical short token/network standard suffix
       case CoinSubClass.moonbeam:
       case CoinSubClass.slp: // ignore: deprecated_member_use_from_same_package
@@ -436,5 +445,6 @@ const Set<CoinSubClass> evmCoinSubClasses = {
   CoinSubClass.ewt,
   CoinSubClass.hecoChain,
   CoinSubClass.rskSmartBitcoin,
+  CoinSubClass.grc20,
   CoinSubClass.erc20,
 };
