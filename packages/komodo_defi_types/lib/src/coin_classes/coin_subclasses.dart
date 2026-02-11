@@ -89,6 +89,8 @@ enum CoinSubClass {
         return 'HT';
       case CoinSubClass.rskSmartBitcoin:
         return 'RBTC';
+      case CoinSubClass.grc20:
+        return 'GLEEC';
       case CoinSubClass.zhtlc:
         return 'ARRR';
       case CoinSubClass.unknown:

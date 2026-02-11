@@ -74,7 +74,7 @@ void main(List<String> arguments) async {
     ..addOption(
       'mirror-url',
       help: 'Mirror URL if using mirror source',
-      defaultsTo: 'https://sdk.devbuilds.komodo.earth',
+      defaultsTo: 'https://devbuilds.gleec.com',
     )
     ..addFlag(
       'help',
@@ -206,7 +206,7 @@ the branch name and commit hash. It does not extract or set up the files - that 
 responsibility of the build step.
 
 It supports both GitHub releases and the internal mirror site at:
-https://sdk.devbuilds.komodo.earth/
+https://devbuilds.gleec.com/
 
 Usage:
   dart run komodo_wallet_cli:update_api_config [options]
@@ -264,7 +264,7 @@ class KdfFetcher {
     this.strict = true,
     this.token,
     this.source = 'github',
-    this.mirrorUrl = 'https://sdk.devbuilds.komodo.earth',
+    this.mirrorUrl = 'https://devbuilds.gleec.com',
   }) {
     final parts = repo.split('/');
     if (parts.length != 2) {

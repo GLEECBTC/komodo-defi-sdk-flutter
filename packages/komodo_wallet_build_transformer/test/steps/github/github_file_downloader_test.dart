@@ -189,7 +189,6 @@ void main() {
       test('should work with realistic Komodo platform CDN URLs', () {
         final realisticUrls = [
           'https://gleecbtc.github.io/coins',
-          'https://gleecbtc.github.io/coins',
           'https://raw.githubusercontent.com/GLEECBTC/coins',
         ];
 
