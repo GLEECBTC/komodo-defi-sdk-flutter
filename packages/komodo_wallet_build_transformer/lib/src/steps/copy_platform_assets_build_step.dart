@@ -140,7 +140,6 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
       await for (final entity in sourceDir.list(recursive: true)) {
         if (entity is File) {
           final relativePath = path.relative(entity.path, from: sourceDir.path);
-          final destFile = File(path.join(destDir.path, relativePath));
 
           if (skipDir != null &&
               path.isWithin(
@@ -151,13 +150,44 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
             continue;
           }
 
-          if (!destFile.parent.existsSync()) {
-            destFile.parent.createSync(recursive: true);
+          // Check if this is a WASM file that needs compression
+          if (path.basename(entity.path) == 'kdflib_bg.wasm') {
+            // Compress and save as .wasm.gz
+            final destFile = File(path.join(destDir.path, relativePath + '.gz'));
+
+            if (!destFile.parent.existsSync()) {
+              destFile.parent.createSync(recursive: true);
+            }
+            if (destFile.existsSync()) {
+              destFile.deleteSync();
+            }
+
+            // Read, compress, and write
+            final wasmBytes = await entity.readAsBytes();
+            final originalSize = wasmBytes.length;
+            final compressedBytes = gzip.encode(wasmBytes);
+            final compressedSize = compressedBytes.length;
+            await destFile.writeAsBytes(compressedBytes);
+
+            final compressionRatio =
+                ((originalSize - compressedSize) / originalSize * 100).toStringAsFixed(1);
+            _log.info(
+              'Compressed kdflib_bg.wasm during copy: '
+              '${originalSize} bytes -> ${compressedSize} bytes '
+              '($compressionRatio% reduction)',
+            );
+          } else {
+            // Normal file copy
+            final destFile = File(path.join(destDir.path, relativePath));
+
+            if (!destFile.parent.existsSync()) {
+              destFile.parent.createSync(recursive: true);
+            }
+            if (destFile.existsSync()) {
+              destFile.deleteSync();
+            }
+            entity.copySync(destFile.path);
           }
-          if (destFile.existsSync()) {
-            destFile.deleteSync();
-          }
-          entity.copySync(destFile.path);
         }
       }
       _log.info(
