@@ -31,7 +31,9 @@ class KdfEventStreamingService {
   SseConnectionState _connectionState = SseConnectionState.disconnected;
 
   Stream<KdfEvent> get events => _events.stream;
-  
+  bool _disposed = false;
+  bool _initialized = false;
+
   /// Future that completes when the first byte is received from the SSE stream.
   /// This indicates the server's event loop is fully flowing and the client is registered.
   Future<void> get firstByteReceived => _firstByteCompleter.future;
@@ -50,6 +52,8 @@ class KdfEventStreamingService {
   /// but should not be called at app startup. SSE connection should be tied to authentication state.
   @Deprecated('Use connectIfNeeded() instead')
   void initialize() {
+    if (_initialized) return;
+    _initialized = true;
     connectIfNeeded();
   }
   
@@ -109,8 +113,12 @@ class KdfEventStreamingService {
   }
 
   void _onIncomingData(Object? data) {
-    try {
-      if (data == null) return;
+    if (_disposed) return;
+    // Break synchronous call stacks to avoid re-entrancy into disposed closures
+    scheduleMicrotask(() {
+      if (_disposed) return;
+      try {
+        if (data == null) return;
       JsonMap? map;
 
       if (data is String) {
@@ -137,17 +145,20 @@ class KdfEventStreamingService {
       } else {
         throw ArgumentError('Unsupported event data type: ${data.runtimeType}');
       }
-      final event = KdfEvent.fromJson(map);
-      if (kDebugMode) {
-        final summary = _summarizeEvent(event);
-        print('[EventStream] Received ${event.typeEnum.value}: $summary');
+        final event = KdfEvent.fromJson(map);
+        if (kDebugMode) {
+          final summary = _summarizeEvent(event);
+          print('[EventStream] Received ${event.typeEnum.value}: $summary');
+        }
+        if (!_events.isClosed) {
+          _events.add(event);
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Failed to parse stream event: $e');
+        }
       }
-      _events.add(event);
-    } catch (e) {
-      if (kDebugMode) {
-        print('Failed to parse stream event: $e');
-      }
-    }
+    });
   }
 
   /// Generic filter for a specific event type with proper type casting
@@ -198,6 +209,7 @@ class KdfEventStreamingService {
 
   /// Cleanup
   Future<void> dispose() async {
+    _disposed = true;
     _unsubscribe?.call();
     await _events.close();
   }
