@@ -4,6 +4,7 @@ import 'dart:developer' show log;
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -102,6 +103,7 @@ class WithdrawalManager {
   final FeeManager _feeManager;
   final LegacyWithdrawalManager _legacyManager;
   final _activeWithdrawals = <int, StreamController<WithdrawalProgress>>{};
+  static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   /// Cancels an active withdrawal task.
   ///
@@ -515,7 +517,7 @@ class WithdrawalManager {
       if (lastStatus.status.toLowerCase() == 'error') {
         throw WithdrawalException(
           lastStatus.details as String,
-          _mapErrorToCode(lastStatus.details as String),
+          WithdrawalException.mapErrorToCode(lastStatus.details as String),
         );
       }
 
@@ -528,12 +530,10 @@ class WithdrawalManager {
 
       return lastStatus.details as WithdrawalPreview;
     } catch (e) {
-      if (e is WithdrawalException) {
-        rethrow;
-      }
-      throw WithdrawalException(
-        'Preview failed: $e',
-        WithdrawalErrorCode.unknownError,
+      throw _mapError(
+        e,
+        operation: 'withdrawal.preview',
+        assetId: parameters.asset,
       );
     }
   }
@@ -594,11 +594,14 @@ class WithdrawalManager {
       }
 
       // Ensure asset is activated before broadcasting
-      final activationResult = await _activationCoordinator.activateAsset(asset);
+      final activationResult = await _activationCoordinator.activateAsset(
+        asset,
+      );
       if (activationResult.isFailure) {
-        throw WithdrawalException(
-          'Failed to activate asset $assetId: ${activationResult.errorMessage ?? activationResult.toString()}',
-          WithdrawalErrorCode.unknownError,
+        throw _mapError(
+          activationResult.errorMessage ?? activationResult.toString(),
+          operation: 'withdrawal.activate',
+          assetId: assetId,
         );
       }
 
@@ -642,10 +645,7 @@ class WithdrawalManager {
       );
     } catch (e) {
       yield* Stream.error(
-        WithdrawalException(
-          'Failed to broadcast transaction: $e',
-          WithdrawalErrorCode.networkError,
-        ),
+        _mapError(e, operation: 'withdrawal.execute', assetId: assetId),
       );
     }
   }
@@ -707,9 +707,10 @@ class WithdrawalManager {
       );
 
       if (activationResult.isFailure) {
-        throw WithdrawalException(
-          'Failed to activate asset ${parameters.asset}',
-          WithdrawalErrorCode.unknownError,
+        throw _mapError(
+          activationResult.errorMessage ?? activationResult.toString(),
+          operation: 'withdrawal.activate',
+          assetId: parameters.asset,
         );
       }
 
@@ -730,9 +731,10 @@ class WithdrawalManager {
       )) {
         if (status.status == 'Error') {
           yield* Stream.error(
-            WithdrawalException(
+            _mapError(
               status.details as String,
-              _mapErrorToCode(status.details as String),
+              operation: 'withdrawal.progress',
+              assetId: parameters.asset,
             ),
           );
           return;
@@ -773,9 +775,10 @@ class WithdrawalManager {
           log('Error while broadcasting transaction: $e');
           log('Stack trace: $stackTrace');
           yield* Stream.error(
-            WithdrawalException(
-              'Failed to broadcast transaction: $e',
-              WithdrawalErrorCode.networkError,
+            _mapError(
+              e,
+              operation: 'withdrawal.broadcast',
+              assetId: parameters.asset,
             ),
           );
         }
@@ -785,9 +788,10 @@ class WithdrawalManager {
       log('Error during withdrawal: $e');
       log('Stack trace: $stackTrace');
       yield* Stream.error(
-        WithdrawalException(
-          'Withdrawal failed: $e',
-          WithdrawalErrorCode.unknownError,
+        _mapError(
+          e,
+          operation: 'withdrawal.execute',
+          assetId: parameters.asset,
         ),
       );
     } finally {
@@ -796,33 +800,15 @@ class WithdrawalManager {
     }
   }
 
-  /// Maps error messages to withdrawal error codes.
-  ///
-  /// This helper method analyzes error messages from the API and maps them
-  /// to appropriate [WithdrawalErrorCode] values for consistent error
-  /// handling.
-  ///
-  /// Parameters:
-  /// - [error] - The error message to analyze
-  ///
-  /// Returns the appropriate [WithdrawalErrorCode] based on the error content.
-  WithdrawalErrorCode _mapErrorToCode(String error) {
-    final errorLower = error.toLowerCase();
-
-    if (errorLower.contains('insufficient funds') ||
-        errorLower.contains('not enough funds')) {
-      return WithdrawalErrorCode.insufficientFunds;
-    }
-
-    if (errorLower.contains('invalid address')) {
-      return WithdrawalErrorCode.invalidAddress;
-    }
-
-    if (errorLower.contains('fee')) {
-      return WithdrawalErrorCode.networkError;
-    }
-
-    return WithdrawalErrorCode.unknownError;
+  SdkError _mapError(
+    Object error, {
+    required String operation,
+    String? assetId,
+  }) {
+    return _errorMapper.map(
+      error,
+      context: SdkErrorContext(operation: operation, assetId: assetId),
+    );
   }
 
   /// Provides estimated confirmation times for Ethereum-based transactions.

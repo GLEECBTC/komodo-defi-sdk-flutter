@@ -8,7 +8,18 @@ library;
 export 'package:komodo_cex_market_data/komodo_cex_market_data.dart'
     show Commodity, Cryptocurrency, FiatCurrency, QuoteCurrency, Stablecoin;
 export 'package:komodo_defi_framework/komodo_defi_framework.dart'
-    show IKdfHostConfig, LocalConfig, RemoteConfig;
+    show
+        BalanceEvent,
+        HeartbeatEvent,
+        IKdfHostConfig,
+        LocalConfig,
+        NetworkEvent,
+        OrderStatusEvent,
+        OrderbookEvent,
+        RemoteConfig,
+        ShutdownSignalEvent,
+        SwapStatusEvent,
+        TxHistoryEvent;
 export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
 // ZHTLC sync parameters
@@ -21,7 +32,10 @@ export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
+export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
+    show TradingManager;
 
+export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation_config/activation_config_service.dart'
     show
         ActivationConfigRepository,
@@ -34,9 +48,8 @@ export 'src/activation_config/activation_config_service.dart'
         ZhtlcUserConfig;
 export 'src/activation_config/hive_activation_config_repository.dart'
     show HiveActivationConfigRepository;
-export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/assets/_assets_index.dart'
-    show AssetHdWalletAddressesExtension, ActivatedAssetsCache;
+    show ActivatedAssetsCache, AssetHdWalletAddressesExtension;
 export 'src/assets/asset_extensions.dart'
     show
         AssetFaucetExtension,

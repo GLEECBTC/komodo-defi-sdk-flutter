@@ -1,6 +1,7 @@
 // TODO(komodo-team): Allow passing the start sync mode; currently hard-coded
 // to sync from the time of activation.
 
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Convenience wrapper around [ActivationProgress] that exposes the canonical
@@ -13,6 +14,7 @@ class ZhtlcActivationProgress extends ActivationProgress {
     super.isComplete,
     super.errorMessage,
     super.progressDetails,
+    super.sdkError,
   });
 
   /// Creates the initial "starting activation" progress update.
@@ -44,15 +46,18 @@ class ZhtlcActivationProgress extends ActivationProgress {
 
   /// Emits a terminal failure progress snapshot for unexpected exceptions.
   factory ZhtlcActivationProgress.failure(Object error, StackTrace stack) {
+    const mapper = SdkErrorMapper();
+    final sdkError = mapper.map(error);
     return ZhtlcActivationProgress._(
       status: 'Activation failed',
-      errorMessage: error.toString(),
+      errorMessage: sdkError.fallbackMessage,
       isComplete: true,
+      sdkError: sdkError,
       progressDetails: ActivationProgressDetails(
         currentStep: ActivationStep.error,
         stepCount: 6,
         errorCode: ZhtlcActivationProgress.errorCode,
-        errorDetails: error.toString(),
+        errorDetails: sdkError.fallbackMessage,
         stackTrace: stack.toString(),
         additionalInfo: {
           'errorType': error.runtimeType.toString(),

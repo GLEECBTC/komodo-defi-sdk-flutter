@@ -44,36 +44,31 @@ class QtumActivationStrategy extends ProtocolActivationStrategy {
       final activationParams = asset.protocol.defaultActivationParams(
         privKeyPolicy: privKeyPolicy,
       );
-      
+
       // Debug logging for QTUM activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activating QTUM coin: ${asset.id.id}',
-        name: 'QtumActivationStrategy',
-      );
+          '[RPC] Activating QTUM coin: ${asset.id.id}',
+          name: 'QtumActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activation parameters: ${jsonEncode({
-          'ticker': asset.id.id,
-          'protocol': asset.protocol.subClass.formatted,
-          'activation_params': activationParams.toRpcParams(),
-          'priv_key_policy': privKeyPolicy.toJson(),
-        })}',
-        name: 'QtumActivationStrategy',
-      );
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          name: 'QtumActivationStrategy',
+        );
       }
-      
+
       final taskResponse = await client.rpc.qtum.enableQtumInit(
         ticker: asset.id.id,
         params: activationParams,
       );
-      
+
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
-        name: 'QtumActivationStrategy',
-      );
+          '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
+          name: 'QtumActivationStrategy',
+        );
       }
 
       var isComplete = false;
@@ -95,16 +90,11 @@ class QtumActivationStrategy extends ProtocolActivationStrategy {
               ),
             );
           } else {
-            yield ActivationProgress(
-              status: 'Activation failed: ${status.details}',
-              errorMessage: status.details,
-              isComplete: true,
-              progressDetails: ActivationProgressDetails(
-                currentStep: ActivationStep.error,
-                stepCount: 4,
-                errorCode: 'QTUM_ACTIVATION_ERROR',
-                errorDetails: status.details,
-              ),
+            yield buildErrorProgress(
+              asset: asset,
+              error: status.details,
+              errorCode: 'QTUM_ACTIVATION_ERROR',
+              stepCount: 4,
             );
           }
           isComplete = true;
@@ -123,17 +113,12 @@ class QtumActivationStrategy extends ProtocolActivationStrategy {
         }
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 4,
-          errorCode: 'QTUM_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'QTUM_ACTIVATION_ERROR',
+        stepCount: 4,
       );
     }
   }

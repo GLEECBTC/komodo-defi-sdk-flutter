@@ -54,8 +54,9 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
             retryCount++;
 
             // Calculate jittered backoff delay
-            final baseDelay =
-                math.min(500 * math.pow(2, retryCount), 2000).toInt();
+            final baseDelay = math
+                .min(500 * math.pow(2, retryCount), 2000)
+                .toInt();
             final jitter = _random.nextInt(baseDelay ~/ 2);
             final delay = Duration(milliseconds: baseDelay + jitter);
 
@@ -150,11 +151,10 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
             } else if (status.status == SyncStatusEnum.error) {
               timer.cancel();
               if (!completer.isCompleted) {
+                final taskError =
+                    exceptionMessage(status.details.error) ?? 'Unknown error';
                 completer.completeError(
-                  Exception(
-                    'HD wallet balance task failed: '
-                    '${status.details.error ?? "Unknown error"}',
-                  ),
+                  Exception('HD wallet balance task failed: $taskError'),
                 );
               }
             }

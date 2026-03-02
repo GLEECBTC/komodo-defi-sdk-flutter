@@ -285,6 +285,10 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Provides access to fee management utilities.
   FeeManager get fees => _assertSdkInitialized(_container<FeeManager>());
 
+  /// Provides high-level trading helpers and stream-first watchers.
+  TradingManager get trading =>
+      _assertSdkInitialized(_container<TradingManager>());
+
   /// Gets a reference to the balance manager for checking asset balances.
   ///
   /// Provides functionality for checking and monitoring asset balances.
@@ -305,6 +309,35 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Throws [StateError] if accessed before initialization.
   KdfEventStreamingService get streaming =>
       _assertSdkInitialized(_container<KomodoDefiFramework>().streaming);
+
+  /// Subscribes to a managed orderbook stream for a trading pair.
+  ///
+  /// This uses the SDK's internal stream lifecycle manager with reference
+  /// counting and automatic `stream::disable` cleanup when the last
+  /// subscription is cancelled.
+  Future<StreamSubscription<OrderbookEvent>> subscribeToOrderbook({
+    required String base,
+    required String rel,
+  }) {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.subscribeToOrderbook(base: base, rel: rel);
+  }
+
+  /// Subscribes to managed swap status updates.
+  ///
+  /// The subscription is reference-counted across all callers.
+  Future<StreamSubscription<SwapStatusEvent>> subscribeToSwapStatus() {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.subscribeToSwapStatus();
+  }
+
+  /// Subscribes to managed order status updates.
+  ///
+  /// The subscription is reference-counted across all callers.
+  Future<StreamSubscription<OrderStatusEvent>> subscribeToOrderStatus() {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.subscribeToOrderStatus();
+  }
 
   /// Public stream of framework logs.
   ///
@@ -510,9 +543,7 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       _disposeIfRegistered<AssetManager>((m) => m.dispose()),
       _disposeIfRegistered<ActivatedAssetsCache>((m) => m.dispose()),
       _disposeIfRegistered<ActivationManager>((m) => m.dispose()),
-      _disposeIfRegistered<ActivationConfigService>(
-        (m) async => m.dispose(),
-      ),
+      _disposeIfRegistered<ActivationConfigService>((m) async => m.dispose()),
       _disposeIfRegistered<BalanceManager>((m) => m.dispose()),
       _disposeIfRegistered<PubkeyManager>((m) => m.dispose()),
       _disposeIfRegistered<TransactionHistoryManager>((m) => m.dispose()),

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/zhtlc_activation_progress.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// High-level phases emitted by the ZHTLC activation task engine.
@@ -166,6 +167,11 @@ class ZhtlcActivationProgressEstimator {
     ZhtlcStatusDetail? detail,
     int? currentBlock,
   }) {
+    const mapper = SdkErrorMapper();
+    final context = SdkErrorContext(
+      operation: 'activation',
+      assetId: asset.id.id,
+    );
     final parsedDetail = detail ?? parse(status.details);
     final baseInfo = _buildAdditionalInfo(
       asset,
@@ -178,15 +184,17 @@ class ZhtlcActivationProgressEstimator {
       if (parsedDetail.hasError) {
         final message =
             _extractErrorMessage(parsedDetail.error) ?? 'Unknown error';
+        final sdkError = mapper.map(message, context: context);
         return ActivationProgress(
           status: 'Activation failed',
-          errorMessage: message,
+          errorMessage: sdkError.fallbackMessage,
           isComplete: true,
+          sdkError: sdkError,
           progressDetails: ActivationProgressDetails(
             currentStep: ActivationStep.error,
             stepCount: stepCount,
             errorCode: ZhtlcActivationProgress.errorCode,
-            errorDetails: message,
+            errorDetails: sdkError.fallbackMessage,
             additionalInfo: baseInfo,
           ),
         );
@@ -204,17 +212,19 @@ class ZhtlcActivationProgressEstimator {
     if (status.status == 'Error' ||
         parsedDetail.phase == ZhtlcActivationPhase.error) {
       final message = parsedDetail.message ?? status.details;
+      final sdkError = mapper.map(message, context: context);
       return ActivationProgress(
         status: 'Activation failed',
-        errorMessage: message,
+        errorMessage: sdkError.fallbackMessage,
         isComplete: true,
+        sdkError: sdkError,
         progressDetails: ActivationProgressDetails(
           currentStep: ActivationStep.error,
           stepCount: stepCount,
           errorCode: ZhtlcActivationProgress.errorCode,
           errorDetails: parsedDetail.error != null
               ? jsonToString(parsedDetail.error)
-              : message,
+              : sdkError.fallbackMessage,
           additionalInfo: baseInfo,
         ),
       );

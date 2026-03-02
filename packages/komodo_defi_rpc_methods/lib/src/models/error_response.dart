@@ -48,6 +48,35 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
     return isError;
   }
 
+  /// Attempts to convert this error response to a typed [MmRpcException].
+  ///
+  /// Returns `null` if the error type is not recognized or if this error
+  /// response does not contain sufficient type information.
+  ///
+  /// Example:
+  /// ```dart
+  /// final typedException = errorResponse.toTypedException();
+  /// if (typedException != null) {
+  ///   // Handle specific exception type
+  ///   switch (typedException) {
+  ///     case AccountRpcErrorNameTooLongException():
+  ///       print('Name too long!');
+  ///     // ... other cases
+  ///   }
+  /// }
+  /// ```
+  MmRpcException? toTypedException() {
+    // Build a JSON map suitable for KdfErrorRegistry parsing
+    final errorJson = <String, dynamic>{
+      'error_type': errorType,
+      'error_data': errorData,
+      'error': error,
+      'error_path': errorPath,
+      'error_trace': errorTrace,
+    };
+    return KdfErrorRegistry.tryParse(errorJson);
+  }
+
   @override
   Map<String, dynamic> toJson() {
     return {

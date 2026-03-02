@@ -72,6 +72,7 @@ class ActivationProgress extends Equatable {
     this.isComplete = false,
     this.errorMessage,
     this.progressDetails,
+    this.sdkError,
   });
 
   /// Factory for successful completion
@@ -114,11 +115,13 @@ class ActivationProgress extends Equatable {
     String? errorCode,
     String? details,
     StackTrace? stackTrace,
+    SdkError? sdkError,
   }) {
     return ActivationProgress(
       status: 'Activation failed',
       errorMessage: message,
       isComplete: true,
+      sdkError: sdkError,
       progressDetails: ActivationProgressDetails(
         currentStep: ActivationStep.error,
         stepCount: 1,
@@ -134,6 +137,7 @@ class ActivationProgress extends Equatable {
   final bool isComplete;
   final String? errorMessage;
   final ActivationProgressDetails? progressDetails;
+  final SdkError? sdkError;
 
   bool get isSuccess => isComplete && errorMessage == null;
   bool get isError => errorMessage != null;
@@ -141,6 +145,9 @@ class ActivationProgress extends Equatable {
   /// Returns a formatted message suitable for user display
   String get userMessage {
     if (isError) {
+      if (sdkError != null) {
+        return sdkError!.fallbackMessage;
+      }
       return 'Error: $errorMessage';
     }
     final progress = progressPercentage != null
@@ -156,6 +163,7 @@ class ActivationProgress extends Equatable {
     bool? isComplete,
     String? errorMessage,
     ActivationProgressDetails? progressDetails,
+    SdkError? sdkError,
   }) {
     return ActivationProgress(
       status: status ?? this.status,
@@ -163,6 +171,7 @@ class ActivationProgress extends Equatable {
       isComplete: isComplete ?? this.isComplete,
       errorMessage: errorMessage ?? this.errorMessage,
       progressDetails: progressDetails ?? this.progressDetails,
+      sdkError: sdkError ?? this.sdkError,
     );
   }
 
@@ -173,6 +182,7 @@ class ActivationProgress extends Equatable {
     isComplete,
     errorMessage,
     progressDetails,
+    sdkError,
   ];
 
   JsonMap toJson() => {
@@ -181,6 +191,7 @@ class ActivationProgress extends Equatable {
     'isComplete': isComplete,
     if (errorMessage != null) 'errorMessage': errorMessage,
     if (progressDetails != null) 'details': progressDetails!.toJson(),
+    if (sdkError != null) 'sdkError': sdkError!.toJson(),
   };
 }
 
