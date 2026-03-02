@@ -21,6 +21,7 @@ enum CoinSubClass {
   utxo,
   smartBch,
   erc20,
+  grc20,
   tendermint,
   tendermintToken,
   krc20,
@@ -28,7 +29,6 @@ enum CoinSubClass {
   hrc20,
   hecoChain,
   rskSmartBitcoin,
-  grc20,
   zhtlc,
   unknown;
 
@@ -387,6 +387,8 @@ extension CoinSubClassTokenStandard on CoinSubClass {
     switch (this) {
       case CoinSubClass.erc20:
         return 'ERC20';
+      case CoinSubClass.grc20:
+        return 'GRC20';
       case CoinSubClass.bep20:
         return 'BEP20';
       case CoinSubClass.qrc20:
@@ -409,8 +411,6 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'HRC20';
       case CoinSubClass.hecoChain:
         return 'HCO20';
-      case CoinSubClass.grc20:
-        return 'GRC20';
       // Subclasses without a canonical short token/network standard suffix
       case CoinSubClass.moonbeam:
       case CoinSubClass.slp: // ignore: deprecated_member_use_from_same_package

@@ -157,6 +157,52 @@ void main() {
         },
       );
 
+      test('should include commit segment for raw GitHub content URLs', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
+          filePath: 'utils/coins_config_unfiltered.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://raw.githubusercontent.com/GLEECBTC/coins/json-config-update/utils/coins_config_unfiltered.json',
+          ),
+        );
+      });
+
+      test('should not include commit segment for CDN content URLs', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://gleecbtc.github.io/coins',
+          filePath: 'utils/coins_config_unfiltered.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
+          ),
+        );
+      });
+
+      test('should preserve absolute file URLs as-is', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
+          filePath:
+              'https://raw.githubusercontent.com/GLEECBTC/coins/master/seed-nodes.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://raw.githubusercontent.com/GLEECBTC/coins/master/seed-nodes.json',
+          ),
+        );
+      });
+
       test(
         'should handle commit hash vs branch name correctly for CDN URLs',
         () {

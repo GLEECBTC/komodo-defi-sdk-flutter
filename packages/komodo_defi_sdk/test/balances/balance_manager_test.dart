@@ -6,6 +6,7 @@ import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dar
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
+import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
@@ -18,6 +19,9 @@ class _MockActivationCoordinator extends Mock
 class _MockPubkeyManager extends Mock implements PubkeyManager {}
 
 class _MockAssetLookup extends Mock implements IAssetLookup {}
+
+class _MockEventStreamingManager extends Mock
+    implements EventStreamingManager {}
 
 void main() {
   setUpAll(() {
@@ -58,6 +62,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockPubkeyManager pubkeyManager;
     late _MockAssetLookup assetLookup;
+    late _MockEventStreamingManager eventStreamingManager;
 
     setUp(() {
       registerFallbackValue(
@@ -74,6 +79,7 @@ void main() {
       activation = _MockActivationCoordinator();
       pubkeyManager = _MockPubkeyManager();
       assetLookup = _MockAssetLookup();
+      eventStreamingManager = _MockEventStreamingManager();
     });
 
     test('dispose swallows cancel/close errors and is idempotent', () async {
@@ -87,6 +93,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       await manager.dispose();
@@ -161,6 +168,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       addTearDown(() async {
@@ -214,6 +222,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockPubkeyManager pubkeyManager;
     late _MockAssetLookup assetLookup;
+    late _MockEventStreamingManager eventStreamingManager;
     late StreamController<KdfUser?> authChanges;
     late BalanceManager manager;
 
@@ -222,6 +231,7 @@ void main() {
       activation = _MockActivationCoordinator();
       pubkeyManager = _MockPubkeyManager();
       assetLookup = _MockAssetLookup();
+      eventStreamingManager = _MockEventStreamingManager();
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
@@ -231,6 +241,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       // Setup common mocks
@@ -767,6 +778,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockPubkeyManager pubkeyManager;
     late _MockAssetLookup assetLookup;
+    late _MockEventStreamingManager eventStreamingManager;
     late StreamController<KdfUser?> authChanges;
     late BalanceManager manager;
 
@@ -775,6 +787,7 @@ void main() {
       activation = _MockActivationCoordinator();
       pubkeyManager = _MockPubkeyManager();
       assetLookup = _MockAssetLookup();
+      eventStreamingManager = _MockEventStreamingManager();
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
@@ -784,6 +797,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       when(() => activation.isAssetActive(any())).thenAnswer((_) async => true);
@@ -1118,6 +1132,7 @@ void main() {
         auth: disposalAuth,
         pubkeyManager: disposalPubkeyManager,
         activationCoordinator: disposalActivation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       // Create resources
@@ -1347,6 +1362,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockPubkeyManager pubkeyManager;
     late _MockAssetLookup assetLookup;
+    late _MockEventStreamingManager eventStreamingManager;
     late StreamController<KdfUser?> authChanges;
     late BalanceManager manager;
 
@@ -1355,6 +1371,7 @@ void main() {
       activation = _MockActivationCoordinator();
       pubkeyManager = _MockPubkeyManager();
       assetLookup = _MockAssetLookup();
+      eventStreamingManager = _MockEventStreamingManager();
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
@@ -1364,6 +1381,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       when(() => auth.currentUser).thenAnswer(

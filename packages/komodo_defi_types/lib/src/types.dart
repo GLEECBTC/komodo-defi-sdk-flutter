@@ -23,6 +23,7 @@ export 'coin_classes/coin_subclasses.dart';
 export 'coin_classes/protocol_class.dart';
 export 'constants.dart';
 export 'cryptography/mnemonic.dart';
+export 'errors/sdk_error.dart';
 export 'exceptions/http_exceptions.dart';
 export 'exported_rpc_types.dart';
 export 'fees/fee_management.dart';

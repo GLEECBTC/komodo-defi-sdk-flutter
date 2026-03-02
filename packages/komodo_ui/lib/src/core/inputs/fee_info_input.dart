@@ -7,6 +7,7 @@ typedef FeeInfoChanged = void Function(FeeInfo? fee);
 
 /// Constants for fee calculations
 const _gweiInEth = 1000000000; // 10^9
+const _defaultUtxoDecimals = 8;
 
 /// A widget for inputting custom fee information.
 ///
@@ -194,12 +195,10 @@ class FeeInfoInput extends StatelessWidget {
             Expanded(
               child: TextFormField(
                 enabled: isCustomFee,
-                initialValue:
-                    currentFee?.maxFeePerGas != null
-                        ? (currentFee!.maxFeePerGas *
-                                Decimal.fromInt(_gweiInEth))
-                            .toString()
-                        : null,
+                initialValue: currentFee?.maxFeePerGas != null
+                    ? (currentFee!.maxFeePerGas * Decimal.fromInt(_gweiInEth))
+                          .toString()
+                    : null,
                 decoration: const InputDecoration(
                   labelText: 'Max Fee Per Gas (Gwei)',
                 ),
@@ -241,12 +240,11 @@ class FeeInfoInput extends StatelessWidget {
             Expanded(
               child: TextFormField(
                 enabled: isCustomFee,
-                initialValue:
-                    currentFee?.maxPriorityFeePerGas != null
-                        ? (currentFee!.maxPriorityFeePerGas *
-                                Decimal.fromInt(_gweiInEth))
-                            .toString()
-                        : null,
+                initialValue: currentFee?.maxPriorityFeePerGas != null
+                    ? (currentFee!.maxPriorityFeePerGas *
+                              Decimal.fromInt(_gweiInEth))
+                          .toString()
+                    : null,
                 decoration: const InputDecoration(
                   labelText: 'Max Priority Fee (Gwei)',
                 ),
@@ -587,16 +585,18 @@ class FeeInfoInput extends StatelessWidget {
 
   /// Builds manual inputs for UTXO fee entry with a toggle button
   Widget _buildUtxoFeeInputs(BuildContext context, UtxoProtocol protocol) {
-    final defaultFee = protocol.txFee ?? 10000;
+    final defaultFeeAtomic = protocol.txFee ?? 10000;
+    final decimals = asset.id.chainId.decimals ?? _defaultUtxoDecimals;
+    final defaultFeeAmount = _atomicToDecimal(defaultFeeAtomic, decimals);
 
     // Extract current fee amount or use default
     final currentFeeAmount =
         selectedFee?.maybeMap(
           utxoFixed: (f) => f.amount,
           utxoPerKbyte: (p) => p.amount,
-          orElse: () => Decimal.parse(defaultFee.toString()),
+          orElse: () => defaultFeeAmount,
         ) ??
-        Decimal.parse(defaultFee.toString());
+        defaultFeeAmount;
 
     // Determine if we're using fixed fee or per KB fee
     final isPerKbyteFee =
@@ -608,43 +608,40 @@ class FeeInfoInput extends StatelessWidget {
       initialValue: currentFeeAmount.toString(),
       decoration: InputDecoration(
         labelText: 'Fee Amount',
-        hintText: defaultFee.toString(),
+        hintText: _formatDecimal(defaultFeeAmount),
         // Toggle button in prefix
         prefixIconConstraints: const BoxConstraints(
           maxWidth: 36,
           maxHeight: 36,
         ),
-        prefixIcon:
-            isCustomFee
-                ? IconButton.filledTonal(
-                  iconSize: 20,
-                  tooltip:
-                      isPerKbyteFee
-                          ? 'Switch to fixed fee'
-                          : 'Switch to fee per kilobyte',
-                  icon: Icon(isPerKbyteFee ? Icons.scale : Icons.attach_money),
-                  onPressed: () {
-                    final amount = currentFeeAmount;
-                    if (!isPerKbyteFee) {
-                      // Switch to per KB fee
-                      onFeeSelected(
-                        FeeInfo.utxoPerKbyte(coin: asset.id.id, amount: amount),
-                      );
-                    } else {
-                      // Switch to fixed fee
-                      onFeeSelected(
-                        FeeInfo.utxoFixed(coin: asset.id.id, amount: amount),
-                      );
-                    }
-                  },
-                )
-                : null,
+        prefixIcon: isCustomFee
+            ? IconButton.filledTonal(
+                iconSize: 20,
+                tooltip: isPerKbyteFee
+                    ? 'Switch to fixed fee'
+                    : 'Switch to fee per kilobyte',
+                icon: Icon(isPerKbyteFee ? Icons.scale : Icons.tune),
+                onPressed: () {
+                  final amount = currentFeeAmount;
+                  if (!isPerKbyteFee) {
+                    // Switch to per KB fee
+                    onFeeSelected(
+                      FeeInfo.utxoPerKbyte(coin: asset.id.id, amount: amount),
+                    );
+                  } else {
+                    // Switch to fixed fee
+                    onFeeSelected(
+                      FeeInfo.utxoFixed(coin: asset.id.id, amount: amount),
+                    );
+                  }
+                },
+              )
+            : null,
         // Show appropriate suffix based on fee type
         suffixText: isPerKbyteFee ? '${asset.id.id}/KB' : asset.id.id,
-        helperText:
-            isPerKbyteFee
-                ? 'Fee per kilobyte of transaction size'
-                : 'Total transaction fee',
+        helperText: isPerKbyteFee
+            ? 'Fee per kilobyte of transaction size'
+            : 'Total transaction fee',
       ),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       onChanged: (value) {
@@ -662,4 +659,14 @@ class FeeInfoInput extends StatelessWidget {
       },
     );
   }
+}
+
+Decimal _atomicToDecimal(int amount, int decimals) {
+  if (decimals <= 0) return Decimal.fromInt(amount);
+  final scale = Decimal.parse('1${'0' * decimals}');
+  return (Decimal.fromInt(amount) / scale).toDecimal();
+}
+
+String _formatDecimal(Decimal value, {int precision = 8}) {
+  return value.toStringAsFixed(precision).replaceAll(RegExp(r'\.?0+$'), '');
 }

@@ -469,6 +469,9 @@ Future<T?> showDropdownSearch<T>(
   final renderBox = context.findRenderObject()! as RenderBox;
   final offset = renderBox.localToGlobal(Offset.zero);
   final screenHeight = MediaQuery.of(context).size.height;
+  final scrollable = Scrollable.maybeOf(context);
+  ScrollPosition? scrollPosition;
+  VoidCallback? scrollListener;
 
   // Check if there's enough space below
   final spaceBelow = screenHeight - offset.dy - renderBox.size.height;
@@ -479,6 +482,9 @@ Future<T?> showDropdownSearch<T>(
   final showAbove = spaceBelow < requiredSpace && offset.dy > spaceBelow;
 
   void clearOverlay() {
+    if (scrollPosition != null && scrollListener != null) {
+      scrollPosition!.removeListener(scrollListener!);
+    }
     _overlayEntry?.remove();
     _overlayEntry = null;
     _completer = null;
@@ -492,6 +498,11 @@ Future<T?> showDropdownSearch<T>(
   clearOverlay();
 
   _completer = Completer<T?>();
+  if (scrollable != null) {
+    scrollPosition = scrollable.position;
+    scrollListener = () => onItemSelected(null);
+    scrollPosition!.addListener(scrollListener!);
+  }
   _overlayEntry = OverlayEntry(
     builder: (context) {
       // Calculate width based on minWidth parameter if provided

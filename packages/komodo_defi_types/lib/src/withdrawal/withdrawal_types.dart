@@ -21,9 +21,9 @@ class WithdrawResult {
     this.kmdRewards,
     this.memo,
   }) : assert(
-          txHex != null || txJson != null,
-          'Either txHex or txJson must be provided',
-        );
+         txHex != null || txJson != null,
+         'Either txHex or txJson must be provided',
+       );
 
   factory WithdrawResult.fromJson(JsonMap json) {
     return WithdrawResult(
@@ -60,20 +60,20 @@ class WithdrawResult {
   final String? memo;
 
   JsonMap toJson() => {
-        if (txHex != null) 'tx_hex': txHex,
-        if (txJson != null) 'tx_json': txJson,
-        'tx_hash': txHash,
-        'from': from,
-        'to': to,
-        ...balanceChanges.toJson(),
-        'block_height': blockHeight,
-        'timestamp': timestamp,
-        'fee_details': fee.toJson(),
-        'coin': coin,
-        if (internalId != null) 'internal_id': internalId,
-        if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
-        if (memo != null) 'memo': memo,
-      };
+    if (txHex != null) 'tx_hex': txHex,
+    if (txJson != null) 'tx_json': txJson,
+    'tx_hash': txHash,
+    'from': from,
+    'to': to,
+    ...balanceChanges.toJson(),
+    'block_height': blockHeight,
+    'timestamp': timestamp,
+    'fee_details': fee.toJson(),
+    'coin': coin,
+    if (internalId != null) 'internal_id': internalId,
+    if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
+    if (memo != null) 'memo': memo,
+  };
 }
 
 /// Domain model for a successful withdrawal operation
@@ -95,7 +95,8 @@ class WithdrawalResult extends Equatable {
       coin: result.coin,
       toAddress: result.to.first,
       fee: result.fee,
-      kmdRewardsEligible: result.kmdRewards != null &&
+      kmdRewardsEligible:
+          result.kmdRewards != null &&
           Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
     );
   }
@@ -112,13 +113,13 @@ class WithdrawalResult extends Equatable {
 
   @override
   List<Object?> get props => [
-        txHash,
-        balanceChanges,
-        coin,
-        toAddress,
-        fee,
-        kmdRewardsEligible,
-      ];
+    txHash,
+    balanceChanges,
+    coin,
+    toAddress,
+    fee,
+    kmdRewardsEligible,
+  ];
 }
 
 /// Progress tracking for withdrawal operations
@@ -130,6 +131,7 @@ class WithdrawalProgress extends Equatable {
     this.errorCode,
     this.errorMessage,
     this.taskId,
+    this.sdkError,
   });
 
   final WithdrawalStatus status;
@@ -138,16 +140,18 @@ class WithdrawalProgress extends Equatable {
   final WithdrawalErrorCode? errorCode;
   final String? errorMessage;
   final String? taskId;
+  final SdkError? sdkError;
 
   @override
   List<Object?> get props => [
-        status,
-        message,
-        withdrawalResult,
-        errorCode,
-        errorMessage,
-        taskId,
-      ];
+    status,
+    message,
+    withdrawalResult,
+    errorCode,
+    errorMessage,
+    taskId,
+    sdkError,
+  ];
 }
 
 /// Parameters for initiating a withdrawal
@@ -164,9 +168,9 @@ class WithdrawParameters extends Equatable {
     this.ibcSourceChannel,
     this.isMax,
   }) : assert(
-          amount != null || (isMax ?? false),
-          'Amount must be non-null when not using max',
-        );
+         amount != null || (isMax ?? false),
+         'Amount must be non-null when not using max',
+       );
 
   final String asset;
   final String toAddress;
@@ -180,30 +184,30 @@ class WithdrawParameters extends Equatable {
   final bool? isMax;
 
   JsonMap toJson() => {
-        'coin': asset,
-        'to': toAddress,
-        if (fee != null) 'fee': fee!.toJson(),
-        if (amount != null) 'amount': amount.toString(),
-        if (isMax != null) 'max': isMax,
-        if (from != null) 'from': from!.toRpcParams(),
-        if (memo != null) 'memo': memo,
-        if (ibcTransfer != null) 'ibc_transfer': ibcTransfer,
-        if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
-      };
+    'coin': asset,
+    'to': toAddress,
+    if (fee != null) 'fee': fee!.toJson(),
+    if (amount != null) 'amount': amount.toString(),
+    if (isMax != null) 'max': isMax,
+    if (from != null) 'from': from!.toRpcParams(),
+    if (memo != null) 'memo': memo,
+    if (ibcTransfer != null) 'ibc_transfer': ibcTransfer,
+    if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
+  };
 
   @override
   List<Object?> get props => [
-        asset,
-        toAddress,
-        amount,
-        fee,
-        feePriority,
-        from,
-        memo,
-        ibcTransfer,
-        ibcSourceChannel,
-        isMax,
-      ];
+    asset,
+    toAddress,
+    amount,
+    fee,
+    feePriority,
+    from,
+    memo,
+    ibcTransfer,
+    ibcSourceChannel,
+    isMax,
+  ];
 }
 
 /// Preview of a withdrawal operation, using same structure as API response
@@ -224,24 +228,20 @@ enum Bip44Chain {
 /// Specifies the source of funds for a withdrawal
 // TODO: Implement Trezor sourcew
 class WithdrawalSource extends Equatable implements RpcRequestParams {
-  const WithdrawalSource._({
-    required this.type,
-    required this.params,
-  });
+  const WithdrawalSource._({required this.type, required this.params});
 
   factory WithdrawalSource.hdWalletId({
     required int accountId,
     required int addressId,
     Bip44Chain chain = Bip44Chain.external,
-  }) =>
-      WithdrawalSource._(
-        type: WithdrawalSourceType.hdWallet,
-        params: {
-          'account_id': accountId,
-          'chain': chain.value,
-          'address_id': addressId,
-        },
-      );
+  }) => WithdrawalSource._(
+    type: WithdrawalSourceType.hdWallet,
+    params: {
+      'account_id': accountId,
+      'chain': chain.value,
+      'address_id': addressId,
+    },
+  );
 
   factory WithdrawalSource.hdDerivationPath(String derivationPath) =>
       WithdrawalSource._(
@@ -255,13 +255,10 @@ class WithdrawalSource extends Equatable implements RpcRequestParams {
     required int accountId,
     required String chain,
     required int addressId,
-  }) =>
-      WithdrawalSource._(
-        type: WithdrawalSourceType.hdWallet,
-        params: {
-          'derivation_path': "m/44'/$coinId'/$accountId'/$chain/$addressId",
-        },
-      );
+  }) => WithdrawalSource._(
+    type: WithdrawalSourceType.hdWallet,
+    params: {'derivation_path': "m/44'/$coinId'/$accountId'/$chain/$addressId"},
+  );
 
   // TODO:
   // factory WithdrawalSource.trezor
@@ -272,23 +269,17 @@ class WithdrawalSource extends Equatable implements RpcRequestParams {
   @override
   JsonMap toRpcParams() => params;
 
-  JsonMap toJson() => {
-        'type': type.toString(),
-        ...params,
-      };
+  JsonMap toJson() => {'type': type.toString(), ...params};
 
   @override
   List<Object?> get props => [
-        type,
-        [...params.values, params.keys],
-      ];
+    type,
+    [...params.values, params.keys],
+  ];
 }
 
 class KmdRewards {
-  KmdRewards({
-    required this.amount,
-    this.claimedByMe,
-  });
+  KmdRewards({required this.amount, this.claimedByMe});
 
   factory KmdRewards.fromJson(JsonMap json) {
     return KmdRewards(
@@ -301,7 +292,7 @@ class KmdRewards {
   final bool? claimedByMe;
 
   JsonMap toJson() => {
-        'amount': amount,
-        if (claimedByMe != null) 'claimed_by_me': claimedByMe,
-      };
+    'amount': amount,
+    if (claimedByMe != null) 'claimed_by_me': claimedByMe,
+  };
 }

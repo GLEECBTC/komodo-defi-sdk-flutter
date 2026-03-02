@@ -267,6 +267,16 @@ Future<void> bootstrap({
     return FeeManager(client);
   }, dependsOn: [ApiClient]);
 
+  container.registerSingletonAsync<TradingManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    final eventStreamingManager = await container
+        .getAsync<EventStreamingManager>();
+    return TradingManager(
+      client: client,
+      eventStreamingManager: eventStreamingManager,
+    );
+  }, dependsOn: [ApiClient, EventStreamingManager]);
+
   container.registerSingletonAsync<LegacyWithdrawalManager>(() async {
     final client = await container.getAsync<ApiClient>();
     return LegacyWithdrawalManager(client);

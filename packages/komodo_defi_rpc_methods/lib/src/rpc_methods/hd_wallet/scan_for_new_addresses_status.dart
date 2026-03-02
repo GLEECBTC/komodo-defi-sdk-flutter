@@ -34,24 +34,41 @@ class ScanForNewAddressesStatusResponse extends BaseResponse {
     required super.mmrpc,
     required this.status,
     this.details,
+    this.error,
+    this.statusDescription,
   });
 
   @override
   factory ScanForNewAddressesStatusResponse.parse(Map<String, dynamic> json) {
+    final status = json.value<String>('result', 'status');
+    final rawDetails = json.valueOrNull<dynamic>('result', 'details');
+
+    ScanAddressesInfo? details;
+    Exception? error;
+    String? statusDescription;
+
+    if (status == 'Ok' && rawDetails is Map<String, dynamic>) {
+      details = ScanAddressesInfo.fromJson(rawDetails);
+    } else if (status == 'Error' && rawDetails != null) {
+      error = parseTaskErrorDetails(rawDetails);
+      statusDescription = exceptionMessage(error);
+    } else if (rawDetails != null) {
+      statusDescription = rawDetails.toString();
+    }
+
     return ScanForNewAddressesStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
-      status: json.value<String>('result', 'status'),
-      details:
-          json.valueOrNull<Map<String, dynamic>>('result', 'details') != null
-              ? ScanAddressesInfo.fromJson(
-                json.value<Map<String, dynamic>>('result', 'details'),
-              )
-              : null,
+      status: status,
+      details: details,
+      error: error,
+      statusDescription: statusDescription,
     );
   }
 
   final String status;
   final ScanAddressesInfo? details;
+  final Exception? error;
+  final String? statusDescription;
 
   @override
   Map<String, dynamic> toJson() {
@@ -60,6 +77,8 @@ class ScanForNewAddressesStatusResponse extends BaseResponse {
       'result': {
         'status': status,
         if (details != null) 'details': details!.toJson(),
+        if (error != null) 'error': error.toString(),
+        if (statusDescription != null) 'description': statusDescription,
       },
     };
   }

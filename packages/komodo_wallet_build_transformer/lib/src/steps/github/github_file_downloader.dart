@@ -134,14 +134,10 @@ class GitHubFileDownloader {
     String relativeFilePath,
     String repoCommit,
   ) async {
-    final isRawContentUrl = relativeFilePath.startsWith(
-      'https://raw.githubusercontent.com',
-    );
-
-    final fileContentUrl = Uri.parse(
-      isRawContentUrl
-          ? '$repoContentUrl/$repoCommit/$relativeFilePath'
-          : '$repoContentUrl/$relativeFilePath',
+    final fileContentUrl = resolveFileContentUri(
+      repoContentUrl: repoContentUrl,
+      filePath: relativeFilePath,
+      repoCommit: repoCommit,
     );
 
     _log.fine('Fetching file content from: $fileContentUrl');
@@ -157,13 +153,41 @@ class GitHubFileDownloader {
     return response.body;
   }
 
-  String _buildFileDownloadUrl(String filePath, String repoCommit) {
-    final isRawContentUrl = repoContentUrl.contains(
+  static Uri resolveFileContentUri({
+    required String repoContentUrl,
+    required String filePath,
+    required String repoCommit,
+  }) {
+    final pathUri = Uri.tryParse(filePath);
+    if (pathUri != null &&
+        (pathUri.scheme.toLowerCase() == 'http' ||
+            pathUri.scheme.toLowerCase() == 'https')) {
+      return pathUri;
+    }
+
+    final normalizedBase = repoContentUrl.endsWith('/')
+        ? repoContentUrl.substring(0, repoContentUrl.length - 1)
+        : repoContentUrl;
+    final normalizedPath = filePath.startsWith('/')
+        ? filePath.substring(1)
+        : filePath;
+
+    final isRawContentUrl = normalizedBase.contains(
       'raw.githubusercontent.com',
     );
-    return isRawContentUrl
-        ? '$repoContentUrl/$repoCommit/$filePath'
-        : '$repoContentUrl/$filePath';
+    final resolvedUrl = isRawContentUrl
+        ? '$normalizedBase/$repoCommit/$normalizedPath'
+        : '$normalizedBase/$normalizedPath';
+
+    return Uri.parse(resolvedUrl);
+  }
+
+  String _buildFileDownloadUrl(String filePath, String repoCommit) {
+    return resolveFileContentUri(
+      repoContentUrl: repoContentUrl,
+      filePath: filePath,
+      repoCommit: repoCommit,
+    ).toString();
   }
 
   /// Downloads the mapped folders from a GitHub repository at a specific commit
@@ -191,13 +215,12 @@ class GitHubFileDownloader {
       repoCommit,
     );
 
-    final List<Future<void>> downloadFutures =
-        folderContents.entries.map((entry) async {
-          _log.fine(
-            'Downloading ${entry.value.length} files from ${entry.key}',
-          );
-          await _downloadFolderContents(entry.key, entry.value, repoCommit);
-        }).toList();
+    final List<Future<void>> downloadFutures = folderContents.entries.map((
+      entry,
+    ) async {
+      _log.fine('Downloading ${entry.value.length} files from ${entry.key}');
+      await _downloadFolderContents(entry.key, entry.value, repoCommit);
+    }).toList();
 
     await Future.wait(downloadFutures);
 
@@ -240,14 +263,13 @@ class GitHubFileDownloader {
     List<GitHubFile> value,
     String repoCommit,
   ) async {
-    final filesWithCdn =
-        value
-            .map(
-              (file) => file.copyWith(
-                downloadUrl: _buildFileDownloadUrl(file.path, repoCommit),
-              ),
-            )
-            .toList();
+    final filesWithCdn = value
+        .map(
+          (file) => file.copyWith(
+            downloadUrl: _buildFileDownloadUrl(file.path, repoCommit),
+          ),
+        )
+        .toList();
 
     await for (final GitHubFileDownloadEvent event in downloadFiles(
       filesWithCdn,
@@ -277,34 +299,31 @@ class GitHubFileDownloader {
     List<GitHubFile> value,
     String repoCommit,
   ) async {
-    final List<Future<void>> downloadFutures =
-        value.map((file) async {
-          final fileWithCdn = file.copyWith(
-            downloadUrl: _buildFileDownloadUrl(file.path, repoCommit),
-          );
-          await for (final GitHubFileDownloadEvent event in downloadFiles([
-            fileWithCdn,
-          ], key)) {
-            switch (event.event) {
-              case GitHubDownloadEvent.downloaded:
-                _downloadedFiles++;
-                sendProgressMessage(
-                  'Downloading file: ${event.localPath}',
-                  success: true,
-                );
-              case GitHubDownloadEvent.skipped:
-                _skippedFiles++;
-                sendProgressMessage(
-                  'Skipped file: ${event.localPath}',
-                  success: true,
-                );
-              case GitHubDownloadEvent.failed:
-                sendProgressMessage(
-                  'Failed to download file: ${event.localPath}',
-                );
-            }
-          }
-        }).toList();
+    final List<Future<void>> downloadFutures = value.map((file) async {
+      final fileWithCdn = file.copyWith(
+        downloadUrl: _buildFileDownloadUrl(file.path, repoCommit),
+      );
+      await for (final GitHubFileDownloadEvent event in downloadFiles([
+        fileWithCdn,
+      ], key)) {
+        switch (event.event) {
+          case GitHubDownloadEvent.downloaded:
+            _downloadedFiles++;
+            sendProgressMessage(
+              'Downloading file: ${event.localPath}',
+              success: true,
+            );
+          case GitHubDownloadEvent.skipped:
+            _skippedFiles++;
+            sendProgressMessage(
+              'Skipped file: ${event.localPath}',
+              success: true,
+            );
+          case GitHubDownloadEvent.failed:
+            sendProgressMessage('Failed to download file: ${event.localPath}');
+        }
+      }
+    }).toList();
 
     await Future.wait(downloadFutures);
   }
