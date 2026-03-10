@@ -3,7 +3,7 @@ import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.da
 import 'package:komodo_defi_framework/src/operations/kdf_operations_remote.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_wasm.dart'
     if (dart.library.io) 'package:komodo_defi_framework/src/operations/kdf_operations_native.dart'
-    if (dart.library.html) 'package:komodo_defi_framework/src/operations/kdf_operations_wasm.dart'
+    if (dart.library.js_interop) 'package:komodo_defi_framework/src/operations/kdf_operations_wasm.dart'
     as local;
 
 IKdfOperations createKdfOperations({
