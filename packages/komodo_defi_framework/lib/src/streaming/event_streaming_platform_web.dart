@@ -1,29 +1,20 @@
 // Web implementation: connect to SharedWorker('event_streaming_worker.js')
 // and forward messages to Dart via the provided callback.
 
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show Event;
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+
 import 'package:flutter/foundation.dart';
-import 'package:js/js_util.dart' as jsu;
+import 'package:web/web.dart' as web;
 
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 
 typedef EventStreamUnsubscribe = void Function();
 
-Object _getGlobalProperty(String name) =>
-    jsu.getProperty<Object>(jsu.globalThis, name);
+const _eventStreamingWorkerPath =
+    'assets/packages/komodo_defi_framework/assets/web/event_streaming_worker.js';
 
-Object? _getProperty(Object o, String name) =>
-    jsu.getProperty<Object?>(o, name);
-
-void _setProperty(Object o, String name, Object? value) =>
-    jsu.setProperty(o, name, value);
-
-T _callConstructor<T>(Object ctor, List<Object?> args) =>
-    jsu.callConstructor(ctor, args) as T;
-
-T _callMethod<T>(Object o, String name, List<Object?> args) =>
-    jsu.callMethod(o, name, args) as T;
+final web.EventHandler _noopHandler = ((web.Event _) {}).toJS;
 
 EventStreamUnsubscribe connectEventStream({
   IKdfHostConfig? hostConfig,
@@ -31,19 +22,14 @@ EventStreamUnsubscribe connectEventStream({
   required void Function() onFirstByte,
 }) {
   try {
-    final Object sharedWorkerCtor = _getGlobalProperty('SharedWorker');
-    final Object worker = _callConstructor<Object>(sharedWorkerCtor, <Object?>[
-      'assets/packages/komodo_defi_framework/assets/web/event_streaming_worker.js',
-    ]);
-    final Object? portMaybe = _getProperty(worker, 'port');
-    if (portMaybe == null) return () {};
-    final Object port = portMaybe;
-    _callMethod<void>(port, 'start', const <Object>[]);
+    final worker = web.SharedWorker(_eventStreamingWorkerPath.toJS);
+    final port = worker.port;
+    port.start();
 
     bool firstMessageReceived = false;
 
-    void handler(html.Event e) {
-      final Object? data = _getProperty(e, 'data');
+    void handler(web.Event event) {
+      final data = event is web.MessageEvent ? event.data.dartify() : null;
 
       // Signal first byte received on first message
       if (!firstMessageReceived) {
@@ -57,12 +43,12 @@ EventStreamUnsubscribe connectEventStream({
       onMessage(data);
     }
 
-    _setProperty(port, 'onmessage', jsu.allowInterop(handler));
+    port.onmessage = handler.toJS;
 
     return () {
       try {
-        _setProperty(port, 'onmessage', null);
-        _callMethod<void>(port, 'close', const <Object>[]);
+        port.onmessage = _noopHandler;
+        port.close();
       } catch (_) {}
     };
   } catch (_) {
