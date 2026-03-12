@@ -39,6 +39,7 @@ class ActivationManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   final Map<AssetId, Completer<void>> _activationCompleters = {};
+  final Map<AssetId, String> _cancelledActivations = <AssetId, String>{};
   bool _isDisposed = false;
 
   /// Helper for mutex-protected operations with timeout
@@ -56,6 +57,29 @@ class ActivationManager {
   Stream<ActivationProgress> activateAsset(Asset asset) =>
       activateAssets([asset]);
 
+  /// Request cancellation of an in-flight activation for [assetId].
+  ///
+  /// Cancellation is best-effort. The current activation stream is terminated
+  /// at the next progress boundary and emits an error completion state.
+  void cancelActivation(
+    AssetId assetId, {
+    String reason = 'Activation cancelled by caller',
+  }) {
+    if (_isDisposed) return;
+    _cancelledActivations[assetId] = reason;
+  }
+
+  /// Request cancellation for all in-flight activations.
+  void cancelAllActivations({
+    String reason = 'Activation cancelled by caller',
+  }) {
+    if (_isDisposed) return;
+    final pendingIds = _activationCompleters.keys.toList();
+    for (final assetId in pendingIds) {
+      _cancelledActivations[assetId] = reason;
+    }
+  }
+
   /// Activate multiple assets
   Stream<ActivationProgress> activateAssets(List<Asset> assets) async* {
     if (_isDisposed) {
@@ -65,6 +89,18 @@ class ActivationManager {
     final groups = _AssetGroup._groupByPrimary(assets);
 
     for (final group in groups) {
+      if (_cancelledActivations.containsKey(group.primary.id)) {
+        final reason =
+            _cancelledActivations[group.primary.id] ??
+            'Activation cancelled by caller';
+        yield ActivationProgress.error(
+          message: reason,
+          errorCode: 'ACTIVATION_CANCELLED',
+        );
+        _cancelledActivations.remove(group.primary.id);
+        continue;
+      }
+
       // Check activation status atomically
       final activationStatus = await _checkActivationStatus(group);
       if (activationStatus.isComplete) {
@@ -117,6 +153,24 @@ class ActivationManager {
           parentAsset ?? group.primary,
           group.children?.toList(),
         )) {
+          if (_cancelledActivations.containsKey(group.primary.id)) {
+            final reason =
+                _cancelledActivations[group.primary.id] ??
+                'Activation cancelled by caller';
+            final cancellationError = ActivationCancelledException(
+              assetId: group.primary.id,
+              message: reason,
+            );
+            if (!primaryCompleter.isCompleted) {
+              primaryCompleter.completeError(cancellationError);
+            }
+            yield ActivationProgress.error(
+              message: reason,
+              errorCode: 'ACTIVATION_CANCELLED',
+            );
+            break;
+          }
+
           yield _attachSdkError(progress, group.primary.id);
 
           if (progress.isComplete) {
@@ -149,10 +203,7 @@ class ActivationManager {
     }
 
     final errorMessage = progress.errorMessage ?? 'Activation failed';
-    final sdkError = _mapError(
-      errorMessage,
-      assetId,
-    );
+    final sdkError = _mapError(errorMessage, assetId);
 
     return progress.copyWith(
       errorMessage: sdkError.fallbackMessage,
@@ -163,10 +214,7 @@ class ActivationManager {
   SdkError _mapError(Object error, AssetId assetId) {
     return _errorMapper.map(
       error,
-      context: SdkErrorContext(
-        operation: 'activation',
-        assetId: assetId.id,
-      ),
+      context: SdkErrorContext(operation: 'activation', assetId: assetId.id),
     );
   }
 
@@ -174,7 +222,8 @@ class ActivationManager {
   Future<ActivationProgress> _checkActivationStatus(_AssetGroup group) async {
     try {
       // Use cache instead of direct RPC call to avoid excessive requests
-      final enabledAssetIds = await _activatedAssetsCache.getActivatedAssetIds();
+      final enabledAssetIds = await _activatedAssetsCache
+          .getActivatedAssetIds();
 
       final isActive = enabledAssetIds.contains(group.primary.id);
       final childrenActive =
@@ -264,6 +313,7 @@ class ActivationManager {
   Future<void> _cleanupActivation(AssetId assetId) async {
     await _protectedOperation(() async {
       _activationCompleters.remove(assetId);
+      _cancelledActivations.remove(assetId);
     });
   }
 
@@ -319,6 +369,7 @@ class ActivationManager {
       }
 
       _activationCompleters.clear();
+      _cancelledActivations.clear();
     });
   }
 }

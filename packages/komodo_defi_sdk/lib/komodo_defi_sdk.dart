@@ -59,6 +59,8 @@ export 'src/assets/asset_extensions.dart'
 export 'src/assets/asset_pubkey_extensions.dart';
 export 'src/assets/legacy_asset_extensions.dart';
 export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
+export 'src/transaction_history/transaction_merge_utils.dart'
+    show TransactionListReconciler, TransactionMergeUtils;
 export 'src/widgets/asset_balance_text.dart';
 export 'src/zcash_params/models/download_progress.dart';
 export 'src/zcash_params/models/download_result.dart';

@@ -37,6 +37,15 @@ abstract class IBalanceManager {
     bool activateIfNeeded = true,
   });
 
+  /// Returns whether [assetId] currently has an active watcher subscription.
+  bool hasActiveWatcher(AssetId assetId);
+
+  /// Counts how many [assetIds] do not currently have active watcher coverage.
+  int countMissingWatchersForAssets(Iterable<AssetId> assetIds);
+
+  /// Returns true when any asset in [assetIds] lacks active watcher coverage.
+  bool hasMissingWatchersForAssets(Iterable<AssetId> assetIds);
+
   /// Gets the last known balance for an asset without triggering a refresh.
   /// Returns null if no balance has been fetched yet.
   BalanceInfo? lastKnown(AssetId assetId);
@@ -116,6 +125,26 @@ class BalanceManager implements IBalanceManager {
 
   /// Getter for pubkeyManager to make it accessible
   PubkeyManager? get pubkeyManager => _pubkeyManager;
+
+  @override
+  bool hasActiveWatcher(AssetId assetId) {
+    if (_isDisposed) return false;
+    return _activeWatchers.containsKey(assetId);
+  }
+
+  @override
+  int countMissingWatchersForAssets(Iterable<AssetId> assetIds) {
+    if (_isDisposed) return assetIds.toSet().length;
+    final uniqueIds = assetIds.toSet();
+    return uniqueIds
+        .where((assetId) => !_activeWatchers.containsKey(assetId))
+        .length;
+  }
+
+  @override
+  bool hasMissingWatchersForAssets(Iterable<AssetId> assetIds) {
+    return countMissingWatchersForAssets(assetIds) > 0;
+  }
 
   /// Setter for activationCoordinator to resolve circular dependencies
   void setActivationCoordinator(SharedActivationCoordinator coordinator) {
@@ -837,9 +866,7 @@ class BalanceManager implements IBalanceManager {
 
     // Snapshot controllers and close all concurrently; swallow errors
     final List<StreamSubscription<AssetPubkeys>> pubkeyHintSubs =
-        List<StreamSubscription<AssetPubkeys>>.from(
-          _pubkeyHintWatchers.values,
-        );
+        List<StreamSubscription<AssetPubkeys>>.from(_pubkeyHintWatchers.values);
     _pubkeyHintWatchers.clear();
     for (final StreamSubscription<AssetPubkeys> sub in pubkeyHintSubs) {
       cancelFutures.add(

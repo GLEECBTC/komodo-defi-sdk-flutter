@@ -70,3 +70,18 @@ class ActivationNetworkException extends ActivationFailedException {
     return 'ActivationNetworkException: Asset ${assetId.name} activation failed due to network issues: $message';
   }
 }
+
+/// Exception thrown when an activation is cancelled by caller or lifecycle.
+class ActivationCancelledException extends ActivationFailedException {
+  const ActivationCancelledException({
+    required super.assetId,
+    required super.message,
+    super.errorCode = 'ACTIVATION_CANCELLED',
+    super.originalError,
+  });
+
+  @override
+  String toString() {
+    return 'ActivationCancelledException: Asset ${assetId.name} activation cancelled: $message';
+  }
+}
