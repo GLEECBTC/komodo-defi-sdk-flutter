@@ -8,6 +8,7 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
@@ -35,6 +36,7 @@ class ActivationManager {
   final ActivatedAssetsCache _activatedAssetsCache;
   final _activationMutex = Mutex();
   static const _operationTimeout = Duration(seconds: 30);
+  static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   final Map<AssetId, Completer<void>> _activationCompleters = {};
   bool _isDisposed = false;
@@ -115,7 +117,7 @@ class ActivationManager {
           parentAsset ?? group.primary,
           group.children?.toList(),
         )) {
-          yield progress;
+          yield _attachSdkError(progress, group.primary.id);
 
           if (progress.isComplete) {
             await _handleActivationComplete(group, progress, primaryCompleter);
@@ -123,10 +125,11 @@ class ActivationManager {
         }
       } catch (e) {
         debugPrint('Activation failed: $e');
+        final mappedError = _mapError(e, group.primary.id);
         if (!primaryCompleter.isCompleted) {
-          primaryCompleter.completeError(e);
+          primaryCompleter.completeError(mappedError);
         }
-        rethrow;
+        throw mappedError;
       } finally {
         try {
           await _cleanupActivation(group.primary.id);
@@ -135,6 +138,36 @@ class ActivationManager {
         }
       }
     }
+  }
+
+  ActivationProgress _attachSdkError(
+    ActivationProgress progress,
+    AssetId assetId,
+  ) {
+    if (!progress.isError || progress.sdkError != null) {
+      return progress;
+    }
+
+    final errorMessage = progress.errorMessage ?? 'Activation failed';
+    final sdkError = _mapError(
+      errorMessage,
+      assetId,
+    );
+
+    return progress.copyWith(
+      errorMessage: sdkError.fallbackMessage,
+      sdkError: sdkError,
+    );
+  }
+
+  SdkError _mapError(Object error, AssetId assetId) {
+    return _errorMapper.map(
+      error,
+      context: SdkErrorContext(
+        operation: 'activation',
+        assetId: assetId.id,
+      ),
+    );
   }
 
   /// Check if asset and its children are already activated

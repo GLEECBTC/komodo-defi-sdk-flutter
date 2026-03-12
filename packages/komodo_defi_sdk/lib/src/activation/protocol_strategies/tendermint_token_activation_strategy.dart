@@ -96,17 +96,12 @@ class TendermintTokenActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 3,
-          errorCode: 'TENDERMINT_TOKEN_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'TENDERMINT_TOKEN_ACTIVATION_ERROR',
+        stepCount: 3,
       );
     }
   }

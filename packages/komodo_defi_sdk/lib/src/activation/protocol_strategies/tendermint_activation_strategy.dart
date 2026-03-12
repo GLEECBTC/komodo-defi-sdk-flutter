@@ -100,33 +100,25 @@ class TendermintWithTokensActivationStrategy
         ),
       );
 
-      final tokensParams = children
-          ?.map((child) => TendermintTokenParams(ticker: child.id.id))
-          .toList() ??
+      final tokensParams =
+          children
+              ?.map((child) => TendermintTokenParams(ticker: child.id.id))
+              .toList() ??
           [];
       final nodes = protocol.rpcUrlsMap.map(TendermintNode.fromJson).toList();
-      
+
       // Debug logging for Tendermint activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activating Tendermint platform: ${asset.id.id}',
-        name: 'TendermintWithTokensActivationStrategy',
-      );
+          '[RPC] Activating Tendermint platform: ${asset.id.id}',
+          name: 'TendermintWithTokensActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activation parameters: ${jsonEncode({
-          'ticker': asset.id.id,
-          'protocol': asset.protocol.subClass.formatted,
-          'chain_id': protocol.chainId,
-          'account_prefix': protocol.accountPrefix,
-          'token_count': children?.length ?? 0,
-          'tokens': children?.map((e) => e.id.id).toList() ?? [],
-          'rpc_nodes': nodes.map((n) => n.toJson()).toList(),
-          'priv_key_policy': privKeyPolicy.toJson(),
-        })}',
-        name: 'TendermintWithTokensActivationStrategy',
-      );
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'chain_id': protocol.chainId, 'account_prefix': protocol.accountPrefix, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'rpc_nodes': nodes.map((n) => n.toJson()).toList(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          name: 'TendermintWithTokensActivationStrategy',
+        );
       }
 
       final taskResponse = await client.rpc.tendermint.taskEnableTendermintInit(
@@ -134,12 +126,12 @@ class TendermintWithTokensActivationStrategy
         tokensParams: tokensParams,
         nodes: nodes,
       );
-      
+
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
-        name: 'TendermintWithTokensActivationStrategy',
-      );
+          '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
+          name: 'TendermintWithTokensActivationStrategy',
+        );
       }
 
       yield ActivationProgress(
@@ -180,16 +172,11 @@ class TendermintWithTokensActivationStrategy
           );
           isComplete = true;
         } else if (status.status == SyncStatusEnum.error) {
-          yield ActivationProgress(
-            status: 'Activation failed: ${status.details.error}',
-            errorMessage: status.details.error ?? 'Unknown error',
-            isComplete: true,
-            progressDetails: ActivationProgressDetails(
-              currentStep: ActivationStep.error,
-              stepCount: 5,
-              errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
-              errorDetails: status.details.error,
-            ),
+          yield buildErrorProgress(
+            asset: asset,
+            error: status.details.error ?? 'Unknown error',
+            errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
+            stepCount: 5,
           );
           isComplete = true;
         } else {
@@ -207,17 +194,12 @@ class TendermintWithTokensActivationStrategy
         }
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 5,
-          errorCode: 'TENDERMINT_WITH_TOKENS_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'TENDERMINT_WITH_TOKENS_ACTIVATION_ERROR',
+        stepCount: 5,
       );
     }
   }

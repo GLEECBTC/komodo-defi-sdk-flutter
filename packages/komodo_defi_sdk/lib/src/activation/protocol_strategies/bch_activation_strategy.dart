@@ -18,9 +18,9 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
-        CoinSubClass.utxo,
-        CoinSubClass.slp,
-      };
+    CoinSubClass.utxo,
+    CoinSubClass.slp,
+  };
 
   @override
   bool get supportsBatchActivation => true;
@@ -86,13 +86,12 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
           ),
         );
 
-        final slpTokensRequests = children
-                ?.map(
-                  (child) => TokensRequest(ticker: child.id.id),
-                )
+        final slpTokensRequests =
+            children
+                ?.map((child) => TokensRequest(ticker: child.id.id))
                 .toList() ??
             [];
-        
+
         // Debug logging for BCH activation
         if (KdfLoggingConfig.verboseLogging) {
           log(
@@ -100,13 +99,7 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
             name: 'BchActivationStrategy',
           );
           log(
-            '[RPC] Activation parameters: ${jsonEncode({
-              'ticker': asset.id.id,
-              'protocol': asset.protocol.subClass.formatted,
-              'slp_token_count': children?.length ?? 0,
-              'slp_tokens': children?.map((e) => e.id.id).toList() ?? [],
-              'activation_params': bchConfig.toRpcParams(),
-            })}',
+            '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'slp_token_count': children?.length ?? 0, 'slp_tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': bchConfig.toRpcParams()})}',
             name: 'BchActivationStrategy',
           );
         }
@@ -117,7 +110,7 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
           params: bchConfig,
           slpTokensRequests: slpTokensRequests,
         );
-        
+
         if (KdfLoggingConfig.verboseLogging) {
           log(
             '[RPC] Successfully activated BCH with ${children?.length ?? 0} SLP tokens',
@@ -167,11 +160,7 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
             name: 'BchActivationStrategy',
           );
           log(
-            '[RPC] Activation parameters: ${jsonEncode({
-              'ticker': asset.id.id,
-              'protocol': asset.protocol.subClass.formatted,
-              'parent_id': asset.id.parentId?.id,
-            })}',
+            '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'parent_id': asset.id.parentId?.id})}',
             name: 'BchActivationStrategy',
           );
         }
@@ -180,7 +169,7 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
           ticker: asset.id.id,
           params: SlpActivationParams(),
         );
-        
+
         if (KdfLoggingConfig.verboseLogging) {
           log(
             '[RPC] Successfully activated SLP token: ${asset.id.id}',
@@ -200,17 +189,12 @@ class BchActivationStrategy extends ProtocolActivationStrategy {
         );
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 4,
-          errorCode: isBch ? 'BCH_ACTIVATION_ERROR' : 'SLP_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: isBch ? 'BCH_ACTIVATION_ERROR' : 'SLP_ACTIVATION_ERROR',
+        stepCount: 4,
       );
     }
   }

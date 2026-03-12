@@ -123,16 +123,11 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
               ),
             );
           } else {
-            yield ActivationProgress(
-              status: 'Activation failed: ${status.details}',
-              errorMessage: status.details,
-              isComplete: true,
-              progressDetails: ActivationProgressDetails(
-                currentStep: ActivationStep.error,
-                stepCount: 5,
-                errorCode: 'UTXO_ACTIVATION_ERROR',
-                errorDetails: status.details,
-              ),
+            yield buildErrorProgress(
+              asset: asset,
+              error: status.details,
+              errorCode: 'UTXO_ACTIVATION_ERROR',
+              stepCount: 5,
             );
           }
           isComplete = true;
@@ -151,17 +146,12 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
         }
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 5,
-          errorCode: 'UTXO_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'UTXO_ACTIVATION_ERROR',
+        stepCount: 5,
       );
     }
   }

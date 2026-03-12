@@ -11,6 +11,26 @@ class _MockPubkeyManager extends Mock implements PubkeyManager {}
 
 class _MockLocalAuth extends Mock implements KomodoDefiLocalAuth {}
 
+Asset _createEvmAsset({
+  required String coin,
+  required int chainId,
+  String type = 'ETH',
+  bool isTestnet = false,
+}) {
+  return Asset.fromJson({
+    'coin': coin,
+    'type': type,
+    'fname': coin,
+    'chain_id': chainId,
+    'is_testnet': isTestnet,
+    'nodes': const [
+      {'url': 'https://rpc.example.com'},
+    ],
+    'swap_contract_address': '0x0000000000000000000000000000000000000001',
+    'fallback_swap_contract': '0x0000000000000000000000000000000000000001',
+  });
+}
+
 Asset _createZhtlcAsset() {
   final protocol = ZhtlcProtocol.fromJson({
     'type': 'ZHTLC',
@@ -43,6 +63,37 @@ void main() {
     auth = _MockLocalAuth();
   });
 
+  group('EtherscanProtocolHelper', () {
+    const helper = EtherscanProtocolHelper();
+
+    test('supports ETH endpoint and keeps KDF tx history disabled', () {
+      final eth = _createEvmAsset(coin: 'ETH', chainId: 1);
+
+      expect(helper.supportsProtocol(eth), isTrue);
+      expect(
+        helper.getApiUrlForAsset(eth)?.toString(),
+        endsWith('/v2/eth_tx_history'),
+      );
+      expect(helper.shouldEnableTransactionHistory(eth), isFalse);
+    });
+
+    test('supports GRC20 endpoint and keeps KDF tx history disabled', () {
+      final gleect = _createEvmAsset(
+        coin: 'GLEECT',
+        chainId: 11169,
+        type: 'GRC20',
+        isTestnet: true,
+      );
+
+      expect(helper.supportsProtocol(gleect), isTrue);
+      expect(
+        helper.getApiUrlForAsset(gleect)?.toString(),
+        endsWith('/v2/grc_tx_history'),
+      );
+      expect(helper.shouldEnableTransactionHistory(gleect), isFalse);
+    });
+  });
+
   group('TransactionHistoryStrategyFactory', () {
     test('selects ZHTLC strategy for ZHTLC asset', () {
       final factory = TransactionHistoryStrategyFactory(pubkeyManager, auth);
@@ -69,6 +120,20 @@ void main() {
       final strategy = factory.forAsset(asset);
 
       expect(strategy, isA<ZhtlcTransactionStrategy>());
+    });
+
+    test('uses Etherscan strategy for GRC20 chain', () {
+      final factory = TransactionHistoryStrategyFactory(pubkeyManager, auth);
+      final gleect = _createEvmAsset(
+        coin: 'GLEECT',
+        chainId: 11169,
+        type: 'GRC20',
+        isTestnet: true,
+      );
+
+      final strategy = factory.forAsset(gleect);
+
+      expect(strategy, isA<EtherscanTransactionStrategy>());
     });
   });
 }

@@ -18,6 +18,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
   @override
   Set<CoinSubClass> get supportedProtocols => {
     CoinSubClass.erc20,
+    CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
     CoinSubClass.matic,
@@ -152,16 +153,11 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
               ),
             );
           } else {
-            yield ActivationProgress(
-              status: 'Activation failed: ${status.details}',
-              errorMessage: status.details,
-              isComplete: true,
-              progressDetails: ActivationProgressDetails(
-                currentStep: ActivationStep.error,
-                stepCount: 5,
-                errorCode: 'ETH_TASK_ACTIVATION_ERROR',
-                errorDetails: status.details,
-              ),
+            yield buildErrorProgress(
+              asset: asset,
+              error: status.details,
+              errorCode: 'ETH_TASK_ACTIVATION_ERROR',
+              stepCount: 5,
             );
           }
           isComplete = true;
@@ -180,17 +176,12 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
         }
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 5,
-          errorCode: 'ETH_TASK_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'ETH_TASK_ACTIVATION_ERROR',
+        stepCount: 5,
       );
     }
   }

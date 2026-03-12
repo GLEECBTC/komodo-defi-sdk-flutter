@@ -1,5 +1,7 @@
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:meta/meta.dart';
 
 abstract class AssetActivator {
   const AssetActivator(this.client);
@@ -151,4 +153,33 @@ abstract class ProtocolActivationStrategy extends BatchCapableActivator {
       supportedProtocols.contains(asset.protocol.subClass);
 
   Set<CoinSubClass> get supportedProtocols;
+
+  @protected
+  ActivationProgress buildErrorProgress({
+    required Asset asset,
+    required Object error,
+    StackTrace? stackTrace,
+    required String errorCode,
+    int stepCount = 1,
+    String status = 'Activation failed',
+  }) {
+    const mapper = SdkErrorMapper();
+    final sdkError = mapper.map(
+      error,
+      context: SdkErrorContext(operation: 'activation', assetId: asset.id.id),
+    );
+    return ActivationProgress(
+      status: status,
+      errorMessage: sdkError.fallbackMessage,
+      sdkError: sdkError,
+      isComplete: true,
+      progressDetails: ActivationProgressDetails(
+        currentStep: ActivationStep.error,
+        stepCount: stepCount,
+        errorCode: errorCode,
+        errorDetails: sdkError.fallbackMessage,
+        stackTrace: stackTrace?.toString(),
+      ),
+    );
+  }
 }

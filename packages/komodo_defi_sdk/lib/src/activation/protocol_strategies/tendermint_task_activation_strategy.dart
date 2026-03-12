@@ -109,16 +109,11 @@ class TendermintTaskActivationStrategy extends ProtocolActivationStrategy {
           );
           isComplete = true;
         } else if (status.status == SyncStatusEnum.error) {
-          yield ActivationProgress(
-            status: 'Activation failed: ${status.details.error}',
-            errorMessage: status.details.error ?? 'Unknown error',
-            isComplete: true,
-            progressDetails: ActivationProgressDetails(
-              currentStep: ActivationStep.error,
-              stepCount: 5,
-              errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
-              errorDetails: status.details.error,
-            ),
+          yield buildErrorProgress(
+            asset: asset,
+            error: status.details.error ?? 'Unknown error',
+            errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
+            stepCount: 5,
           );
           isComplete = true;
         } else {
@@ -136,17 +131,12 @@ class TendermintTaskActivationStrategy extends ProtocolActivationStrategy {
         }
       }
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 5,
-          errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'TENDERMINT_TASK_ACTIVATION_ERROR',
+        stepCount: 5,
       );
     }
   }

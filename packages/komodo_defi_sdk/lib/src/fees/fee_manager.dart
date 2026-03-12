@@ -1,3 +1,4 @@
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Manages cryptocurrency transaction fee operations and policies.
@@ -53,6 +54,7 @@ class FeeManager {
   static const bool _feeEstimationEnabled = false;
 
   final ApiClient _client;
+  static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   /// Enable fee estimator for a specific coin.
   ///
@@ -71,11 +73,15 @@ class FeeManager {
   /// print('Fee estimator enabled: $result');
   /// ```
   Future<String> enableFeeEstimator(String coin, String estimatorType) async {
-    final response = await _client.rpc.feeManagement.feeEstimatorEnable(
-      coin: coin,
-      estimatorType: estimatorType,
-    );
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement.feeEstimatorEnable(
+        coin: coin,
+        estimatorType: estimatorType,
+      );
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee_estimator.enable', assetId: coin);
+    }
   }
 
   /// Retrieves estimated fee per gas for Ethereum-based transactions.
@@ -117,18 +123,17 @@ class FeeManager {
     String coin, {
     FeeEstimatorType estimatorType = FeeEstimatorType.simple,
   }) async {
-    if (!_feeEstimationEnabled) {
-      throw UnsupportedError(
-        'Fee estimation is currently disabled. The API endpoints are not yet available. '
-        'Set `_feeEstimationEnabled` to `true` when the endpoints become available.',
-      );
-    }
+    _throwIfFeeEstimationDisabled();
 
-    final response = await _client.rpc.feeManagement.getEthEstimatedFeePerGas(
-      coin: coin,
-      estimatorType: estimatorType,
-    );
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement.getEthEstimatedFeePerGas(
+        coin: coin,
+        estimatorType: estimatorType,
+      );
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee.estimate.eth', assetId: coin);
+    }
   }
 
   /// Retrieves estimated fees for UTXO-based transactions (Bitcoin, Litecoin, etc.).
@@ -170,18 +175,17 @@ class FeeManager {
     String coin, {
     FeeEstimatorType estimatorType = FeeEstimatorType.simple,
   }) async {
-    if (!_feeEstimationEnabled) {
-      throw UnsupportedError(
-        'Fee estimation is currently disabled. The API endpoints are not yet available. '
-        'Set `_feeEstimationEnabled` to `true` when the endpoints become available.',
-      );
-    }
+    _throwIfFeeEstimationDisabled();
 
-    final response = await _client.rpc.feeManagement.getUtxoEstimatedFee(
-      coin: coin,
-      estimatorType: estimatorType,
-    );
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement.getUtxoEstimatedFee(
+        coin: coin,
+        estimatorType: estimatorType,
+      );
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee.estimate.utxo', assetId: coin);
+    }
   }
 
   /// Retrieves estimated fees for Tendermint/Cosmos-based transactions.
@@ -227,18 +231,15 @@ class FeeManager {
     String coin, {
     FeeEstimatorType estimatorType = FeeEstimatorType.simple,
   }) async {
-    if (!_feeEstimationEnabled) {
-      throw UnsupportedError(
-        'Fee estimation is currently disabled. The API endpoints are not yet available. '
-        'Set `_feeEstimationEnabled` to `true` when the endpoints become available.',
-      );
-    }
+    _throwIfFeeEstimationDisabled();
 
-    final response = await _client.rpc.feeManagement.getTendermintEstimatedFee(
-      coin: coin,
-      estimatorType: estimatorType,
-    );
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement
+          .getTendermintEstimatedFee(coin: coin, estimatorType: estimatorType);
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee.estimate.tendermint', assetId: coin);
+    }
   }
 
   /// Retrieves the current fee policy for swap transactions of a specific coin.
@@ -261,9 +262,13 @@ class FeeManager {
   /// }
   /// ```
   Future<FeePolicy> getSwapTransactionFeePolicy(String coin) async {
-    final response = await _client.rpc.feeManagement
-        .getSwapTransactionFeePolicy(coin: coin);
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement
+          .getSwapTransactionFeePolicy(coin: coin);
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee.policy.get', assetId: coin);
+    }
   }
 
   /// Sets a new fee policy for swap transactions of a specific coin.
@@ -291,9 +296,33 @@ class FeeManager {
     String coin,
     FeePolicy policy,
   ) async {
-    final response = await _client.rpc.feeManagement
-        .setSwapTransactionFeePolicy(coin: coin, swapTxFeePolicy: policy);
-    return response.result;
+    try {
+      final response = await _client.rpc.feeManagement
+          .setSwapTransactionFeePolicy(coin: coin, swapTxFeePolicy: policy);
+      return response.result;
+    } catch (e) {
+      throw _mapError(e, operation: 'fee.policy.set', assetId: coin);
+    }
+  }
+
+  SdkError _mapError(
+    Object error, {
+    required String operation,
+    String? assetId,
+  }) {
+    return _errorMapper.map(
+      error,
+      context: SdkErrorContext(operation: operation, assetId: assetId),
+    );
+  }
+
+  void _throwIfFeeEstimationDisabled() {
+    if (_feeEstimationEnabled) return;
+
+    throw UnsupportedError(
+      'Fee estimation is currently disabled. The API endpoints are not yet available. '
+      'Set `_feeEstimationEnabled` to `true` when the endpoints become available.',
+    );
   }
 
   /// Disposes of resources used by the FeeManager.

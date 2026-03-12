@@ -8,6 +8,8 @@ mixin HDWalletMixin on PubkeyStrategy {
   KdfUser get kdfUser;
 
   int get _gapLimit => 20;
+  Duration get _scanPollInterval => const Duration(milliseconds: 250);
+  Duration get _scanTimeout => const Duration(seconds: 20);
 
   @override
   bool get supportsMultipleAddresses => true;
@@ -28,7 +30,40 @@ mixin HDWalletMixin on PubkeyStrategy {
 
   @override
   Future<void> scanForNewAddresses(AssetId assetId, ApiClient client) async {
-    await getAccountBalance(assetId, client);
+    final initResponse = await client.rpc.hdWallet.scanForNewAddressesInit(
+      assetId.id,
+      accountId: 0,
+      gapLimit: _gapLimit,
+    );
+
+    final startedAt = DateTime.now();
+    while (true) {
+      final status = await client.rpc.hdWallet.scanForNewAddressesStatus(
+        initResponse.taskId,
+        forgetIfFinished: false,
+      );
+
+      if (status.status == 'Ok') {
+        return;
+      }
+
+      if (status.status == 'Error') {
+        if (status.error != null) {
+          throw status.error!;
+        }
+        throw Exception(
+          status.statusDescription ?? 'Failed to scan for new addresses',
+        );
+      }
+
+      if (DateTime.now().difference(startedAt) >= _scanTimeout) {
+        throw TimeoutException(
+          'Timed out scanning for new addresses for ${assetId.id}',
+        );
+      }
+
+      await Future<void>.delayed(_scanPollInterval);
+    }
   }
 
   Future<AccountBalanceInfo> getAccountBalance(
@@ -57,18 +92,17 @@ mixin HDWalletMixin on PubkeyStrategy {
     AssetId assetId,
     AccountBalanceInfo balanceInfo,
   ) async {
-    final addresses =
-        balanceInfo.addresses
-            .map(
-              (addr) => PubkeyInfo(
-                address: addr.address,
-                derivationPath: addr.derivationPath,
-                chain: addr.chain,
-                balance: addr.balance.balanceOf(assetId.id),
-                coinTicker: assetId.id,
-              ),
-            )
-            .toList();
+    final addresses = balanceInfo.addresses
+        .map(
+          (addr) => PubkeyInfo(
+            address: addr.address,
+            derivationPath: addr.derivationPath,
+            chain: addr.chain,
+            balance: addr.balance.balanceOf(assetId.id),
+            coinTicker: assetId.id,
+          ),
+        )
+        .toList();
 
     return AssetPubkeys(
       assetId: assetId,
@@ -102,13 +136,12 @@ class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
   // TODO: Refactor to create a domain model with onlt a single balance entry.
   // Currently we are bound to the RPC response data structure.
   Future<PubkeyInfo> getNewAddress(AssetId assetId, ApiClient client) async {
-    final newAddress =
-        (await client.rpc.hdWallet.getNewAddress(
-          assetId.id,
-          accountId: 0,
-          chain: 'External',
-          gapLimit: _gapLimit,
-        )).newAddress;
+    final newAddress = (await client.rpc.hdWallet.getNewAddress(
+      assetId.id,
+      accountId: 0,
+      chain: 'External',
+      gapLimit: _gapLimit,
+    )).newAddress;
 
     // Get the balance for the specific coin, or use the first balance if not
     // found

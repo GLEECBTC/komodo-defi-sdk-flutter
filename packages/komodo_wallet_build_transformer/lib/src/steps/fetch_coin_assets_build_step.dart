@@ -309,6 +309,9 @@ class FetchCoinAssetsBuildStep extends BuildStep {
 
   List<String> _getFilesInFolder(String folderPath) {
     final localFolder = Directory(folderPath);
+    if (!localFolder.existsSync()) {
+      return <String>[];
+    }
     final localFolderContents = localFolder.listSync(recursive: true);
     return localFolderContents
         .map((FileSystemEntity file) => file.path)

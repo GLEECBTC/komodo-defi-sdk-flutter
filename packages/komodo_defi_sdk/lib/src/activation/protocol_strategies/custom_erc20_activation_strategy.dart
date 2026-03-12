@@ -15,6 +15,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
   @override
   Set<CoinSubClass> get supportedProtocols => {
     CoinSubClass.erc20,
+    CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
     CoinSubClass.matic,
@@ -70,7 +71,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
       );
       final platform = protocolData.value<String>('platform');
       final contractAddress = protocolData.value<String>('contract_address');
-      
+
       // Debug logging for custom ERC20 token activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
@@ -78,13 +79,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
           name: 'CustomErc20ActivationStrategy',
         );
         log(
-          '[RPC] Activation parameters: ${jsonEncode({
-            'ticker': asset.id.id,
-            'protocol': asset.protocol.subClass.formatted,
-            'platform': platform,
-            'contract_address': contractAddress,
-            'activation_params': activationParams.toRpcParams(),
-          })}',
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'platform': platform, 'contract_address': contractAddress, 'activation_params': activationParams.toRpcParams()})}',
           name: 'CustomErc20ActivationStrategy',
         );
       }
@@ -95,7 +90,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         platform: platform,
         contractAddress: contractAddress,
       );
-      
+
       if (KdfLoggingConfig.verboseLogging) {
         log(
           '[RPC] Successfully activated custom ERC20 token: ${asset.id.id}',
@@ -115,17 +110,12 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 2,
-          errorCode: 'ERC20_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'ERC20_ACTIVATION_ERROR',
+        stepCount: 2,
       );
     }
   }

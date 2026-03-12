@@ -42,7 +42,8 @@ class KdfHttpServerOperations implements IKdfOperations {
       // The mm2_main function now returns a Promise that resolves to a result code
       // or rejects with a structured error. We need to handle both cases.
       final resultStr = await controller.evaluateJavascript(
-        source: '''
+        source:
+            '''
           (async function() {
             try {
               const result = await kdf.mm2_main(${jsonEncode(jsConfig)});
@@ -165,7 +166,8 @@ class KdfHttpServerOperations implements IKdfOperations {
 
     try {
       final responseStr = await controller.evaluateJavascript(
-        source: '''
+        source:
+            '''
           (async function() {
             try {
               const result = await kdf.mm2_rpc(${jsonEncode(request)});
@@ -211,6 +213,9 @@ class KdfHttpServerOperations implements IKdfOperations {
     }
   }
 
+  @override
+  void resetHttpClient() {}
+
   Future<void> _ensureWebViewInitialized() async {
     if (_isInitialized) return;
 
@@ -249,6 +254,7 @@ class KdfHttpServerOperations implements IKdfOperations {
     _logger?.call('HTTP server running at http://localhost:8080');
   }
 
+  @override
   void dispose() {
     _webView.dispose();
     _server.close();
