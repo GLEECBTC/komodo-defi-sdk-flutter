@@ -66,6 +66,12 @@ class ActivationManager {
     String reason = 'Activation cancelled by caller',
   }) {
     if (_isDisposed) return;
+    // Only record cancellation for activations that are currently in-flight.
+    // This avoids stale cancellation markers cancelling future fresh attempts.
+    if (!_activationCompleters.containsKey(assetId)) {
+      _cancelledActivations.remove(assetId);
+      return;
+    }
     _cancelledActivations[assetId] = reason;
   }
 

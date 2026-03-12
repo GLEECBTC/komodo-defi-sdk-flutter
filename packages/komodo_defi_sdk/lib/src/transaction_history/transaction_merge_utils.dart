@@ -104,13 +104,13 @@ class TransactionListReconciler {
     };
 
     for (final tx in incoming) {
+      _mergeInPlace(byKey, tx);
       _firstSeenAtByInternalId.putIfAbsent(
         tx.internalId,
         () => tx.timestamp.millisecondsSinceEpoch != 0
             ? tx.timestamp
             : DateTime.now(),
       );
-      _mergeInPlace(byKey, tx);
     }
 
     final merged = byKey.values.toList()..sort(_compareTransactions);
