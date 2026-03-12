@@ -32,6 +32,15 @@ abstract interface class _TransactionHistoryManager {
   /// with the initial batch from storage and the latest transactions from
   /// the API. The stream will close when the latest transaction is reached.
   Stream<List<Transaction>> getTransactionsStreamed(Asset asset);
+
+  /// High-level merged history stream for UI list consumption.
+  ///
+  /// This stream handles update reconciliation, pending->confirmed bridging,
+  /// and stable ordering internally.
+  Stream<List<Transaction>> watchTransactionHistoryMerged(
+    Asset asset, {
+    Transaction Function(Transaction transaction)? transform,
+  });
 }
 
 class TransactionHistoryManager implements _TransactionHistoryManager {
@@ -333,6 +342,35 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           );
         }
       }
+    }
+  }
+
+  @override
+  Stream<List<Transaction>> watchTransactionHistoryMerged(
+    Asset asset, {
+    Transaction Function(Transaction transaction)? transform,
+  }) async* {
+    final reconciler = TransactionListReconciler();
+    var merged = <Transaction>[];
+    var emittedInitial = false;
+
+    await for (final batch in getTransactionsStreamed(asset)) {
+      final incoming = transform == null
+          ? batch
+          : batch.map(transform).toList(growable: false);
+      merged = reconciler.merge(existing: merged, incoming: incoming);
+      emittedInitial = true;
+      yield List<Transaction>.unmodifiable(merged);
+    }
+
+    if (!emittedInitial) {
+      yield const <Transaction>[];
+    }
+
+    await for (final transaction in watchTransactions(asset)) {
+      final normalized = transform?.call(transaction) ?? transaction;
+      merged = reconciler.merge(existing: merged, incoming: [normalized]);
+      yield List<Transaction>.unmodifiable(merged);
     }
   }
 
