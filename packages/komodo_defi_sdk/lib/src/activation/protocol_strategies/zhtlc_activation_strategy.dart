@@ -128,6 +128,13 @@ class ZhtlcActivationStrategy extends ProtocolActivationStrategy {
             isTaskComplete: (TaskStatusResponse s) =>
                 s.status == 'Ok' || s.status == 'Error',
             pollingInterval: effectivePollingInterval,
+            pollingIntervalForStatus: (TaskStatusResponse s) {
+              final parsed = progressEstimator.parse(s.details);
+              // Back off to 5s until requesting balance; then use the effective (fast) interval.
+              return parsed.phase == ZhtlcActivationPhase.requestingWalletBalance
+                  ? effectivePollingInterval
+                  : const Duration(seconds: 5);
+            },
             // cancelTask intentionally omitted, as it is not used in this
             // context and leaving it enabled lead to uncaught exceptions
             // when taskId was already finished.
