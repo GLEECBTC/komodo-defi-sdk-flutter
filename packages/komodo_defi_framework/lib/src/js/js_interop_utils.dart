@@ -8,6 +8,11 @@ import 'package:logging/logging.dart';
 
 final Logger _jsInteropLogger = Logger('JsInteropUtils');
 
+@js_interop.JS('Promise.resolve')
+external js_interop.JSPromise<js_interop.JSAny?> _resolveJsPromise(
+  js_interop.JSAny? value,
+);
+
 /// Parses a JS interop response into a JsonMap.
 ///
 /// Accepts:
@@ -16,14 +21,9 @@ final Logger _jsInteropLogger = Logger('JsInteropUtils');
 /// - String (JSON encoded)
 ///
 /// Throws a [FormatException] if the response cannot be parsed into a JSON map.
-JsonMap parseJsInteropJson(dynamic jsResponse) {
+JsonMap parseJsInteropJson(js_interop.JSAny? jsResponse) {
   try {
-    dynamic value = jsResponse;
-
-    // If we received a JS value, convert to Dart first
-    if (value is js_interop.JSAny?) {
-      value = value?.dartify();
-    }
+    final dynamic value = jsResponse?.dartify();
 
     if (value is String) {
       final decoded = jsonDecode(value);
@@ -45,7 +45,10 @@ JsonMap parseJsInteropJson(dynamic jsResponse) {
 }
 
 /// Generic helper that parses a JS response and maps it to a Dart model.
-T parseJsInteropCall<T>(dynamic jsResponse, T Function(JsonMap) fromJson) {
+T parseJsInteropCall<T>(
+  js_interop.JSAny? jsResponse,
+  T Function(JsonMap) fromJson,
+) {
   final map = parseJsInteropJson(jsResponse);
   return fromJson(map);
 }
@@ -76,11 +79,12 @@ List<dynamic> _deepConvertList(List<dynamic> list) {
 /// - If [jsValue] is not a JSPromise, it is dartified directly
 /// - Returns the dartified dynamic value
 Future<dynamic> resolveJsAnyMaybePromise(js_interop.JSAny? jsValue) async {
-  if (jsValue is js_interop.JSPromise) {
-    final resolved = await jsValue.toDart;
-    return resolved?.dartify();
+  if (jsValue == null || jsValue.isUndefinedOrNull) {
+    return null;
   }
-  return jsValue?.dartify();
+
+  final resolved = await _resolveJsPromise(jsValue).toDart;
+  return resolved?.dartify();
 }
 
 /// Generic helper to resolve a JS interop value (maybe a Promise) and map it.
