@@ -5,7 +5,7 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 part 'fee_info.freezed.dart';
 // We are doing manual fromJson/toJson, so no need for part 'fee_info.g.dart';
 
-/// A union representing eight possible fee types:
+/// A union representing nine possible fee types:
 /// - UtxoFixed
 /// - UtxoPerKbyte
 /// - EthGas (legacy)
@@ -13,6 +13,7 @@ part 'fee_info.freezed.dart';
 /// - Qrc20Gas
 /// - CosmosGas
 /// - Tendermint
+/// - Tron
 /// - Sia
 @Freezed()
 sealed class FeeInfo with _$FeeInfo {
@@ -55,8 +56,9 @@ sealed class FeeInfo with _$FeeInfo {
         return FeeInfo.ethGasEip1559(
           coin: json['coin'] as String? ?? '',
           maxFeePerGas: Decimal.parse(json['max_fee_per_gas'].toString()),
-          maxPriorityFeePerGas:
-              Decimal.parse(json['max_priority_fee_per_gas'].toString()),
+          maxPriorityFeePerGas: Decimal.parse(
+            json['max_priority_fee_per_gas'].toString(),
+          ),
           gas: json['gas'] as int,
           totalGasFee: totalGasFee,
         );
@@ -75,6 +77,17 @@ sealed class FeeInfo with _$FeeInfo {
           coin: json['coin'] as String? ?? '',
           amount: Decimal.parse(json['amount'].toString()),
           gasLimit: json['gas_limit'] as int,
+        );
+      case 'Tron':
+        return FeeInfo.tron(
+          coin: json['coin'] as String? ?? '',
+          bandwidthUsed: json['bandwidth_used'] as int? ?? 0,
+          energyUsed: json['energy_used'] as int? ?? 0,
+          bandwidthFee: Decimal.parse(json['bandwidth_fee'].toString()),
+          energyFee: Decimal.parse(json['energy_fee'].toString()),
+          totalFeeAmount: json['total_fee'] != null
+              ? Decimal.parse(json['total_fee'].toString())
+              : null,
         );
       case 'CosmosGas':
         return FeeInfo.cosmosGas(
@@ -210,7 +223,7 @@ sealed class FeeInfo with _$FeeInfo {
 
   /// 7) Tendermint fee, with fixed `amount` and `gasLimit`.
   ///
-  /// Example JSON:
+  /// Example response JSON:
   /// ```json
   /// {
   ///   "type": "Tendermint",
@@ -219,7 +232,12 @@ sealed class FeeInfo with _$FeeInfo {
   ///   "gas_limit": 100000
   /// }
   /// ```
-  /// Total fee is just the amount (not calculated from gas * price)
+  ///
+  /// Parsed Tendermint responses use the `Tendermint` shape above, but
+  /// outgoing withdraw requests are still encoded as `CosmosGas` for
+  /// compatibility with the current KDF API.
+  ///
+  /// Total fee is just the amount (not calculated from gas * price).
   const factory FeeInfo.tendermint({
     required String coin,
 
@@ -230,7 +248,17 @@ sealed class FeeInfo with _$FeeInfo {
     required int gasLimit,
   }) = FeeInfoTendermint;
 
-  /// 8) SIA fee, with fixed `amount` and `policy`.
+  /// 8) TRON fee, with explicit bandwidth and energy usage/fees.
+  const factory FeeInfo.tron({
+    required String coin,
+    required int bandwidthUsed,
+    required int energyUsed,
+    required Decimal bandwidthFee,
+    required Decimal energyFee,
+    Decimal? totalFeeAmount,
+  }) = FeeInfoTron;
+
+  /// 9) SIA fee, with fixed `amount` and `policy`.
   ///
   /// Example JSON:
   /// ```json
@@ -254,97 +282,113 @@ sealed class FeeInfo with _$FeeInfo {
 
   /// A convenience getter returning the *total fee* in the coin's main units.
   Decimal get totalFee => switch (this) {
-        FeeInfoUtxoFixed(:final amount) => amount,
-        FeeInfoUtxoPerKbyte(:final amount) => amount,
-        FeeInfoEthGas(:final gasPrice, :final gas, :final totalGasFee) =>
-          totalGasFee ?? (gasPrice * Decimal.fromInt(gas)),
-        FeeInfoEthGasEip1559(
-          :final maxFeePerGas,
-          :final gas,
-          :final totalGasFee
-        ) =>
-          totalGasFee ?? (maxFeePerGas * Decimal.fromInt(gas)),
-        FeeInfoQrc20Gas(:final gasPrice, :final gasLimit, :final totalGasFee) =>
-          totalGasFee ?? (gasPrice * Decimal.fromInt(gasLimit)),
-        FeeInfoCosmosGas(:final gasPrice, :final gasLimit) =>
-          gasPrice * Decimal.fromInt(gasLimit),
-        FeeInfoTendermint(:final amount) => amount,
-        FeeInfoSia(:final amount) => amount,
-      };
+    FeeInfoUtxoFixed(:final amount) => amount,
+    FeeInfoUtxoPerKbyte(:final amount) => amount,
+    FeeInfoEthGas(:final gasPrice, :final gas, :final totalGasFee) =>
+      totalGasFee ?? (gasPrice * Decimal.fromInt(gas)),
+    FeeInfoEthGasEip1559(:final maxFeePerGas, :final gas, :final totalGasFee) =>
+      totalGasFee ?? (maxFeePerGas * Decimal.fromInt(gas)),
+    FeeInfoQrc20Gas(:final gasPrice, :final gasLimit, :final totalGasFee) =>
+      totalGasFee ?? (gasPrice * Decimal.fromInt(gasLimit)),
+    FeeInfoCosmosGas(:final gasPrice, :final gasLimit) =>
+      gasPrice * Decimal.fromInt(gasLimit),
+    FeeInfoTendermint(:final amount) => amount,
+    FeeInfoTron(:final bandwidthFee, :final energyFee, :final totalFeeAmount) =>
+      totalFeeAmount ?? (bandwidthFee + energyFee),
+    FeeInfoSia(:final amount) => amount,
+  };
 
   /// Convert this [FeeInfo] to a JSON object matching the mmRPC 2.0 docs.
   JsonMap toJson() => switch (this) {
-        FeeInfoUtxoFixed(:final coin, :final amount) => {
-            'type': 'UtxoFixed',
-            'coin': coin,
-            'amount': amount.toString(),
-          },
-        FeeInfoUtxoPerKbyte(:final coin, :final amount) => {
-            'type': 'UtxoPerKbyte',
-            'coin': coin,
-            'amount': amount.toString(),
-          },
-        FeeInfoEthGas(
-          :final coin,
-          :final gasPrice,
-          :final gas,
-          :final totalGasFee
-        ) =>
-          {
-            'type': 'EthGas',
-            'coin': coin,
-            'gas_price': gasPrice.toString(),
-            'gas': gas,
-            if (totalGasFee != null) 'total_fee': totalGasFee.toString(),
-          },
-        FeeInfoEthGasEip1559(
-          :final coin,
-          :final maxFeePerGas,
-          :final maxPriorityFeePerGas,
-          :final gas,
-          :final totalGasFee
-        ) =>
-          {
-            'type': 'EthGasEip1559',
-            'coin': coin,
-            'max_fee_per_gas': maxFeePerGas.toString(),
-            'max_priority_fee_per_gas': maxPriorityFeePerGas.toString(),
-            'gas': gas,
-            if (totalGasFee != null) 'total_fee': totalGasFee.toString(),
-          },
-        FeeInfoQrc20Gas(
-          :final coin,
-          :final gasPrice,
-          :final gasLimit,
-          :final totalGasFee
-        ) =>
-          {
-            'type': 'Qrc20Gas',
-            'coin': coin,
-            'gas_price': gasPrice.toDouble(),
-            'gas_limit': gasLimit,
-            if (totalGasFee != null) 'total_gas_fee': totalGasFee.toString(),
-          },
-        FeeInfoCosmosGas(:final coin, :final gasPrice, :final gasLimit) => {
-            'type': 'CosmosGas',
-            'coin': coin,
-            'gas_price': gasPrice.toDouble(),
-            'gas_limit': gasLimit,
-          },
-        // TODO: update to Tendermint for KDF v2.5.0-beta
-        FeeInfoTendermint(:final coin, :final amount, :final gasLimit) => {
-            'type': 'CosmosGas',
-            'coin': coin,
-            'gas_price': gasLimit > 0
-                ? (amount / Decimal.fromInt(gasLimit)).toDouble()
-                : 0.0,
-            'gas_limit': gasLimit,
-          },
-        FeeInfoSia(:final coin, :final amount, :final policy) => {
-            'type': 'Sia',
-            'coin': coin,
-            'total_amount': amount.toString(),
-            'policy': policy,
-          },
-      };
+    FeeInfoUtxoFixed(:final coin, :final amount) => {
+      'type': 'UtxoFixed',
+      'coin': coin,
+      'amount': amount.toString(),
+    },
+    FeeInfoUtxoPerKbyte(:final coin, :final amount) => {
+      'type': 'UtxoPerKbyte',
+      'coin': coin,
+      'amount': amount.toString(),
+    },
+    FeeInfoEthGas(
+      :final coin,
+      :final gasPrice,
+      :final gas,
+      :final totalGasFee,
+    ) =>
+      {
+        'type': 'EthGas',
+        'coin': coin,
+        'gas_price': gasPrice.toString(),
+        'gas': gas,
+        if (totalGasFee != null) 'total_fee': totalGasFee.toString(),
+      },
+    FeeInfoEthGasEip1559(
+      :final coin,
+      :final maxFeePerGas,
+      :final maxPriorityFeePerGas,
+      :final gas,
+      :final totalGasFee,
+    ) =>
+      {
+        'type': 'EthGasEip1559',
+        'coin': coin,
+        'max_fee_per_gas': maxFeePerGas.toString(),
+        'max_priority_fee_per_gas': maxPriorityFeePerGas.toString(),
+        'gas': gas,
+        if (totalGasFee != null) 'total_fee': totalGasFee.toString(),
+      },
+    FeeInfoQrc20Gas(
+      :final coin,
+      :final gasPrice,
+      :final gasLimit,
+      :final totalGasFee,
+    ) =>
+      {
+        'type': 'Qrc20Gas',
+        'coin': coin,
+        'gas_price': gasPrice.toDouble(),
+        'gas_limit': gasLimit,
+        if (totalGasFee != null) 'total_gas_fee': totalGasFee.toString(),
+      },
+    FeeInfoCosmosGas(:final coin, :final gasPrice, :final gasLimit) => {
+      'type': 'CosmosGas',
+      'coin': coin,
+      'gas_price': gasPrice.toDouble(),
+      'gas_limit': gasLimit,
+    },
+    // Tendermint fee responses use the `Tendermint` shape, but withdraw
+    // requests must still be sent as `CosmosGas`.
+    FeeInfoTendermint(:final coin, :final amount, :final gasLimit) => {
+      'type': 'CosmosGas',
+      'coin': coin,
+      'gas_price': gasLimit > 0
+          ? (amount / Decimal.fromInt(gasLimit)).toDouble()
+          : 0.0,
+      'gas_limit': gasLimit,
+    },
+    FeeInfoTron(
+      :final coin,
+      :final bandwidthUsed,
+      :final energyUsed,
+      :final bandwidthFee,
+      :final energyFee,
+      :final totalFeeAmount,
+    ) =>
+      {
+        'type': 'Tron',
+        'coin': coin,
+        'bandwidth_used': bandwidthUsed,
+        'energy_used': energyUsed,
+        'bandwidth_fee': bandwidthFee.toString(),
+        'energy_fee': energyFee.toString(),
+        if (totalFeeAmount != null) 'total_fee': totalFeeAmount.toString(),
+      },
+    FeeInfoSia(:final coin, :final amount, :final policy) => {
+      'type': 'Sia',
+      'coin': coin,
+      'total_amount': amount.toString(),
+      'policy': policy,
+    },
+  };
 }

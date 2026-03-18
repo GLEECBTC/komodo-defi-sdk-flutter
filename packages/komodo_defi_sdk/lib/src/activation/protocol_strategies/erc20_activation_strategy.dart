@@ -15,6 +15,7 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trc20,
     CoinSubClass.erc20,
     CoinSubClass.grc20,
     CoinSubClass.bep20,
@@ -32,7 +33,6 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
-    CoinSubClass.grc20,
   };
 
   @override
@@ -69,9 +69,17 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
     );
 
     try {
-      final activationParams = Erc20ActivationParams.fromJsonConfig(
-        asset.protocol.config,
-      );
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ).copyWith(privKeyPolicy: privKeyPolicy),
+        final Trc20Protocol _ => Trc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ).copyWith(privKeyPolicy: privKeyPolicy),
+        _ => throw UnsupportedError(
+          'Unsupported token protocol: ${asset.protocol.runtimeType}',
+        ),
+      };
 
       // Debug logging for ERC20 token activation
       if (KdfLoggingConfig.verboseLogging) {
@@ -113,7 +121,7 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
         asset: asset,
         error: e,
         stackTrace: stack,
-        errorCode: 'ERC20_ACTIVATION_ERROR',
+        errorCode: 'TOKEN_ACTIVATION_ERROR',
         stepCount: 2,
       );
     }

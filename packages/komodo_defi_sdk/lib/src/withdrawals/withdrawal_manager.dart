@@ -1031,6 +1031,7 @@ class WithdrawalManager {
         memo: params.memo,
         ibcTransfer: params.ibcTransfer,
         ibcSourceChannel: params.ibcSourceChannel,
+        expirationSeconds: params.expirationSeconds,
         isMax: params.isMax,
       );
     } catch (e, stackTrace) {

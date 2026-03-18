@@ -18,7 +18,7 @@ class EnableEthWithTokensRequest
        );
 
   final String ticker;
-  final EthWithTokensActivationParams activationParams;
+  final ActivationParams activationParams;
   final bool getBalances;
 
   @override
@@ -34,7 +34,7 @@ class EnableEthWithTokensRequest
 
   @override
   EnableEthWithTokensResponse parse(Map<String, dynamic> json) =>
-      EnableEthWithTokensResponse.parse(json);
+      EnableEthWithTokensResponse.parse(json, platformTicker: ticker);
 }
 
 /// Response from enabling ETH with tokens request
@@ -46,16 +46,23 @@ class EnableEthWithTokensResponse extends BaseResponse {
     required this.nftsInfos,
   });
 
-  factory EnableEthWithTokensResponse.parse(JsonMap json) {
+  factory EnableEthWithTokensResponse.parse(
+    JsonMap json, {
+    String? platformTicker,
+  }) {
     final result = json.value<JsonMap>('result');
 
+    final walletBalanceJson = result.valueOrNull<JsonMap>('wallet_balance');
     return EnableEthWithTokensResponse(
       mmrpc: json.value<String>('mmrpc'),
       currentBlock: result.value<int>('current_block'),
-      walletBalance: WalletBalance.fromJson(
-        result.value<JsonMap>('wallet_balance'),
-      ),
-      nftsInfos: result.value<JsonMap>('nfts_infos'),
+      walletBalance: walletBalanceJson != null
+          ? WalletBalance.fromJson(walletBalanceJson)
+          : WalletBalance.fromLegacyAddressInfos(
+              result,
+              platformTicker: platformTicker,
+            ),
+      nftsInfos: result.valueOrNull<JsonMap>('nfts_infos') ?? const {},
     );
   }
 
@@ -80,11 +87,55 @@ class WalletBalance {
   factory WalletBalance.fromJson(JsonMap json) {
     return WalletBalance(
       walletType: json.value<String>('wallet_type'),
-      accounts:
-          json
-              .value<List<dynamic>>('accounts')
-              .map((e) => WalletAccount.fromJson(e as JsonMap))
-              .toList(),
+      accounts: json
+          .value<List<dynamic>>('accounts')
+          .map((e) => WalletAccount.fromJson(e as JsonMap))
+          .toList(),
+    );
+  }
+
+  factory WalletBalance.fromLegacyAddressInfos(
+    JsonMap json, {
+    String? platformTicker,
+  }) {
+    final platformAddresses =
+        json.valueOrNull<JsonMap>('eth_addresses_infos') ?? const {};
+    final tokenAddresses =
+        json.valueOrNull<JsonMap>('erc20_addresses_infos') ?? const {};
+    final addressesByValue = <String, WalletAddress>{};
+    void addLegacyAddress(String address, JsonMap json) {
+      final next = WalletAddress.fromLegacyJson(
+        address: address,
+        json: json,
+        platformTicker: platformTicker,
+      );
+      final previous = addressesByValue[address];
+      addressesByValue[address] = previous == null
+          ? next
+          : previous.merge(next);
+    }
+
+    for (final entry in platformAddresses.entries) {
+      addLegacyAddress(entry.key, entry.value as JsonMap);
+    }
+    for (final entry in tokenAddresses.entries) {
+      addLegacyAddress(entry.key, entry.value as JsonMap);
+    }
+    final addresses = addressesByValue.values.toList();
+    final totalBalance = _aggregateTokenBalances(
+      addresses.map((address) => address.balance),
+    );
+
+    return WalletBalance(
+      walletType: 'iguana',
+      accounts: [
+        WalletAccount(
+          accountIndex: 0,
+          derivationPath: '',
+          totalBalance: totalBalance,
+          addresses: addresses,
+        ),
+      ],
     );
   }
 
@@ -112,11 +163,10 @@ class WalletAccount {
       totalBalance: TokenBalanceMap.fromJson(
         json.value<JsonMap>('total_balance'),
       ),
-      addresses:
-          json
-              .value<List<dynamic>>('addresses')
-              .map((e) => WalletAddress.fromJson(e as JsonMap))
-              .toList(),
+      addresses: json
+          .value<List<dynamic>>('addresses')
+          .map((e) => WalletAddress.fromJson(e as JsonMap))
+          .toList(),
     );
   }
 
@@ -150,6 +200,27 @@ class WalletAddress {
     );
   }
 
+  factory WalletAddress.fromLegacyJson({
+    required String address,
+    required JsonMap json,
+    String? platformTicker,
+  }) {
+    final balancesJson = json.valueOrNull<JsonMap>('balances');
+    final tickers =
+        json.valueOrNull<List<dynamic>>('tickers')?.whereType<String>() ??
+        const <String>[];
+    return WalletAddress(
+      address: address,
+      derivationPath: json.valueOrNull<String>('derivation_path') ?? '',
+      chain: json.valueOrNull<String>('chain') ?? 'external',
+      balance: _legacyBalancesToTokenBalanceMap(
+        balancesJson,
+        platformTicker: platformTicker,
+        tickers: tickers,
+      ),
+    );
+  }
+
   final String address;
   final String derivationPath;
   final String chain;
@@ -161,4 +232,55 @@ class WalletAddress {
     'chain': chain,
     'balance': balance.toJson(),
   };
+
+  WalletAddress merge(WalletAddress other) {
+    return WalletAddress(
+      address: address,
+      derivationPath: derivationPath.isNotEmpty
+          ? derivationPath
+          : other.derivationPath,
+      chain: chain.isNotEmpty ? chain : other.chain,
+      balance: _aggregateTokenBalances([balance, other.balance]),
+    );
+  }
+}
+
+TokenBalanceMap _legacyBalancesToTokenBalanceMap(
+  JsonMap? balancesJson, {
+  String? platformTicker,
+  Iterable<String> tickers = const <String>[],
+}) {
+  final zeroBalancesJson = _zeroBalancesJsonFromTickers(tickers);
+  if (balancesJson == null) {
+    return TokenBalanceMap.fromJson(zeroBalancesJson);
+  }
+  if (balancesJson.values.every((value) => value is JsonMap)) {
+    return TokenBalanceMap.fromJson({...zeroBalancesJson, ...balancesJson});
+  }
+  final ticker = platformTicker ?? 'ETH';
+  return TokenBalanceMap.fromJson({...zeroBalancesJson, ticker: balancesJson});
+}
+
+JsonMap _zeroBalancesJsonFromTickers(Iterable<String> tickers) =>
+    Map.fromEntries(
+      tickers.toSet().map(
+        (ticker) =>
+            MapEntry<String, dynamic>(ticker, BalanceInfo.zero().toJson()),
+      ),
+    );
+
+TokenBalanceMap _aggregateTokenBalances(Iterable<TokenBalanceMap> balances) {
+  final aggregated = <String, BalanceInfo>{};
+  for (final tokenBalanceMap in balances) {
+    final json = tokenBalanceMap.toJson();
+    for (final entry in json.entries) {
+      final balance = BalanceInfo.fromJson(entry.value as JsonMap);
+      aggregated.update(
+        entry.key,
+        (current) => current + balance,
+        ifAbsent: () => balance,
+      );
+    }
+  }
+  return TokenBalanceMap(balances: aggregated);
 }

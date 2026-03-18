@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:komodo_defi_types/src/utils/json_type_utils.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class AssetId extends Equatable {
   const AssetId({
@@ -15,7 +16,7 @@ class AssetId extends Equatable {
   });
 
   factory AssetId.parse(JsonMap json, {required Set<AssetId>? knownIds}) {
-    final subClass = CoinSubClass.parse(json.value('type'));
+    final subClass = resolveProtocolSubClassFromConfig(json);
 
     final parentCoinTicker = json.valueOrNull<String>('parent_coin');
     final maybeParent = parentCoinTicker == null
