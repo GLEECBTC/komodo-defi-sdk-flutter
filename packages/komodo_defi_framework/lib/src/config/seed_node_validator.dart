@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 
 /// Helper class to validate seed node configurations
 class SeedNodeValidator {
+  static const List<String> _defaultSeedNodes = ['seed01.kmdefi.net'];
+
   /// Validates the seed node configuration
   ///
   /// Throws [KdfException] if the configuration is invalid
@@ -23,8 +26,10 @@ class SeedNodeValidator {
     // If P2P is disabled, no need for further validation
     if (disableP2p ?? false) {
       if (KdfLoggingConfig.verboseLogging) {
-        print('WARN P2P is disabled. Features that require a P2P network '
-            '(like swaps, peer health checks, etc.) will not work.');
+        debugPrint(
+          'WARN P2P is disabled. Features that require a P2P network '
+          '(like swaps, peer health checks, etc.) will not work.',
+        );
       }
       return;
     }
@@ -58,17 +63,19 @@ class SeedNodeValidator {
     // Warning about future requirements - updated to be more explicit
     if (seedNodes == null || seedNodes.isEmpty) {
       if (KdfLoggingConfig.verboseLogging) {
-        print('WARN From v2.5.0-beta, there will be no default seed nodes, '
-            'and the seednodes parameter will be required unless disable_p2p is set to true.');
+        debugPrint(
+          'WARN From v2.5.0-beta, there will be no default seed nodes, '
+          'and the seednodes parameter will be required unless '
+          'disable_p2p is set to true.',
+        );
       }
     }
   }
 
-  /// Gets the default seed nodes if none are provided
+  /// Gets the emergency fallback seed nodes.
   ///
-  /// Note: From v2.5.0-beta, there will be no default seed nodes,
-  /// and the seednodes parameter will be required unless disable_p2p is set to true.
-  static List<String> getDefaultSeedNodes() {
-    return ['seed01.kmdefi.net', 'seed02.kmdefi.net'];
-  }
+  /// The primary fallback path loads the bundled `seed_nodes.json` asset.
+  /// This list is kept as a last-resort fallback when the asset cannot be
+  /// loaded or does not contain any valid nodes for the current net ID.
+  static List<String> getDefaultSeedNodes() => _defaultSeedNodes;
 }
