@@ -1,17 +1,15 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class QtumProtocol extends ProtocolClass {
-  QtumProtocol._({
-    required super.subClass,
-    required super.config,
-  });
+  QtumProtocol._({required super.subClass, required super.config});
 
-  factory QtumProtocol.fromJson(JsonMap json) {
+  factory QtumProtocol.fromJson(JsonMap json, {CoinSubClass? subClass}) {
     _validateQtumConfig(json);
     return QtumProtocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       config: json,
     );
   }
@@ -36,10 +34,7 @@ class QtumProtocol extends ProtocolClass {
 
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }

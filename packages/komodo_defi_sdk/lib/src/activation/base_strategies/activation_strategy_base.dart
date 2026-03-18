@@ -89,7 +89,7 @@ class SmartAssetActivator extends BatchCapableActivator {
   }
 
   bool _supportsBatchActivation(Asset asset) {
-    return asset.protocol.supportedProtocols.isNotEmpty;
+    return _activator.supportsBatchActivationFor(asset);
   }
 }
 
@@ -113,6 +113,10 @@ class CompositeAssetActivator extends BatchCapableActivator {
       ),
     );
     return strategy;
+  }
+
+  bool supportsBatchActivationFor(Asset asset) {
+    return _findStrategy(asset).supportsBatchActivation;
   }
 
   @override

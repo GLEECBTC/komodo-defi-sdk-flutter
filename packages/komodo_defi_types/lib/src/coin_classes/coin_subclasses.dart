@@ -3,6 +3,8 @@ import 'dart:ui';
 // TODO? Add a getter for the ticker of the coin subclass if needed. But this
 // may overlap with the protocol class, in which case it's not needed.
 enum CoinSubClass {
+  trx,
+  trc20,
   moonbeam,
   ftm20,
   arbitrum,
@@ -40,6 +42,10 @@ enum CoinSubClass {
   // TODO: verify all the tickers.
   String get ticker {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRX';
+      case CoinSubClass.trc20:
+        return 'TRX';
       case CoinSubClass.moonbeam:
         return 'MOON';
       case CoinSubClass.ftm20:
@@ -100,6 +106,10 @@ enum CoinSubClass {
 
   String get iconTicker {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRX';
+      case CoinSubClass.trc20:
+        return 'TRC';
       case CoinSubClass.moonbeam:
         return 'GLMR';
       case CoinSubClass.ftm20:
@@ -248,6 +258,10 @@ enum CoinSubClass {
       return true;
     }
 
+    if (this == CoinSubClass.trx && child == CoinSubClass.trc20) {
+      return true;
+    }
+
     // For most cases, parent and child should have the same subclass
     return this == child;
   }
@@ -261,6 +275,10 @@ enum CoinSubClass {
   // subclasses where they don't have a symbol used in coin IDs.
   String get formatted {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRON';
+      case CoinSubClass.trc20:
+        return 'TRC20';
       case CoinSubClass.moonbeam:
         return 'Moonbeam';
       case CoinSubClass.ftm20:
@@ -320,6 +338,9 @@ enum CoinSubClass {
 
   Color? get color {
     switch (this) {
+      case CoinSubClass.trx:
+      case CoinSubClass.trc20:
+        return const Color(0xFFFF060A); // trx: "#ff060a"
       case CoinSubClass.moonbeam:
         return const Color(0xFFE4147C); // glmr: "#e4147c"
       case CoinSubClass.ftm20:
@@ -385,6 +406,8 @@ extension CoinSubClassTokenStandard on CoinSubClass {
   /// be appended for the given subclass.
   String? get tokenStandardSuffix {
     switch (this) {
+      case CoinSubClass.trc20:
+        return 'TRC20';
       case CoinSubClass.erc20:
         return 'ERC20';
       case CoinSubClass.grc20:
@@ -413,6 +436,7 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'HCO20';
       // Subclasses without a canonical short token/network standard suffix
       case CoinSubClass.moonbeam:
+      case CoinSubClass.trx:
       case CoinSubClass.slp: // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.sia:
       case CoinSubClass.smartChain:

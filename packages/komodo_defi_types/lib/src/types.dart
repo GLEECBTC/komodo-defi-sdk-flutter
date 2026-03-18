@@ -40,6 +40,8 @@ export 'protocols/qtum/qtum_protocol.dart';
 export 'protocols/sia/sia_protocol.dart';
 export 'protocols/slp/slp_protocol.dart';
 export 'protocols/tendermint/tendermint_protocol.dart';
+export 'protocols/trc20/trc20_protocol.dart';
+export 'protocols/trx/trx_protocol.dart';
 export 'protocols/utxo/utxo_protocol.dart';
 export 'protocols/zhtlc/zhtlc_protocol.dart';
 export 'public_key/address_operations.dart';

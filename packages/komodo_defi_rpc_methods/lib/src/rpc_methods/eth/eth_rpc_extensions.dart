@@ -7,7 +7,7 @@ class Erc20MethodsNamespace extends BaseRpcMethodNamespace {
 
   Future<EnableEthWithTokensResponse> enableEthWithTokens({
     required String ticker,
-    required EthWithTokensActivationParams params,
+    required ActivationParams params,
     bool getBalances = true,
   }) {
     return execute(
@@ -22,7 +22,7 @@ class Erc20MethodsNamespace extends BaseRpcMethodNamespace {
 
   Future<EnableErc20Response> enableErc20({
     required String ticker,
-    required Erc20ActivationParams activationParams,
+    required ActivationParams activationParams,
   }) {
     return execute(
       EnableErc20Request(
@@ -35,9 +35,10 @@ class Erc20MethodsNamespace extends BaseRpcMethodNamespace {
 
   Future<EnableErc20Response> enableCustomErc20Token({
     required String ticker,
-    required Erc20ActivationParams activationParams,
+    required ActivationParams activationParams,
     required String platform,
     required String contractAddress,
+    String protocolType = 'ERC20',
   }) {
     return execute(
       EnableCustomErc20TokenRequest(
@@ -46,6 +47,7 @@ class Erc20MethodsNamespace extends BaseRpcMethodNamespace {
         activationParams: activationParams,
         platform: platform,
         contractAddress: contractAddress,
+        protocolType: protocolType,
       ),
     );
   }
@@ -53,7 +55,7 @@ class Erc20MethodsNamespace extends BaseRpcMethodNamespace {
   // ETH Task Methods
   Future<NewTaskResponse> enableEthInit({
     required String ticker,
-    required EthWithTokensActivationParams params,
+    required ActivationParams params,
   }) {
     return execute(
       TaskEnableEthInit(rpcPass: rpcPass ?? '', ticker: ticker, params: params),

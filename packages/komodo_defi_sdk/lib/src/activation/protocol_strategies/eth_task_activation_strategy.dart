@@ -17,6 +17,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trx,
     CoinSubClass.erc20,
     CoinSubClass.grc20,
     CoinSubClass.bep20,
@@ -34,7 +35,6 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
-    CoinSubClass.grc20,
   };
 
   @override
@@ -52,7 +52,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
     Asset asset, [
     List<Asset>? children,
   ]) async* {
-    final protocol = asset.protocol as Erc20Protocol;
+    final protocol = asset.protocol;
 
     yield ActivationProgress(
       status: 'Starting ${asset.id.name} activation...',
@@ -62,7 +62,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
         additionalInfo: {
           'chainType': protocol.subClass.formatted,
           'contractAddress': protocol.contractAddress,
-          'nodes': protocol.nodes.length,
+          'nodes': protocol.requiredServers.electrum?.length ?? 0,
         },
       ),
     );
@@ -84,21 +84,35 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
               asset,
             );
 
-      final activationParams =
+      final tokenRequests =
+          children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ?? [];
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ =>
           EthWithTokensActivationParams.fromJson(
             asset.protocol.config,
           ).copyWith(
-            erc20Tokens:
-                children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ??
-                [],
+            erc20Tokens: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
-          );
+          ),
+        final TrxProtocol _ =>
+          TrxWithTokensActivationParams.fromJson(
+            asset.protocol.config,
+          ).copyWith(
+            tokenRequests: tokenRequests,
+            txHistory: txHistoryFlag,
+            privKeyPolicy: privKeyPolicy,
+          ),
+        _ => throw UnsupportedError(
+          'Unsupported platform protocol for task activation: '
+          '${asset.protocol.runtimeType}',
+        ),
+      };
 
       // Debug logging for ETH task-based activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Activating ETH platform (task-based): ${asset.id.id}',
+          '[RPC] Activating platform asset (task-based): ${asset.id.id}',
           name: 'EthTaskActivationStrategy',
         );
         log(
@@ -180,7 +194,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
         asset: asset,
         error: e,
         stackTrace: stack,
-        errorCode: 'ETH_TASK_ACTIVATION_ERROR',
+        errorCode: 'PLATFORM_TASK_ACTIVATION_ERROR',
         stepCount: 5,
       );
     }
@@ -210,7 +224,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
         );
       case 'ActivatingTokens':
         return (
-          status: 'Activating ERC20 tokens...',
+          status: 'Activating token assets...',
           percentage: 80,
           step: ActivationStep.tokenActivation,
           info: {'activationType': 'tokens'},

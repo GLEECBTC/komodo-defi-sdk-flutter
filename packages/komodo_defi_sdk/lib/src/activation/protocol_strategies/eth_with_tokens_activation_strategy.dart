@@ -17,6 +17,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trx,
     CoinSubClass.erc20,
     CoinSubClass.grc20,
     CoinSubClass.bep20,
@@ -34,7 +35,6 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
-    CoinSubClass.grc20, 
   };
 
   @override
@@ -105,21 +105,35 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
               asset,
             );
 
-      final activationParams =
+      final tokenRequests =
+          children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ?? [];
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ =>
           EthWithTokensActivationParams.fromJson(
             asset.protocol.config,
           ).copyWith(
-            erc20Tokens:
-                children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ??
-                [],
+            erc20Tokens: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
-          );
+          ),
+        final TrxProtocol _ =>
+          TrxWithTokensActivationParams.fromJson(
+            asset.protocol.config,
+          ).copyWith(
+            tokenRequests: tokenRequests,
+            txHistory: txHistoryFlag,
+            privKeyPolicy: privKeyPolicy,
+          ),
+        _ => throw UnsupportedError(
+          'Unsupported platform protocol for batch activation: '
+          '${asset.protocol.runtimeType}',
+        ),
+      };
 
       // Debug logging for ETH platform activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Activating ETH platform: ${asset.id.id}',
+          '[RPC] Activating platform asset: ${asset.id.id}',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -137,7 +151,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Successfully activated ETH platform: ${asset.id.id} with ${children?.length ?? 0} tokens',
+          '[RPC] Successfully activated platform asset: ${asset.id.id} with ${children?.length ?? 0} tokens',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -168,7 +182,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
         asset: asset,
         error: e,
         stackTrace: stack,
-        errorCode: 'ETH_WITH_TOKENS_ACTIVATION_ERROR',
+        errorCode: 'PLATFORM_WITH_TOKENS_ACTIVATION_ERROR',
         stepCount: 3,
       );
     }

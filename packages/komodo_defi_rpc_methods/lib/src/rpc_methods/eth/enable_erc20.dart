@@ -10,7 +10,7 @@ class EnableErc20Request
   }) : super(method: 'enable_erc20', rpcPass: rpcPass, mmrpc: RpcVersion.v2_0);
 
   final String ticker;
-  final Erc20ActivationParams activationParams;
+  final ActivationParams activationParams;
 
   @override
   Map<String, dynamic> toJson() {

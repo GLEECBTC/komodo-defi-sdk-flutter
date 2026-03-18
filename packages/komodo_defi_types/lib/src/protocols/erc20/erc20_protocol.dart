@@ -1,6 +1,7 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class Erc20Protocol extends ProtocolClass {
   Erc20Protocol._({
@@ -9,10 +10,10 @@ class Erc20Protocol extends ProtocolClass {
     super.isCustomToken = false,
   });
 
-  factory Erc20Protocol.fromJson(JsonMap json) {
+  factory Erc20Protocol.fromJson(JsonMap json, {CoinSubClass? subClass}) {
     _validateErc20Config(json);
     return Erc20Protocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       isCustomToken: json.valueOrNull<bool>('is_custom_token') ?? false,
       config: json,
     );
@@ -31,7 +32,9 @@ class Erc20Protocol extends ProtocolClass {
   ActivationParams defaultActivationParams({PrivateKeyPolicy? privKeyPolicy}) {
     // For ERC20, we typically don't need child tokens in the default case
     // If you need to support child tokens, you can add an overloaded method
-    return Erc20ActivationParams.fromJsonConfig(super.config);
+    return Erc20ActivationParams.fromJsonConfig(
+      super.config,
+    ).copyWith(privKeyPolicy: privKeyPolicy);
   }
 
   ActivationParams activationParamsWithTokens([List<Asset>? childTokens]) {
@@ -54,10 +57,7 @@ class Erc20Protocol extends ProtocolClass {
 
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }

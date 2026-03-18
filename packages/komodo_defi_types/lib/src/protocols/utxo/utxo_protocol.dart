@@ -1,6 +1,7 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class UtxoProtocol extends ProtocolClass {
   UtxoProtocol._({
@@ -11,11 +12,12 @@ class UtxoProtocol extends ProtocolClass {
 
   factory UtxoProtocol.fromJson(
     JsonMap json, {
+    CoinSubClass? subClass,
     List<CoinSubClass> supportedProtocols = const [],
   }) {
     _validateUtxoConfig(json);
     return UtxoProtocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       config: json,
       supportedProtocols: supportedProtocols,
     );
@@ -37,10 +39,7 @@ class UtxoProtocol extends ProtocolClass {
     }
 
     return UtxoActivationParams.fromJson(config)
-        .copyWith(
-          txHistory: true,
-          privKeyPolicy: privKeyPolicy,
-        )
+        .copyWith(txHistory: true, privKeyPolicy: privKeyPolicy)
         .copyWithHd(
           minAddressesNumber: 1,
           scanPolicy: scanPolicy,
@@ -74,10 +73,7 @@ class UtxoProtocol extends ProtocolClass {
 
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }
