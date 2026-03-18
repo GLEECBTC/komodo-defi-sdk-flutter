@@ -9,12 +9,14 @@ class EnableCustomErc20TokenRequest
     required this.activationParams,
     required this.platform,
     required this.contractAddress,
+    this.protocolType = 'ERC20',
   }) : super(method: 'enable_erc20', rpcPass: rpcPass, mmrpc: RpcVersion.v2_0);
 
   final String ticker;
-  final Erc20ActivationParams activationParams;
+  final ActivationParams activationParams;
   final String platform;
   final String contractAddress;
+  final String protocolType;
 
   @override
   Map<String, dynamic> toJson() {
@@ -32,7 +34,7 @@ class EnableCustomErc20TokenRequest
         'ticker': ticker,
         'activation_params': activationParams.toRpcParams(),
         'protocol': {
-          'type': 'ERC20',
+          'type': protocolType,
           'protocol_data': {
             'platform': platform,
             'contract_address': contractAddress,

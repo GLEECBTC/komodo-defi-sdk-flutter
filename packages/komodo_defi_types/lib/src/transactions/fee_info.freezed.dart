@@ -87,7 +87,7 @@ extension FeeInfoPatterns on FeeInfo {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( FeeInfoUtxoFixed value)?  utxoFixed,TResult Function( FeeInfoUtxoPerKbyte value)?  utxoPerKbyte,TResult Function( FeeInfoEthGas value)?  ethGas,TResult Function( FeeInfoEthGasEip1559 value)?  ethGasEip1559,TResult Function( FeeInfoQrc20Gas value)?  qrc20Gas,TResult Function( FeeInfoCosmosGas value)?  cosmosGas,TResult Function( FeeInfoTendermint value)?  tendermint,TResult Function( FeeInfoSia value)?  sia,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( FeeInfoUtxoFixed value)?  utxoFixed,TResult Function( FeeInfoUtxoPerKbyte value)?  utxoPerKbyte,TResult Function( FeeInfoEthGas value)?  ethGas,TResult Function( FeeInfoEthGasEip1559 value)?  ethGasEip1559,TResult Function( FeeInfoQrc20Gas value)?  qrc20Gas,TResult Function( FeeInfoCosmosGas value)?  cosmosGas,TResult Function( FeeInfoTendermint value)?  tendermint,TResult Function( FeeInfoTron value)?  tron,TResult Function( FeeInfoSia value)?  sia,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed() when utxoFixed != null:
@@ -97,7 +97,8 @@ return ethGas(_that);case FeeInfoEthGasEip1559() when ethGasEip1559 != null:
 return ethGasEip1559(_that);case FeeInfoQrc20Gas() when qrc20Gas != null:
 return qrc20Gas(_that);case FeeInfoCosmosGas() when cosmosGas != null:
 return cosmosGas(_that);case FeeInfoTendermint() when tendermint != null:
-return tendermint(_that);case FeeInfoSia() when sia != null:
+return tendermint(_that);case FeeInfoTron() when tron != null:
+return tron(_that);case FeeInfoSia() when sia != null:
 return sia(_that);case _:
   return orElse();
 
@@ -116,7 +117,7 @@ return sia(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( FeeInfoUtxoFixed value)  utxoFixed,required TResult Function( FeeInfoUtxoPerKbyte value)  utxoPerKbyte,required TResult Function( FeeInfoEthGas value)  ethGas,required TResult Function( FeeInfoEthGasEip1559 value)  ethGasEip1559,required TResult Function( FeeInfoQrc20Gas value)  qrc20Gas,required TResult Function( FeeInfoCosmosGas value)  cosmosGas,required TResult Function( FeeInfoTendermint value)  tendermint,required TResult Function( FeeInfoSia value)  sia,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( FeeInfoUtxoFixed value)  utxoFixed,required TResult Function( FeeInfoUtxoPerKbyte value)  utxoPerKbyte,required TResult Function( FeeInfoEthGas value)  ethGas,required TResult Function( FeeInfoEthGasEip1559 value)  ethGasEip1559,required TResult Function( FeeInfoQrc20Gas value)  qrc20Gas,required TResult Function( FeeInfoCosmosGas value)  cosmosGas,required TResult Function( FeeInfoTendermint value)  tendermint,required TResult Function( FeeInfoTron value)  tron,required TResult Function( FeeInfoSia value)  sia,}){
 final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed():
@@ -126,7 +127,8 @@ return ethGas(_that);case FeeInfoEthGasEip1559():
 return ethGasEip1559(_that);case FeeInfoQrc20Gas():
 return qrc20Gas(_that);case FeeInfoCosmosGas():
 return cosmosGas(_that);case FeeInfoTendermint():
-return tendermint(_that);case FeeInfoSia():
+return tendermint(_that);case FeeInfoTron():
+return tron(_that);case FeeInfoSia():
 return sia(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -141,7 +143,7 @@ return sia(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( FeeInfoUtxoFixed value)?  utxoFixed,TResult? Function( FeeInfoUtxoPerKbyte value)?  utxoPerKbyte,TResult? Function( FeeInfoEthGas value)?  ethGas,TResult? Function( FeeInfoEthGasEip1559 value)?  ethGasEip1559,TResult? Function( FeeInfoQrc20Gas value)?  qrc20Gas,TResult? Function( FeeInfoCosmosGas value)?  cosmosGas,TResult? Function( FeeInfoTendermint value)?  tendermint,TResult? Function( FeeInfoSia value)?  sia,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( FeeInfoUtxoFixed value)?  utxoFixed,TResult? Function( FeeInfoUtxoPerKbyte value)?  utxoPerKbyte,TResult? Function( FeeInfoEthGas value)?  ethGas,TResult? Function( FeeInfoEthGasEip1559 value)?  ethGasEip1559,TResult? Function( FeeInfoQrc20Gas value)?  qrc20Gas,TResult? Function( FeeInfoCosmosGas value)?  cosmosGas,TResult? Function( FeeInfoTendermint value)?  tendermint,TResult? Function( FeeInfoTron value)?  tron,TResult? Function( FeeInfoSia value)?  sia,}){
 final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed() when utxoFixed != null:
@@ -151,7 +153,8 @@ return ethGas(_that);case FeeInfoEthGasEip1559() when ethGasEip1559 != null:
 return ethGasEip1559(_that);case FeeInfoQrc20Gas() when qrc20Gas != null:
 return qrc20Gas(_that);case FeeInfoCosmosGas() when cosmosGas != null:
 return cosmosGas(_that);case FeeInfoTendermint() when tendermint != null:
-return tendermint(_that);case FeeInfoSia() when sia != null:
+return tendermint(_that);case FeeInfoTron() when tron != null:
+return tron(_that);case FeeInfoSia() when sia != null:
 return sia(_that);case _:
   return null;
 
@@ -169,7 +172,7 @@ return sia(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String coin,  Decimal amount)?  utxoFixed,TResult Function( String coin,  Decimal amount)?  utxoPerKbyte,TResult Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)?  ethGas,TResult Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)?  ethGasEip1559,TResult Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)?  qrc20Gas,TResult Function( String coin,  Decimal gasPrice,  int gasLimit)?  cosmosGas,TResult Function( String coin,  Decimal amount,  int gasLimit)?  tendermint,TResult Function( String coin,  Decimal amount,  String policy)?  sia,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String coin,  Decimal amount)?  utxoFixed,TResult Function( String coin,  Decimal amount)?  utxoPerKbyte,TResult Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)?  ethGas,TResult Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)?  ethGasEip1559,TResult Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)?  qrc20Gas,TResult Function( String coin,  Decimal gasPrice,  int gasLimit)?  cosmosGas,TResult Function( String coin,  Decimal amount,  int gasLimit)?  tendermint,TResult Function( String coin,  int bandwidthUsed,  int energyUsed,  Decimal bandwidthFee,  Decimal energyFee,  Decimal? totalFeeAmount)?  tron,TResult Function( String coin,  Decimal amount,  String policy)?  sia,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed() when utxoFixed != null:
 return utxoFixed(_that.coin,_that.amount);case FeeInfoUtxoPerKbyte() when utxoPerKbyte != null:
@@ -178,7 +181,8 @@ return ethGas(_that.coin,_that.gasPrice,_that.gas,_that.totalGasFee);case FeeInf
 return ethGasEip1559(_that.coin,_that.maxFeePerGas,_that.maxPriorityFeePerGas,_that.gas,_that.totalGasFee);case FeeInfoQrc20Gas() when qrc20Gas != null:
 return qrc20Gas(_that.coin,_that.gasPrice,_that.gasLimit,_that.totalGasFee);case FeeInfoCosmosGas() when cosmosGas != null:
 return cosmosGas(_that.coin,_that.gasPrice,_that.gasLimit);case FeeInfoTendermint() when tendermint != null:
-return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoSia() when sia != null:
+return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoTron() when tron != null:
+return tron(_that.coin,_that.bandwidthUsed,_that.energyUsed,_that.bandwidthFee,_that.energyFee,_that.totalFeeAmount);case FeeInfoSia() when sia != null:
 return sia(_that.coin,_that.amount,_that.policy);case _:
   return orElse();
 
@@ -197,7 +201,7 @@ return sia(_that.coin,_that.amount,_that.policy);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String coin,  Decimal amount)  utxoFixed,required TResult Function( String coin,  Decimal amount)  utxoPerKbyte,required TResult Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)  ethGas,required TResult Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)  ethGasEip1559,required TResult Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)  qrc20Gas,required TResult Function( String coin,  Decimal gasPrice,  int gasLimit)  cosmosGas,required TResult Function( String coin,  Decimal amount,  int gasLimit)  tendermint,required TResult Function( String coin,  Decimal amount,  String policy)  sia,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String coin,  Decimal amount)  utxoFixed,required TResult Function( String coin,  Decimal amount)  utxoPerKbyte,required TResult Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)  ethGas,required TResult Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)  ethGasEip1559,required TResult Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)  qrc20Gas,required TResult Function( String coin,  Decimal gasPrice,  int gasLimit)  cosmosGas,required TResult Function( String coin,  Decimal amount,  int gasLimit)  tendermint,required TResult Function( String coin,  int bandwidthUsed,  int energyUsed,  Decimal bandwidthFee,  Decimal energyFee,  Decimal? totalFeeAmount)  tron,required TResult Function( String coin,  Decimal amount,  String policy)  sia,}) {final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed():
 return utxoFixed(_that.coin,_that.amount);case FeeInfoUtxoPerKbyte():
@@ -206,7 +210,8 @@ return ethGas(_that.coin,_that.gasPrice,_that.gas,_that.totalGasFee);case FeeInf
 return ethGasEip1559(_that.coin,_that.maxFeePerGas,_that.maxPriorityFeePerGas,_that.gas,_that.totalGasFee);case FeeInfoQrc20Gas():
 return qrc20Gas(_that.coin,_that.gasPrice,_that.gasLimit,_that.totalGasFee);case FeeInfoCosmosGas():
 return cosmosGas(_that.coin,_that.gasPrice,_that.gasLimit);case FeeInfoTendermint():
-return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoSia():
+return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoTron():
+return tron(_that.coin,_that.bandwidthUsed,_that.energyUsed,_that.bandwidthFee,_that.energyFee,_that.totalFeeAmount);case FeeInfoSia():
 return sia(_that.coin,_that.amount,_that.policy);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -221,7 +226,7 @@ return sia(_that.coin,_that.amount,_that.policy);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String coin,  Decimal amount)?  utxoFixed,TResult? Function( String coin,  Decimal amount)?  utxoPerKbyte,TResult? Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)?  ethGas,TResult? Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)?  ethGasEip1559,TResult? Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)?  qrc20Gas,TResult? Function( String coin,  Decimal gasPrice,  int gasLimit)?  cosmosGas,TResult? Function( String coin,  Decimal amount,  int gasLimit)?  tendermint,TResult? Function( String coin,  Decimal amount,  String policy)?  sia,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String coin,  Decimal amount)?  utxoFixed,TResult? Function( String coin,  Decimal amount)?  utxoPerKbyte,TResult? Function( String coin,  Decimal gasPrice,  int gas,  Decimal? totalGasFee)?  ethGas,TResult? Function( String coin,  Decimal maxFeePerGas,  Decimal maxPriorityFeePerGas,  int gas,  Decimal? totalGasFee)?  ethGasEip1559,TResult? Function( String coin,  Decimal gasPrice,  int gasLimit,  Decimal? totalGasFee)?  qrc20Gas,TResult? Function( String coin,  Decimal gasPrice,  int gasLimit)?  cosmosGas,TResult? Function( String coin,  Decimal amount,  int gasLimit)?  tendermint,TResult? Function( String coin,  int bandwidthUsed,  int energyUsed,  Decimal bandwidthFee,  Decimal energyFee,  Decimal? totalFeeAmount)?  tron,TResult? Function( String coin,  Decimal amount,  String policy)?  sia,}) {final _that = this;
 switch (_that) {
 case FeeInfoUtxoFixed() when utxoFixed != null:
 return utxoFixed(_that.coin,_that.amount);case FeeInfoUtxoPerKbyte() when utxoPerKbyte != null:
@@ -230,7 +235,8 @@ return ethGas(_that.coin,_that.gasPrice,_that.gas,_that.totalGasFee);case FeeInf
 return ethGasEip1559(_that.coin,_that.maxFeePerGas,_that.maxPriorityFeePerGas,_that.gas,_that.totalGasFee);case FeeInfoQrc20Gas() when qrc20Gas != null:
 return qrc20Gas(_that.coin,_that.gasPrice,_that.gasLimit,_that.totalGasFee);case FeeInfoCosmosGas() when cosmosGas != null:
 return cosmosGas(_that.coin,_that.gasPrice,_that.gasLimit);case FeeInfoTendermint() when tendermint != null:
-return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoSia() when sia != null:
+return tendermint(_that.coin,_that.amount,_that.gasLimit);case FeeInfoTron() when tron != null:
+return tron(_that.coin,_that.bandwidthUsed,_that.energyUsed,_that.bandwidthFee,_that.energyFee,_that.totalFeeAmount);case FeeInfoSia() when sia != null:
 return sia(_that.coin,_that.amount,_that.policy);case _:
   return null;
 
@@ -746,6 +752,82 @@ coin: null == coin ? _self.coin : coin // ignore: cast_nullable_to_non_nullable
 as String,amount: null == amount ? _self.amount : amount // ignore: cast_nullable_to_non_nullable
 as Decimal,gasLimit: null == gasLimit ? _self.gasLimit : gasLimit // ignore: cast_nullable_to_non_nullable
 as int,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class FeeInfoTron extends FeeInfo {
+  const FeeInfoTron({required this.coin, required this.bandwidthUsed, required this.energyUsed, required this.bandwidthFee, required this.energyFee, this.totalFeeAmount}): super._();
+  
+
+@override final  String coin;
+ final  int bandwidthUsed;
+ final  int energyUsed;
+ final  Decimal bandwidthFee;
+ final  Decimal energyFee;
+ final  Decimal? totalFeeAmount;
+
+/// Create a copy of FeeInfo
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$FeeInfoTronCopyWith<FeeInfoTron> get copyWith => _$FeeInfoTronCopyWithImpl<FeeInfoTron>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is FeeInfoTron&&(identical(other.coin, coin) || other.coin == coin)&&(identical(other.bandwidthUsed, bandwidthUsed) || other.bandwidthUsed == bandwidthUsed)&&(identical(other.energyUsed, energyUsed) || other.energyUsed == energyUsed)&&(identical(other.bandwidthFee, bandwidthFee) || other.bandwidthFee == bandwidthFee)&&(identical(other.energyFee, energyFee) || other.energyFee == energyFee)&&(identical(other.totalFeeAmount, totalFeeAmount) || other.totalFeeAmount == totalFeeAmount));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,coin,bandwidthUsed,energyUsed,bandwidthFee,energyFee,totalFeeAmount);
+
+@override
+String toString() {
+  return 'FeeInfo.tron(coin: $coin, bandwidthUsed: $bandwidthUsed, energyUsed: $energyUsed, bandwidthFee: $bandwidthFee, energyFee: $energyFee, totalFeeAmount: $totalFeeAmount)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $FeeInfoTronCopyWith<$Res> implements $FeeInfoCopyWith<$Res> {
+  factory $FeeInfoTronCopyWith(FeeInfoTron value, $Res Function(FeeInfoTron) _then) = _$FeeInfoTronCopyWithImpl;
+@override @useResult
+$Res call({
+ String coin, int bandwidthUsed, int energyUsed, Decimal bandwidthFee, Decimal energyFee, Decimal? totalFeeAmount
+});
+
+
+
+
+}
+/// @nodoc
+class _$FeeInfoTronCopyWithImpl<$Res>
+    implements $FeeInfoTronCopyWith<$Res> {
+  _$FeeInfoTronCopyWithImpl(this._self, this._then);
+
+  final FeeInfoTron _self;
+  final $Res Function(FeeInfoTron) _then;
+
+/// Create a copy of FeeInfo
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? coin = null,Object? bandwidthUsed = null,Object? energyUsed = null,Object? bandwidthFee = null,Object? energyFee = null,Object? totalFeeAmount = freezed,}) {
+  return _then(FeeInfoTron(
+coin: null == coin ? _self.coin : coin // ignore: cast_nullable_to_non_nullable
+as String,bandwidthUsed: null == bandwidthUsed ? _self.bandwidthUsed : bandwidthUsed // ignore: cast_nullable_to_non_nullable
+as int,energyUsed: null == energyUsed ? _self.energyUsed : energyUsed // ignore: cast_nullable_to_non_nullable
+as int,bandwidthFee: null == bandwidthFee ? _self.bandwidthFee : bandwidthFee // ignore: cast_nullable_to_non_nullable
+as Decimal,energyFee: null == energyFee ? _self.energyFee : energyFee // ignore: cast_nullable_to_non_nullable
+as Decimal,totalFeeAmount: freezed == totalFeeAmount ? _self.totalFeeAmount : totalFeeAmount // ignore: cast_nullable_to_non_nullable
+as Decimal?,
   ));
 }
 

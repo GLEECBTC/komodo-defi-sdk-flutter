@@ -1,6 +1,7 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class TendermintProtocol extends ProtocolClass {
   TendermintProtocol._({
@@ -11,11 +12,12 @@ class TendermintProtocol extends ProtocolClass {
 
   factory TendermintProtocol.fromJson(
     JsonMap json, {
+    CoinSubClass? subClass,
     List<CoinSubClass> supportedProtocols = const [],
   }) {
     _validateTendermintConfig(json);
     return TendermintProtocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       config: json,
       supportedProtocols: supportedProtocols,
     );
@@ -30,10 +32,7 @@ class TendermintProtocol extends ProtocolClass {
 
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }

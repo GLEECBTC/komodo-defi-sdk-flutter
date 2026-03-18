@@ -14,5 +14,7 @@ export 'qtum_activation_params.dart';
 export 'sia_activation_params.dart';
 export 'slp_activation_params.dart';
 export 'tendermint_activation_params.dart';
+export 'trc20_activation_params.dart';
+export 'trx_activation_params.dart';
 export 'utxo_activation_params.dart';
 export 'zhtlc_activation_params.dart';

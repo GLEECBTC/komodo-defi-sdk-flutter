@@ -7,14 +7,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 const String _kDefaultKmdRewardsAmount = '0';
 
 /// Returns KMD-specific parameters for withdrawal requests
-/// 
+///
 /// KDF requires kmd_rewards object with claimed_by_me flag for KMD withdrawals
 Map<String, dynamic> _kmdRewardsParams() => {
-      'kmd_rewards': {
-        'amount': _kDefaultKmdRewardsAmount,
-        'claimed_by_me': true,
-      },
-    };
+  'kmd_rewards': {'amount': _kDefaultKmdRewardsAmount, 'claimed_by_me': true},
+};
 
 /// Request for standard withdrawal (non-task API)
 ///
@@ -34,6 +31,7 @@ class WithdrawRequest
     this.memo,
     this.max = false,
     this.ibcSourceChannel,
+    this.expirationSeconds,
   }) : assert(
          amount != null || max,
          'Amount cannot be specified if sending the maximum amount',
@@ -52,6 +50,7 @@ class WithdrawRequest
   final String? memo;
   final bool max;
   final int? ibcSourceChannel;
+  final int? expirationSeconds;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -66,6 +65,7 @@ class WithdrawRequest
       if (memo != null) 'memo': memo,
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
       if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
+      if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
     },
   };
 
@@ -100,6 +100,7 @@ class WithdrawInitRequest
        from = params.from,
        memo = params.memo,
        max = params.isMax ?? false,
+       expirationSeconds = params.expirationSeconds,
        assert(
          params.amount != null || (params.isMax ?? false),
          'Amount must be non-null if isMax is false and '
@@ -114,6 +115,7 @@ class WithdrawInitRequest
   final WithdrawalSource? from;
   final String? memo;
   final bool max;
+  final int? expirationSeconds;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -126,6 +128,7 @@ class WithdrawInitRequest
       if (from != null) 'from': from!.toRpcParams(),
       if (memo != null) 'memo': memo,
       if (max) 'max': max,
+      if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
     },
   };
@@ -174,10 +177,9 @@ class WithdrawStatusResponse extends BaseResponse {
     return WithdrawStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
       status: status,
-      details:
-          status == 'Ok'
-              ? WithdrawResult.fromJson(result.value<JsonMap>('details'))
-              : result.value<String>('details'),
+      details: status == 'Ok'
+          ? WithdrawResult.fromJson(result.value<JsonMap>('details'))
+          : result.value<String>('details'),
     );
   }
 
@@ -192,10 +194,9 @@ class WithdrawStatusResponse extends BaseResponse {
     'mmrpc': mmrpc,
     'result': {
       'status': status,
-      'details':
-          (details is WithdrawResult)
-              ? (details as WithdrawResult).toJson()
-              : details,
+      'details': (details is WithdrawResult)
+          ? (details as WithdrawResult).toJson()
+          : details,
     },
   };
 

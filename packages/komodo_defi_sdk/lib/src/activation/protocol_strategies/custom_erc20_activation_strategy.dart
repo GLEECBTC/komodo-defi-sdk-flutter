@@ -14,6 +14,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trc20,
     CoinSubClass.erc20,
     CoinSubClass.grc20,
     CoinSubClass.bep20,
@@ -31,7 +32,6 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
-    CoinSubClass.grc20,
   };
 
   @override
@@ -66,11 +66,23 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         throw StateError('Protocol data is missing from custom token config');
       }
 
-      final activationParams = Erc20ActivationParams.fromJsonConfig(
-        asset.protocol.config,
-      );
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ),
+        final Trc20Protocol _ => Trc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ),
+        _ => throw UnsupportedError(
+          'Unsupported custom token protocol: ${asset.protocol.runtimeType}',
+        ),
+      };
       final platform = protocolData.value<String>('platform');
       final contractAddress = protocolData.value<String>('contract_address');
+      final protocolType = switch (asset.protocol.subClass) {
+        CoinSubClass.trc20 => 'TRC20',
+        _ => 'ERC20',
+      };
 
       // Debug logging for custom ERC20 token activation
       if (KdfLoggingConfig.verboseLogging) {
@@ -89,6 +101,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         activationParams: activationParams,
         platform: platform,
         contractAddress: contractAddress,
+        protocolType: protocolType,
       );
 
       if (KdfLoggingConfig.verboseLogging) {
@@ -114,7 +127,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         asset: asset,
         error: e,
         stackTrace: stack,
-        errorCode: 'ERC20_ACTIVATION_ERROR',
+        errorCode: 'CUSTOM_TOKEN_ACTIVATION_ERROR',
         stepCount: 2,
       );
     }

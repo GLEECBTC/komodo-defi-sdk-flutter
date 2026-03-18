@@ -8,6 +8,12 @@ class AddressFormat {
     bool isBchNetwork = false,
   }) {
     switch (subClass) {
+      case CoinSubClass.trx:
+      case CoinSubClass.trc20:
+        return AddressFormat(
+          format: AddressFormatType.wallet.toString(),
+          network: '',
+        );
       case CoinSubClass.erc20:
       case CoinSubClass.grc20:
       case CoinSubClass.ethereumClassic:

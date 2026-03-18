@@ -1,5 +1,6 @@
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class SlpProtocol extends ProtocolClass {
   SlpProtocol._({
@@ -10,11 +11,12 @@ class SlpProtocol extends ProtocolClass {
 
   factory SlpProtocol.fromJson(
     JsonMap json, {
+    CoinSubClass? subClass,
     List<CoinSubClass> supportedProtocols = const [],
   }) {
     _validateSlpConfig(json);
     return SlpProtocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       config: json,
       supportedProtocols: supportedProtocols,
     );
@@ -42,10 +44,7 @@ class SlpProtocol extends ProtocolClass {
 
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
-        throw MissingProtocolFieldException(
-          field.value,
-          field.key,
-        );
+        throw MissingProtocolFieldException(field.value, field.key);
       }
     }
   }

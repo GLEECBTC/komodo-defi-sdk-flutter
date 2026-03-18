@@ -4,6 +4,7 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:komodo_defi_types/src/utils/json_type_utils.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 /// Base class for all protocol definitions
 abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
@@ -16,8 +17,8 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
 
   /// Creates the appropriate protocol class from JSON config
   factory ProtocolClass.fromJson(JsonMap json, {CoinSubClass? requestedType}) {
-    final primaryType =
-        requestedType ?? CoinSubClass.parse(json.value<String>('type'));
+    final resolvedType = resolveProtocolSubClassFromConfig(json);
+    final primaryType = requestedType ?? resolvedType;
     final otherTypes =
         json
             .valueOrNull<List<dynamic>>('other_types')
@@ -25,15 +26,16 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
             .toList() ??
         [];
 
-    // If a specific type is requested, update the config
-    final configToUse = requestedType != null && requestedType != primaryType
-        ? (JsonMap.of(json)
-            ..['type'] = requestedType.toString().split('.').last)
-        : json;
     try {
       return switch (primaryType) {
+        CoinSubClass.trx => TrxProtocol.fromJson(json, subClass: primaryType),
+        CoinSubClass.trc20 => Trc20Protocol.fromJson(
+          json,
+          subClass: primaryType,
+        ),
         CoinSubClass.utxo || CoinSubClass.smartChain => UtxoProtocol.fromJson(
-          configToUse,
+          json,
+          subClass: primaryType,
           supportedProtocols: otherTypes,
         ),
         // SLP is no longer supported by its own protocol (BCH)
@@ -57,16 +59,27 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
         CoinSubClass.hecoChain ||
         CoinSubClass.rskSmartBitcoin ||
         CoinSubClass.grc20 ||
-        CoinSubClass.erc20 => Erc20Protocol.fromJson(json),
-        CoinSubClass.qrc20 => QtumProtocol.fromJson(json),
-        CoinSubClass.zhtlc => ZhtlcProtocol.fromJson(json),
+        CoinSubClass.erc20 => Erc20Protocol.fromJson(
+          json,
+          subClass: primaryType,
+        ),
+        CoinSubClass.qrc20 => QtumProtocol.fromJson(
+          json,
+          subClass: primaryType,
+        ),
+        CoinSubClass.zhtlc => ZhtlcProtocol.fromJson(
+          json,
+          subClass: primaryType,
+        ),
         CoinSubClass.tendermintToken ||
         CoinSubClass.tendermint => TendermintProtocol.fromJson(
-          configToUse,
+          json,
+          subClass: primaryType,
           supportedProtocols: otherTypes,
         ),
         CoinSubClass.sia => SiaProtocol.fromJson(
-          configToUse,
+          json,
+          subClass: primaryType,
           supportedProtocols: otherTypes,
         ),
         // ignore: deprecated_member_use_from_same_package
@@ -133,10 +146,7 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
   ProtocolClass? createProtocolVariant(CoinSubClass type) {
     if (!supportsProtocolType(type) || type == subClass) return null;
 
-    final variantConfig = JsonMap.from(config)
-      ..['type'] = type.toString().split('.').last;
-
-    return ProtocolClass.fromJson(variantConfig);
+    return ProtocolClass.fromJson(config, requestedType: type);
   }
 
   /// Declarative streaming capabilities based on protocol subclass and
@@ -178,7 +188,13 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
     config,
   ).genericCopyWith(privKeyPolicy: privKeyPolicy);
 
-  String? get contractAddress => config.valueOrNull<String>('contract_address');
+  String? get contractAddress =>
+      config.valueOrNull<String>('contract_address') ??
+      config.valueOrNull<String>(
+        'protocol',
+        'protocol_data',
+        'contract_address',
+      );
 
   @override
   List<Object?> get props => [

@@ -63,14 +63,7 @@ class CustomTokenStorage implements CustomTokenStore {
           logContext: 'for custom tokens',
         )
         .map(
-          (asset) => asset.copyWith(
-            // IMPORTANT: This cast to Erc20Protocol is by design for now,
-            // as custom tokens are currently only supported for ERC20.
-            // This may change in future versions to support other protocols.
-            protocol: (asset.protocol as Erc20Protocol).copyWith(
-              isCustomToken: true,
-            ),
-          ),
+          (asset) => asset.copyWith(protocol: _markCustomToken(asset.protocol)),
         )
         .toList();
   }
@@ -80,12 +73,7 @@ class CustomTokenStorage implements CustomTokenStore {
     _log.fine('Retrieving custom token ${assetId.id}');
     final box = await _openCustomTokensBox();
     final asset = await box.get(assetId.id);
-    return asset?.copyWith(
-      // IMPORTANT: This cast to Erc20Protocol is by design for now,
-      // as custom tokens are currently only supported for ERC20.
-      // This may change in future versions to support other protocols.
-      protocol: (asset.protocol as Erc20Protocol).copyWith(isCustomToken: true),
-    );
+    return asset?.copyWith(protocol: _markCustomToken(asset.protocol));
   }
 
   @override
@@ -195,5 +183,15 @@ class CustomTokenStorage implements CustomTokenStore {
     }
 
     return _customTokensBox!;
+  }
+
+  ProtocolClass _markCustomToken(ProtocolClass protocol) {
+    return switch (protocol) {
+      final Erc20Protocol p => p.copyWith(isCustomToken: true),
+      final Trc20Protocol p => p.copyWith(isCustomToken: true),
+      _ => throw UnsupportedError(
+        'Unsupported custom token protocol: ${protocol.runtimeType}',
+      ),
+    };
   }
 }

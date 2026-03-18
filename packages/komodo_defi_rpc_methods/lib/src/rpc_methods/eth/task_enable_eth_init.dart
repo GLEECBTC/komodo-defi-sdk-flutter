@@ -9,7 +9,7 @@ class TaskEnableEthInit
 
   @override
   // ignore: overridden_fields
-  final EthWithTokensActivationParams params;
+  final ActivationParams params;
 
   @override
   Map<String, dynamic> toJson() => {

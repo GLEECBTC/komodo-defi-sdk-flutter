@@ -6,6 +6,7 @@ class Erc20ActivationParams extends ActivationParams {
     required this.nodes,
     required this.swapContractAddress,
     required this.fallbackSwapContract,
+    super.privKeyPolicy,
   });
 
   factory Erc20ActivationParams.fromJsonConfig(JsonMap json) {
@@ -18,6 +19,20 @@ class Erc20ActivationParams extends ActivationParams {
   final List<EvmNode> nodes;
   final String swapContractAddress;
   final String fallbackSwapContract;
+
+  Erc20ActivationParams copyWith({
+    List<EvmNode>? nodes,
+    String? swapContractAddress,
+    String? fallbackSwapContract,
+    PrivateKeyPolicy? privKeyPolicy,
+  }) {
+    return Erc20ActivationParams(
+      nodes: nodes ?? this.nodes,
+      swapContractAddress: swapContractAddress ?? this.swapContractAddress,
+      fallbackSwapContract: fallbackSwapContract ?? this.fallbackSwapContract,
+      privKeyPolicy: privKeyPolicy ?? this.privKeyPolicy,
+    );
+  }
 
   @override
   JsonMap toRpcParams() => super.toRpcParams().deepMerge({
