@@ -763,7 +763,7 @@ as int,
 
 class FeeInfoTron extends FeeInfo {
   const FeeInfoTron({required this.coin, required this.bandwidthUsed, required this.energyUsed, required this.bandwidthFee, required this.energyFee, this.totalFeeAmount}): super._();
-  
+
 
 @override final  String coin;
  final  int bandwidthUsed;
