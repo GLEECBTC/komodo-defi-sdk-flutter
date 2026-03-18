@@ -9,6 +9,7 @@ export 'src/api/api_client.dart';
 export 'src/assets/asset.dart';
 export 'src/assets/asset_cache_key.dart';
 export 'src/assets/asset_id.dart';
+export 'src/assets/custom_token_exceptions.dart';
 export 'src/auth/auth_result.dart';
 // export 'src/auth/exceptions/incorrect_password_exception.dart';
 export 'src/auth/exceptions/auth_exception.dart';

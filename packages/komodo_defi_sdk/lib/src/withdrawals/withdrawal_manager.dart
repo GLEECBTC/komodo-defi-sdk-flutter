@@ -9,6 +9,40 @@ import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+/// Shared fee-estimation strategy classification used by withdrawal flows.
+enum FeeEstimationSupport {
+  /// Ethereum-style gas estimation.
+  evmGas,
+
+  /// UTXO fee-per-kilobyte estimation.
+  utxoPerKbyte,
+
+  /// Tendermint gas estimation.
+  tendermint,
+
+  /// QTUM gas estimation with UTXO fallback.
+  qtum,
+
+  /// ZHTLC fixed-fee estimation.
+  zhtlc,
+
+  /// No fee estimation support is available.
+  unsupported,
+}
+
+/// Returns the fee-estimation support level for [protocol].
+FeeEstimationSupport feeEstimationSupportForProtocol(ProtocolClass protocol) {
+  return switch (protocol) {
+    Erc20Protocol() => FeeEstimationSupport.evmGas,
+    UtxoProtocol() => FeeEstimationSupport.utxoPerKbyte,
+    TendermintProtocol() => FeeEstimationSupport.tendermint,
+    QtumProtocol() => FeeEstimationSupport.qtum,
+    ZhtlcProtocol() => FeeEstimationSupport.zhtlc,
+    TrxProtocol() || Trc20Protocol() => FeeEstimationSupport.unsupported,
+    _ => FeeEstimationSupport.unsupported,
+  };
+}
+
 /// Manages cryptocurrency asset withdrawals to external addresses.
 ///
 /// The [WithdrawalManager] provides functionality for:
@@ -27,9 +61,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// 3. Broadcasting to the network
 /// 4. Status tracking
 ///
-/// **Note:** Fee estimation features are currently disabled as the API endpoints
-/// are not yet available. Set `_feeEstimationEnabled` to `true` when the API
-/// endpoints become available.
+/// **Note:** Fee estimation features are currently disabled as the API
+/// endpoints are not yet available. Set `_feeEstimationEnabled` to `true`
+/// when the API endpoints become available.
 ///
 /// Usage example:
 /// ```dart
@@ -208,8 +242,8 @@ class WithdrawalManager {
       final protocol = asset.protocol;
 
       // Handle different protocol types
-      switch (protocol.runtimeType) {
-        case Erc20Protocol:
+      switch (feeEstimationSupportForProtocol(protocol)) {
+        case FeeEstimationSupport.evmGas:
           // Ethereum-based protocols use gas estimation
           final estimation = await _feeManager.getEthEstimatedFeePerGas(
             assetId,
@@ -248,7 +282,7 @@ class WithdrawalManager {
             ),
           );
 
-        case UtxoProtocol:
+        case FeeEstimationSupport.utxoPerKbyte:
           // UTXO-based protocols use per-kbyte fee estimation
           final estimation = await _feeManager.getUtxoEstimatedFee(assetId);
           return WithdrawalFeeOptions(
@@ -279,7 +313,7 @@ class WithdrawalManager {
             ),
           );
 
-        case TendermintProtocol:
+        case FeeEstimationSupport.tendermint:
           // Tendermint/Cosmos protocols use gas price and gas limit
           final estimation = await _feeManager.getTendermintEstimatedFee(
             assetId,
@@ -315,7 +349,7 @@ class WithdrawalManager {
             ),
           );
 
-        case QtumProtocol:
+        case FeeEstimationSupport.qtum:
           // QTUM uses similar gas model to Ethereum but with different fee structure
           try {
             final estimation = await _feeManager.getEthEstimatedFeePerGas(
@@ -383,7 +417,7 @@ class WithdrawalManager {
             );
           }
 
-        case ZhtlcProtocol:
+        case FeeEstimationSupport.zhtlc:
           // ZHTLC (Zcash) uses UTXO-style fees
           final estimation = await _feeManager.getUtxoEstimatedFee(assetId);
           return WithdrawalFeeOptions(
@@ -414,8 +448,7 @@ class WithdrawalManager {
             ),
           );
 
-        default:
-          // For unknown protocols, return null to indicate unsupported
+        case FeeEstimationSupport.unsupported:
           log('Fee options not supported for protocol ${protocol.runtimeType}');
           return null;
       }
@@ -929,8 +962,8 @@ class WithdrawalManager {
       final priority = params.feePriority ?? WithdrawalFeeLevel.medium;
       FeeInfo? fee;
 
-      switch (protocol.runtimeType) {
-        case Erc20Protocol:
+      switch (feeEstimationSupportForProtocol(protocol)) {
+        case FeeEstimationSupport.evmGas:
           // Ethereum-based protocols (ETH, ERC20 tokens) use gas estimation
           final estimation = await _feeManager.getEthEstimatedFeePerGas(
             asset.id.id,
@@ -943,7 +976,7 @@ class WithdrawalManager {
             gas: _defaultEthGasLimit,
           );
 
-        case UtxoProtocol:
+        case FeeEstimationSupport.utxoPerKbyte:
           // UTXO-based protocols use per-kbyte fee estimation
           final estimation = await _feeManager.getUtxoEstimatedFee(asset.id.id);
           final selectedLevel = _getUtxoFeeLevel(estimation, priority);
@@ -952,7 +985,7 @@ class WithdrawalManager {
             amount: selectedLevel.feePerKbyte,
           );
 
-        case TendermintProtocol:
+        case FeeEstimationSupport.tendermint:
           // Tendermint/Cosmos protocols use gas price and gas limit
           final estimation = await _feeManager.getTendermintEstimatedFee(
             asset.id.id,
@@ -964,7 +997,7 @@ class WithdrawalManager {
             gasLimit: selectedLevel.gasLimit,
           );
 
-        case QtumProtocol:
+        case FeeEstimationSupport.qtum:
           // QTUM uses similar gas model to Ethereum but different fee structure
           try {
             final estimation = await _feeManager.getEthEstimatedFeePerGas(
@@ -988,7 +1021,7 @@ class WithdrawalManager {
             );
           }
 
-        case ZhtlcProtocol:
+        case FeeEstimationSupport.zhtlc:
           // ZHTLC (Zcash) uses UTXO-style fees
           final estimation = await _feeManager.getUtxoEstimatedFee(asset.id.id);
           final selectedLevel = _getUtxoFeeLevel(estimation, priority);
@@ -999,26 +1032,11 @@ class WithdrawalManager {
                 Decimal.fromInt(250), // Assume ~250 bytes
           );
 
-        default:
-          // For unknown protocols, attempt ETH estimation as fallback
-          try {
-            final estimation = await _feeManager.getEthEstimatedFeePerGas(
-              asset.id.id,
-            );
-            final selectedLevel = _getEthFeeLevel(estimation, priority);
-            fee = FeeInfo.ethGasEip1559(
-              coin: asset.id.id,
-              maxFeePerGas: selectedLevel.maxFeePerGas,
-              maxPriorityFeePerGas: selectedLevel.maxPriorityFeePerGas,
-              gas: _defaultEthGasLimit,
-            );
-          } catch (e) {
-            log(
-              'No fee estimation available for protocol ${protocol.runtimeType}',
-            );
-            // Return original parameters without fee
-            return params;
-          }
+        case FeeEstimationSupport.unsupported:
+          log(
+            'No fee estimation available for protocol ${protocol.runtimeType}',
+          );
+          return params;
       }
 
       return WithdrawParameters(
