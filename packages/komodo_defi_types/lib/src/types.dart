@@ -12,6 +12,7 @@ export 'assets/asset.dart';
 export 'assets/asset_cache_key.dart';
 export 'assets/asset_id.dart';
 export 'assets/asset_symbol.dart';
+export 'assets/custom_token_exceptions.dart';
 export 'auth/auth_options.dart';
 export 'auth/auth_result.dart';
 export 'auth/exceptions/auth_exception.dart';
