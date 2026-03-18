@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer';
 
 import 'package:get_it/get_it.dart';
+import 'package:komodo_coins/komodo_coins.dart' show KomodoAssetsUpdateManager;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
@@ -205,6 +206,19 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   ///
   /// Throws [StateError] if accessed before initialization.
   AssetManager get assets => _assertSdkInitialized(_container<AssetManager>());
+
+  /// Deletes a persisted custom token from SDK-managed storage.
+  ///
+  /// This removes the token from the custom-token store and the in-memory
+  /// asset registry, then invalidates the activated-assets cache so follow-up
+  /// activation checks do not continue resolving the deleted asset.
+  Future<void> deleteCustomToken(AssetId assetId) async {
+    _assertSdkInitialized(assets);
+    await _container<KomodoAssetsUpdateManager>().assets.deleteCustomToken(
+      assetId,
+    );
+    activatedAssetsCache.invalidate();
+  }
 
   /// Cache of activated assets with per-instance TTL.
   ///
