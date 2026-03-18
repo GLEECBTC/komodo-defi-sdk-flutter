@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 
 Map<String, dynamic> _trxConfig() => {
   'coin': 'TRX',
-  'type': 'TRC-20',
+  'type': 'TRX',
   'name': 'TRON',
   'fname': 'TRON',
   'wallet_only': true,

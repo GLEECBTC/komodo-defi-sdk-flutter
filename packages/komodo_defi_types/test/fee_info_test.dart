@@ -100,4 +100,59 @@ void main() {
       expect(tronFee.totalFee, equals(Decimal.parse('0.267')));
     });
   });
+
+  group('FeeInfo Tendermint compatibility', () {
+    test('should serialize Tendermint fees as CosmosGas for requests', () {
+      final feeInfo = FeeInfo.tendermint(
+        coin: 'ATOM',
+        amount: Decimal.parse('0.038553'),
+        gasLimit: 100000,
+      );
+
+      final json = feeInfo.toJson();
+
+      expect(json['type'], equals('CosmosGas'));
+      expect(json['coin'], equals('ATOM'));
+      expect(json['gas_limit'], equals(100000));
+      expect(
+        (json['gas_price'] as num).toDouble(),
+        closeTo(0.00000038553, 1e-18),
+      );
+    });
+
+    test(
+      'should serialize Tendermint fees with zero gas limit as zero gas price',
+      () {
+        final feeInfo = FeeInfo.tendermint(
+          coin: 'ATOM',
+          amount: Decimal.parse('0.038553'),
+          gasLimit: 0,
+        );
+
+        final json = feeInfo.toJson();
+
+        expect(json['type'], equals('CosmosGas'));
+        expect(json['gas_limit'], equals(0));
+        expect(json['gas_price'], equals(0.0));
+      },
+    );
+
+    test('should deserialize Tendermint fee details from response JSON', () {
+      final json = {
+        'type': 'Tendermint',
+        'coin': 'ATOM',
+        'amount': '0.038553',
+        'gas_limit': 100000,
+      };
+
+      final feeInfo = FeeInfo.fromJson(json);
+
+      expect(feeInfo, isA<FeeInfoTendermint>());
+      final tendermintFee = feeInfo as FeeInfoTendermint;
+      expect(tendermintFee.coin, equals('ATOM'));
+      expect(tendermintFee.amount, equals(Decimal.parse('0.038553')));
+      expect(tendermintFee.gasLimit, equals(100000));
+      expect(tendermintFee.totalFee, equals(Decimal.parse('0.038553')));
+    });
+  });
 }

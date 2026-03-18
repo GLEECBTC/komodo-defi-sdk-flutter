@@ -223,7 +223,7 @@ sealed class FeeInfo with _$FeeInfo {
 
   /// 7) Tendermint fee, with fixed `amount` and `gasLimit`.
   ///
-  /// Example JSON:
+  /// Example response JSON:
   /// ```json
   /// {
   ///   "type": "Tendermint",
@@ -232,7 +232,12 @@ sealed class FeeInfo with _$FeeInfo {
   ///   "gas_limit": 100000
   /// }
   /// ```
-  /// Total fee is just the amount (not calculated from gas * price)
+  ///
+  /// Parsed Tendermint responses use the `Tendermint` shape above, but
+  /// outgoing withdraw requests are still encoded as `CosmosGas` for
+  /// compatibility with the current KDF API.
+  ///
+  /// Total fee is just the amount (not calculated from gas * price).
   const factory FeeInfo.tendermint({
     required String coin,
 
@@ -352,10 +357,14 @@ sealed class FeeInfo with _$FeeInfo {
       'gas_price': gasPrice.toDouble(),
       'gas_limit': gasLimit,
     },
+    // Tendermint fee responses use the `Tendermint` shape, but withdraw
+    // requests must still be sent as `CosmosGas`.
     FeeInfoTendermint(:final coin, :final amount, :final gasLimit) => {
-      'type': 'Tendermint',
+      'type': 'CosmosGas',
       'coin': coin,
-      'amount': amount.toString(),
+      'gas_price': gasLimit > 0
+          ? (amount / Decimal.fromInt(gasLimit)).toDouble()
+          : 0.0,
       'gas_limit': gasLimit,
     },
     FeeInfoTron(

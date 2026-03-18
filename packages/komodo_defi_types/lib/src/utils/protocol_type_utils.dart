@@ -3,11 +3,7 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Resolves the canonical protocol type from a coin config.
 ///
-/// Some configs, including TRON assets, use a legacy top-level `type` that
-/// describes the token standard while the authoritative protocol lives under
-/// `protocol.type`. Prefer the nested protocol type when present.
-CoinSubClass resolveProtocolSubClassFromConfig(JsonMap json) {
-  final protocolType = json.valueOrNull<String>('protocol', 'type');
-  final typeValue = protocolType ?? json.value<String>('type');
-  return CoinSubClass.parse(typeValue);
-}
+/// Generated coin configs encode the concrete asset subtype in the top-level
+/// `type` field (`TRX`, `TRC-20`, `AVX-20`, `BEP-20`, etc.).
+CoinSubClass resolveProtocolSubClassFromConfig(JsonMap json) =>
+    CoinSubClass.parse(json.value<String>('type'));

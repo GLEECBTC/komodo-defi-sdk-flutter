@@ -206,6 +206,9 @@ class WalletAddress {
     String? platformTicker,
   }) {
     final balancesJson = json.valueOrNull<JsonMap>('balances');
+    final tickers =
+        json.valueOrNull<List<dynamic>>('tickers')?.whereType<String>() ??
+        const <String>[];
     return WalletAddress(
       address: address,
       derivationPath: json.valueOrNull<String>('derivation_path') ?? '',
@@ -213,6 +216,7 @@ class WalletAddress {
       balance: _legacyBalancesToTokenBalanceMap(
         balancesJson,
         platformTicker: platformTicker,
+        tickers: tickers,
       ),
     );
   }
@@ -244,18 +248,26 @@ class WalletAddress {
 TokenBalanceMap _legacyBalancesToTokenBalanceMap(
   JsonMap? balancesJson, {
   String? platformTicker,
+  Iterable<String> tickers = const <String>[],
 }) {
+  final zeroBalancesJson = _zeroBalancesJsonFromTickers(tickers);
   if (balancesJson == null) {
-    return const TokenBalanceMap(balances: <String, BalanceInfo>{});
+    return TokenBalanceMap.fromJson(zeroBalancesJson);
   }
   if (balancesJson.values.every((value) => value is JsonMap)) {
-    return TokenBalanceMap.fromJson(balancesJson);
+    return TokenBalanceMap.fromJson({...zeroBalancesJson, ...balancesJson});
   }
   final ticker = platformTicker ?? 'ETH';
-  return TokenBalanceMap(
-    balances: {ticker: BalanceInfo.fromJson(balancesJson)},
-  );
+  return TokenBalanceMap.fromJson({...zeroBalancesJson, ticker: balancesJson});
 }
+
+JsonMap _zeroBalancesJsonFromTickers(Iterable<String> tickers) =>
+    Map.fromEntries(
+      tickers.toSet().map(
+        (ticker) =>
+            MapEntry<String, dynamic>(ticker, BalanceInfo.zero().toJson()),
+      ),
+    );
 
 TokenBalanceMap _aggregateTokenBalances(Iterable<TokenBalanceMap> balances) {
   final aggregated = <String, BalanceInfo>{};
