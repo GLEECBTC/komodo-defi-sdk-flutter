@@ -1,5 +1,6 @@
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/src/utils/protocol_type_utils.dart';
 
 class SiaProtocol extends ProtocolClass {
   SiaProtocol._({
@@ -10,11 +11,12 @@ class SiaProtocol extends ProtocolClass {
 
   factory SiaProtocol.fromJson(
     JsonMap json, {
+    CoinSubClass? subClass,
     List<CoinSubClass> supportedProtocols = const [],
   }) {
     _validateSiaConfig(json);
     return SiaProtocol._(
-      subClass: CoinSubClass.parse(json.value('type')),
+      subClass: subClass ?? resolveProtocolSubClassFromConfig(json),
       config: json,
       supportedProtocols: supportedProtocols,
     );
@@ -22,9 +24,7 @@ class SiaProtocol extends ProtocolClass {
 
   static void _validateSiaConfig(JsonMap json) {
     // Minimal required fields for SIA protocol configuration
-    final requiredFields = {
-      'nodes': 'Seed nodes list',
-    };
+    final requiredFields = {'nodes': 'Seed nodes list'};
     for (final field in requiredFields.entries) {
       if (!json.containsKey(field.key)) {
         throw MissingProtocolFieldException(field.value, field.key);

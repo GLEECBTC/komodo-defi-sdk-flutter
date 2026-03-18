@@ -36,7 +36,7 @@ void main() {
           "host": "test1.example.com",
           "type": "domain",
           "wss": true,
-          "netid": 8762,
+          "netid": 6133,
           "contact": [{"email": "test1@example.com"}]
         },
         {
@@ -44,7 +44,7 @@ void main() {
           "host": "test2.example.com",
           "type": "domain",
           "wss": true,
-          "netid": 8762,
+          "netid": 6133,
           "contact": [{"email": "test2@example.com"}]
         }
       ]''';
@@ -61,7 +61,7 @@ void main() {
 
       // Assert
       expect(result.seedNodes.length, equals(2));
-      expect(result.netId, equals(8762));
+      expect(result.netId, equals(6133));
       expect(result.seedNodes[0].name, equals('test-seed-1'));
       expect(result.seedNodes[0].host, equals('test1.example.com'));
       expect(result.seedNodes[1].name, equals('test-seed-2'));
@@ -89,6 +89,43 @@ void main() {
           timeout: const Duration(seconds: 5),
         ),
         throwsException,
+      );
+
+      verify(() => mockClient.get(any())).called(1);
+      verifyNever(() => mockClient.close());
+    });
+
+    test('should throw when no seed nodes match the default netid', () async {
+      // Arrange
+      final mockResponse = MockResponse();
+      const responseBody = '''[
+        {
+          "name": "stale-seed-1",
+          "host": "stale1.example.com",
+          "type": "domain",
+          "wss": true,
+          "netid": 8762,
+          "contact": [{"email": "stale1@example.com"}]
+        }
+      ]''';
+
+      when(() => mockResponse.statusCode).thenReturn(200);
+      when(() => mockResponse.body).thenReturn(responseBody);
+      when(() => mockClient.get(any())).thenAnswer((_) async => mockResponse);
+
+      // Act & Assert
+      await expectLater(
+        () => SeedNodeUpdater.fetchSeedNodes(
+          config: config,
+          httpClient: mockClient,
+        ),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('No seed nodes found for netid 6133'),
+          ),
+        ),
       );
 
       verify(() => mockClient.get(any())).called(1);

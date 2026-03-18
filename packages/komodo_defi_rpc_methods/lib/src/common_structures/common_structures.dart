@@ -15,6 +15,8 @@ export 'activation/activation_params/qtum_activation_params.dart';
 export 'activation/activation_params/sia_activation_params.dart';
 export 'activation/activation_params/slp_activation_params.dart';
 export 'activation/activation_params/tendermint_activation_params.dart';
+export 'activation/activation_params/trc20_activation_params.dart';
+export 'activation/activation_params/trx_activation_params.dart';
 export 'activation/activation_params/utxo_activation_params.dart';
 export 'activation/activation_params/zhtlc_activation_params.dart';
 export 'activation/coin_protocol.dart';

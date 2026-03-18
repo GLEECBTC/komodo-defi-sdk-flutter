@@ -1,4 +1,4 @@
-# Komodo Wallet Build Transformer
+# Gleec Wallet Build Transformer
 
 Flutter asset transformer and CLI to fetch KDF artifacts (binaries/WASM), coins config, seed nodes, and icons at build time, and to copy platform-specific assets.
 

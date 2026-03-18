@@ -214,6 +214,24 @@ class AssetManager implements IAssetProvider {
   Stream<ActivationProgress> activateAssets(List<Asset> assets) =>
       _activationManager().activateAssets(assets);
 
+  /// Requests cancellation of an in-flight activation for [assetId].
+  ///
+  /// Cancellation is best-effort and will be observed on the next activation
+  /// progress boundary.
+  void cancelActivation(
+    AssetId assetId, {
+    String reason = 'Activation cancelled by caller',
+  }) {
+    _activationManager().cancelActivation(assetId, reason: reason);
+  }
+
+  /// Requests cancellation for all in-flight activation tasks.
+  void cancelAllActivations({
+    String reason = 'Activation cancelled by caller',
+  }) {
+    _activationManager().cancelAllActivations(reason: reason);
+  }
+
   /// Disposes of the asset manager, cleaning up resources.
   ///
   /// This is called automatically by the SDK when disposing.

@@ -37,6 +37,15 @@ abstract class IBalanceManager {
     bool activateIfNeeded = true,
   });
 
+  /// Returns whether [assetId] currently has an active watcher subscription.
+  bool hasActiveWatcher(AssetId assetId);
+
+  /// Counts how many [assetIds] do not currently have active watcher coverage.
+  int countMissingWatchersForAssets(Iterable<AssetId> assetIds);
+
+  /// Returns true when any asset in [assetIds] lacks active watcher coverage.
+  bool hasMissingWatchersForAssets(Iterable<AssetId> assetIds);
+
   /// Gets the last known balance for an asset without triggering a refresh.
   /// Returns null if no balance has been fetched yet.
   BalanceInfo? lastKnown(AssetId assetId);
@@ -95,6 +104,8 @@ class BalanceManager implements IBalanceManager {
 
   /// Track active balance watch streams by asset ID
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
+  final Map<AssetId, StreamSubscription<AssetPubkeys>> _pubkeyHintWatchers = {};
+  final Set<AssetId> _pendingFastRefresh = <AssetId>{};
 
   /// Stream controllers for each asset being watched
   final Map<AssetId, StreamController<BalanceInfo>> _balanceControllers = {};
@@ -114,6 +125,26 @@ class BalanceManager implements IBalanceManager {
 
   /// Getter for pubkeyManager to make it accessible
   PubkeyManager? get pubkeyManager => _pubkeyManager;
+
+  @override
+  bool hasActiveWatcher(AssetId assetId) {
+    if (_isDisposed) return false;
+    return _activeWatchers.containsKey(assetId);
+  }
+
+  @override
+  int countMissingWatchersForAssets(Iterable<AssetId> assetIds) {
+    if (_isDisposed) return assetIds.toSet().length;
+    final uniqueIds = assetIds.toSet();
+    return uniqueIds
+        .where((assetId) => !_activeWatchers.containsKey(assetId))
+        .length;
+  }
+
+  @override
+  bool hasMissingWatchersForAssets(Iterable<AssetId> assetIds) {
+    return countMissingWatchersForAssets(assetIds) > 0;
+  }
 
   /// Setter for activationCoordinator to resolve circular dependencies
   void setActivationCoordinator(SharedActivationCoordinator coordinator) {
@@ -404,6 +435,12 @@ class BalanceManager implements IBalanceManager {
 
       // Subscribe to balance event stream for real-time updates
       if (!_supportsBalanceStreaming(asset)) {
+        _attachPubkeyHintListener(
+          asset: asset,
+          assetId: assetId,
+          controller: controller,
+          activateIfNeeded: activateIfNeeded,
+        );
         await _startBalancePolling(
           asset: asset,
           assetId: assetId,
@@ -626,6 +663,7 @@ class BalanceManager implements IBalanceManager {
       _activeWatchers.remove(assetId);
       _logger.fine('Stopped watcher for ${assetId.name}');
     }
+    _stopPubkeyHintListener(assetId);
     _stopStaleBalanceGuard(assetId);
     // Don't close the controller here, just remove the watcher
     // The controller will be closed when all listeners are gone
@@ -691,6 +729,100 @@ class BalanceManager implements IBalanceManager {
     _staleBalanceTimers.remove(assetId);
   }
 
+  void _attachPubkeyHintListener({
+    required Asset asset,
+    required AssetId assetId,
+    required StreamController<BalanceInfo> controller,
+    required bool activateIfNeeded,
+  }) {
+    final pubkeyManager = _pubkeyManager;
+    if (pubkeyManager == null || _isDisposed) return;
+
+    _pubkeyHintWatchers[assetId]?.cancel();
+    _pubkeyHintWatchers[assetId] = pubkeyManager
+        .watchPubkeys(asset, activateIfNeeded: activateIfNeeded)
+        .listen(
+          (AssetPubkeys pubkeys) {
+            unawaited(
+              _handlePubkeyBalanceHint(
+                asset: asset,
+                assetId: assetId,
+                controller: controller,
+                pubkeys: pubkeys,
+              ),
+            );
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            _logger.fine(
+              'Pubkey hint watcher error for ${assetId.name}',
+              error,
+              stackTrace,
+            );
+          },
+        );
+  }
+
+  void _stopPubkeyHintListener(AssetId assetId) {
+    _pubkeyHintWatchers.remove(assetId)?.cancel();
+  }
+
+  Future<void> _handlePubkeyBalanceHint({
+    required Asset asset,
+    required AssetId assetId,
+    required StreamController<BalanceInfo> controller,
+    required AssetPubkeys pubkeys,
+  }) async {
+    if (_isDisposed || _supportsBalanceStreaming(asset)) return;
+
+    final latest = pubkeys.balance;
+    final previous = _balanceCache[assetId];
+    final changed =
+        previous == null ||
+        previous.total != latest.total ||
+        previous.spendable != latest.spendable ||
+        previous.unspendable != latest.unspendable;
+    if (!changed) return;
+
+    _balanceCache[assetId] = latest;
+    if (!controller.isClosed) {
+      controller.add(latest);
+    }
+
+    _pendingFastRefresh.add(assetId);
+    unawaited(
+      _performImmediateBalanceRefresh(
+        asset: asset,
+        assetId: assetId,
+        controller: controller,
+      ),
+    );
+  }
+
+  Future<void> _performImmediateBalanceRefresh({
+    required Asset asset,
+    required AssetId assetId,
+    required StreamController<BalanceInfo> controller,
+  }) async {
+    if (_isDisposed) return;
+    if (!_pendingFastRefresh.contains(assetId)) return;
+
+    try {
+      final refreshed = await getBalance(assetId);
+      _balanceCache[assetId] = refreshed;
+      if (!controller.isClosed) {
+        controller.add(refreshed);
+      }
+    } catch (error, stackTrace) {
+      _logger.fine(
+        'Immediate balance refresh failed for ${assetId.name}',
+        error,
+        stackTrace,
+      );
+    } finally {
+      _pendingFastRefresh.remove(assetId);
+    }
+  }
+
   @override
   BalanceInfo? lastKnown(AssetId assetId) {
     if (_isDisposed) {
@@ -733,6 +865,17 @@ class BalanceManager implements IBalanceManager {
     }
 
     // Snapshot controllers and close all concurrently; swallow errors
+    final List<StreamSubscription<AssetPubkeys>> pubkeyHintSubs =
+        List<StreamSubscription<AssetPubkeys>>.from(_pubkeyHintWatchers.values);
+    _pubkeyHintWatchers.clear();
+    for (final StreamSubscription<AssetPubkeys> sub in pubkeyHintSubs) {
+      cancelFutures.add(
+        sub.cancel().catchError((Object e, StackTrace s) {
+          _logger.warning('Error cancelling pubkey hint watcher', e, s);
+        }),
+      );
+    }
+
     final List<StreamController<BalanceInfo>> controllers =
         List<StreamController<BalanceInfo>>.from(_balanceControllers.values);
     _balanceControllers.clear();

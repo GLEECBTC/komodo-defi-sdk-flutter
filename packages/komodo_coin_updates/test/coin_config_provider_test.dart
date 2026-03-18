@@ -39,10 +39,10 @@ GithubCoinConfigProvider createTestProvider({
     branch: branch ?? 'master',
     coinsGithubContentUrl:
         coinsGithubContentUrl ??
-        'https://raw.githubusercontent.com/KomodoPlatform/coins',
+        'https://raw.githubusercontent.com/GLEECBTC/coins',
     coinsGithubApiUrl:
         coinsGithubApiUrl ??
-        'https://api.github.com/repos/KomodoPlatform/coins',
+        'https://api.github.com/repos/GLEECBTC/coins',
     coinsPath: coinsPath ?? 'coins',
     coinsConfigPath: coinsConfigPath ?? 'utils/coins_config_unfiltered.json',
     cdnBranchMirrors: cdnBranchMirrors,
@@ -96,7 +96,7 @@ void main() {
     test('uses CDN base when exact branch mirror exists', () {
       final provider = createTestProvider(
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -105,7 +105,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+        'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -113,7 +113,7 @@ void main() {
       final provider = createTestProvider(
         branch: 'dev',
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -122,7 +122,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/dev/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/dev/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -130,7 +130,7 @@ void main() {
       final provider = createTestProvider(
         branch: 'dev',
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -140,14 +140,14 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+        'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
       );
     });
 
     test('branchOrCommit override falls back to raw when not mirrored', () {
       final provider = createTestProvider(
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -157,7 +157,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/feature/example/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/feature/example/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -172,14 +172,14 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/dev/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/dev/utils/coins_config_unfiltered.json',
       );
     });
 
     test('uses raw URL for commit hash even when CDN is available', () {
       final provider = createTestProvider(
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -189,7 +189,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -201,14 +201,14 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/master/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/master/utils/coins_config_unfiltered.json',
       );
     });
 
     test('CDN base with trailing slash and path with leading slash', () {
       final provider = createTestProvider(
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins/',
+          'master': 'https://gleecbtc.github.io/coins/',
         },
       );
 
@@ -217,7 +217,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+        'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -225,7 +225,7 @@ void main() {
       final provider = createTestProvider(
         branch: 'feature/example',
         coinsGithubContentUrl:
-            'https://raw.githubusercontent.com/KomodoPlatform/coins/',
+            'https://raw.githubusercontent.com/GLEECBTC/coins/',
       );
 
       final uri = provider.buildContentUri(
@@ -233,7 +233,7 @@ void main() {
       );
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/feature/example/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/feature/example/utils/coins_config_unfiltered.json',
       );
     });
 
@@ -241,7 +241,7 @@ void main() {
       test('master branch uses CDN URL without appending branch name', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -250,7 +250,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+          'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
         );
       });
 
@@ -258,7 +258,7 @@ void main() {
         final provider = createTestProvider(
           branch: 'main',
           cdnBranchMirrors: const {
-            'main': 'https://komodoplatform.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -267,7 +267,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+          'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
         );
       });
 
@@ -275,8 +275,8 @@ void main() {
         final provider = createTestProvider(
           branch: 'dev',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -286,7 +286,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+          'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
         );
       });
 
@@ -294,8 +294,8 @@ void main() {
         final provider = createTestProvider(
           branch: 'dev',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -305,7 +305,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://komodoplatform.github.io/coins/utils/coins_config_unfiltered.json',
+          'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
         );
       });
     });
@@ -315,7 +315,7 @@ void main() {
         final provider = createTestProvider(
           branch: 'dev',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -324,7 +324,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/dev/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/dev/utils/coins_config_unfiltered.json',
         );
       });
 
@@ -332,8 +332,8 @@ void main() {
         final provider = createTestProvider(
           branch: 'feature/new-coin-support',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -342,14 +342,14 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/feature/new-coin-support/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/feature/new-coin-support/utils/coins_config_unfiltered.json',
         );
       });
 
       test('release branch uses GitHub raw URL even with CDN available', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -359,15 +359,15 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/release/v1.2.0/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/release/v1.2.0/utils/coins_config_unfiltered.json',
         );
       });
 
       test('hotfix branch uses GitHub raw URL even with CDN available', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -377,7 +377,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/hotfix/urgent-fix/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/hotfix/urgent-fix/utils/coins_config_unfiltered.json',
         );
       });
     });
@@ -386,8 +386,8 @@ void main() {
       test('full 40-character commit hash uses GitHub raw URL', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -397,14 +397,14 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
         );
       });
 
       test('different commit hash uses GitHub raw URL', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -414,15 +414,15 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/abc123def456789012345678901234567890abcd/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/abc123def456789012345678901234567890abcd/utils/coins_config_unfiltered.json',
         );
       });
 
       test('commit hash with uppercase letters uses GitHub raw URL', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
-            'main': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
+            'main': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -432,14 +432,14 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/F7D8E39CD11C3B6431DF314FCAAE5BECC2814136/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/F7D8E39CD11C3B6431DF314FCAAE5BECC2814136/utils/coins_config_unfiltered.json',
         );
       });
 
       test('mixed case commit hash uses GitHub raw URL', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -449,7 +449,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/AbC123DeF456789012345678901234567890AbCd/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/AbC123DeF456789012345678901234567890AbCd/utils/coins_config_unfiltered.json',
         );
       });
     });
@@ -475,7 +475,7 @@ void main() {
       test('39-character string is treated as branch name', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -485,14 +485,14 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc281413/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc281413/utils/coins_config_unfiltered.json',
         );
       });
 
       test('41-character string is treated as branch name', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -503,14 +503,14 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136a/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136a/utils/coins_config_unfiltered.json',
         );
       });
 
       test('40-character string with non-hex characters is treated as branch', () {
         final provider = createTestProvider(
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -521,7 +521,7 @@ void main() {
         );
         expect(
           uri.toString(),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc281413g/utils/coins_config_unfiltered.json',
+          'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc281413g/utils/coins_config_unfiltered.json',
         );
       });
     });
@@ -545,7 +545,7 @@ void main() {
       final providerWithCdn = createTestProvider(
         httpClient: client,
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins',
+          'master': 'https://gleecbtc.github.io/coins',
         },
       );
 
@@ -556,13 +556,13 @@ void main() {
       );
 
       // The bug shows this URL is being generated:
-      // https://komodoplatform.github.io/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json
+      // https://gleecbtc.github.io/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json
       // But it should be:
-      // https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json
+      // https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json
 
       expect(
         uri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/f7d8e39cd11c3b6431df314fcaae5becc2814136/utils/coins_config_unfiltered.json',
         reason:
             'Commit hashes should never use CDN URLs - they should always use raw GitHub URLs',
       );
@@ -570,7 +570,7 @@ void main() {
       // Verify the URL does NOT contain the CDN base
       expect(
         uri.toString(),
-        isNot(contains('komodoplatform.github.io')),
+        isNot(contains('gleecbtc.github.io')),
         reason: 'CDN URLs should not be used for commit hashes',
       );
     });
@@ -688,27 +688,27 @@ void main() {
     test('buildContentUri normalizes coinsPath entries', () {
       final p = createTestProvider(
         coinsGithubContentUrl:
-            'https://raw.githubusercontent.com/KomodoPlatform/coins/',
+            'https://raw.githubusercontent.com/GLEECBTC/coins/',
         cdnBranchMirrors: const {
-          'master': 'https://komodoplatform.github.io/coins/',
+          'master': 'https://gleecbtc.github.io/coins/',
         },
       );
 
       final cdnUri = p.buildContentUri('/coins/KMD.json');
       expect(
         cdnUri.toString(),
-        'https://komodoplatform.github.io/coins/coins/KMD.json',
+        'https://gleecbtc.github.io/coins/coins/KMD.json',
       );
 
       final rawP = createTestProvider(
         coinsGithubContentUrl:
-            'https://raw.githubusercontent.com/KomodoPlatform/coins/',
+            'https://raw.githubusercontent.com/GLEECBTC/coins/',
         cdnBranchMirrors: const {},
       );
       final rawUri = rawP.buildContentUri('/coins/KMD.json');
       expect(
         rawUri.toString(),
-        'https://raw.githubusercontent.com/KomodoPlatform/coins/master/coins/KMD.json',
+        'https://raw.githubusercontent.com/GLEECBTC/coins/master/coins/KMD.json',
       );
     });
 

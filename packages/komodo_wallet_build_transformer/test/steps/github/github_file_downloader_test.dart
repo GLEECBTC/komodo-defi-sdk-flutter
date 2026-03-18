@@ -157,6 +157,52 @@ void main() {
         },
       );
 
+      test('should include commit segment for raw GitHub content URLs', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
+          filePath: 'utils/coins_config_unfiltered.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://raw.githubusercontent.com/GLEECBTC/coins/json-config-update/utils/coins_config_unfiltered.json',
+          ),
+        );
+      });
+
+      test('should not include commit segment for CDN content URLs', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://gleecbtc.github.io/coins',
+          filePath: 'utils/coins_config_unfiltered.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://gleecbtc.github.io/coins/utils/coins_config_unfiltered.json',
+          ),
+        );
+      });
+
+      test('should preserve absolute file URLs as-is', () {
+        final uri = GitHubFileDownloader.resolveFileContentUri(
+          repoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
+          filePath:
+              'https://raw.githubusercontent.com/GLEECBTC/coins/master/seed-nodes.json',
+          repoCommit: 'json-config-update',
+        );
+
+        expect(
+          uri.toString(),
+          equals(
+            'https://raw.githubusercontent.com/GLEECBTC/coins/master/seed-nodes.json',
+          ),
+        );
+      });
+
       test(
         'should handle commit hash vs branch name correctly for CDN URLs',
         () {
@@ -176,7 +222,7 @@ void main() {
       test('should receive effective content URL from build step', () {
         // This test verifies that when a build step passes an effective content URL
         // (which could be a CDN URL), the downloader uses it correctly
-        const effectiveUrl = 'https://coins-cdn.komodoplatform.com/master';
+        const effectiveUrl = 'https://gleecbtc.github.io/coins';
 
         final downloader = GitHubFileDownloader(
           apiProvider: mockApiProvider,
@@ -188,9 +234,8 @@ void main() {
 
       test('should work with realistic Komodo platform CDN URLs', () {
         final realisticUrls = [
-          'https://coins-cdn.komodoplatform.com/master',
-          'https://coins-cdn.komodoplatform.com/dev',
-          'https://raw.githubusercontent.com/KomodoPlatform/coins',
+          'https://gleecbtc.github.io/coins',
+          'https://raw.githubusercontent.com/GLEECBTC/coins',
         ];
 
         for (final url in realisticUrls) {
@@ -278,9 +323,9 @@ void main() {
           // CDN URLs when provided, which is critical for downloading hundreds
           // of coin assets efficiently without hitting rate limits
 
-          const cdnUrl = 'https://coins-cdn.komodoplatform.com/master';
+          const cdnUrl = 'https://gleecbtc.github.io/coins';
           const originalGitHubUrl =
-              'https://raw.githubusercontent.com/KomodoPlatform/coins';
+              'https://raw.githubusercontent.com/GLEECBTC/coins';
 
           // Test with CDN URL (what should happen when CDN mirrors are configured)
           final downloaderWithCDN = GitHubFileDownloader(
@@ -321,24 +366,22 @@ void main() {
         final testScenarios = [
           {
             'scenario': 'Production with master branch CDN',
-            'contentUrl': 'https://coins-cdn.komodoplatform.com/master',
+            'contentUrl': 'https://gleecbtc.github.io/coins',
             'description': 'Production builds using CDN for master branch',
           },
           {
             'scenario': 'Development with dev branch CDN',
-            'contentUrl': 'https://coins-cdn.komodoplatform.com/dev',
+            'contentUrl': 'https://gleecbtc.github.io/coins',
             'description': 'Development builds using CDN for dev branch',
           },
           {
             'scenario': 'Feature branch without CDN',
-            'contentUrl':
-                'https://raw.githubusercontent.com/KomodoPlatform/coins',
+            'contentUrl': 'https://raw.githubusercontent.com/GLEECBTC/coins',
             'description': 'Feature branches falling back to GitHub raw',
           },
           {
             'scenario': 'Custom jsDelivr CDN',
-            'contentUrl':
-                'https://cdn.jsdelivr.net/gh/KomodoPlatform/coins@master',
+            'contentUrl': 'https://cdn.jsdelivr.net/gh/GLEECBTC/coins@master',
             'description': 'Alternative CDN provider for coin assets',
           },
         ];
@@ -371,8 +414,8 @@ void main() {
         // BuildConfig -> effectiveContentUrl -> GitHubFileDownloader -> CDN URLs
 
         const originalContentUrl =
-            'https://raw.githubusercontent.com/KomodoPlatform/coins';
-        const cdnMirrorUrl = 'https://coins-cdn.komodoplatform.com/master';
+            'https://raw.githubusercontent.com/GLEECBTC/coins';
+        const cdnMirrorUrl = 'https://gleecbtc.github.io/coins';
 
         // When GitHubFileDownloader receives the effective content URL,
         // it should use the CDN mirror for efficiency

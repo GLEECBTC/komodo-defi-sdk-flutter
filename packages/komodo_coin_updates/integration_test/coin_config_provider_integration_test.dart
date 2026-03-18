@@ -161,14 +161,14 @@ void main() {
     group('GithubCoinConfigProvider Integration', () {
       test('fetches and parses configuration from GitHub API', () async {
         final mockResponses = {
-          'https://api.github.com/repos/KomodoPlatform/coins/branches/master':
+          'https://api.github.com/repos/GLEECBTC/coins/branches/master':
               http.Response(
                 jsonEncode({
                   'commit': {'sha': 'abc123def456'},
                 }),
                 200,
               ),
-          'https://raw.githubusercontent.com/KomodoPlatform/coins/master/utils/coins_config_unfiltered.json':
+          'https://raw.githubusercontent.com/GLEECBTC/coins/master/utils/coins_config_unfiltered.json':
               http.Response(
                 jsonEncode({
                   'KMD': {
@@ -190,9 +190,9 @@ void main() {
         final provider = GithubCoinConfigProvider(
           branch: 'master',
           coinsGithubContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsGithubApiUrl:
-              'https://api.github.com/repos/KomodoPlatform/coins',
+              'https://api.github.com/repos/GLEECBTC/coins',
           coinsPath: 'coins',
           coinsConfigPath: 'utils/coins_config_unfiltered.json',
           httpClient: httpClient,
@@ -208,7 +208,7 @@ void main() {
 
       test('handles HTTP errors gracefully', () async {
         final mockResponses = {
-          'https://api.github.com/repos/KomodoPlatform/coins/branches/master':
+          'https://api.github.com/repos/GLEECBTC/coins/branches/master':
               http.Response('Not Found', 404),
         };
 
@@ -217,9 +217,9 @@ void main() {
         final provider = GithubCoinConfigProvider(
           branch: 'master',
           coinsGithubContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsGithubApiUrl:
-              'https://api.github.com/repos/KomodoPlatform/coins',
+              'https://api.github.com/repos/GLEECBTC/coins',
           coinsPath: 'coins',
           coinsConfigPath: 'utils/coins_config_unfiltered.json',
           httpClient: httpClient,
@@ -232,20 +232,20 @@ void main() {
         final provider = GithubCoinConfigProvider(
           branch: 'master',
           coinsGithubContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsGithubApiUrl:
-              'https://api.github.com/repos/KomodoPlatform/coins',
+              'https://api.github.com/repos/GLEECBTC/coins',
           coinsPath: 'coins',
           coinsConfigPath: 'utils/coins_config_unfiltered.json',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
         final uri = provider.buildContentUri(
           'utils/coins_config_unfiltered.json',
         );
-        expect(uri.toString(), contains('komodoplatform.github.io'));
+        expect(uri.toString(), contains('gleecbtc.github.io'));
         expect(uri.toString(), isNot(contains('raw.githubusercontent.com')));
       });
 
@@ -253,13 +253,13 @@ void main() {
         final provider = GithubCoinConfigProvider(
           branch: 'dev',
           coinsGithubContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsGithubApiUrl:
-              'https://api.github.com/repos/KomodoPlatform/coins',
+              'https://api.github.com/repos/GLEECBTC/coins',
           coinsPath: 'coins',
           coinsConfigPath: 'utils/coins_config_unfiltered.json',
           cdnBranchMirrors: const {
-            'master': 'https://komodoplatform.github.io/coins',
+            'master': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -268,7 +268,7 @@ void main() {
         );
         expect(uri.toString(), contains('raw.githubusercontent.com'));
         expect(uri.toString(), contains('/dev/'));
-        expect(uri.toString(), isNot(contains('komodoplatform.github.io')));
+        expect(uri.toString(), isNot(contains('gleecbtc.github.io')));
       });
     });
 

@@ -103,14 +103,14 @@ class GetNewAddressTaskStatusResponse extends BaseResponse {
     final detailsJson = result['details'];
     Object? description;
     NewAddressInfo? data;
-    GeneralErrorResponse? error;
+    Exception? error;
 
     if (status == SyncStatusEnum.success) {
       data = NewAddressInfo.fromJson(
         (detailsJson as JsonMap).value<JsonMap>('new_address'),
       );
     } else if (status == SyncStatusEnum.error) {
-      error = GeneralErrorResponse.parse(detailsJson as JsonMap);
+      error = parseTaskErrorDetails(detailsJson);
     } else if (status == SyncStatusEnum.inProgress) {
       description = TaskDescriptionParserFactory.parseDescription(detailsJson);
     }
@@ -118,7 +118,7 @@ class GetNewAddressTaskStatusResponse extends BaseResponse {
     return GetNewAddressTaskStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
       status: status,
-      details: ResponseDetails<NewAddressInfo, GeneralErrorResponse, Object>(
+      details: ResponseDetails<NewAddressInfo, Exception, Object>(
         data: data,
         error: error,
         description: description,
@@ -127,7 +127,7 @@ class GetNewAddressTaskStatusResponse extends BaseResponse {
   }
 
   final SyncStatusEnum status;
-  final ResponseDetails<NewAddressInfo, GeneralErrorResponse, Object> details;
+  final ResponseDetails<NewAddressInfo, Exception, Object> details;
 
   @override
   JsonMap toJson() {
@@ -158,7 +158,7 @@ class GetNewAddressTaskStatusResponse extends BaseResponse {
       case SyncStatusEnum.error:
         return NewAddressState(
           status: NewAddressStatus.error,
-          error: details.error?.error ?? 'Unknown error',
+          error: exceptionMessage(details.error) ?? 'Unknown error',
           taskId: taskId,
         );
       case SyncStatusEnum.inProgress:

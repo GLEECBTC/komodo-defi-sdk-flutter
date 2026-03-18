@@ -177,17 +177,17 @@ void main() {
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: false,
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
-              'https://raw.githubusercontent.com/KomodoPlatform/coins',
+              'https://raw.githubusercontent.com/GLEECBTC/coins',
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,
           mappedFiles: {'config/coins.json': 'coins/coins.json'},
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -214,13 +214,13 @@ void main() {
         // Config should preserve original GitHub URL
         expect(
           buildStep.config.coinsRepoContentUrl,
-          equals('https://raw.githubusercontent.com/KomodoPlatform/coins'),
+          equals('https://raw.githubusercontent.com/GLEECBTC/coins'),
         );
 
         // But downloader should receive the CDN URL
         expect(
           buildStep.downloader.repoContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
         );
       });
 
@@ -579,13 +579,13 @@ void main() {
 
         // Setup: User has a custom content URL and CDN mirrors configured
         final userConfiguredUrl =
-            'https://my-custom-github-mirror.example.com/KomodoPlatform/coins';
+            'https://my-custom-github-mirror.example.com/GLEECBTC/coins';
 
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
           updateCommitOnBuild: true, // This triggers config save
-          coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+          coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl: userConfiguredUrl, // User's custom URL
           coinsRepoBranch: 'master',
           runtimeUpdatesEnabled: true,
@@ -593,8 +593,8 @@ void main() {
           mappedFolders: {'assets/coins': 'icons'},
           concurrentDownloadsEnabled: true,
           cdnBranchMirrors: {
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           },
         );
 
@@ -641,14 +641,14 @@ void main() {
         // CRITICAL VERIFICATION: The downloader should use the CDN mirror (effective URL)
         expect(
           buildStep.downloader.repoContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
           reason: 'Downloader should use CDN mirror for efficiency',
         );
 
         // CRITICAL VERIFICATION: The effective URL logic should work correctly
         expect(
           buildStep.config.effectiveContentUrl,
-          equals('https://coins-cdn.komodoplatform.com/master'),
+          equals('https://gleecbtc.github.io/coins'),
           reason: 'Effective URL should return CDN mirror when available',
         );
 
@@ -674,8 +674,8 @@ void main() {
         expect(
           savedCoinsConfig['cdn_branch_mirrors'],
           equals({
-            'master': 'https://coins-cdn.komodoplatform.com/master',
-            'dev': 'https://coins-cdn.komodoplatform.com/dev',
+            'master': 'https://gleecbtc.github.io/coins',
+            'dev': 'https://gleecbtc.github.io/coins',
           }),
           reason:
               'CDN mirrors configuration should be preserved in saved config',

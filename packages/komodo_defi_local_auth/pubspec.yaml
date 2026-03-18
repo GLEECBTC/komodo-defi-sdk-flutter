@@ -2,7 +2,7 @@ name: komodo_defi_local_auth
 description: A package responsible for managing and abstracting out an
   authentication service on top of the API's methods
 version: 0.3.1+2
-repository: https://github.com/KomodoPlatform/komodo-defi-sdk-flutter
+repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

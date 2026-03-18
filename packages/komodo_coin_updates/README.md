@@ -2,11 +2,11 @@
 
 Utilities for retrieving, storing, and updating the Komodo coins configuration at runtime.
 
-This package fetches the unified coins configuration JSON from the `KomodoPlatform/coins` repository (`utils/coins_config_unfiltered.json` by default), converts entries into `Asset` models (from `komodo_defi_types`), persists them to Hive, and tracks the source commit so you can decide when to refresh.
+This package fetches the unified coins configuration JSON from the `GLEECBTC/coins` repository (`utils/coins_config_unfiltered.json` by default), converts entries into `Asset` models (from `komodo_defi_types`), persists them to Hive, and tracks the source commit so you can decide when to refresh.
 
 ## Features
 
-- Fetch latest commit from the `KomodoPlatform/coins` repo
+- Fetch latest commit from the `GLEECBTC/coins` repo
 - Retrieve the latest coins_config JSON and parse to strongly-typed `Asset` models
 - Persist assets in Hive (`assets` lazy box) and store the current commit hash in `coins_settings`
 - Check whether the stored commit is up to date and update when needed
@@ -49,8 +49,8 @@ final config = AssetRuntimeUpdateConfig(
   fetchAtBuildEnabled: false,
   updateCommitOnBuild: false,
   bundledCoinsRepoCommit: 'abcdef123456',
-  coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
-  coinsRepoContentUrl: 'https://raw.githubusercontent.com/KomodoPlatform/coins',
+  coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
+  coinsRepoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
   coinsRepoBranch: 'master',
   runtimeUpdatesEnabled: true,
   mappedFiles: {

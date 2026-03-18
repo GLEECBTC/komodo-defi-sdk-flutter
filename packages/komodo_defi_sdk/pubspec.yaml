@@ -4,7 +4,7 @@ description: A high-level opinionated library that provides a simple way to
   wallets). This package seves as the entry point for the packages in this
   repository.
 version: 0.4.0+3
-repository: https://github.com/KomodoPlatform/komodo-defi-sdk-flutter
+repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

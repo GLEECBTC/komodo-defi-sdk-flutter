@@ -257,7 +257,7 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
 
   // Use 127.0.0.1 instead of localhost to avoid DNS resolution issues on mobile
   // platforms, especially after app backgrounding. See:
-  // https://github.com/KomodoPlatform/komodo-wallet/issues/3213
+  // https://github.com/GLEECBTC/gleec-wallet/issues/3213
   final Uri _url = Uri.parse('http://127.0.0.1:7783');
   Client _client = Client();
 

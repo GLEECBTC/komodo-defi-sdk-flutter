@@ -37,18 +37,14 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
       progressDetails: ActivationProgressDetails(
         currentStep: ActivationStep.initialization,
         stepCount: 3,
-        additionalInfo: {
-          'assetType': 'platform',
-          'protocol': 'SIA',
-        },
+        additionalInfo: {'assetType': 'platform', 'protocol': 'SIA'},
       ),
     );
 
     try {
-      final init = await KomodoDefiRpcMethods(client).sia.enableSiaInit(
-            ticker: asset.id.id,
-            params: params,
-          );
+      final init = await KomodoDefiRpcMethods(
+        client,
+      ).sia.enableSiaInit(ticker: asset.id.id, params: params);
 
       final taskId = init.taskId;
       yield ActivationProgress(
@@ -61,8 +57,9 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
       );
 
       while (true) {
-        final status =
-            await KomodoDefiRpcMethods(client).sia.enableSiaStatus(taskId);
+        final status = await KomodoDefiRpcMethods(
+          client,
+        ).sia.enableSiaStatus(taskId);
 
         yield ActivationProgress(
           status: 'SIA activation in progress',
@@ -86,12 +83,15 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
               ),
             );
           } else {
-            yield ActivationProgress(
+            final errorProgress = buildErrorProgress(
+              asset: asset,
+              error: status.details ?? 'SIA activation failed',
+              errorCode: 'SIA_ACTIVATION_ERROR',
+              stepCount: 3,
               status: 'SIA activation failed',
-              isComplete: true,
-              progressDetails: ActivationProgressDetails(
-                currentStep: ActivationStep.error,
-                stepCount: 3,
+            );
+            yield errorProgress.copyWith(
+              progressDetails: errorProgress.progressDetails?.copyWith(
                 additionalInfo: {
                   'taskId': taskId,
                   'status': status.status,
@@ -115,13 +115,17 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
 
         await Future<void>.delayed(kPollInterval);
       }
-    } on Exception catch (e) {
-      yield ActivationProgress(
+    } on Exception catch (e, stack) {
+      final errorProgress = buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'SIA_ACTIVATION_ERROR',
+        stepCount: 3,
         status: 'SIA activation failed',
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 3,
+      );
+      yield errorProgress.copyWith(
+        progressDetails: errorProgress.progressDetails?.copyWith(
           additionalInfo: {'error': e.toString()},
         ),
       );
@@ -129,4 +133,3 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
     }
   }
 }
-

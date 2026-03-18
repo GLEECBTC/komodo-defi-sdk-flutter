@@ -501,7 +501,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -516,7 +516,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -531,7 +531,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -599,7 +599,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon;
 				PRODUCT_NAME = "Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -728,7 +728,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon;
 				PRODUCT_NAME = "Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -751,7 +751,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon;
 				PRODUCT_NAME = "Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -842,7 +842,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.dev;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.dev;
 				PRODUCT_NAME = "[DEV] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -858,7 +858,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -941,7 +941,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.stg;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.stg;
 				PRODUCT_NAME = "[STG] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -957,7 +957,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -1033,7 +1033,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.stg;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.stg;
 				PRODUCT_NAME = "[STG] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -1048,7 +1048,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -1124,7 +1124,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.dev;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.dev;
 				PRODUCT_NAME = "[DEV] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -1139,7 +1139,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -1215,7 +1215,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.stg;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.stg;
 				PRODUCT_NAME = "[STG] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -1230,7 +1230,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";
@@ -1306,7 +1306,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.dev;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.dev;
 				PRODUCT_NAME = "[DEV] Dex Dungeon";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -1321,7 +1321,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.komodoplatform.dex-dungeon.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gleec.dex-dungeon.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/dex_dungeon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/dex_dungeon";

@@ -11,7 +11,7 @@ abstract class BaseRpcMethodNamespace {
   String? get rpcPass => null;
 
   Future<T> execute<T extends BaseResponse>(
-    BaseRequest<T, GeneralErrorResponse> request,
+    BaseRequest<T, Exception> request,
   ) async {
     final client = _client;
     if (client == null) {

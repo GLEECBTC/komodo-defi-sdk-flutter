@@ -44,7 +44,7 @@ abstract class TrezorInitializationState with _$TrezorInitializationState {
         final errorInfo = response.errorInfo;
         return TrezorInitializationState(
           status: AuthenticationStatus.error,
-          error: errorInfo?.error ?? 'Unknown error occurred',
+          error: exceptionMessage(errorInfo) ?? 'Unknown error occurred',
           taskId: taskId,
         );
       case 'InProgress':

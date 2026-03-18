@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -9,6 +10,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   LegacyWithdrawalManager(this._client);
 
   final ApiClient _client;
+  static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   /// Creates a preview and immediately executes the withdrawal.
   ///
@@ -31,9 +33,10 @@ class LegacyWithdrawalManager implements WithdrawalManager {
 
       if (response.status == 'Error') {
         yield* Stream.error(
-          WithdrawalException(
+          _mapError(
             response.details as String,
-            WithdrawalException.mapErrorToCode(response.details as String),
+            operation: 'withdrawal.legacy',
+            assetId: parameters.asset,
           ),
         );
         return;
@@ -82,18 +85,16 @@ class LegacyWithdrawalManager implements WithdrawalManager {
         );
       } catch (e) {
         yield* Stream.error(
-          WithdrawalException(
-            'Failed to broadcast transaction: $e',
-            WithdrawalErrorCode.networkError,
+          _mapError(
+            e,
+            operation: 'withdrawal.broadcast',
+            assetId: parameters.asset,
           ),
         );
       }
     } catch (e) {
       yield* Stream.error(
-        WithdrawalException(
-          'Withdrawal failed: $e',
-          WithdrawalErrorCode.unknownError,
-        ),
+        _mapError(e, operation: 'withdrawal.legacy', assetId: parameters.asset),
       );
     }
   }
@@ -107,27 +108,89 @@ class LegacyWithdrawalManager implements WithdrawalManager {
       final response = await _client.rpc.withdraw.withdraw(parameters);
 
       if (response.status == 'Error') {
-        throw WithdrawalException(
+        throw _mapError(
           response.details as String,
-          WithdrawalException.mapErrorToCode(response.details as String),
+          operation: 'withdrawal.preview',
+          assetId: parameters.asset,
         );
       }
 
       if (response.details is! WithdrawResult) {
-        throw WithdrawalException(
+        throw _mapError(
           'Invalid preview response format',
-          WithdrawalErrorCode.unknownError,
+          operation: 'withdrawal.preview',
+          assetId: parameters.asset,
         );
       }
 
       return response.details as WithdrawResult;
     } catch (e) {
-      if (e is WithdrawalException) {
-        rethrow;
-      }
-      throw WithdrawalException(
-        'Preview failed: $e',
-        WithdrawalErrorCode.unknownError,
+      throw _mapError(
+        e,
+        operation: 'withdrawal.preview',
+        assetId: parameters.asset,
+      );
+    }
+  }
+
+  /// Execute a withdrawal from a previously generated preview.
+  ///
+  /// This method broadcasts the pre-signed transaction from the preview,
+  /// avoiding the need to sign the transaction again. This is the ONLY
+  /// recommended way to execute withdrawals for Tendermint assets.
+  ///
+  /// Parameters:
+  /// - [preview] - The preview result from [previewWithdrawal]
+  /// - [assetId] - The asset identifier (coin symbol)
+  ///
+  /// Returns a [Stream<WithdrawalProgress>] that emits progress updates.
+  @override
+  Stream<WithdrawalProgress> executeWithdrawal(
+    WithdrawalPreview preview,
+    String assetId,
+  ) async* {
+    try {
+      // Initial progress update
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.inProgress,
+        message: 'Broadcasting signed transaction...',
+        withdrawalResult: WithdrawalResult(
+          txHash: preview.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+
+      // Broadcast the pre-signed transaction
+      final broadcastResponse = await _client.rpc.withdraw.sendRawTransaction(
+        coin: assetId,
+        txHex: preview.txHex,
+        txJson: preview.txJson,
+      );
+
+      // Final success update with actual broadcast transaction hash
+      yield WithdrawalProgress(
+        status: WithdrawalStatus.complete,
+        message: 'Withdrawal completed successfully',
+        withdrawalResult: WithdrawalResult(
+          txHash: broadcastResponse.txHash,
+          balanceChanges: preview.balanceChanges,
+          coin: assetId,
+          toAddress: preview.to.first,
+          fee: preview.fee,
+          kmdRewardsEligible:
+              preview.kmdRewards != null &&
+              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+        ),
+      );
+    } catch (e) {
+      yield* Stream.error(
+        _mapError(e, operation: 'withdrawal.execute', assetId: assetId),
       );
     }
   }
@@ -212,5 +275,16 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   Future<WithdrawalFeeOptions?> getFeeOptions(String assetId) async {
     // Legacy implementation doesn't support priority-based fees
     return null;
+  }
+
+  SdkError _mapError(
+    Object error, {
+    required String operation,
+    String? assetId,
+  }) {
+    return _errorMapper.map(
+      error,
+      context: SdkErrorContext(operation: operation, assetId: assetId),
+    );
   }
 }

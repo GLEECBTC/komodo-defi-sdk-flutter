@@ -1,12 +1,14 @@
 <p align="center">
-    <a href="https://github.com/KomodoPlatform/komodo-defi-framework" alt="Contributors">
+    <a href="https://github.com/GLEECBTC/komodo-defi-framework" alt="Komodo DeFi Framework">
         <img width="420" src="https://user-images.githubusercontent.com/24797699/252396802-de8f9264-8056-4430-a17d-5ecec9668dfc.png" />
     </a>
 </p>
 
 # Komodo DeFi SDK for Flutter
 
-Komodo’s Flutter SDK lets you build cross-platform DeFi apps on top of the Komodo DeFi Framework (KDF) with a few lines of code. The SDK provides a high-level, batteries-included developer experience while still exposing the low-level framework and RPC methods when you need them.
+A Flutter SDK for building cross-platform DeFi apps on top of the Komodo DeFi Framework (KDF) with a few lines of code. The SDK provides a high-level, batteries-included developer experience while still exposing the low-level framework and RPC methods when you need them.
+
+Maintained by [GLEEC](https://www.gleec.com).
 
 - Primary entry point: see `packages/komodo_defi_sdk`.
 - Full KDF access: see `packages/komodo_defi_framework`.
@@ -19,7 +21,7 @@ Komodo’s Flutter SDK lets you build cross-platform DeFi apps on top of the Kom
 
 Supported platforms: Android, iOS, macOS, Windows, Linux, and Web (WASM).
 
-See the Komodo DeFi Framework (API) source at `https://github.com/KomodoPlatform/komodo-defi-framework` and a hosted demo at `https://komodo-playground.web.app`.
+See the Komodo DeFi Framework (API) source at `https://github.com/GLEECBTC/komodo-defi-framework` and a hosted demo at `https://gleec-sdk-playground.web.app`.
 
 ## Quick start (SDK)
 

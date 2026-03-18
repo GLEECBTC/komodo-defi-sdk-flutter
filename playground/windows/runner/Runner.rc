@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.komodoplatform" "\0"
-            VALUE "FileDescription", "komodo_defi_framework_example" "\0"
+            VALUE "CompanyName", "GLEEC" "\0"
+            VALUE "FileDescription", "GLEEC SDK Playground" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "komodo_defi_framework_example" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2024 com.komodoplatform. All rights reserved." "\0"
-            VALUE "OriginalFilename", "komodo_defi_framework_example.exe" "\0"
-            VALUE "ProductName", "komodo_defi_framework_example" "\0"
+            VALUE "InternalName", "gleec_sdk_playground" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 GLEEC. All rights reserved." "\0"
+            VALUE "OriginalFilename", "gleec_sdk_playground.exe" "\0"
+            VALUE "ProductName", "GLEEC SDK Playground" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

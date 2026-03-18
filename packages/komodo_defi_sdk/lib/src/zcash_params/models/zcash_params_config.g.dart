@@ -25,10 +25,10 @@ _ZcashParamsConfig _$ZcashParamsConfigFromJson(Map<String, dynamic> json) =>
       paramFiles: (json['param_files'] as List<dynamic>)
           .map((e) => ZcashParamFile.fromJson(e as Map<String, dynamic>))
           .toList(),
-      primaryUrl:
-          json['primary_url'] as String? ??
+      primaryUrl: json['primary_url'] as String? ?? 'https://z.cash/downloads/',
+      backupUrl:
+          json['backup_url'] as String? ??
           'https://komodoplatform.com/downloads/',
-      backupUrl: json['backup_url'] as String? ?? 'https://z.cash/downloads/',
       downloadTimeoutSeconds:
           (json['download_timeout_seconds'] as num?)?.toInt() ?? 1800,
       maxRetries: (json['max_retries'] as num?)?.toInt() ?? 3,

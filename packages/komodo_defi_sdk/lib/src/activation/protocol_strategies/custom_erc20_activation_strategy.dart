@@ -14,7 +14,9 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trc20,
     CoinSubClass.erc20,
+    CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
     CoinSubClass.matic,
@@ -64,12 +66,24 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         throw StateError('Protocol data is missing from custom token config');
       }
 
-      final activationParams = Erc20ActivationParams.fromJsonConfig(
-        asset.protocol.config,
-      );
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ),
+        final Trc20Protocol _ => Trc20ActivationParams.fromJsonConfig(
+          asset.protocol.config,
+        ),
+        _ => throw UnsupportedError(
+          'Unsupported custom token protocol: ${asset.protocol.runtimeType}',
+        ),
+      };
       final platform = protocolData.value<String>('platform');
       final contractAddress = protocolData.value<String>('contract_address');
-      
+      final protocolType = switch (asset.protocol.subClass) {
+        CoinSubClass.trc20 => 'TRC20',
+        _ => 'ERC20',
+      };
+
       // Debug logging for custom ERC20 token activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
@@ -77,13 +91,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
           name: 'CustomErc20ActivationStrategy',
         );
         log(
-          '[RPC] Activation parameters: ${jsonEncode({
-            'ticker': asset.id.id,
-            'protocol': asset.protocol.subClass.formatted,
-            'platform': platform,
-            'contract_address': contractAddress,
-            'activation_params': activationParams.toRpcParams(),
-          })}',
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'platform': platform, 'contract_address': contractAddress, 'activation_params': activationParams.toRpcParams()})}',
           name: 'CustomErc20ActivationStrategy',
         );
       }
@@ -93,8 +101,9 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         activationParams: activationParams,
         platform: platform,
         contractAddress: contractAddress,
+        protocolType: protocolType,
       );
-      
+
       if (KdfLoggingConfig.verboseLogging) {
         log(
           '[RPC] Successfully activated custom ERC20 token: ${asset.id.id}',
@@ -114,17 +123,12 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 2,
-          errorCode: 'ERC20_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'CUSTOM_TOKEN_ACTIVATION_ERROR',
+        stepCount: 2,
       );
     }
   }

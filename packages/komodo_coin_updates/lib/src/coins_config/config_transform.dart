@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb, kIsWasm;
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
 /// Defines a transform that can be applied to a single coin configuration.
@@ -133,6 +134,19 @@ class CoinFilter {
   /// Protocol types to exclude from the runtime list.
   static const _filteredProtocolTypes = <String, String>{};
 
+  /// Protocol subclasses that the runtime parser explicitly does not support.
+  static const _unsupportedProtocolSubClasses = {
+    CoinSubClass.smartBch,
+    CoinSubClass.unknown,
+  };
+
+  /// EVM configs must carry activation data locally because they do not
+  /// inherit the required RPC/swap fields from a parent during parsing.
+  static const _requiredEvmStringFields = {
+    'swap_contract_address',
+    'fallback_swap_contract',
+  };
+
   /// Returns true if the given coin should be filtered out.
   bool shouldFilter(JsonMap config) {
     // Honor an explicit exclusion marker
@@ -143,12 +157,47 @@ class CoinFilter {
     final coin = config.value<String>('coin');
     final protocolSubClass = config.valueOrNull<String>('type');
     final protocolClass = config.valueOrNull<String>('protocol', 'type');
+    final resolvedSubClass = _resolveProtocolSubClass(config);
     final isTestnet = config.valueOrNull<bool>('is_testnet') ?? false;
 
     return _filteredCoins.containsKey(coin) ||
         _filteredProtocolTypes.containsKey(protocolClass) ||
         _filteredProtocolSubTypes.containsKey(protocolSubClass) ||
+        _unsupportedProtocolSubClasses.contains(resolvedSubClass) ||
+        _isInvalidEvmConfig(config) ||
         (_isTestCoinsOnly && !isTestnet);
+  }
+
+  bool _isInvalidEvmConfig(JsonMap config) {
+    final subClass = _resolveProtocolSubClass(config);
+    if (subClass == null || !evmCoinSubClasses.contains(subClass)) {
+      return false;
+    }
+
+    final nodes = config.valueOrNull<JsonList>('nodes');
+    if (nodes == null || nodes.isEmpty) {
+      return true;
+    }
+
+    for (final field in _requiredEvmStringFields) {
+      final value = config.valueOrNull<String>(field)?.trim();
+      if (value == null || value.isEmpty) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  CoinSubClass? _resolveProtocolSubClass(JsonMap config) {
+    final rawType =
+        config.valueOrNull<String>('type') ??
+        config.valueOrNull<String>('protocol', 'type');
+    if (rawType == null) {
+      return null;
+    }
+
+    return CoinSubClass.tryParse(rawType);
   }
 }
 
@@ -208,7 +257,7 @@ class WssWebsocketTransform implements CoinConfigTransform {
 enum ElectrumServerType { wssOnly, nonWssOnly }
 
 /// Filters out insecure connections on non-web platforms, emulating the
-/// filtering applied to the coins_config_ssl.json file in KomodoPlatform/coins
+/// filtering applied to the coins_config_ssl.json file in GLEECBTC/coins
 /// On non-web platforms, only SSL electrum servers and HTTPS URLs are
 /// supported for security.
 // TODO: move this to a build-time step via the coins config and/or the

@@ -252,10 +252,10 @@ class TrezorStatusResponse extends BaseResponse {
     return null;
   }
 
-  /// Returns error info if status is 'Error'
-  GeneralErrorResponse? get errorInfo {
-    if (status == 'Error' && details is JsonMap) {
-      return GeneralErrorResponse.parse(details as JsonMap);
+  /// Returns typed error info if status is 'Error'
+  Exception? get errorInfo {
+    if (status == 'Error') {
+      return parseTaskErrorDetails(details);
     }
     return null;
   }

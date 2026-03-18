@@ -55,10 +55,9 @@ class SlpActivationStrategy extends ProtocolActivationStrategy {
         await client.rpc.slp.enableBchWithTokens(
           ticker: asset.id.id,
           params: BchActivationParams.fromJson(protocol.config),
-          slpTokensRequests: children
-                  ?.map(
-                    (child) => TokensRequest(ticker: child.id.id),
-                  )
+          slpTokensRequests:
+              children
+                  ?.map((child) => TokensRequest(ticker: child.id.id))
                   .toList() ??
               [],
         );
@@ -88,17 +87,12 @@ class SlpActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 3,
-          errorCode: 'SLP_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'SLP_ACTIVATION_ERROR',
+        stepCount: 3,
       );
     }
   }

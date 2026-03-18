@@ -1,5 +1,4 @@
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
-import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 class TaskEnableEthInit
     extends BaseRequest<NewTaskResponse, GeneralErrorResponse> {
@@ -10,7 +9,7 @@ class TaskEnableEthInit
 
   @override
   // ignore: overridden_fields
-  final EthWithTokensActivationParams params;
+  final ActivationParams params;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -22,19 +21,6 @@ class TaskEnableEthInit
   };
 
   @override
-  NewTaskResponse parseResponse(String responseBody) {
-    final json = jsonFromString(responseBody);
-    if (GeneralErrorResponse.isErrorResponse(json)) {
-      throw GeneralErrorResponse.parse(json);
-    }
-    return NewTaskResponse.parse(json);
-  }
-
-  @override
-  NewTaskResponse parse(Map<String, dynamic> json) {
-    if (GeneralErrorResponse.isErrorResponse(json)) {
-      throw GeneralErrorResponse.parse(json);
-    }
-    return NewTaskResponse.parse(json);
-  }
+  NewTaskResponse parse(Map<String, dynamic> json) =>
+      NewTaskResponse.parse(json);
 }

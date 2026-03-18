@@ -14,7 +14,7 @@ class KomodoPriceProvider implements IKomodoPriceProvider {
   /// Creates a new instance of [KomodoPriceProvider].
   KomodoPriceProvider({
     this.mainTickersUrl =
-        'https://defi-stats.komodo.earth/api/v3/prices/tickers_v2?expire_at=600',
+        'https://defistats.gleec.com/api/v3/prices/tickers_v2?expire_at=600',
   });
 
   /// The URL to fetch the main tickers from.

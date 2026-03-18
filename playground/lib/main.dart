@@ -237,35 +237,30 @@ class _ConfigureDialogState extends State<ConfigureDialog> {
                   decoration: InputDecoration(
                     labelText: 'Host or IP Address',
                     hintText: 'e.g. 123.456.789.012 or example.com',
-                    suffixIcon:
-                        _selectedHostType == 'remote'
-                            ? IconButton(
-                              icon: const Icon(Icons.info_outline),
-                              onPressed:
-                                  () => showDialog(
-                                    context: context,
-                                    builder:
-                                        (context) => AlertDialog(
-                                          title: const Text(
-                                            'Remote Access Setup',
-                                          ),
-                                          content: SingleChildScrollView(
-                                            child: SelectableText(
-                                              _remoteAccessTooltipMessage(),
-                                            ),
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () {
-                                                Navigator.of(context).pop();
-                                              },
-                                              child: const Text('OK'),
-                                            ),
-                                          ],
-                                        ),
+                    suffixIcon: _selectedHostType == 'remote'
+                        ? IconButton(
+                            icon: const Icon(Icons.info_outline),
+                            onPressed: () => showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Remote Access Setup'),
+                                content: SingleChildScrollView(
+                                  child: SelectableText(
+                                    _remoteAccessTooltipMessage(),
                                   ),
-                            )
-                            : null,
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                    },
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : null,
                   ),
                 ),
 
@@ -353,14 +348,13 @@ class _ConfigureDialogState extends State<ConfigureDialog> {
                       'Run as a bootstrap node (requires I am Seed)',
                     ),
                     value: _isBootstrapNode,
-                    onChanged:
-                        _iAmSeed
-                            ? (value) {
-                              setState(() {
-                                _isBootstrapNode = value ?? false;
-                              });
-                            }
-                            : null, // Disable if not a seed node
+                    onChanged: _iAmSeed
+                        ? (value) {
+                            setState(() {
+                              _isBootstrapNode = value ?? false;
+                            });
+                          }
+                        : null, // Disable if not a seed node
                   ),
                 ],
               ],
@@ -557,8 +551,9 @@ docker run -p 7783:7783 -v "\$(pwd)":/app -w /app komodoofficial/komodo-defi-fra
     final secureStorage = SecureStorageService();
     // Host type is stored in 'lastUsedConfig' object with the rest of the host config
     String? savedConfigData = await secureStorage.read(key: 'lastUsedConfig');
-    Map<String, dynamic>? savedConfig =
-        savedConfigData != null ? jsonDecode(savedConfigData) : null;
+    Map<String, dynamic>? savedConfig = savedConfigData != null
+        ? jsonDecode(savedConfigData)
+        : null;
 
     String? savedHostType = savedConfig?['hostType'];
     String? savedWalletName = await secureStorage.read(key: 'walletName');
@@ -611,8 +606,9 @@ docker run -p 7783:7783 -v "\$(pwd)":/app -w /app komodoofficial/komodo-defi-fra
       _seedNode3Controller.text = savedSeedNode3 ?? '';
       _disableP2p = savedDisableP2p?.toLowerCase() == 'true' ? true : false;
       _iAmSeed = savedIAmSeed?.toLowerCase() == 'true' ? true : false;
-      _isBootstrapNode =
-          savedIsBootstrapNode?.toLowerCase() == 'true' ? true : false;
+      _isBootstrapNode = savedIsBootstrapNode?.toLowerCase() == 'true'
+          ? true
+          : false;
     });
   }
 
@@ -736,7 +732,7 @@ class _MyAppState extends State<MyApp> {
                 icon: const Icon(Icons.code),
                 onPressed: () {
                   launchUrlString(
-                    'https://github.com/KomodoPlatform/komodo-defi-sdk-flutter/tree/dev',
+                    'https://github.com/GLEECBTC/komodo-defi-sdk-flutter/tree/dev',
                   );
                 },
               ),
@@ -757,15 +753,14 @@ class _MyAppState extends State<MyApp> {
                   ),
                   horizontalSpacerSmall,
                   Tooltip(
-                    message:
-                        _isRemoteConfig()
-                            ? 'For remote configurations, KDF must be started on the server'
-                            : 'Start the Komodo DeFi Framework',
+                    message: _isRemoteConfig()
+                        ? 'For remote configurations, KDF must be started on the server'
+                        : 'Start the Komodo DeFi Framework',
                     child: FilledButton.icon(
                       onPressed:
                           _isRunning || !_canInteract || _isRemoteConfig()
-                              ? null
-                              : _startKdf,
+                          ? null
+                          : _startKdf,
                       label: const Text('Start KDF'),
                       icon: const Icon(Icons.play_arrow),
                     ),
@@ -787,14 +782,12 @@ class _MyAppState extends State<MyApp> {
                   ),
                   horizontalSpacerSmall,
                   OutlinedButton.icon(
-                    onPressed:
-                        _canInteract && _isRunning
-                            ? () => setState(
-                              () =>
-                                  _showRequestPlayground =
-                                      !_showRequestPlayground,
-                            )
-                            : null,
+                    onPressed: _canInteract && _isRunning
+                        ? () => setState(
+                            () => _showRequestPlayground =
+                                !_showRequestPlayground,
+                          )
+                        : null,
                     label: Text(
                       _showRequestPlayground
                           ? 'Hide Playground'
@@ -967,8 +960,9 @@ class _MyAppState extends State<MyApp> {
 
     final status = await _kdfFramework!.kdfMainStatus();
 
-    final version =
-        MainStatus.rpcIsUp == status ? await _kdfFramework!.version() : 'N/A';
+    final version = MainStatus.rpcIsUp == status
+        ? await _kdfFramework!.version()
+        : 'N/A';
     setState(() {
       _isRunning = status == MainStatus.rpcIsUp;
       _statusMessage = status.toString();

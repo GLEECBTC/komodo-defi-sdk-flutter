@@ -83,35 +83,27 @@ class AccountBalanceStatusResponse extends BaseResponse {
   factory AccountBalanceStatusResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
     final status = _statusFromTaskStatus(result.value<String>('status'));
+    final detailsJson = result['details'];
 
     return AccountBalanceStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
       status: status!,
-      // details: status == 'Ok' ? AccountBalanceInfo.fromJson(details) : details,
-      details: ResponseDetails<
-        AccountBalanceInfo,
-        GeneralErrorResponse,
-        String
-      >(
-        data:
-            status == SyncStatusEnum.success
-                ? AccountBalanceInfo.fromJson(result.value<JsonMap>('details'))
-                : null,
-        error:
-            status == SyncStatusEnum.error
-                ? GeneralErrorResponse.parse(result.value<JsonMap>('details'))
-                : null,
-        description:
-            status == SyncStatusEnum.inProgress
-                ? result.value<String>('details')
-                : null,
+      details: ResponseDetails<AccountBalanceInfo, Exception, String>(
+        data: status == SyncStatusEnum.success
+            ? AccountBalanceInfo.fromJson(detailsJson as JsonMap)
+            : null,
+        error: status == SyncStatusEnum.error
+            ? parseTaskErrorDetails(detailsJson)
+            : null,
+        description: status == SyncStatusEnum.inProgress
+            ? detailsJson?.toString()
+            : null,
       ),
     );
   }
 
   final SyncStatusEnum status;
-  final ResponseDetails<AccountBalanceInfo, GeneralErrorResponse, String>
-  details;
+  final ResponseDetails<AccountBalanceInfo, Exception, String> details;
 
   @override
   JsonMap toJson() {

@@ -45,6 +45,25 @@ final signed = await client.rpc.utility.signMessage(
 
 Explore exported modules in `lib/src/rpc_methods` for the full surface (activation, wallet, utxo/eth/trezor, trading, orderbook, transaction history, withdrawal, etc.).
 
+## Development
+
+### Regenerating RPC exceptions
+
+`lib/src/models/mm2_rpc_exceptions.dart` is generated from the Komodo DeFi Framework error enums.
+
+```sh
+python3 tool/generate_mm2_rpc_exceptions.py --mm2-repo /path/to/komodo-defi-framework
+# or let the script clone the API repo into a temp directory:
+python3 tool/generate_mm2_rpc_exceptions.py
+```
+
+Generated error models and exception classes expose `errorType` as the raw
+API string (e.g. `NoSuchCoin`), so app code can match on classes/strings
+directly without depending on generated `*ErrorType` enums.
+
+By default, the script runs `dart fix --apply` after generation. Use `--no-fix`
+to skip it.
+
 ## License
 
 MIT

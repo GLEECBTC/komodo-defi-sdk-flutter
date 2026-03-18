@@ -5,8 +5,8 @@ import 'package:komodo_ui/src/utils/formatters/fee_info_formatters.dart';
 
 /// A widget for displaying FeeInfo details in a consistent format.
 ///
-/// This widget handles all fee types (ETH gas, QRC20 gas, Cosmos gas, UTXO, 
-/// Tendermint, and SIA) and displays their relevant details in a clear, 
+/// This widget handles all fee types (ETH gas, QRC20 gas, Cosmos gas, UTXO,
+/// Tendermint, and SIA) and displays their relevant details in a clear,
 /// formatted way.
 ///
 /// **Note:** Fee estimation features are currently disabled as the API endpoints
@@ -154,12 +154,44 @@ class FeeInfoDisplay extends StatelessWidget {
               ),
             ],
 
-            final FeeInfoSia fee => [
-              Text('Policy:', style: Theme.of(context).textTheme.bodyMedium),
+            final FeeInfoTron fee => [
               Text(
-                fee.policy,
+                'Bandwidth Used:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.bandwidthUsed}',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
+              Text(
+                'Energy Used:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.energyUsed}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                'Bandwidth Fee:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.bandwidthFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                'Energy Fee:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.energyFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ],
+
+            final FeeInfoSia fee => [
+              Text('Policy:', style: Theme.of(context).textTheme.bodyMedium),
+              Text(fee.policy, style: Theme.of(context).textTheme.labelLarge),
               Text('Amount:', style: Theme.of(context).textTheme.bodyMedium),
               Text(
                 fee.formatTotal(precision: 8),

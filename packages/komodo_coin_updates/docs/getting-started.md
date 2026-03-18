@@ -41,8 +41,8 @@ final config = AssetRuntimeUpdateConfig(
   fetchAtBuildEnabled: false,
   updateCommitOnBuild: false,
   bundledCoinsRepoCommit: 'abcdef123456',
-  coinsRepoApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
-  coinsRepoContentUrl: 'https://raw.githubusercontent.com/KomodoPlatform/coins',
+  coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
+  coinsRepoContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
   coinsRepoBranch: 'master',
   runtimeUpdatesEnabled: true,
   mappedFiles: {
@@ -55,7 +55,7 @@ final config = AssetRuntimeUpdateConfig(
   },
   concurrentDownloadsEnabled: true,
   cdnBranchMirrors: {
-    'master': 'https://komodoplatform.github.io/coins',
+    'master': 'https://gleecbtc.github.io/coins',
   },
 );
 ```

@@ -3,9 +3,9 @@
     "short_name": "Dex Dungeon",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A Very Good Project created by Very Good CLI.",
+    "background_color": "#202337",
+    "theme_color": "#4986EA",
+    "description": "A DeFi-powered game by GLEEC.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

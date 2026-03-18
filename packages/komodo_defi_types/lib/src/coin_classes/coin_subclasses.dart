@@ -3,6 +3,8 @@ import 'dart:ui';
 // TODO? Add a getter for the ticker of the coin subclass if needed. But this
 // may overlap with the protocol class, in which case it's not needed.
 enum CoinSubClass {
+  trx,
+  trc20,
   moonbeam,
   ftm20,
   arbitrum,
@@ -21,6 +23,7 @@ enum CoinSubClass {
   utxo,
   smartBch,
   erc20,
+  grc20,
   tendermint,
   tendermintToken,
   krc20,
@@ -39,6 +42,10 @@ enum CoinSubClass {
   // TODO: verify all the tickers.
   String get ticker {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRX';
+      case CoinSubClass.trc20:
+        return 'TRX';
       case CoinSubClass.moonbeam:
         return 'MOON';
       case CoinSubClass.ftm20:
@@ -88,6 +95,8 @@ enum CoinSubClass {
         return 'HT';
       case CoinSubClass.rskSmartBitcoin:
         return 'RBTC';
+      case CoinSubClass.grc20:
+        return 'GLEEC';
       case CoinSubClass.zhtlc:
         return 'ARRR';
       case CoinSubClass.unknown:
@@ -97,6 +106,10 @@ enum CoinSubClass {
 
   String get iconTicker {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRX';
+      case CoinSubClass.trc20:
+        return 'TRC';
       case CoinSubClass.moonbeam:
         return 'GLMR';
       case CoinSubClass.ftm20:
@@ -146,6 +159,8 @@ enum CoinSubClass {
         return 'HT';
       case CoinSubClass.rskSmartBitcoin:
         return 'RBTC';
+      case CoinSubClass.grc20:
+        return 'GLEEC';
       case CoinSubClass.zhtlc:
         return 'ARRR';
       case CoinSubClass.unknown:
@@ -243,6 +258,10 @@ enum CoinSubClass {
       return true;
     }
 
+    if (this == CoinSubClass.trx && child == CoinSubClass.trc20) {
+      return true;
+    }
+
     // For most cases, parent and child should have the same subclass
     return this == child;
   }
@@ -256,6 +275,10 @@ enum CoinSubClass {
   // subclasses where they don't have a symbol used in coin IDs.
   String get formatted {
     switch (this) {
+      case CoinSubClass.trx:
+        return 'TRON';
+      case CoinSubClass.trc20:
+        return 'TRC20';
       case CoinSubClass.moonbeam:
         return 'Moonbeam';
       case CoinSubClass.ftm20:
@@ -304,6 +327,8 @@ enum CoinSubClass {
         return 'Huobi ECO Chain';
       case CoinSubClass.rskSmartBitcoin:
         return 'RSK Smart Bitcoin';
+      case CoinSubClass.grc20:
+        return 'Gleec';
       case CoinSubClass.zhtlc:
         return 'Pirate Network';
       case CoinSubClass.unknown:
@@ -313,6 +338,9 @@ enum CoinSubClass {
 
   Color? get color {
     switch (this) {
+      case CoinSubClass.trx:
+      case CoinSubClass.trc20:
+        return const Color(0xFFFF060A); // trx: "#ff060a"
       case CoinSubClass.moonbeam:
         return const Color(0xFFE4147C); // glmr: "#e4147c"
       case CoinSubClass.ftm20:
@@ -362,6 +390,8 @@ enum CoinSubClass {
         return const Color(0xFF2A3069); // ht: "#2a3069"
       case CoinSubClass.rskSmartBitcoin:
         return const Color(0xFFFC9D37); // rbtc: "#fc9d37"
+      case CoinSubClass.grc20:
+        return const Color(0xFF8C41FF); // gleec: "#8c41ff"
       case CoinSubClass.zhtlc:
         return const Color(0xFFC29F47); // arrr: "#c29f47"
       case CoinSubClass.unknown:
@@ -376,8 +406,12 @@ extension CoinSubClassTokenStandard on CoinSubClass {
   /// be appended for the given subclass.
   String? get tokenStandardSuffix {
     switch (this) {
+      case CoinSubClass.trc20:
+        return 'TRC20';
       case CoinSubClass.erc20:
         return 'ERC20';
+      case CoinSubClass.grc20:
+        return 'GRC20';
       case CoinSubClass.bep20:
         return 'BEP20';
       case CoinSubClass.qrc20:
@@ -402,6 +436,7 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'HCO20';
       // Subclasses without a canonical short token/network standard suffix
       case CoinSubClass.moonbeam:
+      case CoinSubClass.trx:
       case CoinSubClass.slp: // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.sia:
       case CoinSubClass.smartChain:
@@ -436,5 +471,6 @@ const Set<CoinSubClass> evmCoinSubClasses = {
   CoinSubClass.ewt,
   CoinSubClass.hecoChain,
   CoinSubClass.rskSmartBitcoin,
+  CoinSubClass.grc20,
   CoinSubClass.erc20,
 };

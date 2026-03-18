@@ -17,7 +17,9 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
+    CoinSubClass.trx,
     CoinSubClass.erc20,
+    CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
     CoinSubClass.matic,
@@ -103,29 +105,43 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
               asset,
             );
 
-      final activationParams =
+      final tokenRequests =
+          children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ?? [];
+      final activationParams = switch (asset.protocol) {
+        final Erc20Protocol _ =>
           EthWithTokensActivationParams.fromJson(
             asset.protocol.config,
           ).copyWith(
-            erc20Tokens:
-                children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ??
-                [],
+            erc20Tokens: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
-          );
+          ),
+        final TrxProtocol _ =>
+          TrxWithTokensActivationParams.fromJson(
+            asset.protocol.config,
+          ).copyWith(
+            tokenRequests: tokenRequests,
+            txHistory: txHistoryFlag,
+            privKeyPolicy: privKeyPolicy,
+          ),
+        _ => throw UnsupportedError(
+          'Unsupported platform protocol for batch activation: '
+          '${asset.protocol.runtimeType}',
+        ),
+      };
 
       // Debug logging for ETH platform activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activating ETH platform: ${asset.id.id}',
-        name: 'EthWithTokensActivationStrategy',
-      );
+          '[RPC] Activating platform asset: ${asset.id.id}',
+          name: 'EthWithTokensActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
-        name: 'EthWithTokensActivationStrategy',
-      );
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          name: 'EthWithTokensActivationStrategy',
+        );
       }
 
       await client.rpc.erc20.enableEthWithTokens(
@@ -135,9 +151,9 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Successfully activated ETH platform: ${asset.id.id} with ${children?.length ?? 0} tokens',
-        name: 'EthWithTokensActivationStrategy',
-      );
+          '[RPC] Successfully activated platform asset: ${asset.id.id} with ${children?.length ?? 0} tokens',
+          name: 'EthWithTokensActivationStrategy',
+        );
       }
 
       yield const ActivationProgress(
@@ -162,17 +178,12 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
         ),
       );
     } catch (e, stack) {
-      yield ActivationProgress(
-        status: 'Activation failed',
-        errorMessage: e.toString(),
-        isComplete: true,
-        progressDetails: ActivationProgressDetails(
-          currentStep: ActivationStep.error,
-          stepCount: 3,
-          errorCode: 'ETH_WITH_TOKENS_ACTIVATION_ERROR',
-          errorDetails: e.toString(),
-          stackTrace: stack.toString(),
-        ),
+      yield buildErrorProgress(
+        asset: asset,
+        error: e,
+        stackTrace: stack,
+        errorCode: 'PLATFORM_WITH_TOKENS_ACTIVATION_ERROR',
+        stepCount: 3,
       );
     }
   }

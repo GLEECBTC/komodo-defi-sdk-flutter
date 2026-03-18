@@ -1,7 +1,7 @@
 # Tech Debt: PR #227 – ZHTLC Activation Fixes
 
 Date: 2025-10-02  
-PR: https://github.com/KomodoPlatform/komodo-defi-sdk-flutter/pull/227  
+PR: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/227  
 Head commit: 1af4278
 
 This document compiles AI review findings into actionable tech-debt items with severity, impact, and recommended fixes. Items are grouped by concern.
@@ -98,6 +98,7 @@ This document compiles AI review findings into actionable tech-debt items with s
 ## Tests/Determinism
 
 - [MAJOR] Avoid host-dependent APPDATA assumptions in Windows downloader tests
+
   - File: `packages/komodo_defi_sdk/test/zcash_params/platforms/windows_zcash_params_downloader_test.dart` (~47–57, also ~60–80)
   - Problem: Tests assume `APPDATA` missing; on Windows CI this becomes flaky/non-deterministic.
   - Impact: Intermittent CI failures.
@@ -115,6 +116,7 @@ This document compiles AI review findings into actionable tech-debt items with s
 ## Nice-to-Have Enhancements
 
 - [MINOR] Logging for timeouts and failures in size probe
+
   - Context: Same HEAD probe fix above.
   - Suggestion: Log at `warning` on timeout/network errors to aid telemetry.
 

@@ -39,7 +39,7 @@ void main() {
           host: 'seed01.kmdefi.net',
           type: 'domain',
           wss: true,
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'test1@example.com')],
         ),
         const SeedNode(
@@ -47,7 +47,7 @@ void main() {
           host: 'seed02.kmdefi.net',
           type: 'domain',
           wss: true,
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'test1@example.com')],
         ),
       ];
@@ -71,7 +71,7 @@ void main() {
           host: 'seed03.kmdefi.net',
           type: 'domain',
           wss: true,
-          netId: 8762,
+          netId: 6133,
           contact: [], // Empty contact list
         ),
       ];
@@ -83,7 +83,7 @@ void main() {
           host: 'seed04.kmdefi.net',
           type: 'domain',
           wss: false,
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'basic@example.com')],
         ),
         ...seedNodes,
@@ -105,7 +105,7 @@ void main() {
           host: 'mainnet.kmdefi.net',
           type: 'domain',
           wss: true,
-          netId: 8762, // Mainnet
+          netId: 6133, // Mainnet
           contact: [SeedNodeContact(email: 'mainnet@example.com')],
         ),
         const SeedNode(
@@ -132,7 +132,7 @@ void main() {
           host: 'wss.kmdefi.net',
           type: 'domain',
           wss: true, // WebSocket Secure
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'wss@example.com')],
         ),
         const SeedNode(
@@ -140,7 +140,7 @@ void main() {
           host: 'ws.kmdefi.net',
           type: 'domain',
           wss: false, // Regular WebSocket
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'ws@example.com')],
         ),
       ];
@@ -159,7 +159,7 @@ void main() {
           host: '192.168.1.100',
           type: 'ip', // IP address type
           wss: true,
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'ip@example.com')],
         ),
         const SeedNode(
@@ -167,7 +167,7 @@ void main() {
           host: '10.0.0.50',
           type: 'ip',
           wss: false,
-          netId: 8762,
+          netId: 6133,
           contact: [SeedNodeContact(email: 'ip2@example.com')],
         ),
       ];
@@ -186,7 +186,7 @@ void main() {
           host: 'complex.kmdefi.net',
           type: 'domain',
           wss: true,
-          netId: 8762,
+          netId: 6133,
           contact: [
             SeedNodeContact(email: 'admin@example.com'),
             SeedNodeContact(email: 'support@example.com'),

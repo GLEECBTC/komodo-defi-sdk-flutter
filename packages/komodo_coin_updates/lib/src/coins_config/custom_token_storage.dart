@@ -38,6 +38,7 @@ class CustomTokenStorage implements CustomTokenStore {
   Future<void> storeCustomToken(Asset asset) async {
     _log.fine('Storing custom token ${asset.id.id}');
     final box = await _openCustomTokensBox();
+    await _validateCanStoreAsset(box, asset);
     await box.put(asset.id.id, asset);
   }
 
@@ -45,6 +46,10 @@ class CustomTokenStorage implements CustomTokenStore {
   Future<void> storeCustomTokens(List<Asset> assets) async {
     _log.fine('Storing ${assets.length} custom tokens');
     final box = await _openCustomTokensBox();
+    _validateBatchCollisions(assets);
+    for (final asset in assets) {
+      await _validateCanStoreAsset(box, asset);
+    }
     final putMap = <String, Asset>{for (final a in assets) a.id.id: a};
     await box.putAll(putMap);
   }
@@ -63,14 +68,7 @@ class CustomTokenStorage implements CustomTokenStore {
           logContext: 'for custom tokens',
         )
         .map(
-          (asset) => asset.copyWith(
-            // IMPORTANT: This cast to Erc20Protocol is by design for now,
-            // as custom tokens are currently only supported for ERC20.
-            // This may change in future versions to support other protocols.
-            protocol: (asset.protocol as Erc20Protocol).copyWith(
-              isCustomToken: true,
-            ),
-          ),
+          (asset) => asset.copyWith(protocol: _markCustomToken(asset.protocol)),
         )
         .toList();
   }
@@ -80,12 +78,7 @@ class CustomTokenStorage implements CustomTokenStore {
     _log.fine('Retrieving custom token ${assetId.id}');
     final box = await _openCustomTokensBox();
     final asset = await box.get(assetId.id);
-    return asset?.copyWith(
-      // IMPORTANT: This cast to Erc20Protocol is by design for now,
-      // as custom tokens are currently only supported for ERC20.
-      // This may change in future versions to support other protocols.
-      protocol: (asset.protocol as Erc20Protocol).copyWith(isCustomToken: true),
-    );
+    return asset?.copyWith(protocol: _markCustomToken(asset.protocol));
   }
 
   @override
@@ -139,7 +132,9 @@ class CustomTokenStorage implements CustomTokenStore {
   @override
   Future<bool> upsertCustomToken(Asset asset) async {
     final box = await _openCustomTokensBox();
-    final existed = box.containsKey(asset.id.id);
+    final existingAsset = await box.get(asset.id.id);
+    final existed = existingAsset != null;
+    _assertNoConflict(existingAsset, asset);
     await box.put(asset.id.id, asset);
 
     if (existed) {
@@ -154,7 +149,9 @@ class CustomTokenStorage implements CustomTokenStore {
   @override
   Future<bool> addCustomTokenIfNotExists(Asset asset) async {
     final box = await _openCustomTokensBox();
-    if (box.containsKey(asset.id.id)) {
+    final existingAsset = await box.get(asset.id.id);
+    if (existingAsset != null) {
+      _assertNoConflict(existingAsset, asset);
       _log.fine('Custom token ${asset.id.id} already exists, skipping');
       return false;
     }
@@ -195,5 +192,81 @@ class CustomTokenStorage implements CustomTokenStore {
     }
 
     return _customTokensBox!;
+  }
+
+  Future<void> _validateCanStoreAsset(LazyBox<Asset> box, Asset asset) async {
+    final existingAsset = await box.get(asset.id.id);
+    _assertNoConflict(existingAsset, asset);
+  }
+
+  void _validateBatchCollisions(List<Asset> assets) {
+    final assetsById = <String, Asset>{};
+    for (final asset in assets) {
+      final existingAsset = assetsById[asset.id.id];
+      _assertNoConflict(existingAsset, asset);
+      assetsById[asset.id.id] = asset;
+    }
+  }
+
+  void _assertNoConflict(Asset? existingAsset, Asset requestedAsset) {
+    if (existingAsset == null) {
+      return;
+    }
+
+    if (_hasMatchingContract(existingAsset, requestedAsset)) {
+      return;
+    }
+
+    throw CustomTokenConflictException(
+      assetId: requestedAsset.id.id,
+      network: requestedAsset.id.subClass,
+      existingContractAddress: existingAsset.protocol.contractAddress ?? '',
+      requestedContractAddress: requestedAsset.protocol.contractAddress ?? '',
+    );
+  }
+
+  bool _hasMatchingContract(Asset existingAsset, Asset requestedAsset) {
+    final hasMatchingIdentity =
+        existingAsset.id.subClass == requestedAsset.id.subClass &&
+        existingAsset.id.chainId.formattedChainId ==
+            requestedAsset.id.chainId.formattedChainId &&
+        existingAsset.id.parentId == requestedAsset.id.parentId;
+    if (!hasMatchingIdentity) {
+      return false;
+    }
+
+    final existingContractAddress = existingAsset.protocol.contractAddress;
+    final requestedContractAddress = requestedAsset.protocol.contractAddress;
+    if (existingContractAddress == null || requestedContractAddress == null) {
+      return false;
+    }
+
+    return _normalizeContractAddress(
+          existingAsset.id.subClass,
+          existingContractAddress,
+        ) ==
+        _normalizeContractAddress(
+          requestedAsset.id.subClass,
+          requestedContractAddress,
+        );
+  }
+
+  String _normalizeContractAddress(
+    CoinSubClass network,
+    String contractAddress,
+  ) {
+    return network == CoinSubClass.trc20
+        ? contractAddress
+        : contractAddress.toLowerCase();
+  }
+
+  ProtocolClass _markCustomToken(ProtocolClass protocol) {
+    return switch (protocol) {
+      final Erc20Protocol p => p.copyWith(isCustomToken: true),
+      final Trc20Protocol p => p.copyWith(isCustomToken: true),
+      _ => throw UnsupportedError(
+        'Unsupported custom token protocol: ${protocol.runtimeType}',
+      ),
+    };
   }
 }

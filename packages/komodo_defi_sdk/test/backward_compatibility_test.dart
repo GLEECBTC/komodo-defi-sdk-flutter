@@ -5,6 +5,7 @@ import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dar
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
+import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
@@ -17,6 +18,9 @@ class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
 class _MockAssetLookup extends Mock implements IAssetLookup {}
+
+class _MockEventStreamingManager extends Mock
+    implements EventStreamingManager {}
 
 /// Tests to verify backward compatibility of public APIs
 /// These tests ensure that existing public method signatures remain unchanged
@@ -122,10 +126,7 @@ void main() {
 
       // Verify watchPubkeys can be called with and without optional parameters
       expect(() => manager.watchPubkeys(asset), returnsNormally);
-      expect(
-        () => manager.watchPubkeys(asset, activateIfNeeded: true),
-        returnsNormally,
-      );
+      expect(() => manager.watchPubkeys(asset), returnsNormally);
       expect(
         () => manager.watchPubkeys(asset, activateIfNeeded: false),
         returnsNormally,
@@ -138,6 +139,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockPubkeyManager pubkeyManager;
     late _MockAssetLookup assetLookup;
+    late _MockEventStreamingManager eventStreamingManager;
     late BalanceManager manager;
 
     setUp(() {
@@ -145,6 +147,7 @@ void main() {
       activation = _MockActivationCoordinator();
       pubkeyManager = _MockPubkeyManager();
       assetLookup = _MockAssetLookup();
+      eventStreamingManager = _MockEventStreamingManager();
 
       when(
         () => auth.authStateChanges,
@@ -155,6 +158,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
     });
 
@@ -170,6 +174,7 @@ void main() {
           auth: auth,
           pubkeyManager: pubkeyManager,
           activationCoordinator: activation,
+          eventStreamingManager: eventStreamingManager,
         ),
         returnsNormally,
       );
@@ -200,10 +205,7 @@ void main() {
 
       // Verify watchBalance can be called with and without optional parameters
       expect(() => manager.watchBalance(assetId), returnsNormally);
-      expect(
-        () => manager.watchBalance(assetId, activateIfNeeded: true),
-        returnsNormally,
-      );
+      expect(() => manager.watchBalance(assetId), returnsNormally);
       expect(
         () => manager.watchBalance(assetId, activateIfNeeded: false),
         returnsNormally,
@@ -217,6 +219,7 @@ void main() {
     late _MockActivationCoordinator activation;
     late _MockAssetLookup assetLookup;
     late _MockPubkeyManager pubkeyManager;
+    late _MockEventStreamingManager eventStreamingManager;
     late PubkeyManager pubkeyManagerInstance;
     late BalanceManager balanceManagerInstance;
 
@@ -226,6 +229,7 @@ void main() {
       activation = _MockActivationCoordinator();
       assetLookup = _MockAssetLookup();
       pubkeyManager = _MockPubkeyManager();
+      eventStreamingManager = _MockEventStreamingManager();
 
       when(
         () => auth.authStateChanges,
@@ -237,6 +241,7 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
     });
 
@@ -276,11 +281,12 @@ void main() {
         auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
+        eventStreamingManager: eventStreamingManager,
       );
 
       // Simulate auth state changes
       authController.add(
-        KdfUser(
+        const KdfUser(
           walletId: WalletId(
             name: 'test-wallet',
             authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
@@ -290,7 +296,7 @@ void main() {
       );
 
       // Allow auth state change to be processed
-      await Future<void>.delayed(Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Verify managers are still functional after auth state change
       expect(testPubkeyManager, isNotNull);

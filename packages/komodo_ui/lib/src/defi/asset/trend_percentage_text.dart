@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 ///
 /// There may be breaking changes in the near future that enhance
 /// re-usability and customization, but the initial version will be focused on
-/// migrating from the Komodo Wallet app to the new SDK repository.
+/// migrating from the Gleec Wallet app to the new SDK repository.
 ///
 /// E.g.:
 /// - Locked into using percentage prop name
@@ -169,24 +169,22 @@ class _TrendPercentageTextState extends State<TrendPercentageText>
     _isPositive = widget.percentage != null && widget.percentage! > 0;
     _isNeutral = widget.percentage == null || widget.percentage == 0;
     _hasValue = widget.value != null || widget.percentage != null;
-    _currentIcon =
-        _isPositive
-            ? widget.upIcon
-            : _isNeutral
-            ? widget.neutralIcon
-            : widget.downIcon;
+    _currentIcon = _isPositive
+        ? widget.upIcon
+        : _isNeutral
+        ? widget.neutralIcon
+        : widget.downIcon;
   }
 
   void _updateTargetColor(ThemeData theme) {
     if (_cachedTheme != theme) {
       _cachedTheme = theme;
     }
-    _targetColor =
-        _isPositive
-            ? (widget.upColor ?? Colors.green)
-            : _isNeutral
-            ? (widget.neutralColor ?? theme.disabledColor)
-            : (widget.downColor ?? theme.colorScheme.error);
+    _targetColor = _isPositive
+        ? (widget.upColor ?? Colors.green)
+        : _isNeutral
+        ? (widget.neutralColor ?? theme.disabledColor)
+        : (widget.downColor ?? theme.colorScheme.error);
   }
 
   @override
@@ -230,10 +228,9 @@ class _TrendPercentageTextState extends State<TrendPercentageText>
     // Build the main content
     return _AnimatedColorWrapper(
       targetColor: _targetColor,
-      duration:
-          widget.animateColor && widget.enableAnimation
-              ? widget.animationDuration
-              : Duration.zero,
+      duration: widget.animateColor && widget.enableAnimation
+          ? widget.animationDuration
+          : Duration.zero,
       curve: widget.animationCurve,
       builder: (context, color) {
         final baseStyle = (widget.textStyle ?? defaultTextStyle).copyWith(

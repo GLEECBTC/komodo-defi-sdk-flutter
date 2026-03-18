@@ -6,7 +6,7 @@
 
 A lightweight, high-throughput cross-platform logging framework for Flutter with persisted log storage.
 
-[![Komodo Platform Logo](https://komodoplatform.com/assets/img/logo-dark.webp)](https://github.com/KomodoPlatform)
+Maintained by [GLEEC](https://www.gleec.com).
 
 ## Overview
 
@@ -179,4 +179,4 @@ This project is licensed under the MIT License. See the [LICENSE](link_to_licens
 
 ---
 
-Made with ❤️ by [KomodoPlatform](https://github.com/KomodoPlatform)
+Made with ❤️ by [GLEEC](https://www.gleec.com)

@@ -15,11 +15,11 @@ Constructor options:
 ```dart
 GithubCoinConfigProvider(
   branch: 'master',
-  coinsGithubContentUrl: 'https://raw.githubusercontent.com/KomodoPlatform/coins',
-  coinsGithubApiUrl: 'https://api.github.com/repos/KomodoPlatform/coins',
+  coinsGithubContentUrl: 'https://raw.githubusercontent.com/GLEECBTC/coins',
+  coinsGithubApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
   coinsPath: 'coins',
   coinsConfigPath: 'utils/coins_config_unfiltered.json',
-  cdnBranchMirrors: {'master': 'https://komodoplatform.github.io/coins'},
+  cdnBranchMirrors: {'master': 'https://gleecbtc.github.io/coins'},
   githubToken: envToken,
   transformer: const CoinConfigTransformer(),
 );

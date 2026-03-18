@@ -2,11 +2,10 @@ import 'dart:async';
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
-import 'package:komodo_defi_sdk/src/activation/activation_exceptions.dart';
+import 'package:komodo_defi_sdk/src/pubkeys/pubkeys_storage.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
-import 'package:komodo_defi_sdk/src/pubkeys/pubkeys_storage.dart';
 
 /// Interface defining the contract for pubkey management operations
 abstract class IPubkeyManager {
@@ -67,6 +66,8 @@ class PubkeyManager implements IPubkeyManager {
   final Map<AssetId, Asset> _watchedAssets = {};
   // Deduplicate concurrent getPubkeys requests per asset
   final Map<AssetId, Future<AssetPubkeys>> _inFlightPubkeyRequests = {};
+  final Map<String, DateTime> _hdAddressScanRetryAfter = {};
+  static const Duration _hdAddressScanRetryCooldown = Duration(minutes: 2);
 
   StreamSubscription<KdfUser?>? _authSubscription;
   WalletId? _currentWalletId;
@@ -173,6 +174,11 @@ class PubkeyManager implements IPubkeyManager {
     final future = () async {
       await retry(() => _activationCoordinator.activateAsset(asset));
       final strategy = await _resolvePubkeyStrategy(asset);
+      await _scanForNewHdAddressesIfNeeded(
+        walletId: walletId,
+        asset: asset,
+        strategy: strategy,
+      );
       final pubkeys = await strategy.getPubkeys(asset.id, _client);
       _pubkeysCache[asset.id] = pubkeys;
       _persistPubkeysForWallet(walletId, asset, pubkeys).ignore();
@@ -447,6 +453,37 @@ class PubkeyManager implements IPubkeyManager {
     }
   }
 
+  Future<void> _scanForNewHdAddressesIfNeeded({
+    required WalletId walletId,
+    required Asset asset,
+    required PubkeyStrategy strategy,
+  }) async {
+    if (!strategy.supportsMultipleAddresses) {
+      return;
+    }
+
+    final scanKey = '${walletId.name}:${asset.id.id}';
+    final retryAfter = _hdAddressScanRetryAfter[scanKey];
+    if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
+      return;
+    }
+
+    try {
+      await strategy.scanForNewAddresses(asset.id, _client);
+      _hdAddressScanRetryAfter.remove(scanKey);
+    } catch (error, stackTrace) {
+      _hdAddressScanRetryAfter[scanKey] = DateTime.now().add(
+        _hdAddressScanRetryCooldown,
+      );
+      _logger.warning(
+        'HD address scan failed for ${asset.id.name}; continuing with '
+        'existing pubkeys',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
   /// Called when authentication state changes to do the following:
   /// - clear active watchers by canceling all subscriptions
   /// - close all controllers after indicating disconnection with state error
@@ -507,6 +544,7 @@ class PubkeyManager implements IPubkeyManager {
     // Clear caches
     _pubkeysCache.clear();
     _inFlightPubkeyRequests.clear();
+    _hdAddressScanRetryAfter.clear();
 
     stopwatch.stop();
     _logger.fine(
@@ -563,6 +601,7 @@ class PubkeyManager implements IPubkeyManager {
     }
 
     _pubkeysCache.clear();
+    _hdAddressScanRetryAfter.clear();
     _watchedAssets.clear();
     _currentWalletId = null;
     _logger.fine('Disposed');

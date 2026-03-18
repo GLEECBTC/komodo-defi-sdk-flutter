@@ -6,16 +6,32 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:meta/meta.dart';
 
 extension BaseRequestApiClientExtension on ApiClient {
-  Future<T> post<T extends BaseResponse, E extends GeneralErrorResponse>(
+  Future<T> post<T extends BaseResponse, E extends Exception>(
     BaseRequest<T, E> request,
   ) async {
     final response = await executeRpc(request.toJson());
 
     if (GeneralErrorResponse.isErrorResponse(response)) {
+      // Try to parse into a typed KDF exception first
+      final typedException = _tryParseTypedException(response);
+      if (typedException != null) {
+        throw typedException;
+      }
       throw GeneralErrorResponse.parse(response);
     }
 
     return request.parseResponse(jsonEncode(response));
+  }
+
+  /// Attempts to parse the error response into a typed [MmRpcException].
+  MmRpcException? _tryParseTypedException(JsonMap response) {
+    // Extract error details from the response structure
+    final errorDetails =
+        response.valueOrNull<JsonMap>('result', 'details') ??
+        response.valueOrNull<JsonMap>('message') ??
+        response;
+
+    return KdfErrorRegistry.tryParse(errorDetails);
   }
 }
 
@@ -24,10 +40,7 @@ extension BaseRequestApiClientExtension on ApiClient {
 /// Parameters:
 /// - [T] - The response type
 /// - [E] - The error response type
-abstract class BaseRequest<
-  T extends BaseResponse,
-  E extends GeneralErrorResponse
-> {
+abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   BaseRequest({
     // required this.client,
     required this.method,
@@ -71,12 +84,23 @@ abstract class BaseRequest<
 
   /// Parse response from JSON. This method should handle both success and error responses.
   /// Subclasses should override [parse] method for success responses instead.
+  ///
+  /// Error handling order:
+  /// 1. Try to parse into a typed [MmRpcException] using [KdfErrorRegistry]
+  /// 2. Allow subclasses to handle specific error types via [parseCustomErrorResponse]
+  /// 3. Fall back to [GeneralErrorResponse] via [parseGeneralErrorResponse]
   T parseResponse(String responseBody) {
     final json = jsonFromString(responseBody);
 
     // First check if this is an error response
     if (GeneralErrorResponse.isErrorResponse(json)) {
-      // Allow subclasses to handle specific error types first
+      // Try to parse into a typed KDF exception first
+      final typedException = _tryParseTypedException(json);
+      if (typedException != null) {
+        throw typedException;
+      }
+
+      // Allow subclasses to handle specific error types
       final customError = parseCustomErrorResponse(json);
       if (customError != null) {
         throw customError;
@@ -92,6 +116,17 @@ abstract class BaseRequest<
     return parse(json);
   }
 
+  /// Attempts to parse the error response into a typed [MmRpcException].
+  MmRpcException? _tryParseTypedException(JsonMap json) {
+    // Extract error details from the response structure
+    final errorDetails =
+        json.valueOrNull<JsonMap>('result', 'details') ??
+        json.valueOrNull<JsonMap>('message') ??
+        json;
+
+    return KdfErrorRegistry.tryParse(errorDetails);
+  }
+
   /// Override this method to provide custom error handling for specific error
   /// types. Return null if the error is not of a type that this request can handle.
   E? parseCustomErrorResponse(JsonMap json) => null;
@@ -99,7 +134,7 @@ abstract class BaseRequest<
   /// Handles general error responses. This is a fallback for when
   /// [parseCustomErrorResponse] returns null.
   @protected
-  GeneralErrorResponse? parseGeneralErrorResponse(JsonMap json) {
+  Exception? parseGeneralErrorResponse(JsonMap json) {
     if (GeneralErrorResponse.isErrorResponse(json)) {
       return GeneralErrorResponse.parse(json);
     }

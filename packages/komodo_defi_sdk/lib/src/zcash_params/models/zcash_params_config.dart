@@ -36,10 +36,10 @@ abstract class ZcashParamsConfig with _$ZcashParamsConfig {
     required List<ZcashParamFile> paramFiles,
 
     /// Primary download URL for ZCash parameters.
-    @Default('https://komodoplatform.com/downloads/') String primaryUrl,
+    @Default('https://z.cash/downloads/') String primaryUrl,
 
     /// Backup download URL for ZCash parameters.
-    @Default('https://z.cash/downloads/') String backupUrl,
+    @Default('https://komodoplatform.com/downloads/') String backupUrl,
 
     /// Timeout duration for HTTP downloads in seconds.
     @Default(1800) int downloadTimeoutSeconds, // 30 minutes

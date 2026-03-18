@@ -4,9 +4,44 @@ import 'dart:developer' show log;
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+/// Shared fee-estimation strategy classification used by withdrawal flows.
+enum FeeEstimationSupport {
+  /// Ethereum-style gas estimation.
+  evmGas,
+
+  /// UTXO fee-per-kilobyte estimation.
+  utxoPerKbyte,
+
+  /// Tendermint gas estimation.
+  tendermint,
+
+  /// QTUM gas estimation with UTXO fallback.
+  qtum,
+
+  /// ZHTLC fixed-fee estimation.
+  zhtlc,
+
+  /// No fee estimation support is available.
+  unsupported,
+}
+
+/// Returns the fee-estimation support level for [protocol].
+FeeEstimationSupport feeEstimationSupportForProtocol(ProtocolClass protocol) {
+  return switch (protocol) {
+    Erc20Protocol() => FeeEstimationSupport.evmGas,
+    UtxoProtocol() => FeeEstimationSupport.utxoPerKbyte,
+    TendermintProtocol() => FeeEstimationSupport.tendermint,
+    QtumProtocol() => FeeEstimationSupport.qtum,
+    ZhtlcProtocol() => FeeEstimationSupport.zhtlc,
+    TrxProtocol() || Trc20Protocol() => FeeEstimationSupport.unsupported,
+    _ => FeeEstimationSupport.unsupported,
+  };
+}
 
 /// Manages cryptocurrency asset withdrawals to external addresses.
 ///
@@ -26,9 +61,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// 3. Broadcasting to the network
 /// 4. Status tracking
 ///
-/// **Note:** Fee estimation features are currently disabled as the API endpoints
-/// are not yet available. Set `_feeEstimationEnabled` to `true` when the API
-/// endpoints become available.
+/// **Note:** Fee estimation features are currently disabled as the API
+/// endpoints are not yet available. Set `_feeEstimationEnabled` to `true`
+/// when the API endpoints become available.
 ///
 /// Usage example:
 /// ```dart
@@ -102,6 +137,7 @@ class WithdrawalManager {
   final FeeManager _feeManager;
   final LegacyWithdrawalManager _legacyManager;
   final _activeWithdrawals = <int, StreamController<WithdrawalProgress>>{};
+  static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   /// Cancels an active withdrawal task.
   ///
@@ -206,8 +242,8 @@ class WithdrawalManager {
       final protocol = asset.protocol;
 
       // Handle different protocol types
-      switch (protocol.runtimeType) {
-        case Erc20Protocol:
+      switch (feeEstimationSupportForProtocol(protocol)) {
+        case FeeEstimationSupport.evmGas:
           // Ethereum-based protocols use gas estimation
           final estimation = await _feeManager.getEthEstimatedFeePerGas(
             assetId,
@@ -246,7 +282,7 @@ class WithdrawalManager {
             ),
           );
 
-        case UtxoProtocol:
+        case FeeEstimationSupport.utxoPerKbyte:
           // UTXO-based protocols use per-kbyte fee estimation
           final estimation = await _feeManager.getUtxoEstimatedFee(assetId);
           return WithdrawalFeeOptions(
@@ -277,7 +313,7 @@ class WithdrawalManager {
             ),
           );
 
-        case TendermintProtocol:
+        case FeeEstimationSupport.tendermint:
           // Tendermint/Cosmos protocols use gas price and gas limit
           final estimation = await _feeManager.getTendermintEstimatedFee(
             assetId,
@@ -313,7 +349,7 @@ class WithdrawalManager {
             ),
           );
 
-        case QtumProtocol:
+        case FeeEstimationSupport.qtum:
           // QTUM uses similar gas model to Ethereum but with different fee structure
           try {
             final estimation = await _feeManager.getEthEstimatedFeePerGas(
@@ -381,7 +417,7 @@ class WithdrawalManager {
             );
           }
 
-        case ZhtlcProtocol:
+        case FeeEstimationSupport.zhtlc:
           // ZHTLC (Zcash) uses UTXO-style fees
           final estimation = await _feeManager.getUtxoEstimatedFee(assetId);
           return WithdrawalFeeOptions(
@@ -412,8 +448,7 @@ class WithdrawalManager {
             ),
           );
 
-        default:
-          // For unknown protocols, return null to indicate unsupported
+        case FeeEstimationSupport.unsupported:
           log('Fee options not supported for protocol ${protocol.runtimeType}');
           return null;
       }
@@ -515,7 +550,7 @@ class WithdrawalManager {
       if (lastStatus.status.toLowerCase() == 'error') {
         throw WithdrawalException(
           lastStatus.details as String,
-          _mapErrorToCode(lastStatus.details as String),
+          WithdrawalException.mapErrorToCode(lastStatus.details as String),
         );
       }
 
@@ -528,12 +563,10 @@ class WithdrawalManager {
 
       return lastStatus.details as WithdrawalPreview;
     } catch (e) {
-      if (e is WithdrawalException) {
-        rethrow;
-      }
-      throw WithdrawalException(
-        'Preview failed: $e',
-        WithdrawalErrorCode.unknownError,
+      throw _mapError(
+        e,
+        operation: 'withdrawal.preview',
+        assetId: parameters.asset,
       );
     }
   }
@@ -594,11 +627,14 @@ class WithdrawalManager {
       }
 
       // Ensure asset is activated before broadcasting
-      final activationResult = await _activationCoordinator.activateAsset(asset);
+      final activationResult = await _activationCoordinator.activateAsset(
+        asset,
+      );
       if (activationResult.isFailure) {
-        throw WithdrawalException(
-          'Failed to activate asset $assetId: ${activationResult.errorMessage ?? activationResult.toString()}',
-          WithdrawalErrorCode.unknownError,
+        throw _mapError(
+          activationResult.errorMessage ?? activationResult.toString(),
+          operation: 'withdrawal.activate',
+          assetId: assetId,
         );
       }
 
@@ -642,10 +678,7 @@ class WithdrawalManager {
       );
     } catch (e) {
       yield* Stream.error(
-        WithdrawalException(
-          'Failed to broadcast transaction: $e',
-          WithdrawalErrorCode.networkError,
-        ),
+        _mapError(e, operation: 'withdrawal.execute', assetId: assetId),
       );
     }
   }
@@ -707,9 +740,10 @@ class WithdrawalManager {
       );
 
       if (activationResult.isFailure) {
-        throw WithdrawalException(
-          'Failed to activate asset ${parameters.asset}',
-          WithdrawalErrorCode.unknownError,
+        throw _mapError(
+          activationResult.errorMessage ?? activationResult.toString(),
+          operation: 'withdrawal.activate',
+          assetId: parameters.asset,
         );
       }
 
@@ -730,9 +764,10 @@ class WithdrawalManager {
       )) {
         if (status.status == 'Error') {
           yield* Stream.error(
-            WithdrawalException(
+            _mapError(
               status.details as String,
-              _mapErrorToCode(status.details as String),
+              operation: 'withdrawal.progress',
+              assetId: parameters.asset,
             ),
           );
           return;
@@ -773,9 +808,10 @@ class WithdrawalManager {
           log('Error while broadcasting transaction: $e');
           log('Stack trace: $stackTrace');
           yield* Stream.error(
-            WithdrawalException(
-              'Failed to broadcast transaction: $e',
-              WithdrawalErrorCode.networkError,
+            _mapError(
+              e,
+              operation: 'withdrawal.broadcast',
+              assetId: parameters.asset,
             ),
           );
         }
@@ -785,9 +821,10 @@ class WithdrawalManager {
       log('Error during withdrawal: $e');
       log('Stack trace: $stackTrace');
       yield* Stream.error(
-        WithdrawalException(
-          'Withdrawal failed: $e',
-          WithdrawalErrorCode.unknownError,
+        _mapError(
+          e,
+          operation: 'withdrawal.execute',
+          assetId: parameters.asset,
         ),
       );
     } finally {
@@ -796,33 +833,15 @@ class WithdrawalManager {
     }
   }
 
-  /// Maps error messages to withdrawal error codes.
-  ///
-  /// This helper method analyzes error messages from the API and maps them
-  /// to appropriate [WithdrawalErrorCode] values for consistent error
-  /// handling.
-  ///
-  /// Parameters:
-  /// - [error] - The error message to analyze
-  ///
-  /// Returns the appropriate [WithdrawalErrorCode] based on the error content.
-  WithdrawalErrorCode _mapErrorToCode(String error) {
-    final errorLower = error.toLowerCase();
-
-    if (errorLower.contains('insufficient funds') ||
-        errorLower.contains('not enough funds')) {
-      return WithdrawalErrorCode.insufficientFunds;
-    }
-
-    if (errorLower.contains('invalid address')) {
-      return WithdrawalErrorCode.invalidAddress;
-    }
-
-    if (errorLower.contains('fee')) {
-      return WithdrawalErrorCode.networkError;
-    }
-
-    return WithdrawalErrorCode.unknownError;
+  SdkError _mapError(
+    Object error, {
+    required String operation,
+    String? assetId,
+  }) {
+    return _errorMapper.map(
+      error,
+      context: SdkErrorContext(operation: operation, assetId: assetId),
+    );
   }
 
   /// Provides estimated confirmation times for Ethereum-based transactions.
@@ -943,8 +962,8 @@ class WithdrawalManager {
       final priority = params.feePriority ?? WithdrawalFeeLevel.medium;
       FeeInfo? fee;
 
-      switch (protocol.runtimeType) {
-        case Erc20Protocol:
+      switch (feeEstimationSupportForProtocol(protocol)) {
+        case FeeEstimationSupport.evmGas:
           // Ethereum-based protocols (ETH, ERC20 tokens) use gas estimation
           final estimation = await _feeManager.getEthEstimatedFeePerGas(
             asset.id.id,
@@ -957,7 +976,7 @@ class WithdrawalManager {
             gas: _defaultEthGasLimit,
           );
 
-        case UtxoProtocol:
+        case FeeEstimationSupport.utxoPerKbyte:
           // UTXO-based protocols use per-kbyte fee estimation
           final estimation = await _feeManager.getUtxoEstimatedFee(asset.id.id);
           final selectedLevel = _getUtxoFeeLevel(estimation, priority);
@@ -966,7 +985,7 @@ class WithdrawalManager {
             amount: selectedLevel.feePerKbyte,
           );
 
-        case TendermintProtocol:
+        case FeeEstimationSupport.tendermint:
           // Tendermint/Cosmos protocols use gas price and gas limit
           final estimation = await _feeManager.getTendermintEstimatedFee(
             asset.id.id,
@@ -978,7 +997,7 @@ class WithdrawalManager {
             gasLimit: selectedLevel.gasLimit,
           );
 
-        case QtumProtocol:
+        case FeeEstimationSupport.qtum:
           // QTUM uses similar gas model to Ethereum but different fee structure
           try {
             final estimation = await _feeManager.getEthEstimatedFeePerGas(
@@ -1002,7 +1021,7 @@ class WithdrawalManager {
             );
           }
 
-        case ZhtlcProtocol:
+        case FeeEstimationSupport.zhtlc:
           // ZHTLC (Zcash) uses UTXO-style fees
           final estimation = await _feeManager.getUtxoEstimatedFee(asset.id.id);
           final selectedLevel = _getUtxoFeeLevel(estimation, priority);
@@ -1013,26 +1032,11 @@ class WithdrawalManager {
                 Decimal.fromInt(250), // Assume ~250 bytes
           );
 
-        default:
-          // For unknown protocols, attempt ETH estimation as fallback
-          try {
-            final estimation = await _feeManager.getEthEstimatedFeePerGas(
-              asset.id.id,
-            );
-            final selectedLevel = _getEthFeeLevel(estimation, priority);
-            fee = FeeInfo.ethGasEip1559(
-              coin: asset.id.id,
-              maxFeePerGas: selectedLevel.maxFeePerGas,
-              maxPriorityFeePerGas: selectedLevel.maxPriorityFeePerGas,
-              gas: _defaultEthGasLimit,
-            );
-          } catch (e) {
-            log(
-              'No fee estimation available for protocol ${protocol.runtimeType}',
-            );
-            // Return original parameters without fee
-            return params;
-          }
+        case FeeEstimationSupport.unsupported:
+          log(
+            'No fee estimation available for protocol ${protocol.runtimeType}',
+          );
+          return params;
       }
 
       return WithdrawParameters(
@@ -1045,6 +1049,7 @@ class WithdrawalManager {
         memo: params.memo,
         ibcTransfer: params.ibcTransfer,
         ibcSourceChannel: params.ibcSourceChannel,
+        expirationSeconds: params.expirationSeconds,
         isMax: params.isMax,
       );
     } catch (e, stackTrace) {

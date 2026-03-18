@@ -219,7 +219,7 @@ class EtherscanTransactionStrategy extends TransactionHistoryStrategy {
 /// Helper class for managing Etherscan protocol endpoints and URL construction
 class EtherscanProtocolHelper {
   const EtherscanProtocolHelper({String? baseUrl})
-    : _baseUrl = baseUrl ?? 'https://etherscan-proxy-v2.komodo.earth/api';
+    : _baseUrl = baseUrl ?? 'https://etherscan.gleec.com/api';
 
   final String _baseUrl;
 

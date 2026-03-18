@@ -1,11 +1,11 @@
 {
-    "name": "Komodo Compliance Console",
-    "short_name": "Komodo Compliance Console",
+    "name": "GLEEC Compliance Console",
+    "short_name": "GLEEC Compliance",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Tools for external parties to view/manage ecosystem compliance",
+    "background_color": "#202337",
+    "theme_color": "#4986EA",
+    "description": "Tools for external parties to view/manage ecosystem compliance.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
