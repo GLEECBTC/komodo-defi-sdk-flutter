@@ -1,7 +1,7 @@
 {
     "api": {
-        "api_commit_hash": "475cdb49bc343a8fefdc2caaa1635d5ec426990b",
-        "branch": "v2.6.0-beta",
+        "api_commit_hash": "52ba4f9ff12fd9e31768abc924a99ceadd64b2d6",
+        "branch": "staging",
         "fetch_at_build_enabled": true,
         "concurrent_downloads_enabled": true,
         "source_urls": [
@@ -13,14 +13,14 @@
             "web": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "8f16eaf4cc401bad35f8a5c47c512b232d20f2501b38ec6c2b4bcd015c76c32f"
+                    "e0b43651c773f222a4b8aa0c0a314bb3748b4f6edaefb3db70c76b34aaf4030b"
                 ],
                 "path": "web/kdf/bin"
             },
             "ios": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "aa791e8f269dc56c0fc80c5ca224839074ea2ae554993ee237b98599fe0e659f"
+                    "b81d7c7a8f9a7c2c5c15d700ca2ff2683f0ad307ed7d9cd7b7541638940831d4"
                 ],
                 "path": "ios"
             },
@@ -31,35 +31,35 @@
                     "mac-arm64"
                 ],
                 "valid_zip_sha256_checksums": [
-                    "90e7ad6c9cc084cb7a9ae2da0b3f375081a03f3ae265b316a342b63525cb6a8d"
+                    "6c09130fa7e4977dff617df5d5be385c1f2a57e6764a63e12e79797df52568f4"
                 ],
                 "path": "macos/bin"
             },
             "windows": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "1b845b4b36aa27a122edfd291dfe01cc8581083da4bd99941c8a66b1de069c27"
+                    "398e5adc95706613c71c672424aadf719899581fbc48702a5bb800c80c3e27bd"
                 ],
                 "path": "windows/bin"
             },
             "android-armv7": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "b21e17f04df13d9b600405f880663f0fdf99c85b2b1e53db4bd85bc933345831"
+                    "eb41a69db8b002f51a4d04045492c0f6f9fcce8dd3aa655c877e41e5482d1b36"
                 ],
                 "path": "android/app/src/main/cpp/libs/armeabi-v7a"
             },
             "android-aarch64": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "56b79ab33f4b86236c120ce982b04ccc23d8cdd43b34f66398ea1f8b011becd3"
+                    "dc5bdd90196477eba9c4debe1dc93504d24980b45a669d777374bfe09dda73aa"
                 ],
                 "path": "android/app/src/main/cpp/libs/arm64-v8a"
             },
             "linux": {
                 "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
                 "valid_zip_sha256_checksums": [
-                    "4bfabfcfe44b33b32799a90dcd8d373ba5847d8b56e820a1ce5d702dfb76e2cc"
+                    "f282176b99d080315df9f47c11713084cc37de0056c144950aa9f033a8cc6302"
                 ],
                 "path": "linux/bin"
             }
@@ -68,7 +68,7 @@
     "coins": {
         "fetch_at_build_enabled": true,
         "update_commit_on_build": true,
-        "bundled_coins_repo_commit": "e027082339558cc79d653d0e871f0d211562fe2f",
+        "bundled_coins_repo_commit": "f74c985339ff45de8768ab6c8be02ed8e2d0f49a",
         "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
         "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
         "coins_repo_branch": "master",

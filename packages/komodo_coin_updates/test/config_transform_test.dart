@@ -97,4 +97,74 @@ void main() {
       expect(out['parent_coin'], 'XYZ');
     });
   });
+
+  group('CoinFilter', () {
+    test('filters invalid EVM configs with missing activation fields', () {
+      const filter = CoinFilter();
+      final config = JsonMap.of({
+        'coin': 'BROKENETH',
+        'type': 'ETH',
+        'protocol': {
+          'type': 'ETH',
+          'protocol_data': {'chain_id': 1},
+        },
+        'nodes': [
+          {'url': 'https://eth.example.com'},
+        ],
+        'swap_contract_address': '0x61EEC68Cf64d1b31e41EA713356De2563fB6D3F1',
+      });
+
+      expect(filter.shouldFilter(config), isTrue);
+    });
+
+    test('filters invalid EVM configs with empty node lists', () {
+      const filter = CoinFilter();
+      final config = JsonMap.of({
+        'coin': 'BROKENMATIC',
+        'type': 'Matic',
+        'protocol': {
+          'type': 'ETH',
+          'protocol_data': {'chain_id': 137},
+        },
+        'nodes': <JsonMap>[],
+        'swap_contract_address': '0x9130b257D37A52E52F21054c4DA3450c72f595CE',
+        'fallback_swap_contract': '0x9130b257D37A52E52F21054c4DA3450c72f595CE',
+      });
+
+      expect(filter.shouldFilter(config), isTrue);
+    });
+
+    test('filters unsupported protocol subclasses before parsing', () {
+      const filter = CoinFilter();
+      final config = JsonMap.of({
+        'coin': 'SBCH',
+        'type': 'SmartBCH',
+        'protocol': {
+          'type': 'ETH',
+          'protocol_data': {'chain_id': 10000},
+        },
+      });
+
+      expect(filter.shouldFilter(config), isTrue);
+    });
+
+    test('keeps complete EVM configs', () {
+      const filter = CoinFilter();
+      final config = JsonMap.of({
+        'coin': 'ETH',
+        'type': 'ETH',
+        'protocol': {
+          'type': 'ETH',
+          'protocol_data': {'chain_id': 1},
+        },
+        'nodes': [
+          {'url': 'https://eth.example.com'},
+        ],
+        'swap_contract_address': '0x61EEC68Cf64d1b31e41EA713356De2563fB6D3F1',
+        'fallback_swap_contract': '0x24ABE4c71FC658C91313b6552cd40cD808b3Ea80',
+      });
+
+      expect(filter.shouldFilter(config), isFalse);
+    });
+  });
 }

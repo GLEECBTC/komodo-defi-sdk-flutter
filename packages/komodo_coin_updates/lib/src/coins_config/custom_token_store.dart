@@ -6,11 +6,15 @@ abstract class CustomTokenStore {
   Future<void> init();
 
   /// Stores a single custom token.
-  /// If a token with the same AssetId already exists, it will be overwritten.
+  /// If a token with the same storage key already exists, it is overwritten
+  /// only when it represents the same contract on the same network.
+  /// Otherwise, [CustomTokenConflictException] is thrown.
   Future<void> storeCustomToken(Asset asset);
 
   /// Stores multiple custom tokens atomically (all-or-nothing).
-  /// Existing tokens with the same AssetIds will be overwritten.
+  /// Existing tokens with the same storage key are overwritten only when they
+  /// represent the same contract on the same network.
+  /// Otherwise, [CustomTokenConflictException] is thrown.
   /// Implementations should throw on partial failure.
   Future<void> storeCustomTokens(List<Asset> assets);
 
@@ -39,11 +43,14 @@ abstract class CustomTokenStore {
   Future<bool> hasCustomTokens();
 
   /// Upserts a custom token: updates if it exists, inserts otherwise.
-  /// Returns true if updated, false if inserted.
+  /// Returns true if updated, false if inserted. Throws
+  /// [CustomTokenConflictException] for same-key different-contract writes.
   Future<bool> upsertCustomToken(Asset asset);
 
   /// Adds a custom token to storage if it doesn't already exist.
-  /// Returns true if the token was added, false if it already existed.
+  /// Returns true if the token was added, false if the same contract already
+  /// existed. Throws [CustomTokenConflictException] for same-key
+  /// different-contract writes.
   Future<bool> addCustomTokenIfNotExists(Asset asset);
 
   /// Returns the number of custom tokens in storage.

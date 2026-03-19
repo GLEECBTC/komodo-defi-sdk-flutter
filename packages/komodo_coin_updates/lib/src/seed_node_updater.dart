@@ -70,6 +70,10 @@ class SeedNodeUpdater {
         seedNodes = seedNodes.where((e) => e.wss).toList();
       }
 
+      if (seedNodes.isEmpty) {
+        throw Exception('No seed nodes found for netid $kDefaultNetId');
+      }
+
       return (seedNodes: seedNodes, netId: kDefaultNetId);
     } catch (e) {
       debugPrint('Error fetching seed nodes: $e');

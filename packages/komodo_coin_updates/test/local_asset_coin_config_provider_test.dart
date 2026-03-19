@@ -117,5 +117,43 @@ void main() {
       final kmd = assets.firstWhere((a) => a.id.id == 'KMD');
       expect(kmd.isWalletOnly, isTrue);
     });
+
+    test('filters invalid EVM configs before parsing', () async {
+      const jsonMap = {
+        'KMD': {
+          'coin': 'KMD',
+          'decimals': 8,
+          'type': 'UTXO',
+          'protocol': {'type': 'UTXO'},
+          'fname': 'Komodo',
+          'chain_id': 0,
+          'is_testnet': false,
+        },
+        'BROKENETH': {
+          'coin': 'BROKENETH',
+          'type': 'ETH',
+          'protocol': {
+            'type': 'ETH',
+            'protocol_data': {'chain_id': 1},
+          },
+          'chain_id': 1,
+          'nodes': [],
+          'swap_contract_address': '0x61EEC68Cf64d1b31e41EA713356De2563fB6D3F1',
+        },
+      };
+      final bundle = _FakeBundle({
+        'packages/komodo_defi_framework/assets/config/coins_config.json':
+            jsonEncode(jsonMap),
+      });
+
+      final provider = LocalAssetCoinConfigProvider.fromConfig(
+        const AssetRuntimeUpdateConfig(),
+        bundle: bundle,
+      );
+
+      final assets = await provider.getAssets();
+      expect(assets.any((a) => a.id.id == 'KMD'), isTrue);
+      expect(assets.any((a) => a.id.id == 'BROKENETH'), isFalse);
+    });
   });
 }
