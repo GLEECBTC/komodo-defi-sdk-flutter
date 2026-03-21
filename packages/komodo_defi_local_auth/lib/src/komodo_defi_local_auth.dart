@@ -6,7 +6,6 @@ import 'package:komodo_defi_local_auth/src/auth/auth_state.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
 import 'package:komodo_defi_local_auth/src/trezor/_trezor_index.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
-import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// The [KomodoDefiAuth] class provides a simplified local authentication
@@ -192,6 +191,15 @@ abstract interface class KomodoDefiAuth {
   /// print('Custom tokens: $tokenJson');
 
   Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value);
+
+  /// Atomically reads the current value of [key] from the active user's
+  /// metadata, applies [transform], and writes the result back.
+  ///
+  /// Safe to call concurrently — uses a dedicated metadata mutex internally.
+  Future<void> updateActiveUserKeyValue(
+    String key,
+    dynamic Function(dynamic currentValue) transform,
+  );
 
   /// Provides PIN to a Trezor hardware device during authentication.
   ///
@@ -611,15 +619,15 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
 
   @override
   Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value) async {
-    final activeUser = await _authService.getActiveUser();
+    await _authService.updateActiveUserMetadataKey(key, (_) => value);
+  }
 
-    if (activeUser == null) throw AuthException.notFound();
-
-    final updatedMetadata = JsonMap.from(activeUser.metadata)..[key] = value;
-
-    if (value == null) updatedMetadata.remove(key);
-
-    await _authService.setActiveUserMetadata(updatedMetadata);
+  @override
+  Future<void> updateActiveUserKeyValue(
+    String key,
+    dynamic Function(dynamic currentValue) transform,
+  ) async {
+    await _authService.updateActiveUserMetadataKey(key, transform);
   }
 
   @override
