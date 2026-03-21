@@ -105,6 +105,13 @@ class TrezorAuthService implements IAuthService {
       _authService.setActiveUserMetadata(metadata);
 
   @override
+  Future<void> updateActiveUserMetadataKey(
+    String key,
+    dynamic Function(dynamic currentValue) transform,
+  ) =>
+      _authService.updateActiveUserMetadataKey(key, transform);
+
+  @override
   Future<void> restoreSession(KdfUser user) =>
       _authService.restoreSession(user);
 

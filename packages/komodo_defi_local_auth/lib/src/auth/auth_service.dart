@@ -94,6 +94,16 @@ abstract interface class IAuthService {
   /// is fully integrated with KW. This may be deprecated in the future.
   Future<void> setActiveUserMetadata(JsonMap metadata);
 
+  /// Atomically reads the current value of [key] from the active user's
+  /// metadata, applies [transform] to it, and writes the result back.
+  ///
+  /// This is safe to call concurrently — a dedicated metadata mutex
+  /// serialises all read-modify-write cycles.
+  Future<void> updateActiveUserMetadataKey(
+    String key,
+    dynamic Function(dynamic currentValue) transform,
+  );
+
   /// Attempts to restore a user session without requiring password authentication
   /// Only works if the KDF API is running and the wallet exists
   Future<void> restoreSession(KdfUser user);
@@ -123,6 +133,7 @@ class KdfAuthService implements IAuthService {
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage = SecureLocalStorage();
   final ReadWriteMutex _authMutex = ReadWriteMutex();
+  final Mutex _metadataMutex = Mutex();
   final Logger _logger = Logger('KdfAuthService');
   final String _sessionId;
 
@@ -697,21 +708,45 @@ class KdfAuthService implements IAuthService {
 
   @override
   Future<void> setActiveUserMetadata(Map<String, dynamic> metadata) async {
-    final activeUser = await _activeUserOrThrow();
-    // TODO: Implement locks for this to avoid this method interfering with
-    // more sensitive operations.
-    final user = await _secureStorage.getUser(activeUser.walletId.name);
-    if (user == null) throw AuthException.notFound();
+    await _metadataMutex.protect(() async {
+      final activeUser = await _activeUserOrThrow();
+      final user = await _secureStorage.getUser(activeUser.walletId.name);
+      if (user == null) throw AuthException.notFound();
 
-    final updatedUser = user.copyWith(metadata: metadata);
-    await _secureStorage.saveUser(updatedUser);
+      final updatedUser = user.copyWith(metadata: metadata);
+      await _secureStorage.saveUser(updatedUser);
 
-    // Update cache silently without triggering auth state change. Updating the
-    // storage and cache at the same time emulates the same behaviour as before.
-    // Update user metadata for any subsequent access without emitting auth
-    // state changes, as the metadata field is currently used for events like
-    // coin activation, wallet type (derivation), and seed backup status
-    _lastEmittedUser = updatedUser;
+      // Update cache silently without triggering auth state change. Updating
+      // the storage and cache at the same time emulates the same behaviour as
+      // before. Update user metadata for any subsequent access without emitting
+      // auth state changes, as the metadata field is currently used for events
+      // like coin activation, wallet type (derivation), and seed backup status
+      _lastEmittedUser = updatedUser;
+    });
+  }
+
+  @override
+  Future<void> updateActiveUserMetadataKey(
+    String key,
+    dynamic Function(dynamic currentValue) transform,
+  ) async {
+    await _metadataMutex.protect(() async {
+      final activeUser = await _activeUserOrThrow();
+      final user = await _secureStorage.getUser(activeUser.walletId.name);
+      if (user == null) throw AuthException.notFound();
+
+      final metadata = JsonMap.from(user.metadata);
+      final transformed = transform(metadata[key]);
+      if (transformed == null) {
+        metadata.remove(key);
+      } else {
+        metadata[key] = transformed;
+      }
+
+      final updatedUser = user.copyWith(metadata: metadata);
+      await _secureStorage.saveUser(updatedUser);
+      _lastEmittedUser = updatedUser;
+    });
   }
 
   @override
