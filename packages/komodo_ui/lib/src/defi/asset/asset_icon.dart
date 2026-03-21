@@ -129,6 +129,19 @@ class AssetIcon extends StatelessWidget {
   }
 }
 
+/// [precacheImage] with [ImageStreamListener.onError] still completes its future
+/// successfully; this type records whether loading actually succeeded.
+final class _PrecacheOutcome {
+  _PrecacheOutcome() : _succeeded = true;
+
+  bool _succeeded;
+  bool get succeeded => _succeeded;
+
+  void recordFailure(Object error, StackTrace? stackTrace) {
+    _succeeded = false;
+  }
+}
+
 class _AssetIconResolver extends StatelessWidget {
   const _AssetIconResolver({
     required this.assetId,
@@ -163,6 +176,19 @@ class _AssetIconResolver extends StatelessWidget {
   String get _imagePath => '$_coinImagesFolder$_sanitizedId.png';
   String get _cdnUrl => '$_mediaCdnUrl$_sanitizedId.png';
 
+  static Future<bool> _didImagePrecacheSucceed(
+    ImageProvider image,
+    BuildContext context,
+  ) async {
+    final outcome = _PrecacheOutcome();
+    await precacheImage(
+      image,
+      context,
+      onError: outcome.recordFailure,
+    );
+    return outcome.succeeded;
+  }
+
   static Future<void> precacheAssetIcon(
     BuildContext context,
     AssetId asset, {
@@ -189,44 +215,27 @@ class _AssetIconResolver extends StatelessWidget {
         return;
       }
 
-      bool? assetExists;
-      bool? cdnExists;
-
       final assetImage = AssetImage(resolver._imagePath);
       final cdnImage = NetworkImage(resolver._cdnUrl);
 
-      assetExists = true;
-      await precacheImage(
-        assetImage,
-        context,
-        onError: (e, stackTrace) {
-          assetExists = false;
-          if (throwExceptions) {
-            throw Exception(
-              'Failed to pre-cache image for asset ${asset.id}: $e',
-            );
-          }
-        },
-      );
+      final assetSucceeded = await _didImagePrecacheSucceed(assetImage, context);
+      _assetExistenceCache[resolver._imagePath] = assetSucceeded;
 
-      if (context.mounted) {
-        cdnExists = true;
-        await precacheImage(
-          cdnImage,
-          context,
-          onError: (e, stackTrace) {
-            cdnExists = false;
-            if (throwExceptions) {
-              throw Exception(
-                'Failed to pre-cache CDN image for asset ${asset.id}: $e',
-              );
-            }
-          },
-        );
+      if (assetSucceeded) {
+        return;
       }
 
-      _assetExistenceCache[resolver._imagePath] = assetExists ?? false;
-      if (cdnExists != null) _cdnExistenceCache[sanitizedId] = cdnExists!;
+      final cdnSucceeded =
+          context.mounted && await _didImagePrecacheSucceed(cdnImage, context);
+      if (context.mounted) {
+        _cdnExistenceCache[sanitizedId] = cdnSucceeded;
+      }
+
+      if (throwExceptions && !cdnSucceeded) {
+        throw Exception(
+          'Failed to pre-cache bundled and CDN images for asset ${asset.id}',
+        );
+      }
     } catch (e) {
       debugPrint('Error in precacheAssetIcon for ${asset.id}: $e');
       if (throwExceptions) rethrow;
