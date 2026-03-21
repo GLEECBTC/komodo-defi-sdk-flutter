@@ -7,6 +7,7 @@ import 'package:args/args.dart';
 import 'package:crypto/crypto.dart';
 import 'package:html/parser.dart' as parser;
 import 'package:http/http.dart' as http;
+import 'package:komodo_wallet_build_transformer/komodo_wallet_build_transformer.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 
@@ -794,8 +795,7 @@ class KdfFetcher {
 
     // Write config back to disk
     final configFile = File(configPath);
-    const encoder = JsonEncoder.withIndent('    ');
-    await configFile.writeAsString(encoder.convert(config));
+    await configFile.writeAsString(formatJsonForIde(config));
 
     log.info(
       'Updated build config with commit hash: $commitHash${currentBranch != branch ? ' and branch: $branch' : ''}',
