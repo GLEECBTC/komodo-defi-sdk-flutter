@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:komodo_wallet_build_transformer/src/steps/github/github_file_downloader.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/build_config.dart';
+import 'package:komodo_wallet_build_transformer/src/util/ide_json_formatter.dart';
 import 'package:path/path.dart' as path;
 
 /// Represents the build configuration for fetching coin assets.
@@ -99,8 +100,8 @@ class CoinBuildConfig {
   final Map<String, String> mappedFolders;
 
   /// A map of branch names to CDN mirror URLs.
-  /// When downloading assets, if the current branch has a CDN mirror configured,
-  /// it will be used instead of the default content URL.
+  /// When downloading assets, if the current branch has a CDN mirror
+  /// configured, it will be used instead of the default content URL.
   /// This helps avoid rate limiting for commonly used branches.
   final Map<String, String> cdnBranchMirrors;
 
@@ -192,13 +193,11 @@ class CoinBuildConfig {
     final foldersToCreate = <String>[path.dirname(assetPath)];
     createFolders(foldersToCreate);
 
-    final mergedConfig =
-        (originalBuildConfig?.toJson() ?? {})..addAll({'coins': toJson()});
+    final mergedConfig = (originalBuildConfig?.toJson() ?? {})
+      ..addAll({'coins': toJson()});
 
     print('Saving coin assets config to $assetPath');
-    const encoder = JsonEncoder.withIndent('    ');
-
-    final data = encoder.convert(mergedConfig);
+    final data = formatJsonForIde(mergedConfig);
     await File(assetPath).writeAsString(data, flush: true);
   }
 }

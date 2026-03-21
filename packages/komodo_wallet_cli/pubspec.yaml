@@ -25,6 +25,7 @@ dependencies:
   crypto: ^3.0.3
   html: ^0.15.4
   http: ^1.4.0
+  komodo_wallet_build_transformer: ^0.4.0
   logging: ^1.3.0
   path: ^1.9.1
   yaml: ^3.1.3
