@@ -7,7 +7,8 @@ import 'package:logging/logging.dart';
 
 // TODO: Add streaming support for price updates. The challenges share a lot
 // of similarities with the balance manager. Investigate if we can create a
-// generic manager class for such cases.
+// generic manager class for such cases. See:
+// docs/tech_debt/Market_Data_Price_Streaming_Tech_Debt.md
 
 /// Interface defining the contract for price management operations
 abstract class MarketDataManager {
@@ -73,12 +74,19 @@ class CexMarketDataManager
   CexMarketDataManager({
     required List<CexRepository> priceRepositories,
     RepositorySelectionStrategy? selectionStrategy,
-  }) : _priceRepositories = priceRepositories,
+    Duration cacheClearInterval = _defaultCacheClearInterval,
+  }) : assert(
+         cacheClearInterval > Duration.zero,
+         'cacheClearInterval must be greater than zero',
+       ),
+       _cacheClearInterval = cacheClearInterval,
+       _priceRepositories = priceRepositories,
        _selectionStrategy =
            selectionStrategy ?? DefaultRepositorySelectionStrategy();
 
   static final _logger = Logger('CexMarketDataManager');
-  static const _cacheClearInterval = Duration(minutes: 5);
+  static const _defaultCacheClearInterval = Duration(minutes: 5);
+  final Duration _cacheClearInterval;
   Timer? _cacheTimer;
 
   @override
@@ -121,6 +129,11 @@ class CexMarketDataManager
   // Cache to store asset prices
   final Map<String, Decimal> _priceCache = {};
 
+  // Cache to keep last-known current prices (without historical date).
+  // This intentionally survives periodic live cache rotations to avoid
+  // transient null windows for read-only cache consumers.
+  final Map<String, Decimal> _lastKnownCurrentPriceCache = {};
+
   // Cache to store 24h price changes
   final Map<String, Decimal> _priceChangeCache = {};
 
@@ -140,10 +153,9 @@ class CexMarketDataManager
   }) {
     final basePrefix = assetId.baseCacheKeyPrefix;
     // Normalize input dates to UTC midnight before lookups to avoid timezone issues
-    final normalizedDate =
-        priceDate != null
-            ? DateTime.utc(priceDate.year, priceDate.month, priceDate.day)
-            : null;
+    final normalizedDate = priceDate != null
+        ? DateTime.utc(priceDate.year, priceDate.month, priceDate.day)
+        : null;
     return canonicalCacheKeyFromBasePrefix(basePrefix, {
       'quote': quoteCurrency.symbol,
       'kind': 'price',
@@ -202,6 +214,9 @@ class CexMarketDataManager
       fiatCurrency: quoteCurrency,
     );
     _priceCache[cacheKey] = price;
+    if (priceDate == null) {
+      _lastKnownCurrentPriceCache[cacheKey] = price;
+    }
     _logger.finer(
       'Fetched price from ${repo.runtimeType} for '
       '${assetId.symbol.assetConfigId}: $price',
@@ -223,7 +238,21 @@ class CexMarketDataManager
       quoteCurrency: quoteCurrency,
     );
 
-    return _getCachedPrice(cacheKey);
+    final cachedPrice = _getCachedPrice(cacheKey);
+    if (cachedPrice != null) {
+      return cachedPrice;
+    }
+
+    // Historical prices are expected to expire from the live cache.
+    if (priceDate != null) {
+      return null;
+    }
+
+    final lastKnownCurrentPrice = _lastKnownCurrentPriceCache[cacheKey];
+    if (lastKnownCurrentPrice != null) {
+      _logger.finer('Last-known current price cache hit for $cacheKey');
+    }
+    return lastKnownCurrentPrice;
   }
 
   @override
@@ -345,10 +374,9 @@ class CexMarketDataManager
     _assertInitialized();
 
     // Normalize input dates to UTC midnight to avoid timezone issues
-    final normalizedDates =
-        dates
-            .map((date) => DateTime.utc(date.year, date.month, date.day))
-            .toList();
+    final normalizedDates = dates
+        .map((date) => DateTime.utc(date.year, date.month, date.day))
+        .toList();
 
     final cached = <DateTime, Decimal>{};
     final missingDates = <DateTime>[];
@@ -409,6 +437,7 @@ class CexMarketDataManager
     _cacheTimer?.cancel();
     _cacheTimer = null;
     _priceCache.clear();
+    _lastKnownCurrentPriceCache.clear();
     _priceChangeCache.clear();
     clearRepositoryHealthData(); // Clear mixin data
     _logger.fine('Disposed CexMarketDataManager');
