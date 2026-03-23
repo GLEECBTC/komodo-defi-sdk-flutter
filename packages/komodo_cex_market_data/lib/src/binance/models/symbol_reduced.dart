@@ -20,10 +20,10 @@ class SymbolReduced {
       symbol: json['symbol'] as String,
       status: json['status'] as String,
       baseAsset: json['baseAsset'] as String,
-      baseAssetPrecision: json['baseAssetPrecision'] as int,
+      baseAssetPrecision: (json['baseAssetPrecision'] as num).toInt(),
       quoteAsset: json['quoteAsset'] as String,
-      quotePrecision: json['quotePrecision'] as int,
-      quoteAssetPrecision: json['quoteAssetPrecision'] as int,
+      quotePrecision: (json['quotePrecision'] as num).toInt(),
+      quoteAssetPrecision: (json['quoteAssetPrecision'] as num).toInt(),
       isSpotTradingAllowed: json['isSpotTradingAllowed'] as bool,
     );
   }

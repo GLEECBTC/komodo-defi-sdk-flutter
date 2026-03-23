@@ -4,8 +4,8 @@ import 'package:rational/rational.dart';
 const int mm2LimbBase = 4294967296; // 2^32
 
 BigInt bigIntFromMm2Json(List<dynamic> json) {
-  final sign = json[0] as int;
-  final limbs = (json[1] as List).cast<int>();
+  final sign = (json[0] as num).toInt();
+  final limbs = (json[1] as List).map((limb) => (limb as num).toInt());
   if (sign == 0) return BigInt.zero;
   var value = BigInt.zero;
   var multiplier = BigInt.one;

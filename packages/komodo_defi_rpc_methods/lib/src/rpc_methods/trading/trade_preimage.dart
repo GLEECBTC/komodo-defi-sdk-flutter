@@ -43,8 +43,9 @@ class TradePreimageRequest
     'params': {
       'base': base,
       'rel': rel,
-      'swap_method':
-          swapMethod == SwapMethod.setPrice ? 'setprice' : swapMethod.name,
+      'swap_method': swapMethod == SwapMethod.setPrice
+          ? 'setprice'
+          : swapMethod.name,
       if (volume != null) 'volume': volume,
       if (max != null) 'max': max,
       if (price != null) 'price': price,
@@ -72,28 +73,23 @@ class TradePreimageResponse extends BaseResponse {
 
     return TradePreimageResponse(
       mmrpc: json.value<String>('mmrpc'),
-      baseCoinFee:
-          result.containsKey('base_coin_fee')
-              ? PreimageCoinFee.fromJson(result.value<JsonMap>('base_coin_fee'))
-              : null,
-      relCoinFee:
-          result.containsKey('rel_coin_fee')
-              ? PreimageCoinFee.fromJson(result.value<JsonMap>('rel_coin_fee'))
-              : null,
-      takerFee:
-          result.containsKey('taker_fee')
-              ? PreimageCoinFee.fromJson(result.value<JsonMap>('taker_fee'))
-              : null,
-      feeToSendTakerFee:
-          result.containsKey('fee_to_send_taker_fee')
-              ? PreimageCoinFee.fromJson(
-                result.value<JsonMap>('fee_to_send_taker_fee'),
-              )
-              : null,
-      totalFees:
-          (result.valueOrNull<JsonList>('total_fees') ?? [])
-              .map(PreimageTotalFee.fromJson)
-              .toList(),
+      baseCoinFee: result.containsKey('base_coin_fee')
+          ? PreimageCoinFee.fromJson(result.value<JsonMap>('base_coin_fee'))
+          : null,
+      relCoinFee: result.containsKey('rel_coin_fee')
+          ? PreimageCoinFee.fromJson(result.value<JsonMap>('rel_coin_fee'))
+          : null,
+      takerFee: result.containsKey('taker_fee')
+          ? PreimageCoinFee.fromJson(result.value<JsonMap>('taker_fee'))
+          : null,
+      feeToSendTakerFee: result.containsKey('fee_to_send_taker_fee')
+          ? PreimageCoinFee.fromJson(
+              result.value<JsonMap>('fee_to_send_taker_fee'),
+            )
+          : null,
+      totalFees: (result.valueOrNull<JsonList>('total_fees') ?? [])
+          .map(PreimageTotalFee.fromJson)
+          .toList(),
     );
   }
 
@@ -130,8 +126,8 @@ class TradePreimageResponse extends BaseResponse {
 const _mm2LimbBase = 1 << 32; // 2^32
 
 BigInt _bigIntFromMm2Json(List<dynamic> json) {
-  final sign = json[0] as int;
-  final limbs = (json[1] as List).cast<int>();
+  final sign = (json[0] as num).toInt();
+  final limbs = (json[1] as List).map((limb) => (limb as num).toInt());
   if (sign == 0) return BigInt.zero;
   var value = BigInt.zero;
   var multiplier = BigInt.one;

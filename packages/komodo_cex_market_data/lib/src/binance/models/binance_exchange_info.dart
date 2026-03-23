@@ -14,7 +14,7 @@ class BinanceExchangeInfoResponse {
   factory BinanceExchangeInfoResponse.fromJson(Map<String, dynamic> json) {
     return BinanceExchangeInfoResponse(
       timezone: json['timezone'] as String,
-      serverTime: json['serverTime'] as int,
+      serverTime: (json['serverTime'] as num).toInt(),
       rateLimits: (json['rateLimits'] as List<dynamic>)
           .map((dynamic v) => RateLimit.fromJson(v as Map<String, dynamic>))
           .toList(),
