@@ -1,3 +1,14 @@
+## 0.4.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.3.1+1
 
  - Update a dependency to the latest release.

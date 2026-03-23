@@ -1,3 +1,8 @@
+## 2.0.1
+
+ - **FIX**(web): improve wasm JS interop bindings (#315).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+
 ## 2.0.0
 
 > Note: This release has breaking changes.

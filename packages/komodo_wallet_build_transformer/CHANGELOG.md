@@ -1,3 +1,9 @@
+## 0.4.1
+
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+
 ## 0.4.0
 
 > Note: This release has breaking changes.

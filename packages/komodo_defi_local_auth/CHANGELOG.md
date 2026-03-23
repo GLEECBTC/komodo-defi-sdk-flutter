@@ -1,3 +1,13 @@
+## 0.4.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(test): add missing updateActiveUserMetadataKey to fake auth service (#330).
+ - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
+ - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.3.1+2
 
  - Update a dependency to the latest release.

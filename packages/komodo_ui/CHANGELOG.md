@@ -1,3 +1,11 @@
+## 0.3.1
+
+ - **FIX**(ui): detect asset icon precache failures (#326).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+
 ## 0.3.0+3
 
  - Update a dependency to the latest release.

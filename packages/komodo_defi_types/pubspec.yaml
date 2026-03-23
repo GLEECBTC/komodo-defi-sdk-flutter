@@ -1,6 +1,6 @@
 name: komodo_defi_types
 description: Type definitions for Komodo DeFi Framework.
-version: 0.3.2+1
+version: 0.4.0
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
@@ -19,7 +19,7 @@ dependencies:
     sdk: flutter
   freezed_annotation: ^3.0.0
   json_annotation: ^4.9.0
-  komodo_defi_rpc_methods: ^0.3.1+1
+  komodo_defi_rpc_methods: ^0.4.0
   logging: ^1.3.0
   meta: ^1.15.0
 

@@ -1,3 +1,8 @@
+## 0.1.1-dev.4
+
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**: add configurable sparkline baseline (#248).
+
 ## 0.1.1-dev.3
 
 > Note: This release has breaking changes.

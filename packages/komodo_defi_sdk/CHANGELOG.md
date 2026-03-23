@@ -1,3 +1,26 @@
+## 0.5.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
+ - **FIX**(withdrawals): remove duplicate executeWithdrawal method (#322).
+ - **FIX**(sdk): expose custom token cleanup (#321).
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(sdk): add SIA activation and withdrawal support (#320).
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): add high-level balance/transaction manager interfaces (#314).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(activation): integrate ActivatedAssetsCache to optimize asset activation checks.
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+ - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.4.0+3
 
  - Update a dependency to the latest release.

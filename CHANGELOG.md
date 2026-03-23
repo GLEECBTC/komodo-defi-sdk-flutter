@@ -3,6 +3,162 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2026-03-23
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - [`komodo_cex_market_data` - `v0.1.0`](#komodo_cex_market_data---v010)
+ - [`komodo_coin_updates` - `v2.0.0`](#komodo_coin_updates---v200)
+ - [`komodo_defi_framework` - `v0.4.0`](#komodo_defi_framework---v040)
+ - [`komodo_defi_local_auth` - `v0.4.0`](#komodo_defi_local_auth---v040)
+ - [`komodo_defi_rpc_methods` - `v0.4.0`](#komodo_defi_rpc_methods---v040)
+ - [`komodo_defi_sdk` - `v0.5.0`](#komodo_defi_sdk---v050)
+ - [`komodo_defi_types` - `v0.4.0`](#komodo_defi_types---v040)
+ - [`komodo_wallet_cli` - `v0.5.0`](#komodo_wallet_cli---v050)
+
+Packages with other changes:
+
+ - [`dragon_charts_flutter` - `v0.1.1-dev.4`](#dragon_charts_flutter---v011-dev4)
+ - [`dragon_logs` - `v2.0.1`](#dragon_logs---v201)
+ - [`komodo_coins` - `v0.3.2`](#komodo_coins---v032)
+ - [`komodo_ui` - `v0.3.1`](#komodo_ui---v031)
+ - [`komodo_wallet_build_transformer` - `v0.4.1`](#komodo_wallet_build_transformer---v041)
+
+---
+
+#### `komodo_cex_market_data` - `v0.1.0`
+
+ - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(binance): use the per-coin supported quote currency list instead of the global cache (#224).
+ - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_coin_updates` - `v2.0.0`
+
+ - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
+ - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
+ - **FIX**(config): loosen types for needs transform check and fix lightwalletservers type.
+ - **FIX**(config): add ssl-only transform for native platforms.
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_defi_framework` - `v0.4.0`
+
+ - **REFACTOR**(macos): streamline KDF binary placement; update signing flow (#247).
+ - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
+ - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
+ - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
+ - **FIX**(web): improve wasm JS interop bindings (#315).
+ - **FIX**(web): complete wasm-safe sdk interop cleanup (#313).
+ - **FIX**: re-format build config.
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
+ - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_defi_local_auth` - `v0.4.0`
+
+ - **FIX**(test): add missing updateActiveUserMetadataKey to fake auth service (#330).
+ - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
+ - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_defi_rpc_methods` - `v0.4.0`
+
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_defi_sdk` - `v0.5.0`
+
+ - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
+ - **FIX**(withdrawals): remove duplicate executeWithdrawal method (#322).
+ - **FIX**(sdk): expose custom token cleanup (#321).
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(sdk): add SIA activation and withdrawal support (#320).
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): add high-level balance/transaction manager interfaces (#314).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(activation): integrate ActivatedAssetsCache to optimize asset activation checks.
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+ - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_defi_types` - `v0.4.0`
+
+ - **FIX**(types): use reified generics in JSON traversal for wasm/minified builds (#329).
+ - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
+ - **FIX**(asset-tagging): correct UTXO coins incorrectly tagged as Smart Chain (#244).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+ - **FEAT**(types): parent display name suffix via subclass (#213).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `komodo_wallet_cli` - `v0.5.0`
+
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
+#### `dragon_charts_flutter` - `v0.1.1-dev.4`
+
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**: add configurable sparkline baseline (#248).
+
+#### `dragon_logs` - `v2.0.1`
+
+ - **FIX**(web): improve wasm JS interop bindings (#315).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+
+#### `komodo_coins` - `v0.3.2`
+
+ - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+
+#### `komodo_ui` - `v0.3.1`
+
+ - **FIX**(ui): detect asset icon precache failures (#326).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+
+#### `komodo_wallet_build_transformer` - `v0.4.1`
+
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+
+
 ## 2025-08-25
 
 ### Changes

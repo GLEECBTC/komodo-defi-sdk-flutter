@@ -1,3 +1,21 @@
+## 0.4.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(types): use reified generics in JSON traversal for wasm/minified builds (#329).
+ - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
+ - **FIX**(asset-tagging): correct UTXO coins incorrectly tagged as Smart Chain (#244).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(coins): Add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+ - **FEAT**(types): parent display name suffix via subclass (#213).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.3.2+1
 
  - **DOCS**(komodo_defi_types): update CHANGELOG for 0.3.2 with pub submission fix.

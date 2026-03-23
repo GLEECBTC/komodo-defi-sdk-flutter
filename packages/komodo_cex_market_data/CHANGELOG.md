@@ -1,3 +1,13 @@
+## 0.1.0
+
+> Note: This release has breaking changes.
+
+ - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
+ - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(binance): use the per-coin supported quote currency list instead of the global cache (#224).
+ - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.0.3+1
 
  - Update a dependency to the latest release.

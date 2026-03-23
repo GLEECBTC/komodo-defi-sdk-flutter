@@ -1,7 +1,7 @@
 name: komodo_defi_framework
 description: "A Flutter plugin for the Komodo DeFi Framework, supporting both
   native (FFI) and web (WASM) platforms."
-version: 0.3.1+2
+version: 0.4.0
 homepage: https://komodoplatform.com
 
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
@@ -23,10 +23,10 @@ dependencies:
   flutter_web_plugins:
     sdk: flutter
   http: ^1.4.0
-  komodo_coin_updates: ^1.1.1
-  komodo_coins: ^0.3.1+2
-  komodo_defi_types: ^0.3.2+1
-  komodo_wallet_build_transformer: ^0.4.0
+  komodo_coin_updates: ^2.0.0
+  komodo_coins: ^0.3.2
+  komodo_defi_types: ^0.4.0
+  komodo_wallet_build_transformer: ^0.4.1
   logging: ^1.3.0
   mutex: ^3.1.0
   path: ^1.9.1

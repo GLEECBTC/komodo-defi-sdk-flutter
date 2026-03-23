@@ -1,3 +1,23 @@
+## 0.4.0
+
+> Note: This release has breaking changes.
+
+ - **REFACTOR**(macos): streamline KDF binary placement; update signing flow (#247).
+ - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
+ - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
+ - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
+ - **FIX**(web): improve wasm JS interop bindings (#315).
+ - **FIX**(web): complete wasm-safe sdk interop cleanup (#313).
+ - **FIX**: re-format build config.
+ - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
+ - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
+ - **FEAT**(sdk): add token safety and fee support helpers (#319).
+ - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**: add support for ETH-BASE and derived assets (#254).
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.3.1+2
 
  - Update a dependency to the latest release.

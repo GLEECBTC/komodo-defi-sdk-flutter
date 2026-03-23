@@ -3,7 +3,7 @@ description: A high-level opinionated library that provides a simple way to
   build cross-platform Komodo Defi Framework applications (primarily focused on
   wallets). This package seves as the entry point for the packages in this
   repository.
-version: 0.4.0+3
+version: 0.5.0
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
@@ -26,13 +26,13 @@ dependencies:
   http: ^1.4.0
   json_annotation: ^4.9.0
 
-  komodo_cex_market_data: ^0.0.3+1
-  komodo_coins: ^0.3.1+2
-  komodo_defi_framework: ^0.3.1+2
-  komodo_defi_local_auth: ^0.3.1+2
-  komodo_defi_rpc_methods: ^0.3.1+1
-  komodo_defi_types: ^0.3.2+1
-  komodo_ui: ^0.3.0+3
+  komodo_cex_market_data: ^0.1.0
+  komodo_coins: ^0.3.2
+  komodo_defi_framework: ^0.4.0
+  komodo_defi_local_auth: ^0.4.0
+  komodo_defi_rpc_methods: ^0.4.0
+  komodo_defi_types: ^0.4.0
+  komodo_ui: ^0.3.1
 
   logging: ^1.3.0
   mutex: ^3.1.0

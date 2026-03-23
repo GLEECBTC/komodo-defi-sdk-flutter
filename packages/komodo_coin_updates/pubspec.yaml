@@ -1,6 +1,6 @@
 name: komodo_coin_updates
 description: Runtime coin config update coin updates.
-version: 1.1.1
+version: 2.0.0
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
@@ -21,7 +21,7 @@ dependencies:
   hive_ce_flutter: ^2.2.3+ce
   http: ^1.4.0
   json_annotation: ^4.9.0
-  komodo_defi_types: ^0.3.2+1
+  komodo_defi_types: ^0.4.0
   logging: ^1.3.0
 
 dev_dependencies:

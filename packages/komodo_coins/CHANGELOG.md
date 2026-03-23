@@ -1,3 +1,9 @@
+## 0.3.2
+
+ - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
+ - **FIX**(zhltc): zhltc activation fixes (#227).
+ - **FEAT**(coin-config): add custom token support to coin config manager (#225).
+
 ## 0.3.1+2
 
  - Update a dependency to the latest release.

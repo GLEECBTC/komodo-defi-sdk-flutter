@@ -1,3 +1,9 @@
+## 0.5.0
+
+> Note: This release has breaking changes.
+
+ - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
+
 ## 0.4.0+1
 
  - **REFACTOR**(komodo_wallet_cli): replace print() with stdout/stderr and improve logging.
