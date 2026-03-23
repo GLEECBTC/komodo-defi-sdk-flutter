@@ -33,7 +33,7 @@ Packages with other changes:
 #### `komodo_cex_market_data` - `v0.1.0`
 
  - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
- - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(sdk): close balance and pubkey subscriptions on auth state changes (#232).
  - **FIX**(binance): use the per-coin supported quote currency list instead of the global cache (#224).
  - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
@@ -42,86 +42,92 @@ Packages with other changes:
 
  - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).
  - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
- - **FIX**(config): loosen types for needs transform check and fix lightwalletservers type.
- - **FIX**(config): add ssl-only transform for native platforms.
- - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(config): loosen types for `needsTransform` checks and fix `lightwalletservers` typing.
+ - **FIX**(config): add SSL-only transforms for native platforms.
+ - **FIX**(sdk): close balance and pubkey subscriptions on auth state changes (#232).
  - **FIX**(zhltc): zhltc activation fixes (#227).
- - **FEAT**(sdk): add token safety and fee support helpers (#319).
- - **FEAT**(coins): Add TRON and TRC20 support (#316).
- - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(coins): add TRON/TRC20-aware config and storage handling (#316).
+ - **FEAT**(sdk): add token safety and fee support helpers for custom-token flows (#319).
+ - **FEAT**(message-signing): add `AddressPath` support and refactor Asset/PubkeyInfo usage (#231).
  - **FEAT**(coin-config): add custom token support to coin config manager (#225).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_defi_framework` - `v0.4.0`
 
- - **REFACTOR**(macos): streamline KDF binary placement; update signing flow (#247).
- - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
+ - **REFACTOR**(macos): streamline KDF binary placement and update the signing flow (#247).
+ - **CHORE**(framework): upgrade bundled KDF and coins references for the 3.0.0-beta preview and latest coins roll (#317, #331).
+ - **FIX**(streaming): gate enable_* calls on a real SSE first-byte event (#332).
  - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
  - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
- - **FIX**(web): improve wasm JS interop bindings (#315).
- - **FIX**(web): complete wasm-safe sdk interop cleanup (#313).
- - **FIX**: re-format build config.
- - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
+ - **FIX**(web): improve WASM JS interop bindings (#315).
+ - **FIX**(web): complete WASM-safe SDK interop cleanup (#313).
+ - **FIX**(build): reformat build config and normalize API source URLs (#301).
  - **FIX**(zhltc): zhltc activation fixes (#227).
  - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
- - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
+ - **FIX**(build): rename the transformer marker to `assets/transformer_invoker.txt`, update pubspec/README references, and remove the old dotfile exception.
  - **FEAT**(sdk): add token safety and fee support helpers (#319).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(sdk): add typed error plumbing, trading-stream foundations, and activation refactoring (#312).
  - **FEAT**: add support for ETH-BASE and derived assets (#254).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_defi_local_auth` - `v0.4.0`
 
- - **FIX**(test): add missing updateActiveUserMetadataKey to fake auth service (#330).
+ - **FIX**(test): add missing `updateActiveUserMetadataKey` coverage to the fake auth service (#330).
  - **FIX**(auth): add mutex-protected atomic metadata updates (#328).
  - **FIX**(auth): store bip39 compatibility regardless of wallet type (#216).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FEAT**(sdk): add typed error handling, trading streams, and activation refactoring foundations (#312).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_defi_rpc_methods` - `v0.4.0`
 
- - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(sdk): close balance and pubkey subscriptions on auth state changes (#232).
  - **FIX**(zhltc): zhltc activation fixes (#227).
- - **FEAT**(coins): Add TRON and TRC20 support (#316).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
- - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(errors): add generated MM2 exception models and richer task error details (#312).
+ - **FEAT**(wallet): extend HD wallet, password change, delete-wallet, and Trezor RPC shapes (#312).
+ - **FEAT**(coins): add TRON/TRC20 activation parameters and withdrawal request support (#316).
+ - **FEAT**(message-signing): add `AddressPath` type and refactor to use Asset/PubkeyInfo (#231).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_defi_sdk` - `v0.5.0`
 
- - **FIX**(streaming): gate enable_* calls on real SSE first-byte event (#332).
- - **FIX**(withdrawals): remove duplicate executeWithdrawal method (#322).
- - **FIX**(sdk): expose custom token cleanup (#321).
- - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
- - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(streaming): gate enable_* calls on a real SSE first-byte event (#332).
+ - **FIX**(withdrawals): remove the duplicate `executeWithdrawal` path (#322).
+ - **FIX**(sdk): expose custom token cleanup hooks (#321).
+ - **FIX**(build): keep zcash params pointed at official z.cash and align API source inputs (#301).
+ - **FIX**(sdk): close balance and pubkey subscriptions on auth state changes (#232).
  - **FIX**(zhltc): zhltc activation fixes (#227).
- - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
+ - **FIX**(custom-token-import): refresh asset lists on import and use lowercase identifiers for custom token import (#220).
+ - **PERF**(streaming): expose managed `orderbook`, `swap_status`, and `order_status` subscriptions for stream-first trading refresh flows (#312, #262).
+ - **PERF**(rpc): add in-flight and short-lived result caches for `trade_preimage`, `max_taker_vol`, `max_maker_vol`, and `min_trading_vol` (#262).
+ - **PERF**(bridge): dedupe bridge orderbook depth requests, add taker preimage cache parity, and reduce validation retry fan-out (#262).
+ - **PERF**(polling): reduce recurring `my_recent_swaps` payload size, slow swaps and orders polling away from active DEX routes, and keep minute-level balance sweeping as fallback only when live watchers are unavailable (#262).
  - **FEAT**(sdk): add SIA activation and withdrawal support (#320).
- - **FEAT**(sdk): add token safety and fee support helpers (#319).
- - **FEAT**(coins): Add TRON and TRC20 support (#316).
- - **FEAT**(sdk): add high-level balance/transaction manager interfaces (#314).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
- - **FEAT**(activation): integrate ActivatedAssetsCache to optimize asset activation checks.
+ - **FEAT**(sdk): add token safety checks, fee helpers, and custom-token cleanup hooks (#319, #321).
+ - **FEAT**(coins): add TRON/TRC20 activation support, protocol wiring, and withdrawal coverage (#316).
+ - **FEAT**(sdk): add asset, balance, and transaction-history manager interfaces (#314).
+ - **FEAT**(sdk): add typed error mapping, trading-manager support, and activation/withdrawal refactoring foundations (#312).
+ - **FEAT**(activation): integrate `ActivatedAssetsCache` to optimize asset activation checks.
+ - **FEAT**(activation): add subclass token activation strategies and GRC routing for derived assets.
  - **FEAT**: add support for ETH-BASE and derived assets (#254).
- - **FEAT**(message-signing): Add AddressPath type and refactor to use Asset/PubkeyInfo (#231).
+ - **FEAT**(message-signing): add `AddressPath` type and refactor to use Asset/PubkeyInfo (#231).
  - **FEAT**(coin-config): add custom token support to coin config manager (#225).
  - **FEAT**(cex-market-data): add CoinPaprika API provider as a fallback option (#215).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_defi_types` - `v0.4.0`
 
- - **FIX**(types): use reified generics in JSON traversal for wasm/minified builds (#329).
+ - **FIX**(types): use reified generics in JSON traversal for WASM and minified builds (#329).
  - **FIX**(startup): handle 6133 seed fallback and invalid configs (#318).
  - **FIX**(asset-tagging): correct UTXO coins incorrectly tagged as Smart Chain (#244).
- - **FIX**(sdk): close balance and pubkeysubscriptions on auth state changes (#232).
+ - **FIX**(sdk): close balance and pubkey subscriptions on auth state changes (#232).
  - **FIX**(zhltc): zhltc activation fixes (#227).
- - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
- - **FEAT**(sdk): add token safety and fee support helpers (#319).
- - **FEAT**(coins): Add TRON and TRC20 support (#316).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FIX**(custom-token-import): refresh asset lists on import and use lowercase identifiers for custom token import (#220).
+ - **FEAT**(sdk): add token safety helpers and custom token exceptions (#319).
+ - **FEAT**(coins): add TRON/TRC20 protocols, protocol-type utilities, and derived-asset routing (#316).
+ - **FEAT**(sdk): add typed error support, updated activation progress, and refreshed withdrawal/fee types (#312).
  - **FEAT**: add support for ETH-BASE and derived assets (#254).
  - **FEAT**(coin-config): add custom token support to coin config manager (#225).
- - **FEAT**(types): parent display name suffix via subclass (#213).
+ - **FEAT**(types): add parent display-name suffixes via subclasses (#213).
  - **BREAKING** **FIX**(rpc): minimise RPC usage with comprehensive caching and streaming support (#262).
 
 #### `komodo_wallet_cli` - `v0.5.0`
@@ -135,7 +141,7 @@ Packages with other changes:
 
 #### `dragon_logs` - `v2.0.1`
 
- - **FIX**(web): improve wasm JS interop bindings (#315).
+ - **FIX**(web): improve WASM JS interop bindings (#315).
  - **FIX**(zhltc): zhltc activation fixes (#227).
 
 #### `komodo_coins` - `v0.3.2`
@@ -148,15 +154,15 @@ Packages with other changes:
 
  - **FIX**(ui): detect asset icon precache failures (#326).
  - **FIX**(zhltc): zhltc activation fixes (#227).
- - **FIX**(custom-token-import): refresh asset list on import and use lowercase for custom token import (#220).
- - **FEAT**(coins): Add TRON and TRC20 support (#316).
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FIX**(custom-token-import): refresh asset lists on import and use lowercase identifiers for custom token import (#220).
+ - **FEAT**(coins): add TRON and TRC20 support (#316).
+ - **FEAT**(sdk): add typed error handling, trading streams, and activation refactoring foundations (#312).
 
 #### `komodo_wallet_build_transformer` - `v0.4.1`
 
- - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).
- - **FIX**(komodo_defi_framework): rename transformer marker and update references\n\n- Use assets/transformer_invoker.txt instead of dotfile\n- Update pubspec and READMEs\n- Remove special .gitignore unignore.
- - **FEAT**(sdk): typed error handling, trading streams, and activation refactoring (#312).
+ - **FIX**(build): keep zcash params pointed at official z.cash and align API source inputs (#301).
+ - **FIX**(build): rename the transformer marker to `assets/transformer_invoker.txt`, update pubspec/README references, and remove the old dotfile exception.
+ - **FEAT**(build): refresh GitHub asset downloading and typed build-transform plumbing for the new SDK generation flow (#312).
 
 
 ## 2025-08-25
