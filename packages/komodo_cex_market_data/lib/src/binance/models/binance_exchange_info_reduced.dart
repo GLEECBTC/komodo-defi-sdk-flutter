@@ -15,7 +15,7 @@ class BinanceExchangeInfoResponseReduced {
   ) {
     return BinanceExchangeInfoResponseReduced(
       timezone: json['timezone'] as String,
-      serverTime: json['serverTime'] as int,
+      serverTime: (json['serverTime'] as num).toInt(),
       symbols: (json['symbols'] as List<dynamic>)
           .map((dynamic v) => SymbolReduced.fromJson(v as Map<String, dynamic>))
           .toList(),

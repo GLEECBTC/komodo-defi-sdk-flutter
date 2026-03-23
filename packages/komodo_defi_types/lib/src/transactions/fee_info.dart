@@ -46,7 +46,7 @@ sealed class FeeInfo with _$FeeInfo {
           coin: json['coin'] as String? ?? '',
           // If JSON provides e.g. "0.000000003", parse to Decimal => 3e-9
           gasPrice: Decimal.parse(json['gas_price'].toString()),
-          gas: json['gas'] as int,
+          gas: (json['gas'] as num).toInt(),
           totalGasFee: totalGasFee,
         );
       case 'EthGasEip1559':
@@ -59,7 +59,7 @@ sealed class FeeInfo with _$FeeInfo {
           maxPriorityFeePerGas: Decimal.parse(
             json['max_priority_fee_per_gas'].toString(),
           ),
-          gas: json['gas'] as int,
+          gas: (json['gas'] as num).toInt(),
           totalGasFee: totalGasFee,
         );
       case 'Qrc20Gas':
@@ -69,20 +69,20 @@ sealed class FeeInfo with _$FeeInfo {
         return FeeInfo.qrc20Gas(
           coin: json['coin'] as String? ?? '',
           gasPrice: Decimal.parse(json['gas_price'].toString()),
-          gasLimit: json['gas_limit'] as int,
+          gasLimit: (json['gas_limit'] as num).toInt(),
           totalGasFee: totalGasFee,
         );
       case 'Tendermint':
         return FeeInfo.tendermint(
           coin: json['coin'] as String? ?? '',
           amount: Decimal.parse(json['amount'].toString()),
-          gasLimit: json['gas_limit'] as int,
+          gasLimit: (json['gas_limit'] as num).toInt(),
         );
       case 'Tron':
         return FeeInfo.tron(
           coin: json['coin'] as String? ?? '',
-          bandwidthUsed: json['bandwidth_used'] as int? ?? 0,
-          energyUsed: json['energy_used'] as int? ?? 0,
+          bandwidthUsed: (json['bandwidth_used'] as num?)?.toInt() ?? 0,
+          energyUsed: (json['energy_used'] as num?)?.toInt() ?? 0,
           bandwidthFee: Decimal.parse(json['bandwidth_fee'].toString()),
           energyFee: Decimal.parse(json['energy_fee'].toString()),
           totalFeeAmount: json['total_fee'] != null
@@ -95,7 +95,7 @@ sealed class FeeInfo with _$FeeInfo {
           // The doc sometimes shows 0.05 as a number (double),
           // so we convert it to string, then parse:
           gasPrice: Decimal.parse(json['gas_price'].toString()),
-          gasLimit: json['gas_limit'] as int,
+          gasLimit: (json['gas_limit'] as num).toInt(),
         );
       case 'Sia':
         return FeeInfo.sia(

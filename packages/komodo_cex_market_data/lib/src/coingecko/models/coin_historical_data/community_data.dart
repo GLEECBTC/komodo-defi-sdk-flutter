@@ -13,8 +13,9 @@ class CommunityData extends Equatable {
   factory CommunityData.fromJson(Map<String, dynamic> json) => CommunityData(
     facebookLikes: json['facebook_likes'] as dynamic,
     twitterFollowers: json['twitter_followers'] as dynamic,
-    redditAveragePosts48h: json['reddit_average_posts_48h'] as int?,
-    redditAverageComments48h: json['reddit_average_comments_48h'] as int?,
+    redditAveragePosts48h: (json['reddit_average_posts_48h'] as num?)?.toInt(),
+    redditAverageComments48h: (json['reddit_average_comments_48h'] as num?)
+        ?.toInt(),
     redditSubscribers: json['reddit_subscribers'] as dynamic,
     redditAccountsActive48h: json['reddit_accounts_active_48h'] as dynamic,
   );

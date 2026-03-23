@@ -21,16 +21,15 @@ class GitHubFile {
     name: data['name'] as String,
     path: data['path'] as String,
     sha: data['sha'] as String,
-    size: data['size'] as int,
+    size: (data['size'] as num).toInt(),
     url: data['url'] as String?,
     htmlUrl: data['html_url'] as String?,
     gitUrl: data['git_url'] as String?,
     downloadUrl: data['download_url'] as String,
     type: data['type'] as String,
-    links:
-        data['_links'] == null
-            ? null
-            : Links.fromJson(data['_links'] as Map<String, dynamic>),
+    links: data['_links'] == null
+        ? null
+        : Links.fromJson(data['_links'] as Map<String, dynamic>),
   );
 
   /// Converts the [GitHubFile] instance to a JSON map.

@@ -83,8 +83,8 @@ class HdHistoryTarget implements HistoryTarget {
   factory HdHistoryTarget.fromJson(Map<String, dynamic> json) {
     return HdHistoryTarget(
       type: HistoryTargetType.parse(json['type'] as String),
-      accountId: json['account_id'] as int,
-      addressId: json['address_id'] as int?,
+      accountId: (json['account_id'] as num).toInt(),
+      addressId: (json['address_id'] as num?)?.toInt(),
       chain: json['chain'] as String?,
     );
   }

@@ -29,14 +29,14 @@ class Filter {
       minQty: json['minQty'] as String?,
       maxQty: json['maxQty'] as String?,
       stepSize: json['stepSize'] as String?,
-      limit: json['limit'] as int?,
+      limit: (json['limit'] as num?)?.toInt(),
       minNotional: json['minNotional'] as String?,
       applyMinToMarket: json['applyMinToMarket'] as bool?,
       maxNotional: json['maxNotional'] as String?,
       applyMaxToMarket: json['applyMaxToMarket'] as bool?,
-      avgPriceMins: json['avgPriceMins'] as int?,
-      maxNumOrders: json['maxNumOrders'] as int?,
-      maxNumAlgoOrders: json['maxNumAlgoOrders'] as int?,
+      avgPriceMins: (json['avgPriceMins'] as num?)?.toInt(),
+      maxNumOrders: (json['maxNumOrders'] as num?)?.toInt(),
+      maxNumAlgoOrders: (json['maxNumAlgoOrders'] as num?)?.toInt(),
     );
   }
 

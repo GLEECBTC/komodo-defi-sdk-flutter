@@ -13,8 +13,8 @@ class RateLimit {
     return RateLimit(
       rateLimitType: json['rateLimitType'] as String,
       interval: json['interval'] as String,
-      intervalNum: json['intervalNum'] as int,
-      limit: json['limit'] as int,
+      intervalNum: (json['intervalNum'] as num).toInt(),
+      limit: (json['limit'] as num).toInt(),
     );
   }
 
