@@ -13,12 +13,12 @@ class OrderbookEvent extends KdfEvent {
   EventTypeString get typeEnum => EventTypeString.orderbook;
 
   factory OrderbookEvent.fromJson(JsonMap json) {
-    final asks = (json.value<List<dynamic>>('asks'))
-        .map((e) => _parseOrderbookEntry(e as JsonMap))
-        .toList();
-    final bids = (json.value<List<dynamic>>('bids'))
-        .map((e) => _parseOrderbookEntry(e as JsonMap))
-        .toList();
+    final asks = (json.value<List<dynamic>>(
+      'asks',
+    )).map((e) => _parseOrderbookEntry(e as JsonMap)).toList();
+    final bids = (json.value<List<dynamic>>(
+      'bids',
+    )).map((e) => _parseOrderbookEntry(e as JsonMap)).toList();
 
     return OrderbookEvent(
       base: json.value<String>('base'),
@@ -56,4 +56,3 @@ class OrderbookEvent extends KdfEvent {
   String toString() =>
       'OrderbookEvent(base: $base, rel: $rel, asks: ${asks.length}, bids: ${bids.length})';
 }
-

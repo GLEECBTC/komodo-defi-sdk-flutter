@@ -54,9 +54,14 @@ class EventStreamingManager {
 
   // Post-connect delay before first enable_* call (1500ms for robust readiness)
   static const Duration _postConnectDelay = Duration(milliseconds: 1500);
-  
-  // Maximum time to wait for first byte before falling back to time-based delay
-  static const Duration _firstByteTimeout = Duration(seconds: 2);
+
+  /// Per-attempt wait for the first real event from SSE / SharedWorker (KDF
+  /// client registration). Short timeouts caused enable_* before registration.
+  static const Duration _firstByteTimeout = Duration(seconds: 30);
+
+  static const int _firstByteMaxAttempts = 3;
+
+  static const Duration _firstByteReconnectDelay = Duration(seconds: 1);
 
   // Per-key in-flight guards to prevent duplicate enable_* calls
   final Map<String, Future<StreamSubscription<KdfEvent>>> _inFlightEnables = {};
@@ -64,41 +69,50 @@ class EventStreamingManager {
   /// Wait for SSE readiness: first byte received + grace period elapsed
   Future<void> _waitForSseReadiness() async {
     if (_sseReadinessComplete) return;
-    
-    _log('Waiting for SSE readiness (first byte + ${_postConnectDelay.inMilliseconds}ms grace period)...');
-    
-    // Ensure SSE connection is initiated
-    _eventService.connectIfNeeded();
-    
-    // Wait for first byte with timeout
-    bool firstByteReceived = false;
-    try {
-      await _eventService.firstByteReceived.timeout(
-        _firstByteTimeout,
-        onTimeout: () {
-          _log('First byte timeout after ${_firstByteTimeout.inSeconds}s - SSE may not be connected');
-          throw TimeoutException('First byte not received');
-        },
-      );
-      firstByteReceived = true;
-      _log('First byte received from SSE stream');
-    } on TimeoutException {
-      _log('WARNING: Proceeding without first byte confirmation - enable_* calls may fail');
-    } catch (e) {
-      _log('Error waiting for first byte: $e');
+
+    _log(
+      'Waiting for SSE readiness (first real event + '
+      '${_postConnectDelay.inMilliseconds}ms grace period)...',
+    );
+
+    for (var attempt = 1; attempt <= _firstByteMaxAttempts; attempt++) {
+      _eventService.connectIfNeeded();
+
+      try {
+        await _eventService.firstByteReceived.timeout(
+          _firstByteTimeout,
+          onTimeout: () {
+            _log(
+              'First byte timeout after ${_firstByteTimeout.inSeconds}s '
+              '(attempt $attempt/$_firstByteMaxAttempts)',
+            );
+            throw TimeoutException('First byte not received');
+          },
+        );
+        _log('First byte received from SSE stream');
+        break;
+      } on TimeoutException {
+        if (attempt >= _firstByteMaxAttempts) {
+          _log(
+            'SSE first byte not received after $_firstByteMaxAttempts attempts; '
+            'aborting enable_* (avoid UnknownClient)',
+          );
+          rethrow;
+        }
+        _log('Reconnecting SSE before next first-byte wait...');
+        _eventService.disconnect();
+        await Future<void>.delayed(_firstByteReconnectDelay);
+      } catch (e) {
+        _log('Error waiting for first byte: $e');
+        if (attempt >= _firstByteMaxAttempts) rethrow;
+        _eventService.disconnect();
+        await Future<void>.delayed(_firstByteReconnectDelay);
+      }
     }
-    
-    // Additional grace period after first byte (or timeout)
-    if (firstByteReceived) {
-      _log('Waiting ${_postConnectDelay.inMilliseconds}ms grace period...');
-      await Future.delayed(_postConnectDelay);
-    } else {
-      // If first byte wasn't received, wait longer to give SSE more time
-      final fallbackDelay = Duration(milliseconds: _postConnectDelay.inMilliseconds * 2);
-      _log('Waiting ${fallbackDelay.inMilliseconds}ms fallback delay (no first byte)...');
-      await Future.delayed(fallbackDelay);
-    }
-    
+
+    _log('Waiting ${_postConnectDelay.inMilliseconds}ms grace period...');
+    await Future<void>.delayed(_postConnectDelay);
+
     _sseReadinessComplete = true;
     _log('SSE readiness complete - ready for enable_* calls');
   }
@@ -161,7 +175,9 @@ class EventStreamingManager {
 
     // Log enable_* attempt with details
     final coinInfo = coin != null ? ', coin=$coin' : '';
-    _log('Enable stream attempt: type=$streamType, key=$key, client_id=$_defaultClientId$coinInfo');
+    _log(
+      'Enable stream attempt: type=$streamType, key=$key, client_id=$_defaultClientId$coinInfo',
+    );
 
     int attemptCount = 0;
     const maxAttempts = 3;
@@ -170,7 +186,7 @@ class EventStreamingManager {
     while (attemptCount < maxAttempts) {
       try {
         attemptCount++;
-        
+
         // Enable new stream
         final response = await enableStream();
 
@@ -181,17 +197,22 @@ class EventStreamingManager {
         );
         _incrementRefCount(key);
 
-        _log('Enable stream success: type=$streamType, key=$key, streamer_id=$streamerId');
+        _log(
+          'Enable stream success: type=$streamType, key=$key, streamer_id=$streamerId',
+        );
         return _createTypedSubscription<T>(key, eventStream);
-        
       } catch (e) {
-        _log('Enable stream failed (attempt $attemptCount/$maxAttempts): type=$streamType, error=$e');
-        
+        _log(
+          'Enable stream failed (attempt $attemptCount/$maxAttempts): type=$streamType, error=$e',
+        );
+
         // Check if it's an UnknownClient error
         final errorStr = e.toString();
         if (errorStr.contains('UnknownClient')) {
-          _log('UnknownClient error detected - server forgot client registration');
-          
+          _log(
+            'UnknownClient error detected - server forgot client registration',
+          );
+
           if (attemptCount < maxAttempts) {
             // Force full SSE reconnect on UnknownClient regardless of connection state
             // The client may think it's connected, but KDF has dropped the registration
@@ -199,25 +220,24 @@ class EventStreamingManager {
             _eventService.disconnect();
             _sseReadinessComplete = false; // Reset readiness flag
             _activeStreams.remove(key); // Clear stale stream entry
-            
-            // Reconnect SSE
-            _eventService.connectIfNeeded();
-            
-            // Wait for full connection cycle (preflight + handshake + first byte + grace period)
-            await Future.delayed(const Duration(seconds: 3));
-            
+
+            // Wait for first real event + grace (same as initial connect)
+            await _waitForSseReadiness();
+
             _log('Retrying enable_* after SSE reconnection...');
-            await Future.delayed(retryDelay);
+            await Future<void>.delayed(retryDelay);
             continue;
           }
         }
-        
+
         // Rethrow if max attempts reached or non-UnknownClient error
         rethrow;
       }
     }
 
-    throw Exception('Failed to enable stream after $maxAttempts attempts: $key');
+    throw Exception(
+      'Failed to enable stream after $maxAttempts attempts: $key',
+    );
   }
 
   /// Enable balance stream for a specific coin.
