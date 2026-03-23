@@ -5,6 +5,10 @@ import 'package:decimal/decimal.dart';
 typedef JsonMap = Map<String, dynamic>;
 typedef JsonList = List<JsonMap>;
 
+/// Compares reified generic types without relying on [Type.toString()].
+/// Works on VM, dart2js, and dart2wasm (including minified builds).
+bool _isSameType<A, B>() => <A>[] is List<B> && <B>[] is List<A>;
+
 /// Converts a map-like structure to a JSON-compatible [Map<String, dynamic>].
 ///
 /// This function recursively converts all keys to strings and all nested maps/lists
@@ -99,24 +103,16 @@ T? _traverseJson<T>(
   // Handle various type conversions
   try {
     if (value != null) {
-      // Handle List<String> and other list types
-      if (T.toString().startsWith('List<') && value is List) {
-        final genericType = T.toString().substring(5, T.toString().length - 1);
-        switch (genericType) {
-          case 'String':
-            return value.cast<String>() as T;
-          case 'int':
-            return value.cast<int>() as T;
-          case 'double':
-            return value.cast<double>() as T;
-          case 'num':
-            return value.cast<num>() as T;
-          case 'bool':
-            return value.cast<bool>() as T;
-          default:
-            if (genericType == 'JsonMap' || genericType == 'JsonMap') {
-              return value.cast<JsonMap>() as T;
-            }
+      // Handle List types using reified generics (no T.toString() parsing)
+      if (value is List) {
+        if (_isSameType<T, List<String>>()) return value.cast<String>() as T;
+        if (_isSameType<T, List<int>>()) return value.cast<int>() as T;
+        if (_isSameType<T, List<double>>()) return value.cast<double>() as T;
+        if (_isSameType<T, List<num>>()) return value.cast<num>() as T;
+        if (_isSameType<T, List<bool>>()) return value.cast<bool>() as T;
+        if (_isSameType<T, List<JsonMap>>()) return value.cast<JsonMap>() as T;
+        if (_isSameType<T, List<dynamic>>()) {
+          return List<dynamic>.from(value) as T;
         }
       }
 
@@ -172,7 +168,7 @@ T? _traverseJson<T>(
       }
 
       // Handle general Map type conversion
-      if (T != dynamic && value is Map && T.toString().startsWith('Map<')) {
+      if (T != dynamic && value is Map && _isSameType<T, JsonMap>()) {
         return _convertMap(value);
       }
 
@@ -240,9 +236,9 @@ T _convertMap<T>(Map<dynamic, dynamic> sourceMap) {
     }
   });
 
-  if (T is JsonMap || T is JsonMap || T is JsonMap?) {
+  if (_isSameType<T, JsonMap>()) {
     return sanitizedMap as T;
-  } else if ((T is Map<String, Object?>) || (T is Map<String, Object?>?)) {
+  } else if (_isSameType<T, Map<String, Object?>>()) {
     return Map<String, Object?>.from(sanitizedMap) as T;
   }
 
