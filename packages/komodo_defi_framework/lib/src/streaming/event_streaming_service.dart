@@ -84,10 +84,10 @@ class KdfEventStreamingService {
     _unsubscribe = null;
     _connectionState = SseConnectionState.disconnected;
 
-    // Reset first byte completer for next connection
-    if (_firstByteCompleter.isCompleted) {
-      _firstByteCompleter = Completer<void>();
-    }
+    // Always use a fresh completer so a new session can await first byte.
+    // If the previous connection never delivered a byte, the old completer
+    // would otherwise never complete and block readiness forever.
+    _firstByteCompleter = Completer<void>();
   }
 
   void _onFirstByte() {
