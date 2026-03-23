@@ -62,6 +62,66 @@ void main() {
       verify(() => fallback.getCoinFiatPrice(asset('BTC'))).called(1);
     });
 
+    test(
+      'priceIfKnown keeps last-known current price after live cache clear',
+      () async {
+        final repo = MockPrimaryRepository();
+        final manager = CexMarketDataManager(
+          priceRepositories: [repo],
+          selectionStrategy: DefaultRepositorySelectionStrategy(),
+          cacheClearInterval: const Duration(milliseconds: 20),
+        );
+
+        when(repo.getCoinList).thenAnswer((_) async => []);
+        when(
+          () => repo.supports(any(), any(), any()),
+        ).thenAnswer((_) async => true);
+        when(
+          () => repo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenAnswer((_) async => Decimal.parse('100.0'));
+
+        await manager.init();
+
+        // Seed current-price caches.
+        final seededPrice = await manager.maybeFiatPrice(asset('BTC'));
+        expect(seededPrice, equals(Decimal.parse('100.0')));
+        expect(
+          manager.priceIfKnown(asset('BTC')),
+          equals(Decimal.parse('100.0')),
+        );
+
+        // Wait long enough for the periodic live cache clear to run.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+
+        // Live cache is rotated, but last-known current price should still
+        // be returned.
+        expect(
+          manager.priceIfKnown(asset('BTC')),
+          equals(Decimal.parse('100.0')),
+        );
+
+        // Refresh from repository and ensure last-known cache updates.
+        when(
+          () => repo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenAnswer((_) async => Decimal.parse('120.0'));
+
+        final refreshedPrice = await manager.maybeFiatPrice(asset('BTC'));
+        expect(refreshedPrice, equals(Decimal.parse('120.0')));
+        expect(
+          manager.priceIfKnown(asset('BTC')),
+          equals(Decimal.parse('120.0')),
+        );
+
+        await manager.dispose();
+      },
+    );
+
     test('fiatPrice uses fallback when primary repository fails', () async {
       final primaryRepo = MockPrimaryRepository();
       final fallbackRepo = MockFallbackRepository();
