@@ -39,7 +39,8 @@ class KomodoDefiSdkConfig {
   /// Configuration for market data repositories
   final MarketDataConfig marketDataConfig;
 
-  /// Optional TRONSCAN Pro API key ([TRON-PRO-API-KEY](https://docs.tronscan.org/getting-started/api-keys)).
+  /// No longer used. Transaction history now uses TRONGrid which requires no
+  /// API key. Retained for backward compatibility.
   final String? tronProApiKey;
 
   KomodoDefiSdkConfig copyWith({

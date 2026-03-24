@@ -110,6 +110,50 @@ Asset _createZhtlcAsset() {
   );
 }
 
+AssetPubkeys _makePubkeys(Asset asset) => AssetPubkeys(
+  assetId: asset.id,
+  keys: [
+    PubkeyInfo(
+      address: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7',
+      derivationPath: null,
+      chain: null,
+      balance: BalanceInfo.zero(),
+      coinTicker: asset.id.id,
+    ),
+  ],
+  availableAddressesCount: 1,
+  syncStatus: SyncStatusEnum.success,
+);
+
+Map<String, Object> _makeTrxTransferRow({
+  required String txId,
+  required String ownerAddress,
+  required String toAddress,
+  required int amount,
+  required int timestamp,
+}) => {
+  'txID': txId,
+  'blockNumber': 12345,
+  'block_timestamp': timestamp,
+  'ret': <Object>[
+    {'contractRet': 'SUCCESS'},
+  ],
+  'raw_data': {
+    'contract': <Object>[
+      {
+        'type': 'TransferContract',
+        'parameter': {
+          'value': {
+            'owner_address': ownerAddress,
+            'to_address': toAddress,
+            'amount': amount,
+          },
+        },
+      },
+    ],
+  },
+};
+
 void main() {
   late PubkeyManager pubkeyManager;
   late KomodoDefiLocalAuth auth;
@@ -117,7 +161,7 @@ void main() {
   setUpAll(() {
     registerFallbackValue(_createTrxAsset());
     registerFallbackValue(
-      Uri.parse('https://apilist.tronscanapi.com/api/transfer'),
+      Uri.parse('https://api.trongrid.io/v1/accounts/T/transactions'),
     );
   });
 
@@ -202,7 +246,7 @@ void main() {
 
       final strategy = factory.forAsset(trx);
 
-      expect(strategy, isA<TronscanTransactionStrategy>());
+      expect(strategy, isA<TronGridTransactionStrategy>());
     });
 
     test('selects Tronscan strategy for TRC20 on TRX', () {
@@ -211,7 +255,7 @@ void main() {
 
       final strategy = factory.forAsset(usdt);
 
-      expect(strategy, isA<TronscanTransactionStrategy>());
+      expect(strategy, isA<TronGridTransactionStrategy>());
     });
 
     test('Legacy strategy wins over Tronscan when registered first', () {
@@ -221,7 +265,7 @@ void main() {
         strategies: [
           EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
           const LegacyTransactionStrategy(),
-          TronscanTransactionStrategy(pubkeyManager: pubkeyManager),
+          TronGridTransactionStrategy(pubkeyManager: pubkeyManager),
           V2TransactionStrategy(auth),
           const ZhtlcTransactionStrategy(),
         ],
@@ -234,13 +278,11 @@ void main() {
   });
 
   group('TronscanTransactionStrategy', () {
-    test('retries on 429 with Retry-After then succeeds', () async {
+    test('retries on 429 with Retry-After header then succeeds', () async {
       final httpClient = _MockHttpClient();
       final apiClient = _MockApiClient();
       var callCount = 0;
-      when(
-        () => httpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async {
+      when(() => httpClient.get(any())).thenAnswer((_) async {
         callCount++;
         if (callCount == 1) {
           return http.Response(
@@ -249,31 +291,21 @@ void main() {
             headers: {'retry-after': '0'},
           );
         }
-        return http.Response(jsonEncode({'data': <Object>[], 'total': 0}), 200);
+        return http.Response(
+          jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+          200,
+        );
       });
 
       final trx = _createTrxAsset();
-      when(() => pubkeyManager.getPubkeys(trx)).thenAnswer(
-        (_) async => AssetPubkeys(
-          assetId: trx.id,
-          keys: [
-            PubkeyInfo(
-              address: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7',
-              derivationPath: null,
-              chain: null,
-              balance: BalanceInfo.zero(),
-              coinTicker: 'TRX',
-            ),
-          ],
-          availableAddressesCount: 1,
-          syncStatus: SyncStatusEnum.success,
-        ),
-      );
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
 
-      final strategy = TronscanTransactionStrategy(
+      final strategy = TronGridTransactionStrategy(
         pubkeyManager: pubkeyManager,
         httpClient: httpClient,
-        apiHostOverride: 'apilist.tronscanapi.com',
+        apiHostOverride: 'api.trongrid.io',
       );
 
       final response = await strategy.fetchTransactionHistory(
@@ -284,44 +316,74 @@ void main() {
 
       expect(callCount, 2);
       expect(response.transactions, isEmpty);
-      verify(
-        () => httpClient.get(any(), headers: any(named: 'headers')),
-      ).called(2);
+      verify(() => httpClient.get(any())).called(2);
     });
 
-    test('sends TRON-PRO-API-KEY when tronProApiKey is set', () async {
+    test('retries on 429 with TRONGrid JSON body suspension', () async {
       final httpClient = _MockHttpClient();
       final apiClient = _MockApiClient();
-      when(
-        () => httpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer(
-        (_) async =>
-            http.Response(jsonEncode({'data': <Object>[], 'total': 0}), 200),
-      );
+      var callCount = 0;
+      when(() => httpClient.get(any())).thenAnswer((_) async {
+        callCount++;
+        if (callCount == 1) {
+          return http.Response(
+            jsonEncode({
+              'Error':
+                  'request rate exceeded the allowed_rps(3), '
+                  'and the query server is suspended for 3 s. '
+                  'To obtain higher request quotas...',
+            }),
+            429,
+          );
+        }
+        return http.Response(
+          jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+          200,
+        );
+      });
 
       final trx = _createTrxAsset();
-      when(() => pubkeyManager.getPubkeys(trx)).thenAnswer(
-        (_) async => AssetPubkeys(
-          assetId: trx.id,
-          keys: [
-            PubkeyInfo(
-              address: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7',
-              derivationPath: null,
-              chain: null,
-              balance: BalanceInfo.zero(),
-              coinTicker: 'TRX',
-            ),
-          ],
-          availableAddressesCount: 1,
-          syncStatus: SyncStatusEnum.success,
-        ),
-      );
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
 
-      final strategy = TronscanTransactionStrategy(
+      final strategy = TronGridTransactionStrategy(
         pubkeyManager: pubkeyManager,
         httpClient: httpClient,
-        tronProApiKey: 'test-key',
-        apiHostOverride: 'apilist.tronscanapi.com',
+        apiHostOverride: 'api.trongrid.io',
+      );
+
+      final response = await strategy.fetchTransactionHistory(
+        apiClient,
+        trx,
+        const PagePagination(pageNumber: 1, itemsPerPage: 20),
+      );
+
+      expect(callCount, 2);
+      expect(response.transactions, isEmpty);
+    });
+
+    test('uses TRONGrid API without custom auth headers', () async {
+      final httpClient = _MockHttpClient();
+      final apiClient = _MockApiClient();
+      Uri? capturedUri;
+      when(() => httpClient.get(any())).thenAnswer((invocation) async {
+        capturedUri = invocation.positionalArguments.first as Uri;
+        return http.Response(
+          jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+          200,
+        );
+      });
+
+      final trx = _createTrxAsset();
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
+
+      final strategy = TronGridTransactionStrategy(
+        pubkeyManager: pubkeyManager,
+        httpClient: httpClient,
+        apiHostOverride: 'api.trongrid.io',
       );
 
       await strategy.fetchTransactionHistory(
@@ -330,16 +392,273 @@ void main() {
         const PagePagination(pageNumber: 1, itemsPerPage: 20),
       );
 
-      final captured =
-          verify(
-                () => httpClient.get(
-                  any(),
-                  headers: captureAny(named: 'headers'),
-                ),
-              ).captured.single
-              as Map<String, String>;
+      expect(capturedUri, isNotNull);
+      expect(capturedUri!.host, 'api.trongrid.io');
+      expect(
+        capturedUri!.path,
+        contains('/v1/accounts/TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7'),
+      );
+      verify(() => httpClient.get(any())).called(1);
+    });
 
-      expect(captured['TRON-PRO-API-KEY'], 'test-key');
+    test('returns fingerprint as fromId for cursor-based streaming', () async {
+      final httpClient = _MockHttpClient();
+      final apiClient = _MockApiClient();
+      when(() => httpClient.get(any())).thenAnswer((_) async {
+        return http.Response(
+          jsonEncode({
+            'data': <Object>[
+              _makeTrxTransferRow(
+                txId: 'abc123',
+                ownerAddress: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7',
+                toAddress: 'TKoCV62HPYYxghKQJV7bmW3g6KpWb1dGhQ',
+                amount: 1000000,
+                timestamp: 1700000000000,
+              ),
+            ],
+            'meta': <String, Object>{'fingerprint': 'next-page-cursor-token'},
+          }),
+          200,
+        );
+      });
+
+      final trx = _createTrxAsset();
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
+
+      final strategy = TronGridTransactionStrategy(
+        pubkeyManager: pubkeyManager,
+        httpClient: httpClient,
+        apiHostOverride: 'api.trongrid.io',
+      );
+
+      final response = await strategy.fetchTransactionHistory(
+        apiClient,
+        trx,
+        const PagePagination(pageNumber: 1, itemsPerPage: 20),
+      );
+
+      expect(jsonDecode(response.fromId!), {
+        'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7': 'next-page-cursor-token',
+      });
+      expect(response.transactions, hasLength(1));
+    });
+
+    test(
+      'multi-address: single __pending__ cursor stays JSON so address1 is not refetched',
+      () async {
+        final httpClient = _MockHttpClient();
+        final apiClient = _MockApiClient();
+        final addr1 = 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7';
+        final addr2 = 'TKoCV62HPYYxghKQJV7bmW3g6KpWb1dGhQ';
+        final requestUris = <Uri>[];
+
+        final trx = _createTrxAsset();
+        when(() => pubkeyManager.getPubkeys(trx)).thenAnswer(
+          (_) async => AssetPubkeys(
+            assetId: trx.id,
+            keys: [
+              PubkeyInfo(
+                address: addr1,
+                derivationPath: null,
+                chain: null,
+                balance: BalanceInfo.zero(),
+                coinTicker: trx.id.id,
+              ),
+              PubkeyInfo(
+                address: addr2,
+                derivationPath: null,
+                chain: null,
+                balance: BalanceInfo.zero(),
+                coinTicker: trx.id.id,
+              ),
+            ],
+            availableAddressesCount: 2,
+            syncStatus: SyncStatusEnum.success,
+          ),
+        );
+
+        when(() => httpClient.get(any())).thenAnswer((invocation) async {
+          final uri = invocation.positionalArguments.first as Uri;
+          requestUris.add(uri);
+          if (uri.path.contains(addr1)) {
+            return http.Response(
+              jsonEncode({
+                'data': <Object>[
+                  _makeTrxTransferRow(
+                    txId: 'tx1',
+                    ownerAddress: addr1,
+                    toAddress: addr2,
+                    amount: 1000000,
+                    timestamp: 1700000000000,
+                  ),
+                ],
+                'meta': <String, Object>{},
+              }),
+              200,
+            );
+          }
+          if (uri.path.contains(addr2)) {
+            return http.Response(
+              jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+              200,
+            );
+          }
+          throw StateError('Unexpected TRONGrid URI: $uri');
+        });
+
+        final strategy = TronGridTransactionStrategy(
+          pubkeyManager: pubkeyManager,
+          httpClient: httpClient,
+          apiHostOverride: 'api.trongrid.io',
+        );
+
+        final first = await strategy.fetchTransactionHistory(
+          apiClient,
+          trx,
+          const PagePagination(pageNumber: 1, itemsPerPage: 20),
+        );
+
+        expect(first.transactions, hasLength(1));
+        final decoded = jsonDecode(first.fromId!) as Map<String, dynamic>;
+        expect(decoded, {addr2: '__pending__'});
+
+        final cursor = first.fromId!;
+        await strategy.fetchTransactionHistory(
+          apiClient,
+          trx,
+          TransactionBasedPagination(fromId: cursor, itemCount: 20),
+        );
+
+        expect(requestUris, hasLength(2));
+        expect(requestUris[0].path, contains(addr1));
+        expect(requestUris[1].path, contains(addr2));
+        expect(requestUris[1].path, isNot(contains(addr1)));
+      },
+    );
+
+    test('passes fingerprint via TransactionBasedPagination', () async {
+      final httpClient = _MockHttpClient();
+      final apiClient = _MockApiClient();
+      Uri? capturedUri;
+      when(() => httpClient.get(any())).thenAnswer((invocation) async {
+        capturedUri = invocation.positionalArguments.first as Uri;
+        return http.Response(
+          jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+          200,
+        );
+      });
+
+      final trx = _createTrxAsset();
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
+
+      final strategy = TronGridTransactionStrategy(
+        pubkeyManager: pubkeyManager,
+        httpClient: httpClient,
+        apiHostOverride: 'api.trongrid.io',
+      );
+
+      await strategy.fetchTransactionHistory(
+        apiClient,
+        trx,
+        const TransactionBasedPagination(
+          fromId: 'previous-fingerprint-token',
+          itemCount: 50,
+        ),
+      );
+
+      expect(capturedUri, isNotNull);
+      expect(
+        capturedUri!.queryParameters['fingerprint'],
+        'previous-fingerprint-token',
+      );
+    });
+
+    test(
+      'does not treat a transaction hash as a TRONGrid fingerprint',
+      () async {
+        final httpClient = _MockHttpClient();
+        final apiClient = _MockApiClient();
+        Uri? capturedUri;
+        const txHash =
+            '0123456789abcdef0123456789abcdef'
+            '0123456789abcdef0123456789abcdef';
+        when(() => httpClient.get(any())).thenAnswer((invocation) async {
+          capturedUri = invocation.positionalArguments.first as Uri;
+          return http.Response(
+            jsonEncode({'data': <Object>[], 'meta': <String, Object>{}}),
+            200,
+          );
+        });
+
+        final trx = _createTrxAsset();
+        when(
+          () => pubkeyManager.getPubkeys(trx),
+        ).thenAnswer((_) async => _makePubkeys(trx));
+
+        final strategy = TronGridTransactionStrategy(
+          pubkeyManager: pubkeyManager,
+          httpClient: httpClient,
+          apiHostOverride: 'api.trongrid.io',
+        );
+
+        await strategy.fetchTransactionHistory(
+          apiClient,
+          trx,
+          const TransactionBasedPagination(fromId: txHash, itemCount: 50),
+        );
+
+        expect(capturedUri, isNotNull);
+        expect(
+          capturedUri!.queryParameters.containsKey('fingerprint'),
+          isFalse,
+        );
+      },
+    );
+
+    test('returns null fromId when no more pages', () async {
+      final httpClient = _MockHttpClient();
+      final apiClient = _MockApiClient();
+      when(() => httpClient.get(any())).thenAnswer((_) async {
+        return http.Response(
+          jsonEncode({
+            'data': <Object>[
+              _makeTrxTransferRow(
+                txId: 'lastTx',
+                ownerAddress: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7',
+                toAddress: 'TKoCV62HPYYxghKQJV7bmW3g6KpWb1dGhQ',
+                amount: 500000,
+                timestamp: 1700000000000,
+              ),
+            ],
+            'meta': <String, Object>{},
+          }),
+          200,
+        );
+      });
+
+      final trx = _createTrxAsset();
+      when(
+        () => pubkeyManager.getPubkeys(trx),
+      ).thenAnswer((_) async => _makePubkeys(trx));
+
+      final strategy = TronGridTransactionStrategy(
+        pubkeyManager: pubkeyManager,
+        httpClient: httpClient,
+        apiHostOverride: 'api.trongrid.io',
+      );
+
+      final response = await strategy.fetchTransactionHistory(
+        apiClient,
+        trx,
+        const PagePagination(pageNumber: 1, itemsPerPage: 20),
+      );
+
+      expect(response.fromId, isNull);
+      expect(response.transactions, hasLength(1));
     });
   });
 }

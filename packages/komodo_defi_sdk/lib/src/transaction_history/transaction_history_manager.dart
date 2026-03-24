@@ -53,12 +53,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     required EventStreamingManager eventStreamingManager,
     TransactionStorage? storage,
     AssetHistoryStorage? assetHistoryStorage,
-    String? tronProApiKey,
   }) : _storage = storage ?? TransactionStorage.defaultForPlatform(),
        _strategyFactory = TransactionHistoryStrategyFactory(
          pubkeyManager,
          _auth,
-         tronProApiKey: tronProApiKey,
        ),
        _eventStreamingManager = eventStreamingManager,
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
@@ -92,6 +90,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   static const _defaultPollingInterval = Duration(seconds: 30);
   static const _maxPollingRetries = 3;
   static const _maxBatchSize = 50;
+
+  /// Max consecutive strategy responses with no transactions but a non-null
+  /// cursor (e.g. TRX history skipping non-TransferContract pages). Prevents
+  /// unbounded loops on accounts with only contract traffic.
+  static const _maxEmptyPages = 10;
 
   bool _isDisposed = false;
   StreamSubscription<KdfUser?>? _authSubscription;
@@ -298,6 +301,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     var hasMore = true;
     var retryCount = 0;
     const maxRetries = 3;
+    var consecutiveEmptyPages = 0;
 
     while (hasMore && !_isDisposed) {
       try {
@@ -316,9 +320,20 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         );
 
         if (response.transactions.isEmpty) {
-          hasMore = false;
+          if (response.fromId != null) {
+            consecutiveEmptyPages++;
+            if (consecutiveEmptyPages > _maxEmptyPages) {
+              hasMore = false;
+            } else {
+              fromId = response.fromId;
+            }
+          } else {
+            hasMore = false;
+          }
           continue;
         }
+
+        consecutiveEmptyPages = 0;
 
         final transactions = response.transactions
             .map((tx) => tx.asTransaction(asset.id))
@@ -329,12 +344,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
         fromId = response.fromId;
 
-        if (response.transactions.length < _maxBatchSize || fromId == null) {
+        if (fromId == null) {
           hasMore = false;
-        } else {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
         }
-      } catch (e) {
+      } catch (_) {
         retryCount++;
         if (retryCount >= maxRetries) {
           hasMore = false;
@@ -411,11 +424,23 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
     try {
       final strategy = _strategyFactory.forAsset(asset);
-      var fromId = await _storage.getLatestTransactionId(
+      final latestStoredId = await _storage.getLatestTransactionId(
         asset.id,
         await _getCurrentWalletId(),
       );
+      if (strategy.usesOpaquePaginationCursor && latestStoredId != null) {
+        final newTransactions = await _fetchOpaqueCursorTransactionsSince(
+          asset,
+          strategy: strategy,
+          latestStoredId: latestStoredId,
+        );
+        await _batchStoreTransactions(newTransactions);
+        return;
+      }
+
+      var fromId = latestStoredId;
       var hasMore = true;
+      var consecutiveEmptyPages = 0;
 
       while (hasMore && !_isDisposed) {
         await _rateLimiter.throttle();
@@ -435,9 +460,20 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         );
 
         if (response.transactions.isEmpty) {
-          hasMore = false;
+          if (response.fromId != null) {
+            consecutiveEmptyPages++;
+            if (consecutiveEmptyPages > _maxEmptyPages) {
+              hasMore = false;
+            } else {
+              fromId = response.fromId;
+            }
+          } else {
+            hasMore = false;
+          }
           continue;
         }
+
+        consecutiveEmptyPages = 0;
 
         final transactions = response.transactions
             .map((tx) => tx.asTransaction(asset.id))
@@ -446,13 +482,72 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         await _batchStoreTransactions(transactions);
         fromId = response.fromId;
 
-        if (response.transactions.length < _maxBatchSize) {
+        if (fromId == null) {
           hasMore = false;
         }
       }
     } finally {
       _syncInProgress.remove(asset.id);
     }
+  }
+
+  Future<List<Transaction>> _fetchOpaqueCursorTransactionsSince(
+    Asset asset, {
+    required TransactionHistoryStrategy strategy,
+    required String latestStoredId,
+  }) async {
+    String? fromId;
+    var hasMore = true;
+    var consecutiveEmptyPages = 0;
+    final newTransactions = <Transaction>[];
+
+    while (hasMore && !_isDisposed) {
+      final response = await strategy.fetchTransactionHistory(
+        _client,
+        asset,
+        fromId != null
+            ? TransactionBasedPagination(
+                fromId: fromId,
+                itemCount: _maxBatchSize,
+              )
+            : const PagePagination(pageNumber: 1, itemsPerPage: _maxBatchSize),
+      );
+
+      if (response.transactions.isEmpty) {
+        if (response.fromId != null) {
+          consecutiveEmptyPages++;
+          if (consecutiveEmptyPages > _maxEmptyPages) {
+            hasMore = false;
+          } else {
+            fromId = response.fromId;
+          }
+        } else {
+          hasMore = false;
+        }
+        continue;
+      }
+
+      consecutiveEmptyPages = 0;
+
+      var reachedStoredHead = false;
+      for (final tx in response.transactions.map(
+        (tx) => tx.asTransaction(asset.id),
+      )) {
+        if (tx.internalId == latestStoredId) {
+          reachedStoredHead = true;
+          break;
+        }
+        newTransactions.add(tx);
+      }
+
+      if (reachedStoredHead || response.fromId == null) {
+        hasMore = false;
+      } else {
+        fromId = response.fromId;
+      }
+    }
+
+    return newTransactions;
   }
 
   @override
@@ -679,24 +774,30 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         await _getCurrentWalletId(),
       );
 
-      final response = await strategy.fetchTransactionHistory(
-        _client,
-        asset,
-        latestId != null
-            ? TransactionBasedPagination(
-                fromId: latestId,
-                itemCount: _maxBatchSize,
-              )
-            : const PagePagination(pageNumber: 1, itemsPerPage: _maxBatchSize),
-      );
-
       if (!_isPollingActive(asset.id)) return;
 
-      if (response.transactions.isNotEmpty) {
-        final newTransactions = response.transactions
-            .map((tx) => tx.asTransaction(asset.id))
-            .toList();
+      final newTransactions =
+          strategy.usesOpaquePaginationCursor && latestId != null
+          ? await _fetchOpaqueCursorTransactionsSince(
+              asset,
+              strategy: strategy,
+              latestStoredId: latestId,
+            )
+          : (await strategy.fetchTransactionHistory(
+              _client,
+              asset,
+              latestId != null
+                  ? TransactionBasedPagination(
+                      fromId: latestId,
+                      itemCount: _maxBatchSize,
+                    )
+                  : const PagePagination(
+                      pageNumber: 1,
+                      itemsPerPage: _maxBatchSize,
+                    ),
+            )).transactions.map((tx) => tx.asTransaction(asset.id)).toList();
 
+      if (newTransactions.isNotEmpty) {
         await _batchStoreTransactions(newTransactions);
 
         final controller = _streamControllers[asset.id];

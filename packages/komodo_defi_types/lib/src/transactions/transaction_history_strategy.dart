@@ -22,10 +22,19 @@ abstract class TransactionHistoryStrategy {
   /// Whether this strategy requires KDF transaction history to be enabled
   /// during activation for real-time updates and pagination to work.
   ///
-  /// Default is true; strategies that source history externally (e.g. Etherscan)
+  /// Default is true; strategies that source history externally
+  /// (e.g. Etherscan)
   /// can override to false so activation can skip setting `tx_history` when
   /// streaming is also unsupported for the asset.
   bool requiresKdfTransactionHistory(Asset asset) => true;
+
+  /// Whether `TransactionBasedPagination.fromId` is an opaque cursor that must
+  /// come from a previous strategy response, rather than a stored transaction
+  /// ID from local history.
+  ///
+  /// Managers can use this to avoid seeding resume flows with transaction IDs
+  /// that the strategy cannot interpret.
+  bool get usesOpaquePaginationCursor => false;
 
   /// Whether this strategy supports the given pagination mode
   bool supportsPaginationMode(Type paginationType) {
