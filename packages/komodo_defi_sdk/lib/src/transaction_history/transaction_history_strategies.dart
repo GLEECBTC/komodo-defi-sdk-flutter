@@ -14,6 +14,7 @@ class TransactionHistoryStrategyFactory {
            strategies ??
            [
              EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
+             TronGridTransactionStrategy(pubkeyManager: pubkeyManager),
              V2TransactionStrategy(auth),
              const LegacyTransactionStrategy(),
              const ZhtlcTransactionStrategy(),
