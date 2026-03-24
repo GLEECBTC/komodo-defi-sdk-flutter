@@ -32,7 +32,7 @@ Asset _createEvmAsset({
 }
 
 Asset _createZhtlcAsset() {
-  final protocol = ZhtlcProtocol.fromJson({
+  final protocol = ZhtlcProtocol.fromJson(const {
     'type': 'ZHTLC',
     'electrum_servers': [
       {'url': 'lightwalletd.pirate.black', 'port': 9067, 'protocol': 'SSL'},

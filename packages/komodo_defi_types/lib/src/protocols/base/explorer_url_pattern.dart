@@ -10,16 +10,24 @@ class ExplorerUrlPattern {
   });
 
   factory ExplorerUrlPattern.fromJson(JsonMap config) {
-    final baseUrl = config.valueOrNull<String>('explorer_url');
+    final baseUrl = _normalizePatternValue(
+      config.valueOrNull<String>('explorer_url'),
+    );
     if (baseUrl == null) return const ExplorerUrlPattern();
 
     // Add scheme if missing
     final urlString = baseUrl.startsWith('http') ? baseUrl : 'https://$baseUrl';
     return ExplorerUrlPattern(
       baseUrl: Uri.tryParse(urlString),
-      txPattern: config.valueOrNull<String>('explorer_tx_url'),
-      addressPattern: config.valueOrNull<String>('explorer_address_url'),
-      blockPattern: config.valueOrNull<String>('explorer_block_url'),
+      txPattern: _normalizePatternValue(
+        config.valueOrNull<String>('explorer_tx_url'),
+      ),
+      addressPattern: _normalizePatternValue(
+        config.valueOrNull<String>('explorer_address_url'),
+      ),
+      blockPattern: _normalizePatternValue(
+        config.valueOrNull<String>('explorer_block_url'),
+      ),
     );
   }
 
@@ -45,13 +53,35 @@ class ExplorerUrlPattern {
 
       // If no placeholders were found, append the first param value
       if (params.isNotEmpty && url == pattern) {
-        url = '$url/${Uri.encodeComponent(params.values.first)}';
+        url = '$url${Uri.encodeComponent(params.values.first)}';
       }
 
-      return baseUrl?.resolve(url);
+      final resolvedBaseUrl = baseUrl;
+      if (resolvedBaseUrl == null) return null;
+
+      if (resolvedBaseUrl.fragment.isNotEmpty && !url.startsWith('#')) {
+        final baseFragment = resolvedBaseUrl.fragment;
+        final normalizedBaseFragment = baseFragment.endsWith('/')
+            ? baseFragment
+            : '$baseFragment/';
+        final normalizedUrl = url.startsWith('/') ? url.substring(1) : url;
+
+        return resolvedBaseUrl.replace(
+          fragment: '$normalizedBaseFragment$normalizedUrl',
+        );
+      }
+
+      return resolvedBaseUrl.resolve(url);
     } catch (e) {
       return null;
     }
+  }
+
+  static String? _normalizePatternValue(String? value) {
+    if (value == null) return null;
+
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : normalized;
   }
 }
 
@@ -63,30 +93,29 @@ mixin ExplorerUrlMixin {
   Uri? explorerTxUrl(String txHash) {
     if (txHash.isEmpty) return null;
 
-    final hash =
-        needs0xPrefix && !txHash.startsWith('0x') ? '0x$txHash' : txHash;
+    final hash = needs0xPrefix && !txHash.startsWith('0x')
+        ? '0x$txHash'
+        : txHash;
 
-    return explorerPattern.buildUrl(
-      explorerPattern.txPattern,
-      {'HASH': hash, 'TX': hash},
-    );
+    return explorerPattern.buildUrl(explorerPattern.txPattern, {
+      'HASH': hash,
+      'TX': hash,
+    });
   }
 
   Uri? explorerAddressUrl(String address) {
     if (address.isEmpty) return null;
 
-    return explorerPattern.buildUrl(
-      explorerPattern.addressPattern,
-      {'ADDRESS': address},
-    );
+    return explorerPattern.buildUrl(explorerPattern.addressPattern, {
+      'ADDRESS': address,
+    });
   }
 
   Uri? explorerBlockUrl(String blockId) {
     if (blockId.isEmpty) return null;
 
-    return explorerPattern.buildUrl(
-      explorerPattern.blockPattern,
-      {'BLOCK': blockId},
-    );
+    return explorerPattern.buildUrl(explorerPattern.blockPattern, {
+      'BLOCK': blockId,
+    });
   }
 }

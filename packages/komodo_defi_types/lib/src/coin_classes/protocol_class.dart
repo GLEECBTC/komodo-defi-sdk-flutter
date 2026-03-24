@@ -166,6 +166,10 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
   }
 
   bool supportsTxHistoryStreaming({required bool isChildAsset}) {
+    // TRON does not currently expose KDF-backed tx history.
+    if (subClass == CoinSubClass.trx || subClass == CoinSubClass.trc20) {
+      return false;
+    }
     // EVM does not support tx history streaming in KDF
     if (evmCoinSubClasses.contains(subClass)) {
       return false;
