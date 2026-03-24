@@ -1,8 +1,8 @@
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/custom_erc20_activation_strategy.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/erc20_activation_strategy.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/eth_task_activation_strategy.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/eth_with_tokens_activation_strategy.dart';
-import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:test/test.dart';
 
