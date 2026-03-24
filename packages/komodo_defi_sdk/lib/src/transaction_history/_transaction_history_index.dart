@@ -4,6 +4,7 @@
 library _transaction_history;
 
 export 'strategies/etherscan_transaction_history_strategy.dart';
+export 'strategies/tronscan_transaction_history_strategy.dart';
 export 'strategies/zhtlc_transaction_strategy.dart';
 export 'transaction_history_manager.dart';
 export 'transaction_merge_utils.dart';

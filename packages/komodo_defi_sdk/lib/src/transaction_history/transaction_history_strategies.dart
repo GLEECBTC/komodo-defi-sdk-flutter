@@ -10,10 +10,15 @@ class TransactionHistoryStrategyFactory {
     PubkeyManager pubkeyManager,
     KomodoDefiLocalAuth auth, {
     List<TransactionHistoryStrategy>? strategies,
+    String? tronProApiKey,
   }) : _strategies =
            strategies ??
            [
              EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
+             TronscanTransactionStrategy(
+               pubkeyManager: pubkeyManager,
+               tronProApiKey: tronProApiKey,
+             ),
              V2TransactionStrategy(auth),
              const LegacyTransactionStrategy(),
              const ZhtlcTransactionStrategy(),

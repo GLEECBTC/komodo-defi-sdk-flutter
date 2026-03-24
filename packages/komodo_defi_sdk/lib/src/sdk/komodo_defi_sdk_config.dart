@@ -11,6 +11,7 @@ class KomodoDefiSdkConfig {
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
     this.marketDataConfig = const MarketDataConfig(),
+    this.tronProApiKey,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -38,6 +39,9 @@ class KomodoDefiSdkConfig {
   /// Configuration for market data repositories
   final MarketDataConfig marketDataConfig;
 
+  /// Optional TRONSCAN Pro API key ([TRON-PRO-API-KEY](https://docs.tronscan.org/getting-started/api-keys)).
+  final String? tronProApiKey;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -47,6 +51,7 @@ class KomodoDefiSdkConfig {
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
     MarketDataConfig? marketDataConfig,
+    String? tronProApiKey,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -62,6 +67,7 @@ class KomodoDefiSdkConfig {
       activatedAssetsCacheTtl:
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
+      tronProApiKey: tronProApiKey ?? this.tronProApiKey,
     );
   }
 }

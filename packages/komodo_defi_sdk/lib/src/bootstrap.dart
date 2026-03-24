@@ -300,6 +300,7 @@ Future<void> bootstrap({
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
         assetHistoryStorage: container<AssetHistoryStorage>(),
+        tronProApiKey: config.tronProApiKey,
       );
     },
     dependsOn: [

@@ -53,10 +53,12 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     required EventStreamingManager eventStreamingManager,
     TransactionStorage? storage,
     AssetHistoryStorage? assetHistoryStorage,
+    String? tronProApiKey,
   }) : _storage = storage ?? TransactionStorage.defaultForPlatform(),
        _strategyFactory = TransactionHistoryStrategyFactory(
          pubkeyManager,
          _auth,
+         tronProApiKey: tronProApiKey,
        ),
        _eventStreamingManager = eventStreamingManager,
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
