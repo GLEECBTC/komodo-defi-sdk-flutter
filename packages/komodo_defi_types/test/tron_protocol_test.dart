@@ -11,6 +11,9 @@ Map<String, dynamic> _trxConfig() => {
   'decimals': 6,
   'required_confirmations': 1,
   'derivation_path': "m/44'/195'",
+  'explorer_url': 'https://tronscan.org/',
+  'explorer_tx_url': '#/transaction/',
+  'explorer_address_url': '#/address/',
   'protocol': {
     'type': 'TRX',
     'protocol_data': {'network': 'Mainnet'},
@@ -27,6 +30,9 @@ Map<String, dynamic> _trc20Config() => {
   'mm2': 1,
   'decimals': 6,
   'derivation_path': "m/44'/195'",
+  'explorer_url': 'https://tronscan.org/',
+  'explorer_tx_url': '#/transaction/',
+  'explorer_address_url': '#/address/',
   'protocol': {
     'type': 'TRC20',
     'protocol_data': {
@@ -116,7 +122,15 @@ void main() {
       expect(protocol.subClass, CoinSubClass.trx);
       expect((protocol as TrxProtocol).nodes, isEmpty);
       expect(protocol.network, 'Mainnet');
-      expect(protocol.supportsTxHistoryStreaming(isChildAsset: false), isTrue);
+      expect(protocol.supportsTxHistoryStreaming(isChildAsset: false), isFalse);
+      expect(
+        protocol.explorerTxUrl('abc123')?.toString(),
+        'https://tronscan.org/#/transaction/abc123',
+      );
+      expect(
+        protocol.explorerAddressUrl('TAddress123')?.toString(),
+        'https://tronscan.org/#/address/TAddress123',
+      );
     });
 
     test('Asset.fromJson links TRC20 child asset to TRX parent', () {
@@ -128,7 +142,15 @@ void main() {
       expect(child.id.parentId, parent.id);
       expect(parent.id.subClass.canBeParentOf(child.id.subClass), isTrue);
       expect(child.supportsBalanceStreaming, isTrue);
-      expect(child.supportsTxHistoryStreaming, isTrue);
+      expect(child.supportsTxHistoryStreaming, isFalse);
+      expect(
+        child.protocol.explorerTxUrl('def456')?.toString(),
+        'https://tronscan.org/#/transaction/def456',
+      );
+      expect(
+        child.protocol.explorerAddressUrl('TTokenAddress456')?.toString(),
+        'https://tronscan.org/#/address/TTokenAddress456',
+      );
     });
 
     test('non-TRON platform assets keep top-level subtype precedence', () {
