@@ -1,5 +1,22 @@
+import 'package:collection/collection.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
+
+const _coinGeckoFallbackIds = <String, String>{
+  'TRX': 'tron',
+  'TRX-BEP20': 'tron',
+};
+
+const _coinPaprikaFallbackIds = <String, String>{
+  'TRX': 'trx-tron',
+  'TRX-BEP20': 'trx-tron',
+};
+
+String? _fallbackIdForAsset(AssetId assetId, Map<String, String> aliases) {
+  return {assetId.id.toUpperCase(), assetId.symbol.configSymbol.toUpperCase()}
+      .map((key) => aliases[key])
+      .firstWhereOrNull((alias) => alias?.isNotEmpty ?? false);
+}
 
 /// Strategy for resolving platform-specific asset identifiers
 ///
@@ -87,12 +104,14 @@ class CoinGeckoIdResolutionStrategy implements IdResolutionStrategy {
   /// be used and an error is thrown in [resolveTradingSymbol].
   @override
   List<String> getIdPriority(AssetId assetId) {
-    final coinGeckoId = assetId.symbol.coinGeckoId;
+    final coinGeckoId =
+        assetId.symbol.coinGeckoId ??
+        _fallbackIdForAsset(assetId, _coinGeckoFallbackIds);
 
     if (coinGeckoId == null || coinGeckoId.isEmpty) {
       _logger.fine(
-        'Missing coinGeckoId for asset ${assetId.symbol.configSymbol}, '
-        'falling back to configSymbol. This may cause API issues.',
+        'Missing coinGeckoId for asset ${assetId.symbol.configSymbol}. '
+        'CoinGecko API cannot be used for this asset.',
       );
     }
 
@@ -140,7 +159,9 @@ class CoinPaprikaIdResolutionStrategy implements IdResolutionStrategy {
   /// error is thrown in [resolveTradingSymbol].
   @override
   List<String> getIdPriority(AssetId assetId) {
-    final coinPaprikaId = assetId.symbol.coinPaprikaId;
+    final coinPaprikaId =
+        assetId.symbol.coinPaprikaId ??
+        _fallbackIdForAsset(assetId, _coinPaprikaFallbackIds);
 
     if (coinPaprikaId == null || coinPaprikaId.isEmpty) {
       _logger.fine(

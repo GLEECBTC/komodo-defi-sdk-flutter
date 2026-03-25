@@ -184,6 +184,22 @@ class MockFailingRepository implements CexRepository {
   String toString() => 'MockFailingRepository';
 }
 
+class MockSlowSupportingRepository extends MockSupportingRepository {
+  MockSlowSupportingRepository(super.name, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<bool> supports(
+    AssetId assetId,
+    QuoteCurrency fiatCurrency,
+    PriceRequestType requestType,
+  ) async {
+    await Future<void>.delayed(delay);
+    return super.supports(assetId, fiatCurrency, requestType);
+  }
+}
+
 void main() {
   group('RepositorySelectionStrategy', () {
     late RepositorySelectionStrategy strategy;
@@ -278,6 +294,31 @@ void main() {
         );
 
         expect(repo, equals(supportingRepo));
+      });
+
+      test('allows slower support checks within timeout budget', () async {
+        final slowRepo = MockSlowSupportingRepository(
+          'slow-supporting',
+          delay: const Duration(seconds: 3),
+        );
+
+        final asset = AssetId(
+          id: 'TRX',
+          name: 'TRON',
+          symbol: AssetSymbol(assetConfigId: 'TRX'),
+          chainId: AssetChainId(chainId: 0),
+          derivationPath: null,
+          subClass: CoinSubClass.utxo,
+        );
+
+        final repo = await strategy.selectRepository(
+          assetId: asset,
+          fiatCurrency: Stablecoin.usdt,
+          requestType: PriceRequestType.priceHistory,
+          availableRepositories: [slowRepo],
+        );
+
+        expect(repo, equals(slowRepo));
       });
     });
 

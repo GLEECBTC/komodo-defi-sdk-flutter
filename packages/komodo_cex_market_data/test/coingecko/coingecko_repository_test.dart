@@ -246,6 +246,36 @@ void main() {
         }
       });
 
+      test('should resolve TRX via fallback CoinGecko id', () async {
+        when(() => mockProvider.fetchCoinList()).thenAnswer(
+          (_) async => [
+            const CexCoin(
+              id: 'tron',
+              symbol: 'trx',
+              name: 'TRON',
+              currencies: {},
+            ),
+          ],
+        );
+
+        final assetId = AssetId(
+          id: 'TRX',
+          name: 'TRON',
+          symbol: AssetSymbol(assetConfigId: 'TRX'),
+          chainId: AssetChainId(chainId: 0),
+          derivationPath: null,
+          subClass: CoinSubClass.utxo,
+        );
+
+        final supports = await repository.supports(
+          assetId,
+          Stablecoin.usdt,
+          PriceRequestType.priceHistory,
+        );
+
+        expect(supports, isTrue);
+      });
+
       test('should support EUR-pegged stablecoins via EUR mapping', () async {
         final assetId = AssetId(
           id: 'bitcoin',

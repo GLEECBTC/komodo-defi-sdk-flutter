@@ -1,4 +1,3 @@
-import 'package:async/async.dart';
 import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
 import 'package:komodo_cex_market_data/src/coingecko/_coingecko_index.dart';
@@ -29,7 +28,9 @@ class CoinGeckoRepository implements CexRepository {
   final IdResolutionStrategy _idResolutionStrategy;
   final bool _enableMemoization;
 
-  final AsyncMemoizer<List<CexCoin>> _coinListMemoizer = AsyncMemoizer();
+  /// Populated only after a successful fetch; failures do not poison retries.
+  List<CexCoin>? _cachedCoinList;
+  Future<List<CexCoin>>? _coinListInFlight;
   Set<String>? _cachedFiatCurrencies;
 
   /// Fetches the CoinGecko market data.
@@ -48,30 +49,49 @@ class CoinGeckoRepository implements CexRepository {
 
   @override
   Future<List<CexCoin>> getCoinList() async {
-    if (_enableMemoization) {
-      return _coinListMemoizer.runOnce(_fetchCoinListInternal);
-    } else {
+    if (!_enableMemoization) {
       // Warning: Direct API calls without memoization can lead to API rate limiting
       // and unnecessary network requests. Use this mode sparingly.
       return _fetchCoinListInternal();
     }
+    if (_cachedCoinList != null) {
+      return _cachedCoinList!;
+    }
+    if (_coinListInFlight != null) {
+      return _coinListInFlight!;
+    }
+    _coinListInFlight = _fetchCoinListInternal()
+        .then((list) {
+          _cachedCoinList = list;
+          return list;
+        })
+        .whenComplete(() {
+          _coinListInFlight = null;
+        });
+    return _coinListInFlight!;
   }
 
   /// Internal method to fetch coin list data from the API.
   Future<List<CexCoin>> _fetchCoinListInternal() async {
-    final coins = await coinGeckoProvider.fetchCoinList();
-    final supportedCurrencies = await coinGeckoProvider
-        .fetchSupportedVsCurrencies();
+    try {
+      final coins = await coinGeckoProvider.fetchCoinList();
+      final supportedCurrencies = await coinGeckoProvider
+          .fetchSupportedVsCurrencies();
 
-    final result = coins
-        .map((CexCoin e) => e.copyWith(currencies: supportedCurrencies.toSet()))
-        .toSet();
+      final result = coins
+          .map(
+            (CexCoin e) => e.copyWith(currencies: supportedCurrencies.toSet()),
+          )
+          .toSet();
 
-    _cachedFiatCurrencies = supportedCurrencies
-        .map((s) => s.toUpperCase())
-        .toSet();
+      _cachedFiatCurrencies = supportedCurrencies
+          .map((s) => s.toUpperCase())
+          .toSet();
 
-    return result.toList();
+      return result.toList();
+    } catch (e, st) {
+      Error.throwWithStackTrace(e, st);
+    }
   }
 
   @override
@@ -304,6 +324,10 @@ class CoinGeckoRepository implements CexRepository {
       return supportsAsset && supportsFiat;
     } on ArgumentError {
       // If we cannot resolve a trading symbol, treat as unsupported
+      return false;
+    } catch (_) {
+      // Coin list / network failures: treat as unsupported so fallback repos run
+      // without throwing from [DefaultRepositorySelectionStrategy].
       return false;
     }
   }

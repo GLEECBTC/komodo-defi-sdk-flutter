@@ -48,6 +48,7 @@ abstract class RepositorySelectionStrategy {
 class DefaultRepositorySelectionStrategy
     implements RepositorySelectionStrategy {
   static final Logger _logger = Logger('DefaultRepositorySelectionStrategy');
+  static const _supportsTimeout = Duration(seconds: 5);
 
   @override
   Future<void> ensureCacheInitialized(List<CexRepository> repositories) async {
@@ -63,14 +64,12 @@ class DefaultRepositorySelectionStrategy
     required List<CexRepository> availableRepositories,
   }) async {
     final candidates = <CexRepository>[];
-    const timeout = Duration(seconds: 2);
-
     await Future.wait(
       availableRepositories.map((repo) async {
         try {
           final isSupported = await repo
               .supports(assetId, fiatCurrency, requestType)
-              .timeout(timeout, onTimeout: () => false);
+              .timeout(_supportsTimeout, onTimeout: () => false);
           if (isSupported) {
             candidates.add(repo);
           }

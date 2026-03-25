@@ -114,12 +114,27 @@ class ActivationManager {
         continue;
       }
 
-      // Register activation attempt
-      final primaryCompleter = await _registerActivation(group.primary.id);
-      if (primaryCompleter == null) {
+      // Register activation attempt.
+      final registration = await _registerActivation(group.primary.id);
+      final primaryCompleter = registration.completer;
+      if (!registration.shouldStartActivation) {
         debugPrint(
           'Activation already in progress for ${group.primary.id.name}',
         );
+        try {
+          await primaryCompleter.future;
+          yield ActivationProgress.alreadyActiveSuccess(
+            assetName: group.primary.id.name,
+            childCount: group.children?.length ?? 0,
+          );
+        } catch (e, st) {
+          final mappedError = _mapError(e, group.primary.id);
+          yield ActivationProgress.error(
+            message: mappedError.fallbackMessage,
+            sdkError: mappedError,
+            stackTrace: st,
+          );
+        }
         continue;
       }
 
@@ -183,13 +198,26 @@ class ActivationManager {
             await _handleActivationComplete(group, progress, primaryCompleter);
           }
         }
-      } catch (e) {
+      } catch (e, st) {
+        final recoveredProgress = await _tryRecoverAlreadyActivated(group, e);
+        if (recoveredProgress != null) {
+          if (!primaryCompleter.isCompleted) {
+            primaryCompleter.complete();
+          }
+          yield recoveredProgress;
+          continue;
+        }
+
         debugPrint('Activation failed: $e');
         final mappedError = _mapError(e, group.primary.id);
         if (!primaryCompleter.isCompleted) {
           primaryCompleter.completeError(mappedError);
         }
-        throw mappedError;
+        yield ActivationProgress.error(
+          message: mappedError.fallbackMessage,
+          sdkError: mappedError,
+          stackTrace: st,
+        );
       } finally {
         try {
           await _cleanupActivation(group.primary.id);
@@ -224,12 +252,16 @@ class ActivationManager {
     );
   }
 
-  /// Check if asset and its children are already activated
-  Future<ActivationProgress> _checkActivationStatus(_AssetGroup group) async {
+  /// Check if asset and its children are already activated.
+  Future<ActivationProgress> _checkActivationStatus(
+    _AssetGroup group, {
+    bool forceRefresh = false,
+  }) async {
     try {
       // Use cache instead of direct RPC call to avoid excessive requests
-      final enabledAssetIds = await _activatedAssetsCache
-          .getActivatedAssetIds();
+      final enabledAssetIds = await _activatedAssetsCache.getActivatedAssetIds(
+        forceRefresh: forceRefresh,
+      );
 
       final isActive = enabledAssetIds.contains(group.primary.id);
       final childrenActive =
@@ -257,19 +289,47 @@ class ActivationManager {
     );
   }
 
-  /// Register new activation attempt
-  Future<Completer<void>?> _registerActivation(AssetId assetId) async {
+  /// Register a new activation attempt or join an existing one.
+  Future<_ActivationRegistration> _registerActivation(AssetId assetId) async {
     return _protectedOperation(() async {
-      // Return the existing completer if activation is already in progress
-      // This ensures subsequent callers properly wait for the activation to complete
-      if (_activationCompleters.containsKey(assetId)) {
-        return _activationCompleters[assetId];
+      final existingCompleter = _activationCompleters[assetId];
+      if (existingCompleter != null) {
+        return _ActivationRegistration(
+          completer: existingCompleter,
+          shouldStartActivation: false,
+        );
       }
 
       final completer = Completer<void>();
       _activationCompleters[assetId] = completer;
-      return completer;
+      return _ActivationRegistration(
+        completer: completer,
+        shouldStartActivation: true,
+      );
     });
+  }
+
+  Future<ActivationProgress?> _tryRecoverAlreadyActivated(
+    _AssetGroup group,
+    Object error,
+  ) async {
+    if (!_isAlreadyActivatedError(error)) {
+      return null;
+    }
+
+    _activatedAssetsCache.invalidate();
+    final refreshedStatus = await _checkActivationStatus(
+      group,
+      forceRefresh: true,
+    );
+    return refreshedStatus.isComplete ? refreshedStatus : null;
+  }
+
+  bool _isAlreadyActivatedError(Object error) {
+    final message = error.toString();
+    return message.contains('PlatformIsAlreadyActivated') ||
+        message.contains('CoinIsAlreadyActivated') ||
+        message.contains('activated already');
   }
 
   /// Handle completion of activation
@@ -414,4 +474,14 @@ class _AssetGroup {
 
     return groups.values.toList();
   }
+}
+
+class _ActivationRegistration {
+  const _ActivationRegistration({
+    required this.completer,
+    required this.shouldStartActivation,
+  });
+
+  final Completer<void> completer;
+  final bool shouldStartActivation;
 }

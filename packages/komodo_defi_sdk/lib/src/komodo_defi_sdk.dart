@@ -207,6 +207,19 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Throws [StateError] if accessed before initialization.
   AssetManager get assets => _assertSdkInitialized(_container<AssetManager>());
 
+  /// Activates an asset through the shared activation coordinator.
+  ///
+  /// This is the preferred path for app code that wants to ensure an asset is
+  /// enabled without racing other managers that may be activating the same
+  /// asset concurrently.
+  Future<bool> ensureAssetActivated(Asset asset) async {
+    final coordinator = _assertSdkInitialized(
+      _container<SharedActivationCoordinator>(),
+    );
+    final result = await coordinator.activateAsset(asset);
+    return result.isSuccess;
+  }
+
   /// Deletes a persisted custom token from SDK-managed storage.
   ///
   /// This removes the token from the custom-token store and the in-memory

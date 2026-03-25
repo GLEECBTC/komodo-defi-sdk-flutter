@@ -393,6 +393,44 @@ void main() {
         },
       );
 
+      test('returns true for TRX via fallback CoinPaprika id', () async {
+        when(
+          () => mockProvider.supportedQuoteCurrencies,
+        ).thenReturn([FiatCurrency.usd, FiatCurrency.eur]);
+
+        MockHelpers.setupProviderCoinListResponse(
+          mockProvider,
+          coins: const [
+            CoinPaprikaCoin(
+              id: 'trx-tron',
+              name: 'TRON',
+              symbol: 'TRX',
+              rank: 1,
+              isNew: false,
+              isActive: true,
+              type: 'coin',
+            ),
+          ],
+        );
+
+        final trxAsset = AssetId(
+          id: 'TRX',
+          name: 'TRON',
+          symbol: AssetSymbol(assetConfigId: 'TRX'),
+          chainId: AssetChainId(chainId: 0),
+          derivationPath: null,
+          subClass: CoinSubClass.utxo,
+        );
+
+        final result = await repository.supports(
+          trxAsset,
+          Stablecoin.usdt,
+          PriceRequestType.priceHistory,
+        );
+
+        expect(result, isTrue);
+      });
+
       test('returns false for unsupported quote currency', () async {
         // Arrange
         MockHelpers.setupProviderCoinListResponse(
@@ -688,7 +726,6 @@ void main() {
           ),
         ];
 
-        DateTime? capturedStartDate;
         DateTime? capturedEndDate;
 
         when(
@@ -700,8 +737,6 @@ void main() {
             interval: any(named: 'interval'),
           ),
         ).thenAnswer((invocation) async {
-          capturedStartDate =
-              invocation.namedArguments[#startDate] as DateTime?;
           capturedEndDate = invocation.namedArguments[#endDate] as DateTime?;
           return mockOhlcData;
         });
