@@ -13,7 +13,10 @@ extension BaseRequestApiClientExtension on ApiClient {
 
     if (GeneralErrorResponse.isErrorResponse(response)) {
       // Try to parse into a typed KDF exception first
-      final typedException = _tryParseTypedException(response);
+      final typedException = _tryParseTypedException(
+        response,
+        rpcMethodHint: request.method,
+      );
       if (typedException != null) {
         throw typedException;
       }
@@ -24,14 +27,20 @@ extension BaseRequestApiClientExtension on ApiClient {
   }
 
   /// Attempts to parse the error response into a typed [MmRpcException].
-  MmRpcException? _tryParseTypedException(JsonMap response) {
+  MmRpcException? _tryParseTypedException(
+    JsonMap response, {
+    required String rpcMethodHint,
+  }) {
     // Extract error details from the response structure
     final errorDetails =
         response.valueOrNull<JsonMap>('result', 'details') ??
         response.valueOrNull<JsonMap>('message') ??
         response;
 
-    return KdfErrorRegistry.tryParse(errorDetails);
+    return KdfErrorRegistry.tryParse(
+      errorDetails,
+      rpcMethodHint: rpcMethodHint,
+    );
   }
 }
 
@@ -95,7 +104,10 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
     // First check if this is an error response
     if (GeneralErrorResponse.isErrorResponse(json)) {
       // Try to parse into a typed KDF exception first
-      final typedException = _tryParseTypedException(json);
+      final typedException = _tryParseTypedException(
+        json,
+        rpcMethodHint: method,
+      );
       if (typedException != null) {
         throw typedException;
       }
@@ -117,14 +129,20 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   }
 
   /// Attempts to parse the error response into a typed [MmRpcException].
-  MmRpcException? _tryParseTypedException(JsonMap json) {
+  MmRpcException? _tryParseTypedException(
+    JsonMap json, {
+    required String rpcMethodHint,
+  }) {
     // Extract error details from the response structure
     final errorDetails =
         json.valueOrNull<JsonMap>('result', 'details') ??
         json.valueOrNull<JsonMap>('message') ??
         json;
 
-    return KdfErrorRegistry.tryParse(errorDetails);
+    return KdfErrorRegistry.tryParse(
+      errorDetails,
+      rpcMethodHint: rpcMethodHint,
+    );
   }
 
   /// Override this method to provide custom error handling for specific error

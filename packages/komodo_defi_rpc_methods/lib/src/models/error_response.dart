@@ -65,7 +65,7 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
   ///   }
   /// }
   /// ```
-  MmRpcException? toTypedException() {
+  MmRpcException? toTypedException({String? rpcMethodHint}) {
     // Build a JSON map suitable for KdfErrorRegistry parsing
     final errorJson = <String, dynamic>{
       'error_type': errorType,
@@ -74,7 +74,10 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
       'error_path': errorPath,
       'error_trace': errorTrace,
     };
-    return KdfErrorRegistry.tryParse(errorJson);
+    return KdfErrorRegistry.tryParse(
+      errorJson,
+      rpcMethodHint: rpcMethodHint,
+    );
   }
 
   @override

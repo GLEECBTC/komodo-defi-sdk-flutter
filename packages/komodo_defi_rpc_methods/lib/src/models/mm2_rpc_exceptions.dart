@@ -25024,15 +25024,33 @@ abstract final class KdfErrorRegistry {
   ///
   /// Returns `null` if the error type is not recognized or if the JSON
   /// does not contain an `error_type` field.
-  static MmRpcException? tryParse(JsonMap json) {
+  ///
+  /// [rpcMethodHint] disambiguates types in [_ambiguousErrorTypes] that share
+  /// the same `error_type` string across RPC namespaces (e.g. withdraw vs
+  /// delegation `NotSufficientBalance`).
+  static MmRpcException? tryParse(
+    JsonMap json, {
+    String? rpcMethodHint,
+  }) {
     final errorType = json['error_type'] as String?;
     if (errorType == null) return null;
-    if (_ambiguousErrorTypes.contains(errorType)) return null;
 
     final errorData = json['error_data'];
     final message = json['error'] as String? ?? json['message'] as String?;
     final path = json['error_path'] as String?;
     final trace = json['error_trace'] as String?;
+
+    final withdrawScoped = _tryParseWithdrawScopedAmbiguousType(
+      errorType: errorType,
+      errorData: errorData,
+      rpcMethodHint: rpcMethodHint,
+      message: message,
+      path: path,
+      trace: trace,
+    );
+    if (withdrawScoped != null) return withdrawScoped;
+
+    if (_ambiguousErrorTypes.contains(errorType)) return null;
 
     final parser = _errorParsers[errorType];
     if (parser == null) return null;
@@ -25044,6 +25062,40 @@ abstract final class KdfErrorRegistry {
       // callers can degrade gracefully to GeneralErrorResponse.
       return null;
     }
+  }
+
+  static MmRpcException? _tryParseWithdrawScopedAmbiguousType({
+    required String errorType,
+    required dynamic errorData,
+    String? rpcMethodHint,
+    String? message,
+    String? path,
+    String? trace,
+  }) {
+    if (rpcMethodHint == null || !_isWithdrawRelatedRpcMethod(rpcMethodHint)) {
+      return null;
+    }
+    if (errorType != 'NotSufficientBalance') return null;
+    try {
+      final w = WithdrawErrorNotSufficientBalance.fromJson(errorData);
+      return WithdrawErrorNotSufficientBalanceException(
+        coin: w.coin,
+        available: w.available,
+        required: w.required,
+        message: message,
+        path: path,
+        trace: trace,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isWithdrawRelatedRpcMethod(String method) {
+    return method == 'withdraw' ||
+        method == 'task::withdraw::init' ||
+        method == 'task::withdraw::status' ||
+        method == 'task::withdraw::cancel';
   }
 
   /// Checks if the given error type string is a known KDF error type.
