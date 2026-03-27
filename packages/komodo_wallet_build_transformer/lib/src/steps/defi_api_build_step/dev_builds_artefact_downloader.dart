@@ -30,13 +30,16 @@ class DevBuildsArtefactDownloader implements ArtefactDownloader {
     ApiFileMatchingConfig matchingConfig,
     String platform,
   ) async {
-    // Try both branch-scoped and base-scoped listings to support different mirrors
+    // Try raw and sanitized branch-scoped listings before the base index.
     final normalizedSource = sourceUrl.endsWith('/')
         ? sourceUrl
         : '$sourceUrl/';
     final baseUri = Uri.parse(normalizedSource);
+    final sanitizedBranch = apiBranch.replaceAll('/', '-');
     final candidateListingUrls = <Uri>{
       if (apiBranch.isNotEmpty) baseUri.resolve('$apiBranch/'),
+      if (apiBranch.isNotEmpty && sanitizedBranch != apiBranch)
+        baseUri.resolve('$sanitizedBranch/'),
       baseUri,
     };
 
@@ -75,7 +78,8 @@ class DevBuildsArtefactDownloader implements ArtefactDownloader {
             final containsHash =
                 hrefPath.contains(fullHash) || hrefPath.contains(shortHash);
             if (containsHash) {
-              // Build absolute URL respecting whether href is absolute or relative
+              // Build an absolute URL, regardless of whether href is
+              // already absolute or relative to the listing page.
               final resolvedUrl = href.startsWith('http')
                   ? href
                   : listingUrl.resolve(href).toString();
