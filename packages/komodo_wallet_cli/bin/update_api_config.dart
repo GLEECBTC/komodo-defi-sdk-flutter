@@ -606,13 +606,16 @@ class KdfFetcher {
     String? matchingKeyword,
     List<String> matchingPreference,
   ) async {
-    // Try both branch-scoped and base listings; mirrors now expose branch paths
+    // Try raw and sanitized branch-scoped listings before falling back to the base index.
     final normalizedMirror = mirrorUrl.endsWith('/')
         ? mirrorUrl
         : '$mirrorUrl/';
     final mirrorUri = Uri.parse(normalizedMirror);
+    final sanitizedBranch = branch.replaceAll('/', '-');
     final listingUrls = <Uri>{
       if (branch.isNotEmpty) mirrorUri.resolve('$branch/'),
+      if (branch.isNotEmpty && sanitizedBranch != branch)
+        mirrorUri.resolve('$sanitizedBranch/'),
       mirrorUri,
     };
 

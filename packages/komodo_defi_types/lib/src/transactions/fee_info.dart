@@ -85,6 +85,9 @@ sealed class FeeInfo with _$FeeInfo {
           energyUsed: (json['energy_used'] as num?)?.toInt() ?? 0,
           bandwidthFee: Decimal.parse(json['bandwidth_fee'].toString()),
           energyFee: Decimal.parse(json['energy_fee'].toString()),
+          accountCreationFee: json['account_creation_fee'] != null
+              ? Decimal.parse(json['account_creation_fee'].toString())
+              : null,
           totalFeeAmount: json['total_fee'] != null
               ? Decimal.parse(json['total_fee'].toString())
               : null,
@@ -255,6 +258,7 @@ sealed class FeeInfo with _$FeeInfo {
     required int energyUsed,
     required Decimal bandwidthFee,
     required Decimal energyFee,
+    Decimal? accountCreationFee,
     Decimal? totalFeeAmount,
   }) = FeeInfoTron;
 
@@ -293,8 +297,14 @@ sealed class FeeInfo with _$FeeInfo {
     FeeInfoCosmosGas(:final gasPrice, :final gasLimit) =>
       gasPrice * Decimal.fromInt(gasLimit),
     FeeInfoTendermint(:final amount) => amount,
-    FeeInfoTron(:final bandwidthFee, :final energyFee, :final totalFeeAmount) =>
-      totalFeeAmount ?? (bandwidthFee + energyFee),
+    FeeInfoTron(
+      :final bandwidthFee,
+      :final energyFee,
+      :final accountCreationFee,
+      :final totalFeeAmount,
+    ) =>
+      totalFeeAmount ??
+          (bandwidthFee + energyFee + (accountCreationFee ?? Decimal.zero)),
     FeeInfoSia(:final amount) => amount,
   };
 
@@ -373,6 +383,7 @@ sealed class FeeInfo with _$FeeInfo {
       :final energyUsed,
       :final bandwidthFee,
       :final energyFee,
+      :final accountCreationFee,
       :final totalFeeAmount,
     ) =>
       {
@@ -382,6 +393,8 @@ sealed class FeeInfo with _$FeeInfo {
         'energy_used': energyUsed,
         'bandwidth_fee': bandwidthFee.toString(),
         'energy_fee': energyFee.toString(),
+        if (accountCreationFee != null)
+          'account_creation_fee': accountCreationFee.toString(),
         if (totalFeeAmount != null) 'total_fee': totalFeeAmount.toString(),
       },
     FeeInfoSia(:final coin, :final amount, :final policy) => {
