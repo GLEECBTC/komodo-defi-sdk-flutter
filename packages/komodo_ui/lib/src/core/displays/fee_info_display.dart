@@ -187,6 +187,16 @@ class FeeInfoDisplay extends StatelessWidget {
                 '${fee.energyFee} ${fee.coin}',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
+              if (fee.accountCreationFee != null) ...[
+                Text(
+                  'Account Activation Fee:',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                Text(
+                  '${fee.accountCreationFee} ${fee.coin}',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ],
             ],
 
             final FeeInfoSia fee => [

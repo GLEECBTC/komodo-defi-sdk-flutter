@@ -62,6 +62,7 @@ void main() {
         energyUsed: 29650,
         bandwidthFee: Decimal.parse('0.345'),
         energyFee: Decimal.parse('12.453'),
+        accountCreationFee: Decimal.one,
         totalFeeAmount: Decimal.parse('12.798'),
       );
 
@@ -73,6 +74,7 @@ void main() {
       expect(json['energy_used'], equals(29650));
       expect(json['bandwidth_fee'], equals('0.345'));
       expect(json['energy_fee'], equals('12.453'));
+      expect(json['account_creation_fee'], equals('1'));
       expect(json['total_fee'], equals('12.798'));
     });
 
@@ -84,6 +86,7 @@ void main() {
         'energy_used': 0,
         'bandwidth_fee': '0.267',
         'energy_fee': '0',
+        'account_creation_fee': '1',
         'total_fee': '0.267',
       };
 
@@ -96,8 +99,41 @@ void main() {
       expect(tronFee.energyUsed, equals(0));
       expect(tronFee.bandwidthFee, equals(Decimal.parse('0.267')));
       expect(tronFee.energyFee, equals(Decimal.zero));
+      expect(tronFee.accountCreationFee, equals(Decimal.one));
       expect(tronFee.totalFeeAmount, equals(Decimal.parse('0.267')));
       expect(tronFee.totalFee, equals(Decimal.parse('0.267')));
+    });
+
+    test('should include account creation fee in total fee fallback', () {
+      final json = {
+        'type': 'Tron',
+        'coin': 'TRX',
+        'bandwidth_used': 267,
+        'energy_used': 0,
+        'bandwidth_fee': '0.1',
+        'energy_fee': '0',
+        'account_creation_fee': '1',
+      };
+
+      final feeInfo = FeeInfo.fromJson(json);
+
+      expect(feeInfo, isA<FeeInfoTron>());
+      expect(feeInfo.totalFee, equals(Decimal.parse('1.1')));
+    });
+
+    test('should omit account creation fee when it is absent', () {
+      final feeInfo = FeeInfo.tron(
+        coin: 'TRX',
+        bandwidthUsed: 345,
+        energyUsed: 0,
+        bandwidthFee: Decimal.parse('0.345'),
+        energyFee: Decimal.zero,
+      );
+
+      final json = feeInfo.toJson();
+
+      expect(json.containsKey('account_creation_fee'), isFalse);
+      expect(feeInfo.totalFee, equals(Decimal.parse('0.345')));
     });
   });
 
