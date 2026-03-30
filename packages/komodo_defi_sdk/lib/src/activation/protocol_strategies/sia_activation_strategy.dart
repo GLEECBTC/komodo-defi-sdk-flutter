@@ -60,60 +60,50 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
         final status = await KomodoDefiRpcMethods(
           client,
         ).sia.enableSiaStatus(taskId);
-
-        yield ActivationProgress(
-          status: 'SIA activation in progress',
-          progressDetails: ActivationProgressDetails(
-            currentStep: ActivationStep.processing,
-            stepCount: 3,
-            additionalInfo: {'status': status.status},
-          ),
-        );
-
-        // Stop polling on any terminal state
-        if (status.status != 'InProgress') {
-          if (status.status == 'Ok') {
-            yield ActivationProgress(
-              status: 'SIA activation complete',
-              isComplete: true,
-              progressDetails: ActivationProgressDetails(
-                currentStep: ActivationStep.complete,
-                stepCount: 3,
-                additionalInfo: {'taskId': taskId},
-              ),
-            );
-          } else {
-            final errorProgress = buildErrorProgress(
-              asset: asset,
-              error: status.details ?? 'SIA activation failed',
-              errorCode: 'SIA_ACTIVATION_ERROR',
-              stepCount: 3,
-              status: 'SIA activation failed',
-            );
-            yield errorProgress.copyWith(
-              progressDetails: errorProgress.progressDetails?.copyWith(
-                additionalInfo: {
-                  'taskId': taskId,
-                  'status': status.status,
-                  'details': status.details,
-                },
-              ),
-            );
-          }
+        if (status.status == 'InProgress') {
           yield ActivationProgress(
-            status: 'SIA activation concluded',
-            isComplete: true,
+            status: 'SIA activation in progress',
             progressDetails: ActivationProgressDetails(
-              currentStep: status.status == 'Ok'
-                  ? ActivationStep.complete
-                  : ActivationStep.error,
+              currentStep: ActivationStep.processing,
               stepCount: 3,
+              additionalInfo: {'status': status.status},
+            ),
+          );
+          await Future<void>.delayed(kPollInterval);
+          continue;
+        }
+
+        if (status.status == 'Ok') {
+          yield ActivationProgress.success(
+            details: ActivationProgressDetails(
+              currentStep: ActivationStep.complete,
+              stepCount: 3,
+              additionalInfo: {'taskId': taskId, 'status': status.status},
             ),
           );
           break;
         }
 
-        await Future<void>.delayed(kPollInterval);
+        final errorDetails = (status.detailsAsString ?? '').trim().isEmpty
+            ? 'SIA activation failed'
+            : status.detailsAsString!;
+        final errorProgress = buildErrorProgress(
+          asset: asset,
+          error: errorDetails,
+          errorCode: 'SIA_ACTIVATION_ERROR',
+          stepCount: 3,
+          status: 'SIA activation failed',
+        );
+        yield errorProgress.copyWith(
+          progressDetails: errorProgress.progressDetails?.copyWith(
+            additionalInfo: {
+              'taskId': taskId,
+              'status': status.status,
+              'details': status.details,
+            },
+          ),
+        );
+        break;
       }
     } on Exception catch (e, stack) {
       final errorProgress = buildErrorProgress(
@@ -129,7 +119,6 @@ class SiaActivationStrategy extends ProtocolActivationStrategy {
           additionalInfo: {'error': e.toString()},
         ),
       );
-      rethrow;
     }
   }
 }

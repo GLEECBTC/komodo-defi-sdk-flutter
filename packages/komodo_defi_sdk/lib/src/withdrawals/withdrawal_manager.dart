@@ -525,6 +525,7 @@ class WithdrawalManager {
       final asset = _assetProvider
           .findAssetsByConfigId(parameters.asset)
           .single;
+      _validateSiaSourceSelection(parameters, asset);
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
       final isSiaProtocol = asset.protocol is SiaProtocol;
 
@@ -619,9 +620,10 @@ class WithdrawalManager {
     try {
       final asset = _assetProvider.findAssetsByConfigId(assetId).single;
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
+      final isSiaProtocol = asset.protocol is SiaProtocol;
 
       // Tendermint assets are not yet supported by the task-based API
-      if (isTendermintProtocol) {
+      if (isTendermintProtocol || isSiaProtocol) {
         yield* _legacyManager.executeWithdrawal(preview, assetId);
         return;
       }
@@ -725,6 +727,7 @@ class WithdrawalManager {
       final asset = _assetProvider
           .findAssetsByConfigId(parameters.asset)
           .single;
+      _validateSiaSourceSelection(parameters, asset);
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
       final isSiaProtocol = asset.protocol is SiaProtocol;
 
@@ -841,6 +844,27 @@ class WithdrawalManager {
     return _errorMapper.map(
       error,
       context: SdkErrorContext(operation: operation, assetId: assetId),
+    );
+  }
+
+  void _validateSiaSourceSelection(WithdrawParameters parameters, Asset asset) {
+    if (asset.protocol is! SiaProtocol || parameters.from == null) {
+      return;
+    }
+
+    throw SdkError(
+      code: SdkErrorCode.notSupported,
+      category: SdkErrorCategory.unsupported,
+      messageKey: 'withdrawal.sia.source_not_supported',
+      fallbackMessage:
+          'SIA withdrawals do not support "from" derivation/account/index '
+          'parameters.',
+      context: SdkErrorContext(
+        operation: 'withdrawal.validate',
+        assetId: parameters.asset,
+        extra: {'protocol': 'SIA', 'param': 'from'},
+      ),
+      retryable: false,
     );
   }
 

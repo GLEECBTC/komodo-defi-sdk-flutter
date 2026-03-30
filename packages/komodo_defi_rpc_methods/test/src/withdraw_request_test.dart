@@ -32,5 +32,62 @@ void main() {
         closeTo(0.00000038553, 1e-18),
       );
     });
+
+    test('parses SIA-style non-task v2 withdraw response', () {
+      final request = WithdrawRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'SC',
+        to: 'recipient',
+        amount: Decimal.parse('1'),
+      );
+
+      final parsed = request.parse({
+        'mmrpc': '2.0',
+        'result': {
+          'tx_json': {
+            'siacoinInputs': <Map<String, dynamic>>[],
+            'siacoinOutputs': <Map<String, dynamic>>[],
+            'minerFee': '10000000000000000000',
+          },
+          'tx_hash': '0xabc',
+          'from': ['sender'],
+          'to': ['recipient'],
+          'total_amount': '1.000000000000000000000000',
+          'spent_by_me': '1.000000000000000000000000',
+          'received_by_me': '0',
+          'my_balance_change': '-1.000000000000000000000000',
+          'block_height': 1,
+          'timestamp': 123456,
+          'fee_details': {
+            'type': 'Sia',
+            'coin': 'SC',
+            'policy': 'Fixed',
+            'total_amount': '0.000010000000000000000000',
+          },
+          'coin': 'SC',
+          'internal_id': '',
+          'transaction_type': 'SiaV2Transaction',
+          'memo': null,
+        },
+        'id': null,
+      });
+
+      expect(parsed.status, 'Ok');
+      expect(parsed.details, isA<WithdrawResult>());
+
+      final details = parsed.details as WithdrawResult;
+      expect(details.coin, 'SC');
+      expect(details.txHex, isNull);
+      expect(details.txJson, isNotNull);
+      expect(details.txHash, '0xabc');
+      expect(
+        details.fee,
+        FeeInfo.sia(
+          coin: 'SC',
+          amount: Decimal.parse('0.000010000000000000000000'),
+          policy: 'Fixed',
+        ),
+      );
+    });
   });
 }

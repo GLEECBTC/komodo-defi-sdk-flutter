@@ -1,5 +1,4 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
-import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 class SiaMethodsNamespace extends BaseRpcMethodNamespace {
   SiaMethodsNamespace(super.client);
@@ -9,15 +8,11 @@ class SiaMethodsNamespace extends BaseRpcMethodNamespace {
     required SiaActivationParams params,
   }) {
     return execute(
-      TaskEnableSiaInit(
-        rpcPass: rpcPass ?? '',
-        ticker: ticker,
-        params: params,
-      ),
+      TaskEnableSiaInit(rpcPass: rpcPass ?? '', ticker: ticker, params: params),
     );
   }
 
-  Future<TaskStatusResponse> enableSiaStatus(
+  Future<SiaTaskStatusResponse> enableSiaStatus(
     int taskId, {
     bool forgetIfFinished = true,
   }) {
@@ -30,10 +25,7 @@ class SiaMethodsNamespace extends BaseRpcMethodNamespace {
     );
   }
 
-  Future<BaseResponse> enableSiaCancel({required int taskId}) {
-    return execute(
-      TaskEnableSiaCancel(taskId: taskId, rpcPass: rpcPass),
-    );
+  Future<SiaTaskCancelResponse> enableSiaCancel({required int taskId}) {
+    return execute(TaskEnableSiaCancel(taskId: taskId, rpcPass: rpcPass));
   }
 }
-
