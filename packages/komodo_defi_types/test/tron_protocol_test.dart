@@ -153,6 +153,10 @@ void main() {
       );
     });
 
+    test('TRC20 child assets use the TRX badge icon ticker', () {
+      expect(CoinSubClass.trc20.iconTicker, 'TRX');
+    });
+
     test('non-TRON platform assets keep top-level subtype precedence', () {
       final assetId = AssetId.parse(_avaxConfig(), knownIds: const {});
       final protocol = ProtocolClass.fromJson(_avaxConfig());
