@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// A widget that displays an icon for a given [AssetId].
@@ -159,6 +160,8 @@ class _AssetIconResolver extends StatelessWidget {
   static final Map<String, bool> _assetExistenceCache = {};
   static final Map<String, bool> _cdnExistenceCache = {};
   static final Map<String, ImageProvider> _customIconsCache = {};
+  static Set<String>? _bundledAssetPaths;
+  static Future<Set<String>>? _bundledAssetPathsLoader;
 
   static void registerCustomIcon(AssetId assetId, ImageProvider imageProvider) {
     final sanitizedId = assetId.symbol.configSymbol.toLowerCase();
@@ -169,6 +172,8 @@ class _AssetIconResolver extends StatelessWidget {
     _assetExistenceCache.clear();
     _cdnExistenceCache.clear();
     _customIconsCache.clear();
+    _bundledAssetPaths = null;
+    _bundledAssetPathsLoader = null;
   }
 
   String get _sanitizedId =>
@@ -176,16 +181,41 @@ class _AssetIconResolver extends StatelessWidget {
   String get _imagePath => '$_coinImagesFolder$_sanitizedId.png';
   String get _cdnUrl => '$_mediaCdnUrl$_sanitizedId.png';
 
+  static Future<Set<String>> _loadBundledAssetPaths() async {
+    if (_bundledAssetPaths != null) {
+      return _bundledAssetPaths!;
+    }
+
+    if (_bundledAssetPathsLoader != null) {
+      return _bundledAssetPathsLoader!;
+    }
+
+    _bundledAssetPathsLoader = () async {
+      try {
+        final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+        return manifest.listAssets().toSet();
+      } catch (e) {
+        debugPrint('Failed to load asset manifest for icon precache: $e');
+        return <String>{};
+      }
+    }();
+
+    _bundledAssetPaths = await _bundledAssetPathsLoader;
+    _bundledAssetPathsLoader = null;
+    return _bundledAssetPaths!;
+  }
+
+  static Future<bool> _isBundledAssetDeclared(String assetPath) async {
+    final bundledPaths = await _loadBundledAssetPaths();
+    return bundledPaths.contains(assetPath);
+  }
+
   static Future<bool> _didImagePrecacheSucceed(
     ImageProvider image,
     BuildContext context,
   ) async {
     final outcome = _PrecacheOutcome();
-    await precacheImage(
-      image,
-      context,
-      onError: outcome.recordFailure,
-    );
+    await precacheImage(image, context, onError: outcome.recordFailure);
     return outcome.succeeded;
   }
 
@@ -199,42 +229,51 @@ class _AssetIconResolver extends StatelessWidget {
 
     try {
       if (_customIconsCache.containsKey(sanitizedId)) {
-        if (context.mounted) {
-          await precacheImage(
-            _customIconsCache[sanitizedId]!,
-            context,
-            onError: (e, stackTrace) {
-              if (throwExceptions) {
-                throw Exception(
-                  'Failed to pre-cache custom image for coin $asset: $e',
-                );
-              }
-            },
-          );
+        if (!context.mounted) return;
+
+        final customSucceeded = await _didImagePrecacheSucceed(
+          _customIconsCache[sanitizedId]!,
+          context,
+        );
+        if (throwExceptions && !customSucceeded) {
+          throw Exception('Failed to pre-cache custom image for coin $asset.');
         }
         return;
       }
 
       final assetImage = AssetImage(resolver._imagePath);
       final cdnImage = NetworkImage(resolver._cdnUrl);
+      final bundledAssetExists = await _isBundledAssetDeclared(
+        resolver._imagePath,
+      );
 
-      final assetSucceeded = await _didImagePrecacheSucceed(assetImage, context);
-      _assetExistenceCache[resolver._imagePath] = assetSucceeded;
+      if (bundledAssetExists) {
+        if (!context.mounted) return;
+        final assetSucceeded = await _didImagePrecacheSucceed(
+          assetImage,
+          context,
+        );
+        _assetExistenceCache[resolver._imagePath] = assetSucceeded;
+        if (assetSucceeded) {
+          _cdnExistenceCache.remove(sanitizedId);
+          return;
+        }
 
-      if (assetSucceeded) {
+        if (throwExceptions) {
+          throw Exception(
+            'Failed to pre-cache bundled image for asset ${asset.id}',
+          );
+        }
         return;
       }
 
-      final cdnSucceeded =
-          context.mounted && await _didImagePrecacheSucceed(cdnImage, context);
-      if (context.mounted) {
-        _cdnExistenceCache[sanitizedId] = cdnSucceeded;
-      }
+      _assetExistenceCache[resolver._imagePath] = false;
+      if (!context.mounted) return;
+      final cdnSucceeded = await _didImagePrecacheSucceed(cdnImage, context);
+      _cdnExistenceCache[sanitizedId] = cdnSucceeded;
 
       if (throwExceptions && !cdnSucceeded) {
-        throw Exception(
-          'Failed to pre-cache bundled and CDN images for asset ${asset.id}',
-        );
+        throw Exception('Failed to pre-cache CDN image for asset ${asset.id}');
       }
     } catch (e) {
       debugPrint('Error in precacheAssetIcon for ${asset.id}: $e');
@@ -245,6 +284,21 @@ class _AssetIconResolver extends StatelessWidget {
   static bool assetIconExists(String assetIconId) {
     final resolver = _AssetIconResolver(assetId: assetIconId, size: 20);
     return _assetExistenceCache[resolver._imagePath] ?? false;
+  }
+
+  Widget _buildFallbackIcon() {
+    return Icon(Icons.monetization_on_outlined, size: size);
+  }
+
+  Widget _buildCdnImage() {
+    return Image.network(
+      _cdnUrl,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (context, error, stackTrace) {
+        _cdnExistenceCache[_sanitizedId] = false;
+        return _buildFallbackIcon();
+      },
+    );
   }
 
   @override
@@ -260,22 +314,30 @@ class _AssetIconResolver extends StatelessWidget {
       );
     }
 
-    _assetExistenceCache[_imagePath] = true;
+    final bundledState = _assetExistenceCache[_imagePath];
+    final cdnState = _cdnExistenceCache[_sanitizedId];
+
+    if (bundledState == false && cdnState == true) {
+      return _buildCdnImage();
+    }
+
+    if (bundledState == false && cdnState == false) {
+      return _buildFallbackIcon();
+    }
+
+    _assetExistenceCache[_imagePath] = bundledState ?? true;
     return Image.asset(
       _imagePath,
       filterQuality: FilterQuality.high,
       errorBuilder: (context, error, stackTrace) {
         _assetExistenceCache[_imagePath] = false;
+        if (_cdnExistenceCache[_sanitizedId] == false) {
+          return _buildFallbackIcon();
+        }
+
         _cdnExistenceCache[_sanitizedId] ??= true;
 
-        return Image.network(
-          _cdnUrl,
-          filterQuality: FilterQuality.high,
-          errorBuilder: (context, error, stackTrace) {
-            _cdnExistenceCache[_sanitizedId] = false;
-            return Icon(Icons.monetization_on_outlined, size: size);
-          },
-        );
+        return _buildCdnImage();
       },
     );
   }
