@@ -160,8 +160,10 @@ class _AssetIconResolver extends StatelessWidget {
   static final Map<String, bool> _assetExistenceCache = {};
   static final Map<String, bool> _cdnExistenceCache = {};
   static final Map<String, ImageProvider> _customIconsCache = {};
+  static final Map<String, DateTime> _lastCdnFailureAt = {};
   static Set<String>? _bundledAssetPaths;
   static Future<Set<String>>? _bundledAssetPathsLoader;
+  static const _cdnRetryInterval = Duration(minutes: 1);
 
   static void registerCustomIcon(AssetId assetId, ImageProvider imageProvider) {
     final sanitizedId = assetId.symbol.configSymbol.toLowerCase();
@@ -172,6 +174,7 @@ class _AssetIconResolver extends StatelessWidget {
     _assetExistenceCache.clear();
     _cdnExistenceCache.clear();
     _customIconsCache.clear();
+    _lastCdnFailureAt.clear();
     _bundledAssetPaths = null;
     _bundledAssetPathsLoader = null;
   }
@@ -256,6 +259,7 @@ class _AssetIconResolver extends StatelessWidget {
         _assetExistenceCache[resolver._imagePath] = assetSucceeded;
         if (assetSucceeded) {
           _cdnExistenceCache.remove(sanitizedId);
+          _lastCdnFailureAt.remove(sanitizedId);
           return;
         }
 
@@ -271,6 +275,11 @@ class _AssetIconResolver extends StatelessWidget {
       if (!context.mounted) return;
       final cdnSucceeded = await _didImagePrecacheSucceed(cdnImage, context);
       _cdnExistenceCache[sanitizedId] = cdnSucceeded;
+      if (cdnSucceeded) {
+        _lastCdnFailureAt.remove(sanitizedId);
+      } else {
+        _lastCdnFailureAt[sanitizedId] = DateTime.now();
+      }
 
       if (throwExceptions && !cdnSucceeded) {
         throw Exception('Failed to pre-cache CDN image for asset ${asset.id}');
@@ -296,9 +305,16 @@ class _AssetIconResolver extends StatelessWidget {
       filterQuality: FilterQuality.high,
       errorBuilder: (context, error, stackTrace) {
         _cdnExistenceCache[_sanitizedId] = false;
+        _lastCdnFailureAt[_sanitizedId] = DateTime.now();
         return _buildFallbackIcon();
       },
     );
+  }
+
+  bool _shouldRetryCdnNow() {
+    final lastFailure = _lastCdnFailureAt[_sanitizedId];
+    if (lastFailure == null) return true;
+    return DateTime.now().difference(lastFailure) >= _cdnRetryInterval;
   }
 
   @override
@@ -322,6 +338,10 @@ class _AssetIconResolver extends StatelessWidget {
     }
 
     if (bundledState == false && cdnState == false) {
+      if (_shouldRetryCdnNow()) {
+        _cdnExistenceCache[_sanitizedId] = true;
+        return _buildCdnImage();
+      }
       return _buildFallbackIcon();
     }
 
