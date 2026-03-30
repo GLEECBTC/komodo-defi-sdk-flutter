@@ -194,23 +194,26 @@ class _AssetIconResolver extends StatelessWidget {
     }
 
     _bundledAssetPathsLoader = () async {
-      try {
-        final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-        return manifest.listAssets().toSet();
-      } catch (e) {
-        debugPrint('Failed to load asset manifest for icon precache: $e');
-        return <String>{};
-      }
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      return manifest.listAssets().toSet();
     }();
 
-    _bundledAssetPaths = await _bundledAssetPathsLoader;
-    _bundledAssetPathsLoader = null;
-    return _bundledAssetPaths!;
+    try {
+      _bundledAssetPaths = await _bundledAssetPathsLoader;
+      return _bundledAssetPaths!;
+    } finally {
+      _bundledAssetPathsLoader = null;
+    }
   }
 
-  static Future<bool> _isBundledAssetDeclared(String assetPath) async {
-    final bundledPaths = await _loadBundledAssetPaths();
-    return bundledPaths.contains(assetPath);
+  static Future<bool?> _isBundledAssetDeclared(String assetPath) async {
+    try {
+      final bundledPaths = await _loadBundledAssetPaths();
+      return bundledPaths.contains(assetPath);
+    } catch (e) {
+      debugPrint('Failed to load asset manifest for icon precache: $e');
+      return null;
+    }
   }
 
   static Future<bool> _didImagePrecacheSucceed(
@@ -220,6 +223,22 @@ class _AssetIconResolver extends StatelessWidget {
     final outcome = _PrecacheOutcome();
     await precacheImage(image, context, onError: outcome.recordFailure);
     return outcome.succeeded;
+  }
+
+  static Future<bool> _precacheCdnImage(
+    BuildContext context,
+    NetworkImage cdnImage,
+    String sanitizedId,
+  ) async {
+    if (!context.mounted) return false;
+    final cdnSucceeded = await _didImagePrecacheSucceed(cdnImage, context);
+    _cdnExistenceCache[sanitizedId] = cdnSucceeded;
+    if (cdnSucceeded) {
+      _lastCdnFailureAt.remove(sanitizedId);
+    } else {
+      _lastCdnFailureAt[sanitizedId] = DateTime.now();
+    }
+    return cdnSucceeded;
   }
 
   static Future<void> precacheAssetIcon(
@@ -250,7 +269,7 @@ class _AssetIconResolver extends StatelessWidget {
         resolver._imagePath,
       );
 
-      if (bundledAssetExists) {
+      if (bundledAssetExists == true || bundledAssetExists == null) {
         if (!context.mounted) return;
         final assetSucceeded = await _didImagePrecacheSucceed(
           assetImage,
@@ -263,9 +282,16 @@ class _AssetIconResolver extends StatelessWidget {
           return;
         }
 
-        if (throwExceptions) {
+        _assetExistenceCache[resolver._imagePath] = false;
+        if (!context.mounted) return;
+        final cdnSucceeded = await _precacheCdnImage(
+          context,
+          cdnImage,
+          sanitizedId,
+        );
+        if (throwExceptions && !cdnSucceeded) {
           throw Exception(
-            'Failed to pre-cache bundled image for asset ${asset.id}',
+            'Failed to pre-cache bundled and CDN images for asset ${asset.id}',
           );
         }
         return;
@@ -273,14 +299,11 @@ class _AssetIconResolver extends StatelessWidget {
 
       _assetExistenceCache[resolver._imagePath] = false;
       if (!context.mounted) return;
-      final cdnSucceeded = await _didImagePrecacheSucceed(cdnImage, context);
-      _cdnExistenceCache[sanitizedId] = cdnSucceeded;
-      if (cdnSucceeded) {
-        _lastCdnFailureAt.remove(sanitizedId);
-      } else {
-        _lastCdnFailureAt[sanitizedId] = DateTime.now();
-      }
-
+      final cdnSucceeded = await _precacheCdnImage(
+        context,
+        cdnImage,
+        sanitizedId,
+      );
       if (throwExceptions && !cdnSucceeded) {
         throw Exception('Failed to pre-cache CDN image for asset ${asset.id}');
       }
