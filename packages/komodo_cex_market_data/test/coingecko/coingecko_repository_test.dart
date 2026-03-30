@@ -413,6 +413,109 @@ void main() {
       });
     });
 
+    group('getCoinList failure cooldown', () {
+      test(
+        'should not retry API call during cooldown after failure',
+        () async {
+          var callCount = 0;
+          when(() => mockProvider.fetchCoinList()).thenAnswer((_) async {
+            callCount++;
+            throw Exception('API error');
+          });
+          when(
+            () => mockProvider.fetchSupportedVsCurrencies(),
+          ).thenAnswer((_) async => ['usd']);
+
+          // Enable memoization for this test
+          final memoizedRepo = CoinGeckoRepository(
+            coinGeckoProvider: mockProvider,
+          );
+
+          // First call should hit the API and fail
+          expect(memoizedRepo.getCoinList(), throwsA(isA<Exception>()));
+          await Future<void>.delayed(Duration.zero);
+          expect(callCount, equals(1));
+
+          // Second call should throw StateError (cooldown) without hitting API
+          expect(memoizedRepo.getCoinList(), throwsA(isA<StateError>()));
+          await Future<void>.delayed(Duration.zero);
+          expect(callCount, equals(1)); // Still 1 - no new API call
+        },
+      );
+
+      test(
+        'should return false from supports() during cooldown without API call',
+        () async {
+          when(() => mockProvider.fetchCoinList()).thenThrow(
+            Exception('rate limit'),
+          );
+          when(
+            () => mockProvider.fetchSupportedVsCurrencies(),
+          ).thenAnswer((_) async => ['usd']);
+
+          final memoizedRepo = CoinGeckoRepository(
+            coinGeckoProvider: mockProvider,
+          );
+
+          final assetId = AssetId(
+            id: 'bitcoin',
+            name: 'Bitcoin',
+            symbol: AssetSymbol(assetConfigId: 'BTC', coinGeckoId: 'bitcoin'),
+            chainId: AssetChainId(chainId: 0),
+            derivationPath: null,
+            subClass: CoinSubClass.utxo,
+          );
+
+          // First supports() call triggers the API failure
+          final result1 = await memoizedRepo.supports(
+            assetId,
+            FiatCurrency.usd,
+            PriceRequestType.currentPrice,
+          );
+          expect(result1, isFalse);
+
+          // Second supports() call should return false without new API call
+          final result2 = await memoizedRepo.supports(
+            assetId,
+            FiatCurrency.usd,
+            PriceRequestType.currentPrice,
+          );
+          expect(result2, isFalse);
+
+          // Provider should only have been called once
+          verify(() => mockProvider.fetchCoinList()).called(1);
+        },
+      );
+
+      test('should cache result on success and not call API again', () async {
+        when(() => mockProvider.fetchCoinList()).thenAnswer(
+          (_) async => [
+            const CexCoin(
+              id: 'bitcoin',
+              symbol: 'btc',
+              name: 'Bitcoin',
+              currencies: {},
+            ),
+          ],
+        );
+        when(
+          () => mockProvider.fetchSupportedVsCurrencies(),
+        ).thenAnswer((_) async => ['usd']);
+
+        final memoizedRepo = CoinGeckoRepository(
+          coinGeckoProvider: mockProvider,
+        );
+
+        final result1 = await memoizedRepo.getCoinList();
+        final result2 = await memoizedRepo.getCoinList();
+
+        expect(result1.length, equals(1));
+        expect(result2.length, equals(1));
+        // API should only be called once
+        verify(() => mockProvider.fetchCoinList()).called(1);
+      });
+    });
+
     group('_mapFiatCurrencyToCoingecko mapping verification', () {
       setUp(() {
         // Mock the coin list response
