@@ -109,7 +109,7 @@ enum CoinSubClass {
       case CoinSubClass.trx:
         return 'TRX';
       case CoinSubClass.trc20:
-        return 'TRC';
+        return 'TRX';
       case CoinSubClass.moonbeam:
         return 'GLMR';
       case CoinSubClass.ftm20:
