@@ -110,6 +110,23 @@ Asset _createZhtlcAsset() {
   );
 }
 
+Asset _createSiaAsset() {
+  return Asset.fromJson({
+    'coin': 'SC',
+    'type': 'SIA',
+    'name': 'Siacoin',
+    'fname': 'Siacoin',
+    'wallet_only': false,
+    'mm2': 1,
+    'chain_id': 2024,
+    'decimals': 24,
+    'required_confirmations': 1,
+    'nodes': const [
+      {'url': 'https://api.siascan.com/wallet/api'},
+    ],
+  });
+}
+
 AssetPubkeys _makePubkeys(Asset asset) => AssetPubkeys(
   assetId: asset.id,
   keys: [
@@ -238,6 +255,15 @@ void main() {
       final strategy = factory.forAsset(gleect);
 
       expect(strategy, isA<LegacyTransactionStrategy>());
+    });
+
+    test('uses Legacy strategy for SIA assets', () {
+      final factory = TransactionHistoryStrategyFactory(pubkeyManager, auth);
+
+      final strategy = factory.forAsset(_createSiaAsset());
+
+      expect(strategy, isA<LegacyTransactionStrategy>());
+      expect(strategy, isNot(isA<V2TransactionStrategy>()));
     });
 
     test('selects Tronscan strategy for TRX asset', () {

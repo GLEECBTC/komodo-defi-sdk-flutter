@@ -1,6 +1,5 @@
-import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
-import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:test/test.dart';
 
 void main() {
   group('SIA RPC', () {
@@ -23,20 +22,27 @@ void main() {
       expect(p['required_confirmations'], 1);
     });
 
-    test('SiaWithdrawResponse parses nullable fee_details safely', () {
-      final response = {
+    test('TaskEnableSiaStatus parses object details', () {
+      final response = TaskEnableSiaStatus(taskId: 1).parse({
         'mmrpc': '2.0',
         'result': {
           'status': 'Ok',
-          'spent_by_me': '0',
-          'received_by_me': '100',
-          'my_balance_change': '100',
-          // fee_details intentionally omitted
+          'details': {'ticker': 'SC', 'current_block': 100},
         },
-      };
-      final parsed = SiaWithdrawResponse.parse(JsonMap.of(response));
-      expect(parsed.status, 'Ok');
-      expect(parsed.feeDetails, isNull);
+        'id': null,
+      });
+
+      expect(response.status, 'Ok');
+      expect(response.isCompleted, isTrue);
+      expect(response.details, isA<Map<String, dynamic>>());
+    });
+
+    test('TaskEnableSiaCancel parses success result', () {
+      final response = TaskEnableSiaCancel(
+        taskId: 1,
+      ).parse({'mmrpc': '2.0', 'result': 'success', 'id': null});
+
+      expect(response.result, 'success');
     });
   });
 }

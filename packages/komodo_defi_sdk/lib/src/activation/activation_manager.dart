@@ -170,6 +170,7 @@ class ActivationManager {
           _activatedAssetsCache,
         );
 
+        var completionHandled = false;
         await for (final progress in activator.activate(
           parentAsset ?? group.primary,
           group.children?.toList(),
@@ -195,6 +196,14 @@ class ActivationManager {
           yield _attachSdkError(progress, group.primary.id);
 
           if (progress.isComplete) {
+            if (completionHandled) {
+              debugPrint(
+                'Ignoring duplicate completion event for '
+                '${group.primary.id.name}',
+              );
+              continue;
+            }
+            completionHandled = true;
             await _handleActivationComplete(group, progress, primaryCompleter);
           }
         }
