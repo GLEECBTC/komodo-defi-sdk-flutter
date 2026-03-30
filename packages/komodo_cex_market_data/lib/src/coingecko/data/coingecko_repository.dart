@@ -33,6 +33,12 @@ class CoinGeckoRepository implements CexRepository {
   Future<List<CexCoin>>? _coinListInFlight;
   Set<String>? _cachedFiatCurrencies;
 
+  /// Tracks when the last coin list fetch failed, to prevent API request spam.
+  /// When a fetch fails (e.g. due to rate limiting), we avoid retrying until
+  /// the cooldown period has elapsed.
+  DateTime? _lastCoinListFailure;
+  static const _coinListFailureCooldown = Duration(minutes: 5);
+
   /// Fetches the CoinGecko market data.
   ///
   /// Returns a list of [CoinMarketData] objects containing the market data.
@@ -57,13 +63,34 @@ class CoinGeckoRepository implements CexRepository {
     if (_cachedCoinList != null) {
       return _cachedCoinList!;
     }
+
+    // Prevent API spam: don't retry if we recently failed.
+    // Without this guard, every price request triggers supports() which calls
+    // getCoinList(), and each failed call immediately retries the API — causing
+    // a request storm that exhausts rate limits.
+    if (_lastCoinListFailure != null) {
+      final elapsed = DateTime.now().difference(_lastCoinListFailure!);
+      if (elapsed < _coinListFailureCooldown) {
+        throw StateError(
+          'CoinGecko coin list fetch is in cooldown after a recent failure '
+          '(${(_coinListFailureCooldown - elapsed).inSeconds}s remaining)',
+        );
+      }
+      _lastCoinListFailure = null;
+    }
+
     if (_coinListInFlight != null) {
       return _coinListInFlight!;
     }
     _coinListInFlight = _fetchCoinListInternal()
         .then((list) {
           _cachedCoinList = list;
+          _lastCoinListFailure = null;
           return list;
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          _lastCoinListFailure = DateTime.now();
+          Error.throwWithStackTrace(error, stackTrace);
         })
         .whenComplete(() {
           _coinListInFlight = null;
