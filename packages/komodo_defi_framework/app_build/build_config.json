@@ -1,7 +1,7 @@
 {
   "api": {
-    "api_commit_hash": "b3c9e669ac736dc4853064958ecc565a0284e16d",
-    "branch": "fix/tron-account-activation-fee",
+    "api_commit_hash": "d56a7bc5028f10b9c1bb8370bb2ee16444796a23",
+    "branch": "main",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
     "source_urls": [
@@ -13,50 +13,50 @@
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "61be493c87eaaa5d5cc74fd9c2b2d98353c52d8dc1d3ff0ce55c9f3467cf4720"
+          "7653ef16352d4afec8ac11b2c54efd89618e7034d79c06bcc266948109e66ac9"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "cc8e545a1704d86cc20871fc1f14943db61d055fa8e3db466a7e40e253982ac7"
+          "68719828c7a2616955fd426c949a10bbef224591470d41821739974bf18e9efc"
         ],
         "path": "ios"
       },
       "macos": {
-        "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
+        "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal|libkdf-macos-universal2-[a-f0-9]{7,40})\\.zip$",
         "matching_preference": ["universal2", "mac-arm64"],
         "valid_zip_sha256_checksums": [
-          "6852d232afce798abd887381f0699e74e2ccfda94faf14dbf0af115b84de0584"
+          "14a1473d46706fdfbd04d18939994b686016a126e4dc2cb8937d00f5645b8773"
         ],
         "path": "macos/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "0377cf6c539610cce2495731058f63d3165289a071ab4772a649374f4ea1658f"
+          "4839a22f8722e5ab9b249c2e0d602659e74c45dfcac7b0345729aaf4738591b2"
         ],
         "path": "windows/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "1b3c064322b377fd66945c25e405a04246134b7564d56530ab1bd39ed3de30eb"
+          "731af04ea8b95647433b232951c68b57eeab25c5948f2fbe5ee3896c272fa393"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "4ed7e4a3f1ddc7906d12b6bf2564e6e17a5a8cc772b3fd7f4ebf0e5d16fd58ee"
+          "1f2303240131ce11dec0afa67a014dd8753c1d3989faa9c701996f09c3e7b595"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "6dbff099e8ca002c6de828554bb6a81f5729ec48caab5ea5544cb1125a531255"
+          "20016e48158cc3926febb37bb2c51bce713eb46f53b0be6790ab132ceec2d501"
         ],
         "path": "linux/bin"
       }
@@ -65,10 +65,10 @@
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "16496a71d9473bfab1357ab0b71511c7ba106ce4",
+    "bundled_coins_repo_commit": "1d2a5c9c4d23416df2fa1c5e2f263a244a09704d",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
-    "coins_repo_branch": "feat/add-tron-coins",
+    "coins_repo_branch": "master",
     "runtime_updates_enabled": true,
     "mapped_files": {
       "assets/config/coins_config.json": "utils/coins_config_unfiltered.json",
