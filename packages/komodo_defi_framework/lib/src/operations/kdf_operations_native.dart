@@ -365,6 +365,10 @@ ffi.DynamicLibrary _loadLibrary() {
 
 List<String> _getLibraryPaths() {
   if (Platform.isMacOS) {
+    // macOS supports three packaging modes:
+    // - a bundled kdf executable copied into the framework Helpers directory
+    // - a bundled libkdflib.dylib
+    // - a force-loaded libkdflib.a, resolved via PROCESS/EXECUTABLE symbols
     return ['kdf', 'mm2', 'libkdflib.dylib', 'PROCESS', 'EXECUTABLE'];
   } else if (Platform.isIOS) {
     return ['libkdflib.dylib', 'PROCESS', 'EXECUTABLE'];

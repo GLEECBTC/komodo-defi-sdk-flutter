@@ -34,6 +34,9 @@ class KdfExecutableFinder {
   /// Attempts to find the KDF executable in standard and platform-specific
   /// locations
   Future<File?> findExecutable({String executableName = 'kdf'}) async {
+    // Executable-based macOS builds copy kdf into the framework Helpers
+    // directory. Static-library builds do not populate this path and instead
+    // rely on DynamicLibrary.process()/executable() resolution.
     final macosHelpersInFrameworkPath = p.joinAll([
       p.dirname(p.dirname(Platform.resolvedExecutable)),
       'Frameworks',
@@ -73,8 +76,9 @@ class KdfExecutableFinder {
       }
     }
 
+    final searchedPaths = files.map((e) => e.absolute.path).join('\n');
     logCallback(
-      'Executable not found in paths: ${files.map((e) => e.absolute.path).join('\n')}. '
+      'Executable not found in paths: $searchedPaths. '
       'If you are using the KDF Flutter SDK, open an issue on GitHub.',
     );
 

@@ -12,6 +12,7 @@ This directory contains the artifact configuration used by `komodo_wallet_build_
 - `api.api_commit_hash` – commit hash of the KDF artifacts to fetch
 - `api.source_urls` – list of base URLs to download from (GitHub API, CDN)
 - `api.platforms.*.matching_pattern` – regex to match artifact names per platform
+- `api.platforms.*.matching_preference` – preferred filename substrings when multiple artifacts match
 - `api.platforms.*.valid_zip_sha256_checksums` – allow-list of artifact checksums
 - `api.platforms.*.path` – destination relative to artifact output package
 - `coins.bundled_coins_repo_commit` – commit of Komodo coins registry
@@ -27,6 +28,18 @@ Artifacts are downloaded into the package specified by the transformer flag:
 ```
 
 Paths in the config are relative to that package directory.
+
+### macOS canonical layout
+
+The transformer normalizes any compatible macOS archive into a single package
+layout before marking it current:
+
+- executable builds: `macos/bin/kdf`
+- dynamic library builds: `macos/lib/libkdflib.dylib`
+- static library builds: `macos/Frameworks/libkdflib.a`
+
+GitHub release artifacts are tried first. Mirror artifacts are only accepted
+after checksum validation and canonical-layout normalization succeed.
 
 ## Updating artifacts
 
@@ -53,6 +66,9 @@ Paths in the config are relative to that package directory.
 ```
 
 - The downloader expects branch-scoped directory listings (e.g., `.../dev/`) on both devbuilds and Nebula mirrors and will fallback to the base listing when available. It searches for artifacts that match the platform patterns and contain either the full commit hash or a 7-char short hash.
+- For macOS, keep all accepted archive checksums for a commit in the
+  checksum allow-list when both release (`libkdf-*`) and mirror/CI
+  (`kdf-*`) archives should be usable.
 - To pin a specific commit (e.g., `4025b8c`) without changing branches, update `api.api_commit_hash` or use the CLI with `--commit`:
 
 ```bash
