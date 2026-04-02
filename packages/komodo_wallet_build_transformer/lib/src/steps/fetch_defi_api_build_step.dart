@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:komodo_wallet_build_transformer/src/build_step.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader_factory.dart';
+import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/macos_artefact_layout_normalizer.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/node_path.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_build_platform_config.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/build_config.dart';
@@ -209,9 +210,11 @@ class FetchDefiApiStep extends BuildStep {
         );
 
         if (await _verifyChecksum(zipFilePath, platform)) {
-          await downloader.extractArtefact(
+          await _extractAndInstallArtefact(
+            downloader: downloader,
             filePath: zipFilePath,
             destinationFolder: destinationFolder,
+            platform: platform,
           );
           _updateLastUpdatedFile(platform, destinationFolder, zipFilePath);
           _log.info('$platform platform update completed.');
@@ -278,6 +281,7 @@ class FetchDefiApiStep extends BuildStep {
     final lastUpdatedFile = File(
       path.join(destinationFolder, '.api_last_updated_$platform'),
     );
+    lastUpdatedFile.parent.createSync(recursive: true);
     final currentTimestamp = DateTime.now().toIso8601String();
     final targetChecksums = List<String>.from(
       platformsConfig[platform]!.validZipSha256Checksums,
@@ -320,7 +324,8 @@ class FetchDefiApiStep extends BuildStep {
           config.validZipSha256Checksums,
         );
 
-        // Consider up-to-date only if the stored set exactly matches the target set
+        // Consider up-to-date only if the stored set exactly matches the
+        // target set.
         final storedSet = storedChecksums.toSet();
         final targetSet = targetChecksums.toSet();
         if (storedSet.length == targetSet.length &&
@@ -415,6 +420,10 @@ class FetchDefiApiStep extends BuildStep {
       // TODO: Consider adding npm if it makes a significant difference to
       // file build size or if it is required for cache-busting.
     }
+    if (platform == 'macos') {
+      // macOS artefacts are normalized into their final layout during install.
+      return Future.value();
+    }
     if (_isBinaryExecutable(platform)) {
       _tryRenameExecutable(platform, destinationFolder);
       _setExecutablePermissions(destinationFolder);
@@ -423,6 +432,49 @@ class FetchDefiApiStep extends BuildStep {
     }
 
     return Future.value();
+  }
+
+  Future<void> _extractAndInstallArtefact({
+    required ArtefactDownloader downloader,
+    required String filePath,
+    required String destinationFolder,
+    required String platform,
+  }) async {
+    if (platform != 'macos') {
+      await downloader.extractArtefact(
+        filePath: filePath,
+        destinationFolder: destinationFolder,
+      );
+      return;
+    }
+
+    final extractedDirectory = await Directory.systemTemp.createTemp(
+      'kdf_macos_extract_',
+    );
+    try {
+      await downloader.extractArtefact(
+        filePath: filePath,
+        destinationFolder: extractedDirectory.path,
+      );
+
+      final destinationRoot = Directory(path.dirname(destinationFolder));
+      final normalizer = MacosArtefactLayoutNormalizer(log: _log);
+      final result = await normalizer.installFromExtractedDirectory(
+        extractedDirectory: extractedDirectory,
+        destinationRoot: destinationRoot,
+      );
+
+      _log.info(
+        'Installed macOS artefacts: '
+        'executable=${result.hasExecutable}, '
+        'dynamicLibrary=${result.hasDynamicLibrary}, '
+        'staticLibrary=${result.hasStaticLibrary}',
+      );
+    } finally {
+      if (extractedDirectory.existsSync()) {
+        await extractedDirectory.delete(recursive: true);
+      }
+    }
   }
 
   /// if executable is named "mm2" or "mm2.exe", then rename to "kdf"
