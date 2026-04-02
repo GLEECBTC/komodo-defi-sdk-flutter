@@ -22,6 +22,7 @@ workspace:
   - packages/dragon_charts_flutter
   - packages/dragon_charts_flutter/example
   - packages/komodo_wallet_cli
+  - packages/komodo_legacy_wallet_migration
 
   # TODO: Change products and playground to reference pub.dev hosted packages and remove from here.
   - products/dex_dungeon
