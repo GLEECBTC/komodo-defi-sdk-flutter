@@ -57,10 +57,17 @@ class KomodoLegacyWalletMigration {
   }
 
   /// Reads the plaintext seed and cleanup keys for [wallet].
+  ///
+  /// Throws [LegacyWalletMigrationException.unsupportedPlatform] on runtimes
+  /// that cannot access native legacy storage (web, desktop).
   Future<LegacyWalletSecrets> readWalletSecrets({
     required LegacyWalletRecord wallet,
     required String password,
   }) async {
+    if (!isSupportedPlatform) {
+      throw const LegacyWalletMigrationException.unsupportedPlatform();
+    }
+
     try {
       final wallets = await _listWallets();
       final sourceWallet = _findWalletById(wallet, wallets);

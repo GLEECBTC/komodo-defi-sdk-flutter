@@ -191,16 +191,33 @@ extension KdfExtensions on KdfAuthService {
         onTimeout: () => MainStatus.notRunning,
       );
       if (status == MainStatus.rpcIsUp) {
-        final version = await _kdfFramework.version().timeout(
-          KdfAuthService._kdfRpcProbeTimeout,
-          onTimeout: () => null,
-        );
-        if (version != null) {
-          _logger.info(
-            '[$_sessionId] _waitUntilKdfRpcReady: RPC ready in '
-            '${stopwatch.elapsedMilliseconds}ms',
+        try {
+          final version = await _kdfFramework.version().timeout(
+            KdfAuthService._kdfRpcProbeTimeout,
+            onTimeout: () => null,
           );
-          return;
+          if (version != null) {
+            _logger.info(
+              '[$_sessionId] _waitUntilKdfRpcReady: RPC ready in '
+              '${stopwatch.elapsedMilliseconds}ms',
+            );
+            return;
+          }
+        } on SocketException catch (e) {
+          _logger.fine(
+            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
+            'error (will retry): $e',
+          );
+        } on HttpException catch (e) {
+          _logger.fine(
+            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
+            'error (will retry): $e',
+          );
+        } on HandshakeException catch (e) {
+          _logger.fine(
+            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
+            'error (will retry): $e',
+          );
         }
       }
 
