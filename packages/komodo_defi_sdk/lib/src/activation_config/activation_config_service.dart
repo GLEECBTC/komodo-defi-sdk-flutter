@@ -1,13 +1,144 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
-import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 
 typedef JsonMap = Map<String, dynamic>;
+
+enum ZhtlcRecurringSyncMode {
+  recentTransactions,
+  earliest,
+  height,
+  date;
+
+  static ZhtlcRecurringSyncMode? tryParse(String? value) {
+    switch (value) {
+      case 'recent_transactions':
+        return ZhtlcRecurringSyncMode.recentTransactions;
+      case 'earliest':
+        return ZhtlcRecurringSyncMode.earliest;
+      case 'height':
+        return ZhtlcRecurringSyncMode.height;
+      case 'date':
+        return ZhtlcRecurringSyncMode.date;
+      default:
+        return null;
+    }
+  }
+
+  String get jsonValue => switch (this) {
+    ZhtlcRecurringSyncMode.recentTransactions => 'recent_transactions',
+    ZhtlcRecurringSyncMode.earliest => 'earliest',
+    ZhtlcRecurringSyncMode.height => 'height',
+    ZhtlcRecurringSyncMode.date => 'date',
+  };
+}
+
+/// Persisted recurring sync policy for ZHTLC wallet activations.
+class ZhtlcRecurringSyncPolicy {
+  ZhtlcRecurringSyncPolicy._({
+    required this.mode,
+    this.height,
+    this.unixTimestamp,
+  }) : assert(switch (mode) {
+         ZhtlcRecurringSyncMode.recentTransactions ||
+         ZhtlcRecurringSyncMode.earliest =>
+           height == null && unixTimestamp == null,
+         ZhtlcRecurringSyncMode.height => height != null,
+         ZhtlcRecurringSyncMode.date => unixTimestamp != null,
+       }, 'Recurring sync policy data does not match its mode.');
+
+  factory ZhtlcRecurringSyncPolicy.recentTransactions() =>
+      ZhtlcRecurringSyncPolicy._(
+        mode: ZhtlcRecurringSyncMode.recentTransactions,
+      );
+
+  factory ZhtlcRecurringSyncPolicy.earliest() =>
+      ZhtlcRecurringSyncPolicy._(mode: ZhtlcRecurringSyncMode.earliest);
+
+  factory ZhtlcRecurringSyncPolicy.height(int height) =>
+      ZhtlcRecurringSyncPolicy._(
+        mode: ZhtlcRecurringSyncMode.height,
+        height: height,
+      );
+
+  factory ZhtlcRecurringSyncPolicy.date(int unixTimestamp) =>
+      ZhtlcRecurringSyncPolicy._(
+        mode: ZhtlcRecurringSyncMode.date,
+        unixTimestamp: unixTimestamp,
+      );
+
+  factory ZhtlcRecurringSyncPolicy.fromJson(JsonMap json) {
+    final mode = ZhtlcRecurringSyncMode.tryParse(
+      json.valueOrNull<String>('mode'),
+    );
+    if (mode == null) {
+      throw ArgumentError.value(
+        json['mode'],
+        'json.mode',
+        'Unsupported recurring ZHTLC sync policy mode',
+      );
+    }
+
+    return switch (mode) {
+      ZhtlcRecurringSyncMode.recentTransactions =>
+        ZhtlcRecurringSyncPolicy.recentTransactions(),
+      ZhtlcRecurringSyncMode.earliest => ZhtlcRecurringSyncPolicy.earliest(),
+      ZhtlcRecurringSyncMode.height => ZhtlcRecurringSyncPolicy.height(
+        json.value<int>('height'),
+      ),
+      ZhtlcRecurringSyncMode.date => ZhtlcRecurringSyncPolicy.date(
+        json.value<int>('unixTimestamp'),
+      ),
+    };
+  }
+
+  factory ZhtlcRecurringSyncPolicy.fromSyncParams(ZhtlcSyncParams syncParams) {
+    if (syncParams.isEarliest) {
+      return ZhtlcRecurringSyncPolicy.earliest();
+    }
+    if (syncParams.height != null) {
+      return ZhtlcRecurringSyncPolicy.height(syncParams.height!);
+    }
+    if (syncParams.date != null) {
+      return ZhtlcRecurringSyncPolicy.date(syncParams.date!);
+    }
+    throw ArgumentError.value(
+      syncParams,
+      'syncParams',
+      'Unsupported ZHTLC sync params payload',
+    );
+  }
+
+  final ZhtlcRecurringSyncMode mode;
+  final int? height;
+  final int? unixTimestamp;
+
+  JsonMap toJson() => <String, dynamic>{
+    'mode': mode.jsonValue,
+    if (height != null) 'height': height,
+    if (unixTimestamp != null) 'unixTimestamp': unixTimestamp,
+  };
+
+  ZhtlcSyncParams toSyncParams({DateTime? now}) {
+    return switch (mode) {
+      ZhtlcRecurringSyncMode.recentTransactions => ZhtlcSyncParams.date(
+        (now ?? DateTime.now())
+                .toUtc()
+                .subtract(const Duration(days: 2))
+                .millisecondsSinceEpoch ~/
+            1000,
+      ),
+      ZhtlcRecurringSyncMode.earliest => ZhtlcSyncParams.earliest(),
+      ZhtlcRecurringSyncMode.height => ZhtlcSyncParams.height(height!),
+      ZhtlcRecurringSyncMode.date => ZhtlcSyncParams.date(unixTimestamp!),
+    };
+  }
+}
 
 /// Simple key-value store abstraction for persisting activation configs.
 abstract class KeyValueStore {
@@ -45,6 +176,7 @@ class ZhtlcUserConfig {
     this.scanBlocksPerIteration = 1000,
     this.scanIntervalMs = 0,
     this.taskStatusPollingIntervalMs,
+    this.recurringSyncPolicy,
     this.syncParams,
   });
 
@@ -52,13 +184,39 @@ class ZhtlcUserConfig {
   final int scanBlocksPerIteration;
   final int scanIntervalMs;
   final int? taskStatusPollingIntervalMs;
+  final ZhtlcRecurringSyncPolicy? recurringSyncPolicy;
+
   /// Optional, accepted for backward compatibility. Not persisted.
   /// If provided to saveZhtlcConfig, it will be applied as a one-shot
   /// sync override for the next activation and then discarded.
   final ZhtlcSyncParams? syncParams;
-  // Sync params are no longer persisted here; they are supplied one-shot
-  // via ActivationConfigService at activation time when the user requests
-  // an intentional resync.
+  // Sync params are supplied one-shot via ActivationConfigService when the
+  // user requests an immediate resync. Recurring sync behavior is persisted
+  // separately via [recurringSyncPolicy].
+
+  ZhtlcUserConfig copyWith({
+    String? zcashParamsPath,
+    int? scanBlocksPerIteration,
+    int? scanIntervalMs,
+    int? taskStatusPollingIntervalMs,
+    ZhtlcRecurringSyncPolicy? recurringSyncPolicy,
+    bool clearRecurringSyncPolicy = false,
+    ZhtlcSyncParams? syncParams,
+    bool clearSyncParams = false,
+  }) {
+    return ZhtlcUserConfig(
+      zcashParamsPath: zcashParamsPath ?? this.zcashParamsPath,
+      scanBlocksPerIteration:
+          scanBlocksPerIteration ?? this.scanBlocksPerIteration,
+      scanIntervalMs: scanIntervalMs ?? this.scanIntervalMs,
+      taskStatusPollingIntervalMs:
+          taskStatusPollingIntervalMs ?? this.taskStatusPollingIntervalMs,
+      recurringSyncPolicy: clearRecurringSyncPolicy
+          ? null
+          : recurringSyncPolicy ?? this.recurringSyncPolicy,
+      syncParams: clearSyncParams ? null : syncParams ?? this.syncParams,
+    );
+  }
 
   JsonMap toJson() => {
     'zcashParamsPath': zcashParamsPath,
@@ -66,6 +224,8 @@ class ZhtlcUserConfig {
     'scanIntervalMs': scanIntervalMs,
     if (taskStatusPollingIntervalMs != null)
       'taskStatusPollingIntervalMs': taskStatusPollingIntervalMs,
+    if (recurringSyncPolicy != null)
+      'recurringSyncPolicy': recurringSyncPolicy!.toJson(),
   };
 
   static ZhtlcUserConfig fromJson(JsonMap json) => ZhtlcUserConfig(
@@ -76,6 +236,12 @@ class ZhtlcUserConfig {
     taskStatusPollingIntervalMs: json.valueOrNull<int>(
       'taskStatusPollingIntervalMs',
     ),
+    recurringSyncPolicy:
+        json.valueOrNull<JsonMap>('recurringSyncPolicy') == null
+        ? null
+        : ZhtlcRecurringSyncPolicy.fromJson(
+            json.value<JsonMap>('recurringSyncPolicy'),
+          ),
   );
 }
 
@@ -249,8 +415,12 @@ class ActivationConfigService {
         onTimeout: () => null,
       );
       if (result == null) return null;
-      await repo.saveConfig(walletId, id, result);
-      return result;
+      if (result.syncParams != null) {
+        _oneShotSyncParams[key] = result.syncParams;
+      }
+      final normalizedConfig = _normalizeConfigForPersistence(result);
+      await repo.saveConfig(walletId, id, normalizedConfig);
+      return normalizedConfig;
     } finally {
       _awaitingControllers.remove(key);
     }
@@ -258,12 +428,12 @@ class ActivationConfigService {
 
   Future<void> saveZhtlcConfig(AssetId id, ZhtlcUserConfig config) async {
     final walletId = await _requireActiveWallet();
-    // If legacy callers provide syncParams in the config, convert it to
-    // a one-shot sync override and do not persist it.
-    if (config.syncParams != null) {
-      _oneShotSyncParams[_WalletAssetKey(walletId, id)] = config.syncParams;
+    final oneShotSyncParams = config.syncParams;
+    final normalizedConfig = _normalizeConfigForPersistence(config);
+    if (oneShotSyncParams != null) {
+      _oneShotSyncParams[_WalletAssetKey(walletId, id)] = oneShotSyncParams;
     }
-    await repo.saveConfig(walletId, id, config);
+    await repo.saveConfig(walletId, id, normalizedConfig);
   }
 
   Future<void> submitZhtlc(AssetId id, ZhtlcUserConfig config) async {
@@ -290,6 +460,19 @@ class ActivationConfigService {
     return value;
   }
 
+  ZhtlcUserConfig _normalizeConfigForPersistence(ZhtlcUserConfig config) {
+    final recurringSyncPolicy =
+        config.recurringSyncPolicy ??
+        (config.syncParams == null
+            ? null
+            : ZhtlcRecurringSyncPolicy.fromSyncParams(config.syncParams!));
+
+    return config.copyWith(
+      recurringSyncPolicy: recurringSyncPolicy,
+      clearSyncParams: true,
+    );
+  }
+
   /// Clears all one-shot sync params for the specified wallet.
   /// This should be called when a user signs out to prevent stale one-shot
   /// params from being applied on the next activation after re-login.
@@ -307,8 +490,9 @@ class ActivationConfigService {
       {};
 }
 
+@immutable
 class _WalletAssetKey {
-  _WalletAssetKey(this.walletId, this.assetId);
+  const _WalletAssetKey(this.walletId, this.assetId);
 
   final WalletId walletId;
   final AssetId assetId;

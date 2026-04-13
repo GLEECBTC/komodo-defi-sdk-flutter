@@ -45,6 +45,8 @@ export 'src/activation_config/activation_config_service.dart'
         InMemoryKeyValueStore,
         JsonActivationConfigRepository,
         WalletIdResolver,
+        ZhtlcRecurringSyncMode,
+        ZhtlcRecurringSyncPolicy,
         ZhtlcUserConfig;
 export 'src/activation_config/hive_activation_config_repository.dart'
     show HiveActivationConfigRepository;

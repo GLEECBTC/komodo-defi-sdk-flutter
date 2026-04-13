@@ -411,8 +411,11 @@ class ActivationRpcData {
   /// Maximum number of electrum servers to keep connected. Defaults to 1.
   final int? maxConnected;
 
-  /// ZHTLC coins only. Optional, defaults to two days ago. Defines where to start
-  /// scanning blockchain data upon initial activation.
+  /// ZHTLC coins only. Optional. Defines where to start scanning blockchain
+  /// data on activation when provided by the client.
+  ///
+  /// If omitted, backend-side behavior applies (for example resuming from
+  /// persisted sync state or using backend defaults).
   ///
   /// Supported values:
   /// - Earliest: start from the coin's `sapling_activation_height`

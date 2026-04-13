@@ -151,6 +151,10 @@ class KdfAuthService implements IAuthService {
   List<KdfUser>? _usersCache;
   DateTime? _usersCacheTimestamp;
   final Duration _usersCacheTtl = const Duration(minutes: 5);
+  static const Duration _kdfRpcReadyTimeout = Duration(seconds: 15);
+  static const Duration _kdfRpcProbeTimeout = Duration(seconds: 2);
+  static const Duration _kdfRpcPollInterval = Duration(milliseconds: 250);
+  static const Duration _startupSensitiveRpcTimeout = Duration(seconds: 10);
 
   ApiClient get _client => _kdfFramework.client;
   late final methods = KomodoDefiRpcMethods(_client);
@@ -254,42 +258,85 @@ class KdfAuthService implements IAuthService {
     ),
     Mnemonic? mnemonic,
   }) async {
-    await _ensureKdfRunning();
+    _logger.info(
+      '[$_sessionId] register: Starting registration for wallet: $walletName',
+    );
+    final registerStopwatch = Stopwatch()..start();
 
-    await _runReadOperation(() async {
-      final walletExists = await _walletExists(walletName);
-      if (walletExists) {
-        throw AuthException(
-          'Wallet already exists',
-          type: AuthExceptionType.generalAuthError,
+    try {
+      final ensureStartStopwatch = Stopwatch()..start();
+      await _ensureKdfRunning();
+      ensureStartStopwatch.stop();
+      _logger.info(
+        '[$_sessionId] register: ensure no-auth start completed in '
+        '${ensureStartStopwatch.elapsedMilliseconds}ms',
+      );
+
+      final walletExistsStopwatch = Stopwatch()..start();
+      await _runReadOperation(() async {
+        final walletExists = await _walletExists(walletName);
+        if (walletExists) {
+          throw AuthException(
+            'Wallet already exists',
+            type: AuthExceptionType.generalAuthError,
+          );
+        }
+      });
+      walletExistsStopwatch.stop();
+      _logger.info(
+        '[$_sessionId] register: wallet existence read completed in '
+        '${walletExistsStopwatch.elapsedMilliseconds}ms',
+      );
+
+      // replaces the __assertWalletOrStop method - wait for read/write locks to
+      // be released here.
+      // can be used outside of a lock, since both functions are public-facing
+      // and manage their own read/write locks
+      final stopStopwatch = Stopwatch()..start();
+      if (await isSignedIn()) {
+        await signOut();
+        stopStopwatch.stop();
+        _logger.info(
+          '[$_sessionId] register: stop phase completed in '
+          '${stopStopwatch.elapsedMilliseconds}ms',
+        );
+      } else {
+        stopStopwatch.stop();
+        _logger.info(
+          '[$_sessionId] register: no active session to stop '
+          '(${stopStopwatch.elapsedMilliseconds}ms)',
         );
       }
-    });
 
-    // replaces the __assertWalletOrStop method - wait for read/write locks to
-    // be released here.
-    // can be used outside of a lock, since both functions are public-facing
-    // and manage their own read/write locks
-    if (await isSignedIn()) {
-      await signOut();
+      final config = await _generateStartupConfig(
+        walletName: walletName,
+        walletPassword: password,
+        allowRegistrations: true,
+        plaintextMnemonic: mnemonic?.plaintextMnemonic,
+        hdEnabled: options.derivationMethod == DerivationMethod.hdWallet,
+        allowWeakPassword: options.allowWeakPassword,
+      );
+
+      return _lockWriteOperation(() async {
+        final writePathStopwatch = Stopwatch()..start();
+        final isImported = mnemonic != null;
+        final currentUser = await _registerNewUser(config, options, isImported);
+        writePathStopwatch.stop();
+        _logger.info(
+          '[$_sessionId] register: registration write path completed in '
+          '${writePathStopwatch.elapsedMilliseconds}ms',
+        );
+        _emitAuthStateChange(currentUser);
+        _invalidateUsersCache();
+        return currentUser;
+      });
+    } finally {
+      registerStopwatch.stop();
+      _logger.info(
+        '[$_sessionId] register: Finished in '
+        '${registerStopwatch.elapsedMilliseconds}ms',
+      );
     }
-
-    final config = await _generateStartupConfig(
-      walletName: walletName,
-      walletPassword: password,
-      allowRegistrations: true,
-      plaintextMnemonic: mnemonic?.plaintextMnemonic,
-      hdEnabled: options.derivationMethod == DerivationMethod.hdWallet,
-      allowWeakPassword: options.allowWeakPassword,
-    );
-
-    return _lockWriteOperation(() async {
-      final isImported = mnemonic != null;
-      final currentUser = await _registerNewUser(config, options, isImported);
-      _emitAuthStateChange(currentUser);
-      _invalidateUsersCache();
-      return currentUser;
-    });
   }
 
   @override
@@ -304,7 +351,10 @@ class KdfAuthService implements IAuthService {
         return _usersCache!;
       }
 
-      final walletNames = await _client.rpc.wallet.getWalletNames();
+      final walletNames = await _runStartupSensitiveRpc(
+        phase: 'get_wallet_names',
+        operation: () => _client.rpc.wallet.getWalletNames(),
+      );
 
       final users = await Future.wait(
         walletNames.walletNames.map((name) async {
@@ -1006,12 +1056,14 @@ class KdfAuthService implements IAuthService {
         throw KdfExtensions._mapStartupErrorToAuthException(result);
       }
 
-      _logger.info('[$_sessionId] _forceStartKdf: Waiting for RPC to be up');
+      _kdfFramework.resetHttpClient();
+      _logger.info('[$_sessionId] _forceStartKdf: Waiting for RPC to be ready');
       final waitStopwatch = Stopwatch()..start();
-      await _waitUntilKdfRpcIsUp();
+      await _waitUntilKdfRpcReady();
       waitStopwatch.stop();
       _logger.info(
-        '[$_sessionId] _forceStartKdf: RPC is up after ${waitStopwatch.elapsedMilliseconds}ms',
+        '[$_sessionId] _forceStartKdf: RPC ready after '
+        '${waitStopwatch.elapsedMilliseconds}ms',
       );
     });
   }

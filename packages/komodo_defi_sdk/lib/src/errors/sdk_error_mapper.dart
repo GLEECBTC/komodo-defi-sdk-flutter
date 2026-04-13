@@ -229,6 +229,7 @@ class _AuthExceptionHandler extends SdkErrorHandler {
       case AuthExceptionType.alreadySignedIn:
       case AuthExceptionType.registrationNotAllowed:
       case AuthExceptionType.internalError:
+      case AuthExceptionType.legacyWalletAlreadyMigrated:
         return _build(
           code: SdkErrorCode.general,
           category: SdkErrorCategory.auth,
