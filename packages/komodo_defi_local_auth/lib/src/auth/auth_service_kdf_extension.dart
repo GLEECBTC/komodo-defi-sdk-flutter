@@ -13,8 +13,10 @@ extension KdfExtensions on KdfAuthService {
       return null;
     }
 
-    final activeWallet =
-        (await _client.rpc.wallet.getWalletNames()).activatedWallet;
+    final activeWallet = (await _runStartupSensitiveRpc(
+      phase: 'active wallet read',
+      operation: () => _client.rpc.wallet.getWalletNames(),
+    )).activatedWallet;
     if (activeWallet == null) {
       return null;
     }
@@ -39,14 +41,19 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    final response = await _kdfFramework.client.executeRpc({
-      'mmrpc': '2.0',
-      'method': 'get_mnemonic',
-      'params': {
-        'format': encrypted ? 'encrypted' : 'plaintext',
-        if (!encrypted) 'password': walletPassword,
+    final response = await _runStartupSensitiveRpc<JsonMap>(
+      phase: 'get_mnemonic',
+      operation: () async {
+        return _kdfFramework.client.executeRpc({
+          'mmrpc': '2.0',
+          'method': 'get_mnemonic',
+          'params': {
+            'format': encrypted ? 'encrypted' : 'plaintext',
+            if (!encrypted) 'password': walletPassword,
+          },
+        });
       },
-    });
+    );
 
     if (response is JsonRpcErrorResponse) {
       throw AuthException(
@@ -60,6 +67,7 @@ extension KdfExtensions on KdfAuthService {
 
   Future<void> _stopKdf() async {
     await _kdfFramework.kdfStop();
+    _kdfFramework.resetHttpClient();
     _authStateController.add(null);
   }
 
@@ -68,22 +76,54 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _ensureKdfRunning() async {
     if (!await _kdfFramework.isRunning()) {
       await _lockWriteOperation(() async {
-        await _kdfFramework.startKdf(await _noAuthConfig);
-        await _waitUntilKdfRpcIsUp();
+        final startStopwatch = Stopwatch()..start();
+        final kdfResult = await _kdfFramework.startKdf(await _noAuthConfig);
+        startStopwatch.stop();
+        _logger.info(
+          '[$_sessionId] _ensureKdfRunning: startKdf(no-auth) returned '
+          '${kdfResult.name} in ${startStopwatch.elapsedMilliseconds}ms',
+        );
+
+        if (!kdfResult.isStartingOrAlreadyRunning()) {
+          throw _mapStartupErrorToAuthException(kdfResult);
+        }
+
+        _kdfFramework.resetHttpClient();
+        await _waitUntilKdfRpcReady();
       });
     }
   }
 
   // consider moving to kdf api
   Future<void> _restartKdf(KdfStartupConfig config) async {
+    final stopStopwatch = Stopwatch()..start();
     await _stopKdf();
+    stopStopwatch.stop();
+    _logger.info(
+      '[$_sessionId] _restartKdf: stop phase completed in '
+      '${stopStopwatch.elapsedMilliseconds}ms',
+    );
+
+    final startStopwatch = Stopwatch()..start();
     final kdfResult = await _kdfFramework.startKdf(config);
+    startStopwatch.stop();
+    _logger.info(
+      '[$_sessionId] _restartKdf: auth start returned ${kdfResult.name} in '
+      '${startStopwatch.elapsedMilliseconds}ms',
+    );
 
     if (!kdfResult.isStartingOrAlreadyRunning()) {
       throw _mapStartupErrorToAuthException(kdfResult);
     }
 
-    await _waitUntilKdfRpcIsUp();
+    _kdfFramework.resetHttpClient();
+    final readyStopwatch = Stopwatch()..start();
+    await _waitUntilKdfRpcReady();
+    readyStopwatch.stop();
+    _logger.info(
+      '[$_sessionId] _restartKdf: readiness verify completed in '
+      '${readyStopwatch.elapsedMilliseconds}ms',
+    );
   }
 
   static AuthException _mapStartupErrorToAuthException(
@@ -140,26 +180,88 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
-  Future<void> _waitUntilKdfRpcIsUp({
-    Duration timeout = const Duration(seconds: 5),
-    bool throwOnTimeout = false,
+  Future<void> _waitUntilKdfRpcReady({
+    Duration timeout = KdfAuthService._kdfRpcReadyTimeout,
   }) async {
     final stopwatch = Stopwatch()..start();
 
     while (stopwatch.elapsed < timeout) {
-      final status = await _kdfFramework.kdfMainStatus();
+      final status = await _kdfFramework.kdfMainStatus().timeout(
+        KdfAuthService._kdfRpcProbeTimeout,
+        onTimeout: () => MainStatus.notRunning,
+      );
       if (status == MainStatus.rpcIsUp) {
-        return;
+        final version = await _kdfFramework.version().timeout(
+          KdfAuthService._kdfRpcProbeTimeout,
+          onTimeout: () => null,
+        );
+        if (version != null) {
+          _logger.info(
+            '[$_sessionId] _waitUntilKdfRpcReady: RPC ready in '
+            '${stopwatch.elapsedMilliseconds}ms',
+          );
+          return;
+        }
       }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      await Future<void>.delayed(KdfAuthService._kdfRpcPollInterval);
     }
 
-    if (throwOnTimeout) {
-      throw AuthException(
-        'Timeout waiting for KDF RPC to start',
-        type: AuthExceptionType.generalAuthError,
+    throw AuthException(
+      'KDF RPC did not become ready within ${timeout.inSeconds} seconds',
+      type: AuthExceptionType.apiConnectionError,
+    );
+  }
+
+  Future<T> _runStartupSensitiveRpc<T>({
+    required String phase,
+    required Future<T> Function() operation,
+  }) async {
+    Future<T> runAttempt() =>
+        operation().timeout(KdfAuthService._startupSensitiveRpcTimeout);
+
+    try {
+      return await runAttempt();
+    } catch (error, stackTrace) {
+      if (!_shouldRecoverStartupSensitiveRpc(error)) {
+        rethrow;
+      }
+
+      _logger.warning(
+        '[$_sessionId] _runStartupSensitiveRpc: $phase failed on first '
+        'attempt, resetting HTTP client and retrying',
+        error,
+        stackTrace,
       );
+      _kdfFramework.resetHttpClient();
+      await _waitUntilKdfRpcReady();
+
+      try {
+        return await runAttempt();
+      } catch (retryError, retryStackTrace) {
+        if (!_shouldRecoverStartupSensitiveRpc(retryError)) {
+          rethrow;
+        }
+
+        _logger.severe(
+          '[$_sessionId] _runStartupSensitiveRpc: $phase failed after retry',
+          retryError,
+          retryStackTrace,
+        );
+        throw AuthException(
+          'KDF RPC unavailable during $phase',
+          type: AuthExceptionType.apiConnectionError,
+          details: {'phase': phase, 'cause': retryError.toString()},
+        );
+      }
     }
+  }
+
+  bool _shouldRecoverStartupSensitiveRpc(Object error) {
+    return error is TimeoutException ||
+        error is SocketException ||
+        error is HttpException ||
+        error is HandshakeException;
   }
 
   Future<KdfStartupConfig> _generateStartupConfig({
