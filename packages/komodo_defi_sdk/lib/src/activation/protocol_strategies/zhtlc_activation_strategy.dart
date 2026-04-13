@@ -4,8 +4,8 @@
 
 import 'dart:convert';
 import 'dart:developer' show log;
-import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 
+import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_sdk/src/activation/protocol_strategies/zhtlc_activation_progress.dart';
@@ -81,8 +81,9 @@ class ZhtlcActivationStrategy extends ProtocolActivationStrategy {
             privKeyPolicy: privKeyPolicy,
           );
 
-      // Apply one-shot sync_params only when explicitly provided via config form
-      // right before activation. This avoids caching and unintended rewinds.
+      // Apply sync params only when explicitly requested as a one-shot
+      // override. If absent, omit sync_params so backend resume/default sync
+      // behavior is used.
       if (params.mode?.rpcData != null) {
         final oneShotSync = await configService.takeOneShotSyncParams(asset.id);
         if (oneShotSync != null) {
@@ -106,15 +107,25 @@ class ZhtlcActivationStrategy extends ProtocolActivationStrategy {
       // Debug logging for ZHTLC activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-        '[RPC] Activating ZHTLC coin: ${asset.id.id}',
-        name: 'ZhtlcActivationStrategy',
-      );
+          '[RPC] Activating ZHTLC coin: ${asset.id.id}',
+          name: 'ZhtlcActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
+        final activationLogPayload = <String, dynamic>{
+          'ticker': asset.id.id,
+          'protocol': asset.protocol.subClass.formatted,
+          'activation_params': params.toRpcParams(),
+          'zcash_params_path': userConfig.zcashParamsPath,
+          'scan_blocks_per_iteration': userConfig.scanBlocksPerIteration,
+          'scan_interval_ms': userConfig.scanIntervalMs,
+          'polling_interval_ms': effectivePollingInterval.inMilliseconds,
+          'priv_key_policy': privKeyPolicy.toJson(),
+        };
         log(
-        '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'activation_params': params.toRpcParams(), 'zcash_params_path': userConfig.zcashParamsPath, 'scan_blocks_per_iteration': userConfig.scanBlocksPerIteration, 'scan_interval_ms': userConfig.scanIntervalMs, 'polling_interval_ms': effectivePollingInterval.inMilliseconds, 'priv_key_policy': privKeyPolicy.toJson()})}',
-        name: 'ZhtlcActivationStrategy',
-      );
+          '[RPC] Activation parameters: ${jsonEncode(activationLogPayload)}',
+          name: 'ZhtlcActivationStrategy',
+        );
       }
 
       // Initialize task and watch via TaskShepherd
@@ -167,7 +178,7 @@ class ZhtlcActivationStrategy extends ProtocolActivationStrategy {
           detail: detail,
         );
       }
-    } catch (e, stack) {
+    } on Object catch (e, stack) {
       yield ActivationProgressZhtlc.failure(e, stack);
     }
   }

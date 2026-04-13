@@ -23,6 +23,10 @@ export 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 export 'src/operations/kdf_operations_interface.dart';
 
 class KomodoDefiFramework implements ApiClient {
+  static const Duration _versionProbeTimeout = Duration(seconds: 2);
+  static const Duration _stopPollInterval = Duration(milliseconds: 250);
+  static const Duration _stopSettleDelay = Duration(milliseconds: 250);
+
   factory KomodoDefiFramework.create({
     required IKdfHostConfig hostConfig,
     void Function(String)? externalLogger,
@@ -162,24 +166,44 @@ class KomodoDefiFramework implements ApiClient {
     _log('Stopping KDF...');
     final result = await _kdfOperations.kdfStop();
     _log('KDF stop result: $result');
-    // Await a max of 5 seconds for KDF to stop. Check every 500ms.
-    for (var i = 0; i < 10; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (!await isRunning()) {
-        break;
-      }
-      if (i == 9) {
-        throw Exception('Error stopping KDF: KDF did not stop in time.');
+
+    // Drop any stale keep-alive socket before verifying shutdown. Otherwise,
+    // the post-stop version() fallback can hang on Android while the native
+    // thread is already tearing down.
+    resetHttpClient();
+
+    // Wait for native status to settle without probing RPC over HTTP.
+    for (var i = 0; i < 20; i++) {
+      await Future<void>.delayed(_stopPollInterval);
+      final stillRunning = await isRunning(allowVersionFallback: false);
+      if (!stillRunning) {
+        await Future<void>.delayed(_stopSettleDelay);
+        if (!await isRunning(allowVersionFallback: false)) {
+          return result;
+        }
       }
     }
 
-    return result;
+    throw Exception('Error stopping KDF: KDF did not stop in time.');
   }
 
-  Future<bool> isRunning() async {
+  Future<bool> isRunning({bool allowVersionFallback = true}) async {
+    final nativeRunning = await _kdfOperations.isRunning();
+    if (nativeRunning) {
+      return true;
+    }
+
+    if (!allowVersionFallback) {
+      _log('KDF is not running.');
+      return false;
+    }
+
     final running =
-        await _kdfOperations.isRunning() ||
-        await _kdfOperations.version() != null;
+        await _kdfOperations.version().timeout(
+          _versionProbeTimeout,
+          onTimeout: () => null,
+        ) !=
+        null;
     if (!running) {
       _log('KDF is not running.');
     }
@@ -188,15 +212,23 @@ class KomodoDefiFramework implements ApiClient {
 
   Future<String?> version() async {
     final stopwatch = Stopwatch()..start();
-    _log('version(): Starting version RPC call via ${_kdfOperations.operationsName}');
+    _log(
+      'version(): Starting version RPC call via ${_kdfOperations.operationsName}',
+    );
     try {
-      final version = await _kdfOperations.version();
+      final version = await _kdfOperations.version().timeout(
+        _versionProbeTimeout,
+      );
       stopwatch.stop();
-      _log('version(): Completed in ${stopwatch.elapsedMilliseconds}ms, result=$version');
+      _log(
+        'version(): Completed in ${stopwatch.elapsedMilliseconds}ms, result=$version',
+      );
       return version;
     } catch (e) {
       stopwatch.stop();
-      _log('version(): Failed after ${stopwatch.elapsedMilliseconds}ms with error: $e');
+      _log(
+        'version(): Failed after ${stopwatch.elapsedMilliseconds}ms with error: $e',
+      );
       rethrow;
     }
   }
@@ -205,7 +237,7 @@ class KomodoDefiFramework implements ApiClient {
   /// Returns true if KDF is running and responsive, false otherwise.
   /// This is useful for detecting when KDF has become unavailable, especially
   /// on mobile platforms after app backgrounding.
-  /// 
+  ///
   /// IMPORTANT: This method ONLY relies on actual RPC verification (version() call)
   /// to avoid false positives where native status reports "running" but HTTP listener
   /// is not accepting connections (common after iOS backgrounding).
@@ -217,7 +249,7 @@ class KomodoDefiFramework implements ApiClient {
         _log('KDF health check failed: version call returned null');
         return false;
       }
-      
+
       _log('KDF health check passed: version=$versionCheck');
       return true;
     } catch (e) {
@@ -279,7 +311,7 @@ class KomodoDefiFramework implements ApiClient {
       return response;
     } catch (e) {
       stopwatch.stop();
-      
+
       // Detect transport-fatal SocketExceptions that indicate KDF is down/dying
       // errno 32 (EPIPE): Broken pipe - writing to socket whose peer closed
       // errno 54 (ECONNRESET): Connection reset by peer
@@ -287,18 +319,29 @@ class KomodoDefiFramework implements ApiClient {
       // errno 61 (ECONNREFUSED): Connection refused - no listener on port
       final errorString = e.toString().toLowerCase();
       final isSocketException = errorString.contains('socketexception');
-      final isFatalTransportError = isSocketException && (
-        errorString.contains('broken pipe') || errorString.contains('errno = 32') ||
-        errorString.contains('connection reset') || errorString.contains('errno = 54') ||
-        errorString.contains('operation timed out') || errorString.contains('errno = 60') ||
-        errorString.contains('connection refused') || errorString.contains('errno = 61')
-      );
+      final isFatalTransportError =
+          isSocketException &&
+          (errorString.contains('broken pipe') ||
+              errorString.contains('errno = 32') ||
+              errorString.contains('connection reset') ||
+              errorString.contains('errno = 54') ||
+              errorString.contains('operation timed out') ||
+              errorString.contains('errno = 60') ||
+              errorString.contains('connection refused') ||
+              errorString.contains('errno = 61'));
 
       if (isFatalTransportError) {
-        final errorType = errorString.contains('errno = 32') || errorString.contains('broken pipe') ? 'EPIPE (32)' :
-                         errorString.contains('errno = 54') || errorString.contains('connection reset') ? 'ECONNRESET (54)' :
-                         errorString.contains('errno = 60') || errorString.contains('operation timed out') ? 'ETIMEDOUT (60)' :
-                         'ECONNREFUSED (61)';
+        final errorType =
+            errorString.contains('errno = 32') ||
+                errorString.contains('broken pipe')
+            ? 'EPIPE (32)'
+            : errorString.contains('errno = 54') ||
+                  errorString.contains('connection reset')
+            ? 'ECONNRESET (54)'
+            : errorString.contains('errno = 60') ||
+                  errorString.contains('operation timed out')
+            ? 'ETIMEDOUT (60)'
+            : 'ECONNREFUSED (61)';
         _logger.severe(
           '[RPC] ${method ?? 'unknown'} failed: KDF transport error $errorType. '
           'Resetting HTTP client to drop stale connections.',
