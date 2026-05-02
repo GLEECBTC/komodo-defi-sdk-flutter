@@ -1,3 +1,7 @@
+## 0.3.2+1
+
+ - Update a dependency to the latest release.
+
 ## 0.3.2
 
  - **PERF**(logs): reduce market metrics log verbosity and duplication (#223).

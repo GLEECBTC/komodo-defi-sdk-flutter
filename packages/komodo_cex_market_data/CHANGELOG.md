@@ -1,3 +1,9 @@
+## 0.1.0+1
+
+ - **FIX**(coingecko): add a failure cooldown to avoid repeated failing requests (#346).
+ - **FIX**(tron): restore TRX market-data ID resolution and repository fallback behaviour (#340).
+ - **FIX**(models): accept numeric API values encoded as either `int` or `num` (#336).
+
 ## 0.1.0
 
 > Note: This release has breaking changes.

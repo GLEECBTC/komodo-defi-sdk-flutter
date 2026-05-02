@@ -1,3 +1,11 @@
+## 0.4.1
+
+ - **FIX**(tron): support TRON explorer URL templates and correct TRC20 badge classification (#338, #344).
+ - **FIX**(models): accept numeric JSON values encoded as either `int` or `num` (#336).
+ - **FEAT**(migration): add auth error and wallet metadata types used by legacy wallet migration.
+ - **FEAT**(fees): expose richer fee information for balance recovery flows (#341).
+ - **FEAT**(transaction-history): add strategy metadata needed by the Tronscan history provider (#339).
+
 ## 0.4.0
 
 > Note: This release has breaking changes.

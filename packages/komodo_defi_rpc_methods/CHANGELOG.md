@@ -1,3 +1,12 @@
+## 0.5.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(errors): preserve RPC method hints when parsing ambiguous KDF error responses (#342).
+ - **FIX**(models): accept numeric JSON values encoded as either `int` or `num` across RPC models (#336).
+ - **FEAT**(auth): add the RPC request and activation parameter support needed by legacy wallet migration.
+ - **BREAKING** **FEAT**(sia): move SIA withdrawal handling onto hardened SIA-specific RPC models and namespace methods (#343).
+
 ## 0.4.0
 
 > Note: This release has breaking changes.

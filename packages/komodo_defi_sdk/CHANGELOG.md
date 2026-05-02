@@ -1,3 +1,15 @@
+## 0.6.0
+
+> Note: This release has breaking changes.
+
+ - **FIX**(activation): restore coordinated TRX activation and market-data lookup (#340).
+ - **FIX**(explorers): support TRON explorer URL templates in SDK transaction flows (#338).
+ - **FIX**(market-data): keep last-known spot prices available while rotating cache snapshots (#335).
+ - **FEAT**(migration): add SDK integration for legacy wallet discovery, verification, import, and cleanup.
+ - **FEAT**(balances): add balance recovery mode and richer fee information plumbing (#341).
+ - **FEAT**(transaction-history): add a Tronscan strategy with address, cursor, and fixed-scale amount codecs (#339).
+ - **BREAKING** **FEAT**(sia): route SIA activation and withdrawals through the hardened SIA strategy and RPC namespace (#343).
+
 ## 0.5.0
 
 > Note: This release has breaking changes.

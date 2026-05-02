@@ -1,3 +1,7 @@
+## 0.5.1
+
+ - **FEAT**(build): update API config tooling for the balance recovery and fee-info release inputs (#341).
+
 ## 0.5.0
 
 > Note: This release has breaking changes.

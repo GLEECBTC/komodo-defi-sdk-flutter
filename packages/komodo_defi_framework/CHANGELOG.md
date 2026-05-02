@@ -1,3 +1,11 @@
+## 0.4.1
+
+ - **CHORE**(build): update bundled KDF to staging commit `52ba4f9` and use the TRON coins source for release builds.
+ - **FIX**(config): carry TRON explorer URL support through bundled build configuration (#338).
+ - **FIX**(web): harden numeric JS interop parsing for KDF responses (#336).
+ - **FEAT**(migration): expose the framework hooks needed for legacy wallet migration.
+ - **FEAT**(build): align build configuration with the balance recovery and fee-info release inputs (#341).
+
 ## 0.4.0
 
 > Note: This release has breaking changes.

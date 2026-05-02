@@ -3,6 +3,105 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2026-05-02
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - [`komodo_defi_rpc_methods` - `v0.5.0`](#komodo_defi_rpc_methods---v050)
+ - [`komodo_defi_sdk` - `v0.6.0`](#komodo_defi_sdk---v060)
+
+Packages with other changes:
+
+ - [`komodo_cex_market_data` - `v0.1.0+1`](#komodo_cex_market_data---v0101)
+ - [`komodo_defi_framework` - `v0.4.1`](#komodo_defi_framework---v041)
+ - [`komodo_defi_local_auth` - `v0.4.1`](#komodo_defi_local_auth---v041)
+ - [`komodo_defi_types` - `v0.4.1`](#komodo_defi_types---v041)
+ - [`komodo_legacy_wallet_migration` - `v0.1.0`](#komodo_legacy_wallet_migration---v010)
+ - [`komodo_ui` - `v0.3.2`](#komodo_ui---v032)
+ - [`komodo_wallet_build_transformer` - `v0.4.2`](#komodo_wallet_build_transformer---v042)
+ - [`komodo_wallet_cli` - `v0.5.1`](#komodo_wallet_cli---v051)
+ - [`komodo_coins` - `v0.3.2+1`](#komodo_coins---v0321)
+ - [`komodo_coin_updates` - `v2.0.1`](#komodo_coin_updates---v201)
+
+Packages with dependency updates only:
+
+> Packages listed below depend on other packages in this workspace that have had changes. Their versions have been incremented to bump the minimum dependency versions of the packages they depend upon in this project.
+
+ - `komodo_coins` - `v0.3.2+1`
+ - `komodo_coin_updates` - `v2.0.1`
+
+---
+
+#### `komodo_defi_rpc_methods` - `v0.5.0`
+
+ - **FIX**(errors): preserve RPC method hints when parsing ambiguous KDF error responses (#342).
+ - **FIX**(models): accept numeric JSON values encoded as either `int` or `num` across RPC models (#336).
+ - **FEAT**(auth): add the RPC request and activation parameter support needed by legacy wallet migration.
+ - **BREAKING** **FEAT**(sia): move SIA withdrawal handling onto hardened SIA-specific RPC models and namespace methods (#343).
+
+#### `komodo_defi_sdk` - `v0.6.0`
+
+ - **FIX**(activation): restore coordinated TRX activation and market-data lookup (#340).
+ - **FIX**(explorers): support TRON explorer URL templates in SDK transaction flows (#338).
+ - **FIX**(market-data): keep last-known spot prices available while rotating cache snapshots (#335).
+ - **FEAT**(migration): add SDK integration for legacy wallet discovery, verification, import, and cleanup.
+ - **FEAT**(balances): add balance recovery mode and richer fee information plumbing (#341).
+ - **FEAT**(transaction-history): add a Tronscan strategy with address, cursor, and fixed-scale amount codecs (#339).
+ - **BREAKING** **FEAT**(sia): route SIA activation and withdrawals through the hardened SIA strategy and RPC namespace (#343).
+
+#### `komodo_legacy_wallet_migration` - `v0.1.0`
+
+ - **FEAT**(migration): add legacy wallet discovery, metadata parsing, password verification, import, and cleanup utilities.
+ - **FIX**(migration): use a PointyCastle-based Argon2 verifier for WASM compatibility.
+ - **FIX**(migration): guard unsupported platforms and wait for KDF RPC readiness before migration work.
+
+#### `komodo_cex_market_data` - `v0.1.0+1`
+
+ - **FIX**(coingecko): add a failure cooldown to avoid repeated failing requests (#346).
+ - **FIX**(tron): restore TRX market-data ID resolution and repository fallback behaviour (#340).
+ - **FIX**(models): accept numeric API values encoded as either `int` or `num` (#336).
+
+#### `komodo_defi_framework` - `v0.4.1`
+
+ - **CHORE**(build): update bundled KDF to staging commit `52ba4f9` and use the TRON coins source for release builds.
+ - **FIX**(config): carry TRON explorer URL support through bundled build configuration (#338).
+ - **FIX**(web): harden numeric JS interop parsing for KDF responses (#336).
+ - **FEAT**(migration): expose the framework hooks needed for legacy wallet migration.
+ - **FEAT**(build): align build configuration with the balance recovery and fee-info release inputs (#341).
+
+#### `komodo_defi_local_auth` - `v0.4.1`
+
+ - **FIX**(auth,migration): wait for KDF RPC readiness and guard unsupported platforms during migration.
+ - **FEAT**(migration): add local-auth integration for legacy wallet verification and import flows.
+
+#### `komodo_defi_types` - `v0.4.1`
+
+ - **FIX**(tron): support TRON explorer URL templates and correct TRC20 badge classification (#338, #344).
+ - **FIX**(models): accept numeric JSON values encoded as either `int` or `num` (#336).
+ - **FEAT**(migration): add auth error and wallet metadata types used by legacy wallet migration.
+ - **FEAT**(fees): expose richer fee information for balance recovery flows (#341).
+ - **FEAT**(transaction-history): add strategy metadata needed by the Tronscan history provider (#339).
+
+#### `komodo_ui` - `v0.3.2`
+
+ - **FIX**(asset-icons): avoid duplicate icon precache requests (#345).
+ - **FIX**(asset-icons): show the correct TRC20 chain badge (#344).
+ - **FEAT**(fees): display richer fee information from SDK balance recovery flows (#341).
+
+#### `komodo_wallet_build_transformer` - `v0.4.2`
+
+ - **FIX**(github): accept numeric GitHub API values encoded as either `int` or `num` (#336).
+ - **FEAT**(build): support the build inputs needed by balance recovery and fee-info updates (#341).
+
+#### `komodo_wallet_cli` - `v0.5.1`
+
+ - **FEAT**(build): update API config tooling for the balance recovery and fee-info release inputs (#341).
+
+
 ## 2026-03-23
 
 ### Changes

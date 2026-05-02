@@ -1,3 +1,8 @@
+## 0.4.1
+
+ - **FIX**(auth,migration): wait for KDF RPC readiness and guard unsupported platforms during migration.
+ - **FEAT**(migration): add local-auth integration for legacy wallet verification and import flows.
+
 ## 0.4.0
 
 > Note: This release has breaking changes.
@@ -55,4 +60,3 @@
  - **FEAT**(dev): Install `melos`.
  - **FEAT**(sdk): Balance manager WIP.
  - **BREAKING** **FEAT**(sdk): Multi-SDK instance support.
-

@@ -1,3 +1,8 @@
+## 0.4.2
+
+ - **FIX**(github): accept numeric GitHub API values encoded as either `int` or `num` (#336).
+ - **FEAT**(build): support the build inputs needed by balance recovery and fee-info updates (#341).
+
 ## 0.4.1
 
  - **FIX**: swap zcash params primary/backup URLs to use official z.cash as primary (#301).

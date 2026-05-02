@@ -1,3 +1,9 @@
+## 0.3.2
+
+ - **FIX**(asset-icons): avoid duplicate icon precache requests (#345).
+ - **FIX**(asset-icons): show the correct TRC20 chain badge (#344).
+ - **FEAT**(fees): display richer fee information from SDK balance recovery flows (#341).
+
 ## 0.3.1
 
  - **FIX**(ui): detect asset icon precache failures (#326).
