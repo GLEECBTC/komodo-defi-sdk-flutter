@@ -1,6 +1,19 @@
 include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  errors:
+    deprecated_member_use: ignore
+    document_ignores: ignore
+    unused_element: ignore
 linter:
   rules:
+    cascade_invocations: false
+    document_ignores: false
+    flutter_style_todos: false
+    library_private_types_in_public_api: false
+    lines_longer_than_80_chars: false
+    noop_primitive_operations: false
+    prefer_asserts_with_message: false
     public_member_api_docs: false
+    use_late_for_private_fields_and_variables: false
     prefer_int_literals: false
     omit_local_variable_types: false

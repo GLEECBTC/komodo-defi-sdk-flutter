@@ -2,7 +2,7 @@ import 'dart:io';
 
 void main(List<String> arguments) {
   if (arguments.isEmpty) {
-    stderr.writeln('Usage: dart classify_library.dart <file_path>');
+    stderr.writeln('Usage: dart komodo_wallet_cli.dart <file_path>');
     exit(1);
   }
 
