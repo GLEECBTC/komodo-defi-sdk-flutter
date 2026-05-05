@@ -26,9 +26,16 @@
       },
       "macos": {
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal|libkdf-macos-universal2-[a-f0-9]{7,40})\\.zip$",
-        "matching_preference": ["universal2", "mac-arm64"],
+        "matching_preference": [
+          "libkdf-macos-universal2",
+          "kdf-macos-universal2",
+          "kdf_",
+          "universal2",
+          "mac-arm64"
+        ],
         "valid_zip_sha256_checksums": [
-          "14a1473d46706fdfbd04d18939994b686016a126e4dc2cb8937d00f5645b8773"
+          "14a1473d46706fdfbd04d18939994b686016a126e4dc2cb8937d00f5645b8773",
+          "61ed5295dfc7acfb962a976e915c0909a300f15552a3d1ae64b737f3add8a39d"
         ],
         "path": "macos/bin"
       },

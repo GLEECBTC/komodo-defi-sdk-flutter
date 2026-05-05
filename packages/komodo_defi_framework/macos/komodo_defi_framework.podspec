@@ -1,3 +1,6 @@
+has_static_library = File.exist?('Frameworks/libkdflib.a')
+has_dynamic_library = File.exist?('lib/libkdflib.dylib')
+
 Pod::Spec.new do |s|
   s.name             = 'komodo_defi_framework'
   s.version          = '0.0.1'
@@ -15,11 +18,17 @@ A new Flutter FFI plugin project.
   s.source_files = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
 
-  s.resource_bundles = {
-    'kdf_resources' => ['lib/*.dylib'].select { |f| Dir.exist?(File.dirname(f)) }
-  }
+  if has_dynamic_library
+    s.resource_bundles = {
+      'kdf_resources' => ['lib/*.dylib']
+    }
+  end
 
-  # s.preserve_paths = ['bin/kdf']
+  if has_static_library
+    s.vendored_libraries = ['Frameworks/libkdflib.a']
+  end
+
+  s.preserve_paths = ['bin/kdf', 'lib/libkdflib.dylib', 'Frameworks/libkdflib.a']
 
   s.script_phase = {
     :name => 'Install kdf executable and/or dylib',
@@ -54,6 +63,13 @@ A new Flutter FFI plugin project.
         FOUND_REQUIRED_FILE=1
       else
         echo "Warning: libkdflib.dylib not found in lib/libkdflib.dylib"
+      fi
+
+      if [ -f "${PODS_TARGET_SRCROOT}/Frameworks/libkdflib.a" ]; then
+        echo "Static libkdflib.a found, linking through CocoaPods vendored_libraries"
+        FOUND_REQUIRED_FILE=1
+      else
+        echo "Warning: libkdflib.a not found in Frameworks/libkdflib.a"
       fi
       
       # Prune binary slices to match $ARCHS (preserve universals) in Release builds only
@@ -125,20 +141,31 @@ A new Flutter FFI plugin project.
       if [ -f "$APP_SUPPORT_DIR/kdf" ]; then cp "$APP_SUPPORT_DIR/kdf" "$HELPERS_DIR/kdf"; fi
       code_sign_if_enabled "$FRAMEWORKS_DIR/libkdflib.dylib" || true
 
-      # Fail if neither file was found
+      # Static-library builds rely on vendored_libraries/force_load and
+      # DynamicLibrary.process() at runtime, so there is nothing to copy/sign.
       if [ $FOUND_REQUIRED_FILE -eq 0 ]; then
-        echo "Error: Neither kdf executable nor libkdflib.dylib was found. At least one is required."
+        echo "Error: No compatible macOS KDF artefact was found."
+        echo "Expected one of:"
+        echo "  - bin/kdf"
+        echo "  - lib/libkdflib.dylib"
+        echo "  - Frameworks/libkdflib.a"
         exit 1
       fi
     SCRIPT
   }
   
   # Configuration for macOS build
+  other_ldflags = if has_static_library
+                    '-force_load $(PODS_TARGET_SRCROOT)/Frameworks/libkdflib.a -lstdc++ -framework SystemConfiguration'
+                  else
+                    '-framework SystemConfiguration'
+                  end
+
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     # Allow building universal macOS apps (arm64 + x86_64). i386 remains excluded by default Xcode settings.
-    'OTHER_LDFLAGS' => '-framework SystemConfiguration',
-    # Add rpath to ensure dylib can be found at runtime
+    'OTHER_LDFLAGS' => other_ldflags,
+    # Add rpath to ensure dylib can be found at runtime when the dynamic artefact is used.
     'LD_RUNPATH_SEARCH_PATHS' => [
       '$(inherited)',
       '@executable_path/../Frameworks',

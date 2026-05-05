@@ -37,6 +37,17 @@ flutter:
 
 Artifacts and checksums are configured in `packages/komodo_defi_framework/app_build/build_config.json`.
 
+For macOS, the transformer normalizes compatible archives into a canonical
+layout before they are marked current:
+
+- `bin/kdf` for executable builds
+- `lib/libkdflib.dylib` for dynamic-library builds
+- `Frameworks/libkdflib.a` for static-library builds
+
+GitHub release assets remain the primary source. Mirror/CI assets are accepted
+only when they match the requested commit, pass checksum validation, and
+normalize into one of the supported macOS layouts.
+
 ## CLI
 
 You can run the transformer directly for local testing:

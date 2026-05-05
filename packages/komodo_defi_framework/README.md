@@ -103,6 +103,11 @@ flutter:
 
 You can customize sources and checksums via `app_build/build_config.json` in this package. See `packages/komodo_wallet_build_transformer/README.md` for CLI flags, environment variables, and troubleshooting.
 
+On macOS, the build pipeline accepts both release-style static archives
+(`libkdf-macos-universal2-<hash>.zip`) and CI-style executable archives
+(`kdf-macos-universal2-<hash>.zip`). The transformer normalizes them into the
+package layout consumed by the plugin podspec before Xcode builds.
+
 ## Web (WASM)
 
 On Web, the plugin registers a WASM implementation automatically (see `lib/web/kdf_plugin_web.dart`). The WASM bundle and bootstrap scripts are provided via the build transformer.
