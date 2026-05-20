@@ -9,8 +9,8 @@ class RefreshNftMetadataRequest
     required this.chain,
     required this.tokenAddress,
     required this.tokenId,
-    this.url,
-    this.urlAntispam,
+    required this.url,
+    required this.urlAntispam,
     this.komodoProxy,
   }) : super(
          method: 'refresh_nft_metadata',
@@ -27,11 +27,11 @@ class RefreshNftMetadataRequest
   /// Token id.
   final String tokenId;
 
-  /// Optional NFT metadata/indexer URL supplied by the app.
-  final String? url;
+  /// NFT metadata/indexer URL supplied by the app.
+  final String url;
 
-  /// Optional anti-spam service URL supplied by the app.
-  final String? urlAntispam;
+  /// Anti-spam service URL supplied by the app.
+  final String urlAntispam;
 
   /// Whether to use KDF's Komodo proxy setting.
   final bool? komodoProxy;
@@ -42,8 +42,8 @@ class RefreshNftMetadataRequest
       'chain': chain,
       'token_address': tokenAddress,
       'token_id': tokenId,
-      if (url != null) 'url': url,
-      if (urlAntispam != null) 'url_antispam': urlAntispam,
+      'url': url,
+      'url_antispam': urlAntispam,
       if (komodoProxy != null) 'komodo_proxy': komodoProxy,
     },
   });

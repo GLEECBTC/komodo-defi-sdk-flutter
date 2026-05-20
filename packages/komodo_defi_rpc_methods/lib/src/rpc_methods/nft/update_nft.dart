@@ -7,19 +7,19 @@ class UpdateNftRequest
   UpdateNftRequest({
     required String rpcPass,
     required this.chains,
-    this.url,
-    this.urlAntispam,
+    required this.url,
+    required this.urlAntispam,
     this.komodoProxy,
   }) : super(method: 'update_nft', rpcPass: rpcPass, mmrpc: RpcVersion.v2_0);
 
   /// NFT chain identifiers to update.
   final List<String> chains;
 
-  /// Optional NFT metadata/indexer URL supplied by the app.
-  final String? url;
+  /// NFT metadata/indexer URL supplied by the app.
+  final String url;
 
-  /// Optional anti-spam service URL supplied by the app.
-  final String? urlAntispam;
+  /// Anti-spam service URL supplied by the app.
+  final String urlAntispam;
 
   /// Whether to use KDF's Komodo proxy setting.
   final bool? komodoProxy;
@@ -28,8 +28,8 @@ class UpdateNftRequest
   Map<String, dynamic> toJson() => super.toJson().deepMerge({
     'params': {
       'chains': chains,
-      if (url != null) 'url': url,
-      if (urlAntispam != null) 'url_antispam': urlAntispam,
+      'url': url,
+      'url_antispam': urlAntispam,
       if (komodoProxy != null) 'komodo_proxy': komodoProxy,
     },
   });

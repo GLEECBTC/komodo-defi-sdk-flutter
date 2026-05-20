@@ -202,6 +202,36 @@ void main() {
       expect(response.nfts.single.possibleSpam, isFalse);
     });
 
+    test('NFT metadata requests always serialize indexer URLs', () {
+      final updateRequest = UpdateNftRequest(
+        rpcPass: 'pass',
+        chains: ['ETH'],
+        url: 'https://nft.example',
+        urlAntispam: 'https://spam.example',
+      );
+      final refreshRequest = RefreshNftMetadataRequest(
+        rpcPass: 'pass',
+        chain: 'ETH',
+        tokenAddress: '0xcontract',
+        tokenId: '1',
+        url: 'https://nft.example',
+        urlAntispam: 'https://spam.example',
+      );
+
+      expect(updateRequest.toJson()['params'], {
+        'chains': ['ETH'],
+        'url': 'https://nft.example',
+        'url_antispam': 'https://spam.example',
+      });
+      expect(refreshRequest.toJson()['params'], {
+        'chain': 'ETH',
+        'token_address': '0xcontract',
+        'token_id': '1',
+        'url': 'https://nft.example',
+        'url_antispam': 'https://spam.example',
+      });
+    });
+
     test('withdraw_nft serializes data and parses transaction details', () {
       final request = WithdrawNftRequest(
         rpcPass: 'pass',
@@ -273,7 +303,7 @@ void main() {
               'from_address': '0xfrom',
               'to_address': '0xto',
               'amount': '1',
-              'verified': true,
+              'verified': 1,
               'possible_spam': false,
               'confirmations': 12,
               'fee_details': {'type': 'EthGas', 'coin': 'ETH'},
@@ -282,8 +312,36 @@ void main() {
         },
       });
 
+      expect(response.transfers.single.verified, 1);
       expect(response.transfers.single.confirmations, 12);
       expect(response.transfers.single.feeDetails?.coin, 'ETH');
+    });
+
+    test('NFT transfers tolerate missing verified field', () {
+      final request = GetNftTransfersRequest(rpcPass: 'pass', chains: ['ETH']);
+
+      final response = request.parse({
+        'mmrpc': '2.0',
+        'result': {
+          'transfer_history': [
+            {
+              'chain': 'ETH',
+              'block_number': 100,
+              'block_timestamp': 123,
+              'transaction_hash': '0xhash',
+              'contract_type': 'ERC721',
+              'token_address': '0xcontract',
+              'token_id': '1',
+              'from_address': '0xfrom',
+              'to_address': '0xto',
+              'amount': '1',
+              'possible_spam': false,
+            },
+          ],
+        },
+      });
+
+      expect(response.transfers.single.verified, isNull);
     });
 
     test('kmd_rewards_info parses accrued and not-accrued reward entries', () {

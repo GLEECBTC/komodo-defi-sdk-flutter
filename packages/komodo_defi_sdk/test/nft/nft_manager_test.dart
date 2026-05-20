@@ -1,6 +1,5 @@
 import 'dart:collection';
 
-import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -70,7 +69,7 @@ void main() {
                       'from_address': '0xfrom',
                       'to_address': '0xto',
                       'amount': '1',
-                      'verified': true,
+                      'verified': 1,
                       'possible_spam': false,
                     },
                   ],

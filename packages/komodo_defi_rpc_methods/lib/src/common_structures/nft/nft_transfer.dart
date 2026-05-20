@@ -179,8 +179,8 @@ class NftTransfer {
     required this.fromAddress,
     required this.toAddress,
     required this.amount,
-    required this.verified,
     required this.possibleSpam,
+    this.verified,
     this.blockHash,
     this.confirmations,
     this.feeDetails,
@@ -221,7 +221,7 @@ class NftTransfer {
       fromAddress: json.value<String>('from_address'),
       toAddress: json.value<String>('to_address'),
       amount: json.value<String>('amount'),
-      verified: json.value<bool>('verified'),
+      verified: _optionalInt(json, 'verified'),
       operator: json.valueOrNull<String>('operator'),
       collectionName: json.valueOrNull<String>('collection_name'),
       imageUrl: json.valueOrNull<String>('image_url'),
@@ -286,8 +286,8 @@ class NftTransfer {
   /// Amount transferred.
   final String amount;
 
-  /// Verification flag returned by KDF.
-  final bool verified;
+  /// Verification status returned by KDF.
+  final int? verified;
 
   /// Operator address.
   final String? operator;
@@ -371,7 +371,7 @@ class NftTransfer {
     'from_address': fromAddress,
     'to_address': toAddress,
     'amount': amount,
-    'verified': verified,
+    if (verified != null) 'verified': verified,
     if (operator != null) 'operator': operator,
     if (collectionName != null) 'collection_name': collectionName,
     if (imageUrl != null) 'image_url': imageUrl,
@@ -388,4 +388,12 @@ class NftTransfer {
 String _firstOrString(dynamic value) {
   if (value is List && value.isNotEmpty) return value.first.toString();
   return value.toString();
+}
+
+int? _optionalInt(JsonMap json, String key) {
+  final value = json[key];
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value);
+  return null;
 }

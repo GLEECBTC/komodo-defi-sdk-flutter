@@ -43,8 +43,8 @@ class NftMethodsNamespace extends BaseRpcMethodNamespace {
   /// Updates KDF's NFT cache for the provided chains.
   Future<NftOperationResponse> updateNft({
     required List<String> chains,
-    String? url,
-    String? urlAntispam,
+    required String url,
+    required String urlAntispam,
     bool? komodoProxy,
     String? rpcPass,
   }) {
@@ -64,8 +64,8 @@ class NftMethodsNamespace extends BaseRpcMethodNamespace {
     required String chain,
     required String tokenAddress,
     required String tokenId,
-    String? url,
-    String? urlAntispam,
+    required String url,
+    required String urlAntispam,
     bool? komodoProxy,
     String? rpcPass,
   }) {

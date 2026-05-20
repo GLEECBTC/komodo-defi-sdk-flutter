@@ -47,8 +47,8 @@ class NftManager {
   /// Updates KDF's NFT cache for the provided chains.
   Future<NftOperationResponse> updateNft({
     required List<String> chains,
-    String? url,
-    String? urlAntispam,
+    required String url,
+    required String urlAntispam,
     bool? komodoProxy,
   }) {
     return _client.rpc.nft.updateNft(
@@ -64,8 +64,8 @@ class NftManager {
     required String chain,
     required String tokenAddress,
     required String tokenId,
-    String? url,
-    String? urlAntispam,
+    required String url,
+    required String urlAntispam,
     bool? komodoProxy,
   }) {
     return _client.rpc.nft.refreshNftMetadata(
