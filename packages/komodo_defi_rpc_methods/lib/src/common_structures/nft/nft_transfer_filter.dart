@@ -3,18 +3,20 @@ class NftTransferFilter {
   const NftTransferFilter({
     this.excludeSpam,
     this.excludePhishing,
-    this.status,
-    this.fromTimestamp,
-    this.toTimestamp,
+    this.receive,
+    this.send,
+    this.fromDate,
+    this.toDate,
   });
 
   factory NftTransferFilter.fromJson(Map<String, dynamic> json) {
     return NftTransferFilter(
       excludeSpam: json['exclude_spam'] as bool?,
       excludePhishing: json['exclude_phishing'] as bool?,
-      status: json['status'] as String?,
-      fromTimestamp: (json['from_timestamp'] as num?)?.toInt(),
-      toTimestamp: (json['to_timestamp'] as num?)?.toInt(),
+      receive: json['receive'] as bool?,
+      send: json['send'] as bool?,
+      fromDate: (json['from_date'] as num?)?.toInt(),
+      toDate: (json['to_date'] as num?)?.toInt(),
     );
   }
 
@@ -24,20 +26,24 @@ class NftTransferFilter {
   /// Exclude transfers for NFTs flagged as phishing.
   final bool? excludePhishing;
 
-  /// Optional transfer status filter.
-  final String? status;
+  /// Include received NFT transfers.
+  final bool? receive;
+
+  /// Include sent NFT transfers.
+  final bool? send;
 
   /// Lower timestamp bound in Unix seconds.
-  final int? fromTimestamp;
+  final int? fromDate;
 
   /// Upper timestamp bound in Unix seconds.
-  final int? toTimestamp;
+  final int? toDate;
 
   Map<String, dynamic> toJson() => {
     if (excludeSpam != null) 'exclude_spam': excludeSpam,
     if (excludePhishing != null) 'exclude_phishing': excludePhishing,
-    if (status != null) 'status': status,
-    if (fromTimestamp != null) 'from_timestamp': fromTimestamp,
-    if (toTimestamp != null) 'to_timestamp': toTimestamp,
+    if (receive != null) 'receive': receive,
+    if (send != null) 'send': send,
+    if (fromDate != null) 'from_date': fromDate,
+    if (toDate != null) 'to_date': toDate,
   };
 }
