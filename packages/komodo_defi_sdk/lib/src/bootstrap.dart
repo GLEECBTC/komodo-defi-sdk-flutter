@@ -1,3 +1,4 @@
+// Bootstrap registration reads more clearly as direct GetIt calls.
 // ignore_for_file: cascade_invocations
 
 import 'dart:developer';
@@ -277,6 +278,16 @@ Future<void> bootstrap({
     );
   }, dependsOn: [ApiClient, EventStreamingManager]);
 
+  container.registerSingletonAsync<NftManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    return NftManager(client: client);
+  }, dependsOn: [ApiClient]);
+
+  container.registerSingletonAsync<DiagnosticsManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    return DiagnosticsManager(client);
+  }, dependsOn: [ApiClient]);
+
   container.registerSingletonAsync<LegacyWithdrawalManager>(() async {
     final client = await container.getAsync<ApiClient>();
     return LegacyWithdrawalManager(client);
@@ -337,6 +348,12 @@ Future<void> bootstrap({
       LegacyWithdrawalManager,
     ],
   );
+
+  container.registerSingletonAsync<RewardsManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    final withdrawalManager = await container.getAsync<WithdrawalManager>();
+    return RewardsManager(client: client, withdrawalManager: withdrawalManager);
+  }, dependsOn: [ApiClient, WithdrawalManager]);
 
   container.registerSingletonAsync<SecurityManager>(
     () async {
