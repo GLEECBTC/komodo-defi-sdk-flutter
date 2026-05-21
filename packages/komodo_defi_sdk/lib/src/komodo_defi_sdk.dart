@@ -243,6 +243,9 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   NftActivationService get nftActivation =>
       _assertSdkInitialized(_container<NftActivationService>());
 
+  /// NFT list, metadata, withdrawal, and transfer helpers.
+  NftManager get nft => _assertSdkInitialized(_container<NftManager>());
+
   /// The transaction history manager instance.
   ///
   /// Manages transaction history and monitoring.
@@ -315,6 +318,14 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Provides high-level trading helpers and stream-first watchers.
   TradingManager get trading =>
       _assertSdkInitialized(_container<TradingManager>());
+
+  /// Provides KMD rewards helpers.
+  RewardsManager get rewards =>
+      _assertSdkInitialized(_container<RewardsManager>());
+
+  /// Provides KDF diagnostics and low-level lifecycle helpers.
+  DiagnosticsManager get diagnostics =>
+      _assertSdkInitialized(_container<DiagnosticsManager>());
 
   /// Gets a reference to the balance manager for checking asset balances.
   ///

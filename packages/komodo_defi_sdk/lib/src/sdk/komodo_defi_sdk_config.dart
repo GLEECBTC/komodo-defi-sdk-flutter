@@ -1,7 +1,10 @@
 // sdk_config.dart
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_defi_sdk/src/nft/nft_manager.dart';
 
+/// Configuration for SDK-managed services and startup behavior.
 class KomodoDefiSdkConfig {
+  /// Creates SDK configuration.
   const KomodoDefiSdkConfig({
     this.defaultAssets = const {'KMD', 'BTC', 'ETH', 'DOC', 'MARTY'},
     this.preActivateDefaultAssets = true,
@@ -11,6 +14,7 @@ class KomodoDefiSdkConfig {
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
     this.marketDataConfig = const MarketDataConfig(),
+    this.nftTransactionDetailsProvider,
     this.tronProApiKey,
   });
 
@@ -39,10 +43,14 @@ class KomodoDefiSdkConfig {
   /// Configuration for market data repositories
   final MarketDataConfig marketDataConfig;
 
+  /// Optional app-provided provider for enriching NFT transfer history.
+  final NftTransactionDetailsProvider? nftTransactionDetailsProvider;
+
   /// No longer used. Transaction history now uses TRONGrid which requires no
   /// API key. Retained for backward compatibility.
   final String? tronProApiKey;
 
+  /// Creates a copy with selected fields replaced.
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -52,6 +60,7 @@ class KomodoDefiSdkConfig {
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
     MarketDataConfig? marketDataConfig,
+    NftTransactionDetailsProvider? nftTransactionDetailsProvider,
     String? tronProApiKey,
   }) {
     return KomodoDefiSdkConfig(
@@ -68,6 +77,8 @@ class KomodoDefiSdkConfig {
       activatedAssetsCacheTtl:
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
+      nftTransactionDetailsProvider:
+          nftTransactionDetailsProvider ?? this.nftTransactionDetailsProvider,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
     );
   }

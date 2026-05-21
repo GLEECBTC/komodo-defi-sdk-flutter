@@ -54,6 +54,9 @@ class KomodoDefiRpcMethods {
   MessageSigningMethodsNamespace get messageSigning =>
       MessageSigningMethodsNamespace(_client);
   UtilityMethods get utility => UtilityMethods(_client);
+  RewardsMethodsNamespace get rewards => RewardsMethodsNamespace(_client);
+  DiagnosticsMethodsNamespace get diagnostics =>
+      DiagnosticsMethodsNamespace(_client);
   FeeManagementMethodsNamespace get feeManagement =>
       FeeManagementMethodsNamespace(_client);
 
@@ -115,7 +118,8 @@ class WalletMethods extends BaseRpcMethodNamespace {
   ///
   /// Parameters:
   /// - [coins]: List of coin tickers to export keys for
-  /// - [mode]: Export mode (HD or Iguana). If null, defaults based on wallet type
+  /// - [mode]: Export mode (HD or Iguana). If null, defaults based on wallet
+  ///   type
   /// - [startIndex]: Starting address index for HD mode (default: 0)
   /// - [endIndex]: Ending address index for HD mode (default: startIndex + 10)
   /// - [accountIndex]: Account index for HD mode (default: 0)
@@ -212,4 +216,14 @@ class GeneralActivationMethods extends BaseRpcMethodNamespace {
 
   Future<GetEnabledCoinsResponse> getEnabledCoins([String? rpcPass]) =>
       execute(GetEnabledCoinsRequest(rpcPass: rpcPass));
+
+  /// Disables an activated coin.
+  Future<DisableCoinResponse> disableCoin({
+    required String coin,
+    String? rpcPass,
+  }) {
+    return execute(
+      DisableCoinRequest(rpcPass: rpcPass ?? this.rpcPass ?? '', coin: coin),
+    );
+  }
 }
