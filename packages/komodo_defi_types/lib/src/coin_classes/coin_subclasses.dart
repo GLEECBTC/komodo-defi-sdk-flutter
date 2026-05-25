@@ -1,7 +1,7 @@
 import 'dart:ui';
 
-// TODO? Add a getter for the ticker of the coin subclass if needed. But this
-// may overlap with the protocol class, in which case it's not needed.
+// TODO(komodo): Add a getter for the ticker of the coin subclass if needed.
+// This may overlap with the protocol class, in which case it's not needed.
 enum CoinSubClass {
   trx,
   trc20,
@@ -9,6 +9,7 @@ enum CoinSubClass {
   ftm20,
   arbitrum,
   base,
+  gnosis,
   @Deprecated('No longer active. Will be removed in the future.')
   slp,
   sia,
@@ -39,7 +40,7 @@ enum CoinSubClass {
     return e.toString().split('.').last.toLowerCase();
   }
 
-  // TODO: verify all the tickers.
+  // TODO(komodo): verify all the tickers.
   String get ticker {
     switch (this) {
       case CoinSubClass.trx:
@@ -54,6 +55,8 @@ enum CoinSubClass {
         return 'ARB';
       case CoinSubClass.base:
         return 'BASE';
+      case CoinSubClass.gnosis:
+        return 'XDAI';
       // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.slp:
         return 'SLP';
@@ -118,6 +121,8 @@ enum CoinSubClass {
         return 'ARB';
       case CoinSubClass.base:
         return 'BASE';
+      case CoinSubClass.gnosis:
+        return 'XDAI';
       // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.slp:
         return 'SLP';
@@ -243,6 +248,7 @@ enum CoinSubClass {
   static CoinSubClass? tryParse(String value) {
     try {
       return parse(value);
+      // ignore: avoid_catching_errors
     } on StateError {
       return null;
     }
@@ -271,7 +277,7 @@ enum CoinSubClass {
     return parent.canBeParentOf(this);
   }
 
-  // TODO: Consider if null or an empty string should be returned for
+  // TODO(komodo): Consider if null or an empty string should be returned for
   // subclasses where they don't have a symbol used in coin IDs.
   String get formatted {
     switch (this) {
@@ -287,6 +293,8 @@ enum CoinSubClass {
         return 'Arbitrum';
       case CoinSubClass.base:
         return 'Base';
+      case CoinSubClass.gnosis:
+        return 'Gnosis';
       case CoinSubClass.slp:
         return 'Simple Ledger Protocol';
       case CoinSubClass.sia:
@@ -349,6 +357,8 @@ enum CoinSubClass {
         return const Color(0xFF28A0F0); // arb: "#28a0f0"
       case CoinSubClass.base:
         return const Color(0xFF0052FF); // base: "#0052ff"
+      case CoinSubClass.gnosis:
+        return const Color(0xFF04795B); // xdai: "#04795b"
       // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.slp:
         return const Color(0xFF0CC38C); // slp: "#0cc38c"
@@ -422,6 +432,8 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'ARB20';
       case CoinSubClass.base:
         return 'BASE';
+      case CoinSubClass.gnosis:
+        return 'GNO';
       case CoinSubClass.avx20:
         return 'AVX20';
       case CoinSubClass.matic:
@@ -463,6 +475,7 @@ const Set<CoinSubClass> evmCoinSubClasses = {
   CoinSubClass.hrc20,
   CoinSubClass.arbitrum,
   CoinSubClass.base,
+  CoinSubClass.gnosis,
   CoinSubClass.moonriver,
   CoinSubClass.moonbeam,
   CoinSubClass.ethereumClassic,

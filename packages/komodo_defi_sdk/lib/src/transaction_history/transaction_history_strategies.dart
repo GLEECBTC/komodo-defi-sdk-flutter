@@ -13,6 +13,7 @@ class TransactionHistoryStrategyFactory {
   }) : _strategies =
            strategies ??
            [
+             GnosisBlockscoutTransactionStrategy(pubkeyManager: pubkeyManager),
              EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
              TronGridTransactionStrategy(pubkeyManager: pubkeyManager),
              V2TransactionStrategy(auth),

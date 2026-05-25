@@ -35,6 +35,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
+    CoinSubClass.gnosis,
   };
 
   @override
@@ -43,7 +44,9 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool canHandle(Asset asset) {
     // Use task-based activation for Trezor private key policy
+    final isPlatformAsset = asset.id.parentId == null;
     return privKeyPolicy == const PrivateKeyPolicy.trezor() &&
+        isPlatformAsset &&
         super.canHandle(asset);
   }
 

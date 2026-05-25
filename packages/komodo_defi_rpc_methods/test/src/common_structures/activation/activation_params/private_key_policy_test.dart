@@ -1,5 +1,6 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -333,6 +334,17 @@ void main() {
         final expected = testCase['expected']! as String;
         expect(policy.pascalCaseName, expected);
       }
+    });
+  });
+
+  group('PrivKeyPolicySerializer', () {
+    test('serializes Gnosis policies using EVM JSON form', () {
+      final result = PrivKeyPolicySerializer.toRpc(
+        const PrivateKeyPolicy.contextPrivKey(),
+        protocol: CoinSubClass.gnosis,
+      );
+
+      expect(result, {'type': 'ContextPrivKey'});
     });
   });
 }

@@ -27,6 +27,23 @@ void main() {
       // intentionally no 'trezor_coin'
     };
 
+    final xdaiConfig = {
+      'coin': 'XDAI',
+      'fname': 'Gnosis',
+      'chain_id': 100,
+      'type': 'Gnosis',
+      'protocol': {
+        'type': 'ETH',
+        'protocol_data': {'chain_id': 100},
+      },
+      'swap_contract_address': '0x0000000000000000000000000000000000000001',
+      'fallback_swap_contract': '0x0000000000000000000000000000000000000001',
+      'is_testnet': false,
+      'nodes': [
+        {'url': 'https://rpc.gnosischain.com'},
+      ],
+    };
+
     late CoinConfigRepository repo;
     // Use repository helpers to parse and store assets from raw JSON
     setUp(() async {
@@ -47,13 +64,10 @@ void main() {
           cdnBranchMirrors: {},
         ),
       );
-      await repo.upsertRawAssets(
-        {
-          'BTC': btcConfig,
-          'NTZ': noTrezorConfig,
-        },
-        'test',
-      );
+      await repo.upsertRawAssets({
+        'BTC': btcConfig,
+        'NTZ': noTrezorConfig,
+      }, 'test');
     });
 
     tearDown(() async {
@@ -107,6 +121,14 @@ void main() {
       final asset = Asset.fromJson(cfg);
       const filter = UtxoAssetFilterStrategy();
       expect(asset.protocol.subClass, CoinSubClass.smartChain);
+      expect(filter.shouldInclude(asset, asset.protocol.config), isTrue);
+    });
+
+    test('EVM filter accepts Gnosis assets', () {
+      final asset = Asset.fromJson(xdaiConfig);
+      const filter = EvmAssetFilterStrategy();
+
+      expect(asset.protocol.subClass, CoinSubClass.gnosis);
       expect(filter.shouldInclude(asset, asset.protocol.config), isTrue);
     });
   });

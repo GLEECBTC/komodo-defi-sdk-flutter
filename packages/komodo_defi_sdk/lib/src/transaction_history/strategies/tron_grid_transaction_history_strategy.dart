@@ -1,12 +1,10 @@
-import 'dart:math' as math;
-
 import 'package:decimal/decimal.dart';
 import 'package:http/http.dart' as http;
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/strategies/fixed_scale_decimal_string.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/strategies/public_explorer_history_pager.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/strategies/tron_grid_address_codec.dart';
-import 'package:komodo_defi_sdk/src/transaction_history/strategies/tron_grid_cursor_codec.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -31,40 +29,59 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     http.Client? httpClient,
     this.tronProApiKey,
     String? apiHostOverride,
+    int trxPagesPerCall = 1,
+    int maxEmptyPagesPerAddress = 3,
   }) : _client = httpClient ?? http.Client(),
        _ownsClient = httpClient == null,
-       _apiHostOverride = apiHostOverride;
+       _apiHostOverride = apiHostOverride,
+       _trxPagesPerCall = trxPagesPerCall {
+    if (trxPagesPerCall < 1) {
+      throw ArgumentError.value(
+        trxPagesPerCall,
+        'trxPagesPerCall',
+        'must be at least 1',
+      );
+    }
+    if (maxEmptyPagesPerAddress < 1) {
+      throw ArgumentError.value(
+        maxEmptyPagesPerAddress,
+        'maxEmptyPagesPerAddress',
+        'must be at least 1',
+      );
+    }
+
+    _pager = PublicExplorerHistoryPager(
+      maxEmptyPagesPerAddress: maxEmptyPagesPerAddress,
+    );
+    _http = PublicExplorerJsonHttpClient(
+      client: _client,
+      ownsClient: _ownsClient,
+      policy: PublicExplorerHttpRetryPolicy(
+        failureLabel: 'TRONGrid request failed',
+        networkFailureLabel: 'Network error while fetching TRONGrid history',
+        minRequestInterval: const Duration(milliseconds: 350),
+        maxAttempts: 6,
+        jitter: const Duration(milliseconds: 250),
+        retryWaitParser: _parseTronGridRetryWait,
+      ),
+    );
+  }
 
   /// Rows per TRONGrid API request (their maximum).
   static const int _gridPageSize = 200;
 
-  /// Cursor marker for addresses that haven't been fetched yet. Used to enable
-  /// per-address incremental streaming: the strategy returns results as soon as
-  /// the first address yields data, encoding remaining addresses with this
-  /// marker so the manager's streaming loop fetches them on subsequent calls.
-  static const String _kPending = '__pending__';
-
-  /// For TRX (where rows are filtered client-side for TransferContract), fetch
-  /// up to this many TRONGrid pages per [fetchTransactionHistory] call so a
-  /// single invocation still returns a meaningful batch.
-  static const int _maxInternalPages = 3;
-
-  static const int _maxHttpAttempts = 6;
-
-  /// Minimum gap between HTTP requests to stay within 3 RPS.
-  static const Duration _minRequestInterval = Duration(milliseconds: 350);
-
   final http.Client _client;
   final bool _ownsClient;
   final String? _apiHostOverride;
+  final int _trxPagesPerCall;
+  late final PublicExplorerHistoryPager _pager;
+  late final PublicExplorerJsonHttpClient _http;
 
   /// Provides public-key / address data for the asset being queried.
   final PubkeyManager pubkeyManager;
 
   /// Retained for backward compatibility; TRONGrid does not require a key.
   final String? tronProApiKey;
-
-  DateTime _lastRequestTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   bool get usesOpaquePaginationCursor => true;
@@ -103,79 +120,50 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
     final host = _apiHostOverride ?? _defaultApiHost(asset.protocol);
     final addresses = await _getAssetPubkeys(asset);
+    final addressStrings = addresses
+        .map((address) => address.address)
+        .toList(growable: false);
     final limit = pagination.limit ?? 50;
 
     // Decode per-address cursors. On the first call (PagePagination) the map
     // is empty so every address starts from the beginning. On subsequent calls
     // the map contains only addresses that still have remaining pages.
-    final cursors =
-        pagination is TransactionBasedPagination &&
-            !_looksLikeTransactionHash(pagination.fromId)
-        ? decodeTronGridCursorMap(pagination.fromId)
-        : <String, String>{};
-
-    final byHash = <String, TransactionInfo>{};
-    final nextCursors = <String, String>{};
+    final cursors = pagination is TransactionBasedPagination
+        ? _pager.decodeCursorMap(
+            pagination.fromId,
+            decodeBareCursor: (cursor) =>
+                _looksLikeTransactionHash(cursor) ? null : cursor,
+          )
+        : <String, PublicExplorerCursorEntry>{};
+    final selected = _pager.selectAddressPage(addressStrings, cursors);
 
     try {
-      for (var i = 0; i < addresses.length; i++) {
-        final addr = addresses[i].address;
-
-        // On a continuation call, skip addresses already exhausted (absent
-        // from the cursor map). The empty-key wildcard ('') from the single-
-        // address fast path matches any address.
-        if (cursors.isNotEmpty &&
-            !cursors.containsKey(addr) &&
-            !cursors.containsKey('')) {
-          continue;
-        }
-
-        // Resolve fingerprint: exact address key first, then wildcard ('').
-        // The _kPending marker means "not yet started" — treat as null.
-        var fp = cursors[addr] ?? cursors[''];
-        if (fp == _kPending) fp = null;
-
-        final result = switch (asset.protocol) {
+      var result = const _PageResult(transactions: []);
+      if (selected != null) {
+        final fingerprint = _fingerprintFromCursor(selected.cursor);
+        result = switch (asset.protocol) {
           TrxProtocol() => await _fetchTrxPage(
             host: host,
-            address: addr,
+            address: selected.address,
             asset: asset,
-            fingerprint: fp,
+            fingerprint: fingerprint,
             limit: limit,
           ),
           Trc20Protocol() => await _fetchTrc20Page(
             host: host,
-            address: addr,
+            address: selected.address,
             asset: asset,
-            fingerprint: fp,
+            fingerprint: fingerprint,
           ),
           _ => const _PageResult(transactions: []),
         };
+      }
 
-        for (final tx in result.transactions) {
-          final h = tx.txHash;
-          final existing = byHash[h];
-          byHash[h] = existing == null
-              ? tx
-              : _mergeTransactionInfo(existing, tx);
-        }
-
-        if (result.nextFingerprint != null) {
-          nextCursors[addr] = result.nextFingerprint!;
-        }
-
-        // Yield results early: if we already have transactions and there are
-        // remaining addresses, encode them as pending in the cursor so the
-        // manager's streaming loop fetches them on the next call.
-        if (byHash.isNotEmpty && i < addresses.length - 1) {
-          for (var j = i + 1; j < addresses.length; j++) {
-            final pending = addresses[j].address;
-            if (!nextCursors.containsKey(pending)) {
-              nextCursors[pending] = cursors[pending] ?? _kPending;
-            }
-          }
-          break;
-        }
+      final byHash = <String, TransactionInfo>{};
+      for (final tx in result.transactions) {
+        final h = tx.txHash;
+        final existing = byHash[h];
+        byHash[h] = existing == null ? tx : _mergeTransactionInfo(existing, tx);
       }
 
       final transactions = byHash.values.toList()
@@ -185,26 +173,20 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
           ? transactions.first.blockHeight
           : 0;
 
-      final cursorString = nextCursors.isEmpty
-          ? null
-          : encodeTronGridCursorMap(nextCursors);
+      final nextCursors = _pager.nextCursorMap(
+        addresses: addressStrings,
+        currentCursors: cursors,
+        selectedAddress: selected?.address,
+        nextCursor: result.nextFingerprint,
+        pageProducedTransactions: transactions.isNotEmpty,
+      );
 
-      return MyTxHistoryResponse(
-        mmrpc: RpcVersion.v2_0,
-        currentBlock: currentBlock,
-        fromId: cursorString,
-        limit: limit,
-        skipped: 0,
-        syncStatus: SyncStatusResponse(
-          state: TransactionSyncStatusEnum.finished,
-        ),
-        total: transactions.length,
-        totalPages: 1,
-        pageNumber: 1,
-        pagingOptions: cursorString != null
-            ? Pagination(fromId: cursorString)
-            : null,
+      return _pager.buildResponse(
         transactions: transactions,
+        nextCursors: nextCursors,
+        limit: limit,
+        pageNumber: 1,
+        currentBlock: currentBlock,
       );
     } catch (e) {
       throw HttpException('Error fetching TRONGrid transaction history: $e');
@@ -215,7 +197,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   // Single-page fetch methods
   // ---------------------------------------------------------------------------
 
-  /// Fetches up to [_maxInternalPages] TRONGrid pages of general transactions,
+  /// Fetches up to the configured TRONGrid page count of general transactions,
   /// filtering for `TransferContract` rows, until at least [limit] results are
   /// collected or there are no more pages.
   Future<_PageResult> _fetchTrxPage({
@@ -229,9 +211,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     final out = <TransactionInfo>[];
     var cursor = fingerprint;
 
-    for (var page = 0; page < _maxInternalPages; page++) {
-      await _throttle();
-
+    for (var page = 0; page < _trxPagesPerCall; page++) {
       final params = <String, String>{
         'only_confirmed': 'true',
         'limit': '$_gridPageSize',
@@ -241,7 +221,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
       final uri = Uri.https(host, '/v1/accounts/$address/transactions', params);
 
-      final json = await _getJson(uri);
+      final json = await _http.getJson(uri);
       final data = json.valueOrNull<JsonList>('data') ?? const [];
 
       if (data.isEmpty) {
@@ -287,8 +267,6 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
     final decimals = _tokenDecimalsFromRowOrAsset(asset);
 
-    await _throttle();
-
     final params = <String, String>{
       'only_confirmed': 'true',
       'limit': '$_gridPageSize',
@@ -302,7 +280,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
       params,
     );
 
-    final json = await _getJson(uri);
+    final json = await _http.getJson(uri);
     final data = json.valueOrNull<JsonList>('data') ?? const [];
     if (data.isEmpty) {
       return const _PageResult(transactions: []);
@@ -347,6 +325,8 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
   bool _looksLikeTransactionHash(String value) =>
       RegExp(r'^[0-9A-Fa-f]{64}$').hasMatch(value);
+
+  String? _fingerprintFromCursor(Object? cursor) => cursor?.toString();
 
   int _decimals(Asset asset) =>
       asset.protocol.config.valueOrNull<int>('decimals') ?? 6;
@@ -544,82 +524,18 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   }
 
   // ---------------------------------------------------------------------------
-  // Rate limiter — keeps requests within TRONGrid's 3 RPS budget
+  // TRONGrid rate-limit parsing
   // ---------------------------------------------------------------------------
-
-  Future<void> _throttle() async {
-    final elapsed = DateTime.now().difference(_lastRequestTime);
-    if (elapsed < _minRequestInterval) {
-      await Future<void>.delayed(_minRequestInterval - elapsed);
-    }
-    _lastRequestTime = DateTime.now();
-  }
-
-  // ---------------------------------------------------------------------------
-  // HTTP with retry & TRONGrid rate-limit parsing
-  // ---------------------------------------------------------------------------
-
-  Future<JsonMap> _getJson(Uri uri) async {
-    final random = math.Random();
-    var attempt = 0;
-    var backoff = const Duration(milliseconds: 500);
-    const maxBackoff = Duration(seconds: 10);
-
-    while (true) {
-      try {
-        final response = await _client.get(uri);
-        if (response.statusCode == 200) {
-          return jsonFromString(response.body);
-        }
-
-        final retriable =
-            response.statusCode == 429 || response.statusCode == 503;
-        if (retriable && attempt < _maxHttpAttempts - 1) {
-          final baseWait = _parseRetryWait(response) ?? backoff;
-          final jitter = Duration(milliseconds: random.nextInt(250));
-          await Future<void>.delayed(baseWait + jitter);
-          _lastRequestTime = DateTime.now();
-          attempt++;
-          final doubled = backoff.inMilliseconds * 2;
-          backoff = doubled > maxBackoff.inMilliseconds
-              ? maxBackoff
-              : Duration(milliseconds: doubled);
-          continue;
-        }
-
-        throw HttpException(
-          'TRONGrid request failed: ${response.statusCode}',
-          uri: uri,
-        );
-      } on http.ClientException catch (e) {
-        if (attempt >= _maxHttpAttempts - 1) {
-          throw HttpException(
-            'Network error while fetching TRONGrid history: ${e.message}',
-            uri: uri,
-          );
-        }
-        final jitter = Duration(milliseconds: random.nextInt(250));
-        await Future<void>.delayed(backoff + jitter);
-        attempt++;
-        backoff = backoff.inMilliseconds * 2 > maxBackoff.inMilliseconds
-            ? maxBackoff
-            : Duration(milliseconds: backoff.inMilliseconds * 2);
-      }
-    }
-  }
 
   /// Extracts the wait duration from a TRONGrid rate-limit response.
   ///
   /// Checks the `Retry-After` header first, then falls back to parsing the
   /// JSON body for the `"suspended for N s"` pattern that TRONGrid returns.
-  Duration? _parseRetryWait(http.Response response) {
-    final header = response.headers['retry-after'];
-    if (header != null) {
-      final seconds = int.tryParse(header.trim());
-      if (seconds != null) {
-        return Duration(seconds: seconds.clamp(0, 60));
-      }
-    }
+  Duration? _parseTronGridRetryWait(http.Response response) {
+    final headerWait = PublicExplorerJsonHttpClient.retryAfterHeaderWait(
+      response,
+    );
+    if (headerWait != null) return headerWait;
 
     try {
       final body = jsonFromString(response.body);
@@ -638,9 +554,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
   /// Releases the HTTP client if it was internally created.
   void dispose() {
-    if (_ownsClient) {
-      _client.close();
-    }
+    _http.dispose();
   }
 }
 

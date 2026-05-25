@@ -7,18 +7,18 @@ class AddressFormat {
     CoinSubClass subClass, {
     bool isBchNetwork = false,
   }) {
+    if (evmCoinSubClasses.contains(subClass)) {
+      return AddressFormat(
+        format: AddressFormatType.mixedCase.toString(),
+        network: '',
+      );
+    }
+
     switch (subClass) {
       case CoinSubClass.trx:
       case CoinSubClass.trc20:
         return AddressFormat(
           format: AddressFormatType.wallet.toString(),
-          network: '',
-        );
-      case CoinSubClass.erc20:
-      case CoinSubClass.grc20:
-      case CoinSubClass.ethereumClassic:
-        return AddressFormat(
-          format: AddressFormatType.mixedCase.toString(),
           network: '',
         );
       case CoinSubClass.qrc20:

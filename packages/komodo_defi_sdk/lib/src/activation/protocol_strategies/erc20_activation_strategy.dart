@@ -33,6 +33,7 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
+    CoinSubClass.gnosis,
   };
 
   @override

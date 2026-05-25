@@ -35,6 +35,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.rskSmartBitcoin,
     CoinSubClass.arbitrum,
     CoinSubClass.base,
+    CoinSubClass.gnosis,
   };
 
   @override
