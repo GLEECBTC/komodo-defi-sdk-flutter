@@ -24,7 +24,13 @@ export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
 // ZHTLC sync parameters
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
-    show ZhtlcSyncParams;
+    show
+        MatchBy,
+        StartSwapResponse,
+        SwapInfo,
+        SwapMethod,
+        TradePreimageResponse,
+        ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
 export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
@@ -34,6 +40,8 @@ export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
+export 'package:komodo_defi_types/komodo_defi_types.dart'
+    show WithdrawalPreview, WithdrawalStatus;
 
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation_config/activation_config_service.dart'
@@ -60,6 +68,35 @@ export 'src/assets/asset_extensions.dart'
         AssetValidation;
 export 'src/assets/asset_pubkey_extensions.dart';
 export 'src/assets/legacy_asset_extensions.dart';
+export 'src/kdf/kdf_dex_funding_repository.dart'
+    show
+        KdfDexFundingOrder,
+        KdfDexFundingQuote,
+        KdfDexFundingQuoteRequest,
+        KdfDexFundingRepository,
+        KdfDexFundingSource,
+        KdfDexFundingStatus,
+        KdfDexFundingStatusKind,
+        KdfDexFundingStep,
+        KdfDexSafeTransferPreview,
+        KdfDexSafeTransferResult,
+        kdfDexFundingProviderId,
+        kdfGnosisSpendableTokenAssets;
+export 'src/kdf/kdf_evm_account_repository.dart'
+    show
+        KdfEvmAccount,
+        KdfEvmAccountRepository,
+        KdfEvmPrivateKey,
+        KdfEvmSigningPolicy,
+        kdfGnosisChainId,
+        kdfGnosisGasAssetId;
+export 'src/kdf/typed_data_signing_strategy.dart'
+    show
+        Eip712SigningResult,
+        Eip712TypedDataRequest,
+        KdfSigningException,
+        PrivateKeyExportTypedDataSigningStrategy,
+        TypedDataSigningStrategy;
 export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
 export 'src/transaction_history/transaction_merge_utils.dart'
     show TransactionListReconciler, TransactionMergeUtils;

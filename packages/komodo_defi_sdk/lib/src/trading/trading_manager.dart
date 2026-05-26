@@ -280,6 +280,34 @@ class TradingManager {
     );
   }
 
+  /// Thin wrapper for `start_swap`.
+  ///
+  /// Keeps app integrations on the SDK manager surface instead of reaching
+  /// through to the raw RPC namespace.
+  Future<StartSwapResponse> startSwap({
+    required String base,
+    required String rel,
+    required String baseCoinAmount,
+    required String relCoinAmount,
+    required SwapMethod method,
+    String? senderPubkey,
+    String? destPubkey,
+    MatchBy? matchBy,
+  }) {
+    return _client.rpc.trading.startSwap(
+      swapRequest: SwapRequest(
+        base: base,
+        rel: rel,
+        baseCoinAmount: baseCoinAmount,
+        relCoinAmount: relCoinAmount,
+        method: method,
+        senderPubkey: senderPubkey,
+        destPubkey: destPubkey,
+        matchBy: matchBy,
+      ),
+    );
+  }
+
   /// Cached wrapper for `max_taker_vol`.
   Future<MaxTakerVolumeResponse> maxTakerVolume({
     required String coin,
