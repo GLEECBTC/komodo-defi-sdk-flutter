@@ -34,4 +34,12 @@ if(ANDROID)
     "${KDFLIB_PATH}"
     "-Wl,--no-whole-archive"
   )
+
+  # Align LOAD segments to 16 KB so the library loads on Android 15+ devices
+  # that use 16 KB memory pages (required by Google Play for apps targeting
+  # Android 15+). Without this the prebuilt libkdf.a links a 4 KB-aligned .so
+  # and Play reports the app as incompatible ("made for an older version").
+  target_link_options(komodo_defi_framework PRIVATE
+    "-Wl,-z,max-page-size=16384"
+  )
 endif()
