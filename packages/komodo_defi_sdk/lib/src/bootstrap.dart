@@ -43,6 +43,12 @@ Future<void> bootstrap({
   log('Bootstrap: Starting dependency injection setup...', name: 'Bootstrap');
   final stopwatch = Stopwatch()..start();
 
+  // Load any persisted custom coins / coins-config override before the
+  // framework starts KDF or the asset manager builds its config sources, so the
+  // override is applied on this cold start. (A restart is required for changes
+  // to take effect — see KomodoDefiSdk.setCustomCoinsPath.)
+  await CustomCoinsConfig.instance.load();
+
   final rpcPassword = await SecureRpcPasswordMixin().ensureRpcPassword();
 
   // Framework and core dependencies

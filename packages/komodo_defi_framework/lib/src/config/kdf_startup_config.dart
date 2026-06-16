@@ -243,6 +243,12 @@ class KdfStartupConfig {
   static JsonList? _memoizedCoins;
 
   static Future<JsonList> _fetchCoinsData() async {
+    // A custom KDF-coins file overrides the default coins data entirely. It is
+    // not memoized because the override is resolved once per process from the
+    // persisted store loaded during SDK bootstrap.
+    final overrideCoins = CustomCoinsConfig.instance.kdfCoinsListOrNull;
+    if (overrideCoins != null) return overrideCoins;
+
     if (_memoizedCoins != null) return _memoizedCoins!;
 
     return _memoizedCoins =

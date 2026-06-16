@@ -7,6 +7,8 @@ library;
 
 export 'package:komodo_cex_market_data/komodo_cex_market_data.dart'
     show Commodity, Cryptocurrency, FiatCurrency, QuoteCurrency, Stablecoin;
+export 'package:komodo_coins/komodo_coins.dart'
+    show CustomCoinsConfig, CustomCoinsFileSource;
 export 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show
         BalanceEvent,

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/src/asset_management/_asset_management_index.dart';
+import 'package:komodo_coins/src/config/custom_coins_config.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart'
     show JsonList, JsonMap;
 import 'package:komodo_defi_types/komodo_defi_types.dart'
@@ -34,6 +35,13 @@ class StartupCoinsProvider {
   }) async {
     final resolvedAppName = appName ?? 'komodo_coins';
 
+    // Ensure any persisted coins-config override is loaded so it can be used
+    // as the authoritative source for the coins passed to mm2.
+    await CustomCoinsConfig.instance.load(
+      appStoragePath: appStoragePath,
+      appName: resolvedAppName,
+    );
+
     // Ensure Hive is initialized so storage reads can succeed.
     try {
       final storagePath = await _resolveStoragePath(
@@ -63,10 +71,23 @@ class StartupCoinsProvider {
       final repository = factory.createRepository(runtimeConfig, xform);
       final localProvider = factory.createLocalProvider(runtimeConfig);
 
-      final sources = <CoinConfigSource>[
-        StorageCoinConfigSource(repository: repository),
-        AssetBundleCoinConfigSource(provider: localProvider),
-      ];
+      // When a custom coins-config override is configured, derive the mm2
+      // startup coins from that file exclusively so KDF and the SDK asset
+      // registry stay consistent.
+      final overrideSource = CustomCoinsConfig.instance.coinsConfigSource;
+      final sources = overrideSource != null
+          ? <CoinConfigSource>[
+              AssetBundleCoinConfigSource(
+                provider: FileCoinConfigProvider(
+                  overrideSource,
+                  transformer: xform,
+                ),
+              ),
+            ]
+          : <CoinConfigSource>[
+              StorageCoinConfigSource(repository: repository),
+              AssetBundleCoinConfigSource(provider: localProvider),
+            ];
 
       manager = StrategicCoinConfigManager(
         configSources: sources,

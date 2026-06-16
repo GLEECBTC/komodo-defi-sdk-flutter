@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/src/asset_filter.dart';
 import 'package:komodo_coins/src/asset_management/_asset_management_index.dart';
+import 'package:komodo_coins/src/config/custom_coins_config.dart';
 import 'package:komodo_coins/src/update_management/_update_management_index.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
@@ -137,6 +138,19 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       // Initialize hive first before registering adapters or repositories.
       await _initializeHiveStorage();
 
+      // Ensure any persisted custom coins-config override is loaded before
+      // building the config sources below.
+      await CustomCoinsConfig.instance.load(
+        appStoragePath: appStoragePath,
+        appName: appName,
+      );
+
+      // A custom coins-config override is authoritative: skip remote/background
+      // updates so they cannot overwrite or shadow the user-selected config.
+      final effectiveAutoUpdate =
+          enableAutoUpdate &&
+          !CustomCoinsConfig.instance.hasCoinsConfigOverride;
+
       final runtimeConfig = await _getRuntimeConfig();
       final configProviders = await _createConfigSources(runtimeConfig);
       final newAssetsManager = StrategicCoinConfigManager(
@@ -154,7 +168,9 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       final localProvider = _dataFactory.createLocalProvider(runtimeConfig);
       final newUpdatesManager = StrategicCoinUpdateManager(
         repository: repository,
-        updateStrategy: enableAutoUpdate ? _updateStrategy : NoUpdateStrategy(),
+        updateStrategy: effectiveAutoUpdate
+            ? _updateStrategy
+            : NoUpdateStrategy(),
         fallbackProvider: localProvider,
       );
 
@@ -167,7 +183,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       _initialized = true;
 
       // Start background updates if enabled
-      if (enableAutoUpdate) {
+      if (effectiveAutoUpdate) {
         _updatesManager!.startBackgroundUpdates();
       }
       _log.fine('KomodoAssetsUpdateManager initialized successfully');
@@ -224,10 +240,31 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
     return _runtimeConfig!;
   }
 
-  /// Creates configuration sources based on the runtime config
+  /// Creates configuration sources based on the runtime config.
+  ///
+  /// When a custom coins-config override is configured it becomes the sole,
+  /// authoritative source: storage and the bundled asset are bypassed so the
+  /// user-selected file is always used (and a malformed file fails loudly
+  /// rather than silently falling back to the bundled config).
   Future<List<CoinConfigSource>> _createConfigSources(
     AssetRuntimeUpdateConfig config,
   ) async {
+    final overrideSource = CustomCoinsConfig.instance.coinsConfigSource;
+    if (overrideSource != null) {
+      _log.info(
+        'Using custom coins-config override: '
+        '${overrideSource.displayLabel}',
+      );
+      return <CoinConfigSource>[
+        AssetBundleCoinConfigSource(
+          provider: FileCoinConfigProvider(
+            overrideSource,
+            transformer: _transformer,
+          ),
+        ),
+      ];
+    }
+
     final sources = <CoinConfigSource>[];
 
     // Add storage source
