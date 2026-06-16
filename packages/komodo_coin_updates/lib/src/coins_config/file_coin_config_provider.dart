@@ -3,26 +3,23 @@ import 'dart:convert';
 import 'package:komodo_coin_updates/src/coins_config/asset_parser.dart';
 import 'package:komodo_coin_updates/src/coins_config/coin_config_provider.dart';
 import 'package:komodo_coin_updates/src/coins_config/config_transform.dart';
-import 'package:komodo_coin_updates/src/coins_config/custom_coins_file_reader.dart';
-import 'package:komodo_coin_updates/src/coins_config/custom_coins_file_source.dart';
+import 'package:komodo_coin_updates/src/coins_config/custom_coins_file.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
 /// A [CoinConfigProvider] that loads the enriched coins configuration
-/// (`coins_config.json`-shaped map) from a user-supplied file instead of the
-/// bundled app asset.
+/// (`coins_config.json`-shaped map) from a user-supplied [CustomCoinsFile]
+/// snapshot instead of the bundled app asset.
 ///
-/// On native platforms the file is read from [CustomCoinsFileSource.path]; on
-/// web the in-memory [CustomCoinsFileSource.content] is used. The parsing
-/// pipeline mirrors [LocalAssetCoinConfigProvider] so the resulting [Asset]s
-/// are identical in shape to the bundled configuration.
+/// The parsing pipeline mirrors [LocalAssetCoinConfigProvider] so the resulting
+/// [Asset]s are identical in shape to the bundled configuration.
 class FileCoinConfigProvider implements CoinConfigProvider {
-  /// Creates a provider backed by [source].
+  /// Creates a provider backed by the [file] snapshot.
   ///
   /// [commit] is reported by [getLatestCommit]; it defaults to a sentinel that
   /// marks the configuration as a local custom override.
   FileCoinConfigProvider(
-    this.source, {
+    this.file, {
     CoinConfigTransformer? transformer,
     String commit = customCoinsCommit,
   }) : _transformer = transformer ?? const CoinConfigTransformer(),
@@ -33,8 +30,8 @@ class FileCoinConfigProvider implements CoinConfigProvider {
 
   static final Logger _log = Logger('FileCoinConfigProvider');
 
-  /// The file source backing this provider.
-  final CustomCoinsFileSource source;
+  /// The coins-config file snapshot backing this provider.
+  final CustomCoinsFile file;
 
   final CoinConfigTransformer _transformer;
   final String _commit;
@@ -53,10 +50,9 @@ class FileCoinConfigProvider implements CoinConfigProvider {
   }) async => _commit;
 
   Future<List<Asset>> _loadAssets() async {
-    _log.info('Loading custom coins config from ${source.displayLabel}');
-    final content = await CustomCoinsFileReader.read(source);
+    _log.info('Loading custom coins config from ${file.displayLabel}');
 
-    final decoded = jsonDecode(content);
+    final decoded = jsonDecode(file.content);
     if (decoded is! Map) {
       throw FormatException(
         'Custom coins config must be a JSON object mapping coin tickers to '

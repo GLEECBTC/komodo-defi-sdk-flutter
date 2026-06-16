@@ -46,8 +46,8 @@ Future<void> bootstrap({
   // Load any persisted custom coins / coins-config override before the
   // framework starts KDF or the asset manager builds its config sources, so the
   // override is applied on this cold start. (A restart is required for changes
-  // to take effect — see KomodoDefiSdk.setCustomCoinsPath.)
-  await CustomCoinsConfig.instance.load();
+  // to take effect — see KomodoDefiSdk.setCustomCoins.)
+  await CustomCoinsStore.instance.load();
 
   final rpcPassword = await SecureRpcPasswordMixin().ensureRpcPassword();
 

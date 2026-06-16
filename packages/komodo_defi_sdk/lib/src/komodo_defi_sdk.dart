@@ -3,7 +3,7 @@ import 'dart:developer';
 
 import 'package:get_it/get_it.dart';
 import 'package:komodo_coins/komodo_coins.dart'
-    show CustomCoinsConfig, CustomCoinsFileSource, KomodoAssetsUpdateManager;
+    show CustomCoinsFile, CustomCoinsStore, KomodoAssetsUpdateManager;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
@@ -235,17 +235,17 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   }
 
   /// Persists a custom override for the KDF coins file and/or the SDK coins
-  /// configuration file, reading from local files instead of the bundled
+  /// configuration file, using local files instead of the bundled
   /// configuration.
   ///
   /// * [kdfCoins] overrides the raw `coins` list passed to mm2/KDF at startup.
   /// * [coinsConfig] overrides the enriched `coins_config.json` consumed by the
   ///   SDK's asset registry.
   ///
-  /// Each [CustomCoinsFileSource] references either an absolute filesystem path
-  /// (native) or in-memory file content (web, where no filesystem path exists).
-  /// File selection (and the file-open dialog) is the responsibility of the
-  /// host app; this method only validates and persists the resolved sources.
+  /// Each [CustomCoinsFile] is an in-memory snapshot of the selected file's
+  /// content (the same representation on native and web). File selection (and
+  /// the file-open dialog) is the responsibility of the host app; this method
+  /// only validates and persists the resolved snapshots.
   ///
   /// **A full app restart is required for the change to take effect.** The
   /// coins data is read only when KDF starts and the asset registry is built
@@ -254,14 +254,14 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   ///
   /// Returns a short human-readable summary of what was configured, or `null`
   /// if neither argument was provided.
-  Future<String?> setCustomCoinsPath({
-    CustomCoinsFileSource? kdfCoins,
-    CustomCoinsFileSource? coinsConfig,
+  Future<String?> setCustomCoins({
+    CustomCoinsFile? kdfCoins,
+    CustomCoinsFile? coinsConfig,
   }) async {
     _assertNotDisposed();
     if (kdfCoins == null && coinsConfig == null) return null;
 
-    await CustomCoinsConfig.instance.setOverrides(
+    await CustomCoinsStore.instance.setOverrides(
       kdfCoins: kdfCoins,
       coinsConfig: coinsConfig,
     );
@@ -277,10 +277,10 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// configuration.
   ///
   /// **A full app restart is required for the change to take effect** (see
-  /// [setCustomCoinsPath]). The persisted override is removed asynchronously.
-  void resetCustomCoinsPath() {
+  /// [setCustomCoins]). The persisted override is removed asynchronously.
+  void resetCustomCoins() {
     _assertNotDisposed();
-    unawaited(CustomCoinsConfig.instance.clear());
+    unawaited(CustomCoinsStore.instance.clear());
   }
 
   /// Cache of activated assets with per-instance TTL.

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/src/asset_filter.dart';
 import 'package:komodo_coins/src/asset_management/_asset_management_index.dart';
-import 'package:komodo_coins/src/config/custom_coins_config.dart';
+import 'package:komodo_coins/src/config/custom_coins_store.dart';
 import 'package:komodo_coins/src/update_management/_update_management_index.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
@@ -140,7 +140,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
 
       // Ensure any persisted custom coins-config override is loaded before
       // building the config sources below.
-      await CustomCoinsConfig.instance.load(
+      await CustomCoinsStore.instance.load(
         appStoragePath: appStoragePath,
         appName: appName,
       );
@@ -148,8 +148,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       // A custom coins-config override is authoritative: skip remote/background
       // updates so they cannot overwrite or shadow the user-selected config.
       final effectiveAutoUpdate =
-          enableAutoUpdate &&
-          !CustomCoinsConfig.instance.hasCoinsConfigOverride;
+          enableAutoUpdate && !CustomCoinsStore.instance.hasCoinsConfigOverride;
 
       final runtimeConfig = await _getRuntimeConfig();
       final configProviders = await _createConfigSources(runtimeConfig);
@@ -249,16 +248,15 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
   Future<List<CoinConfigSource>> _createConfigSources(
     AssetRuntimeUpdateConfig config,
   ) async {
-    final overrideSource = CustomCoinsConfig.instance.coinsConfigSource;
-    if (overrideSource != null) {
+    final overrideFile = CustomCoinsStore.instance.coinsConfigFile;
+    if (overrideFile != null) {
       _log.info(
-        'Using custom coins-config override: '
-        '${overrideSource.displayLabel}',
+        'Using custom coins-config override: ${overrideFile.displayLabel}',
       );
       return <CoinConfigSource>[
         AssetBundleCoinConfigSource(
           provider: FileCoinConfigProvider(
-            overrideSource,
+            overrideFile,
             transformer: _transformer,
           ),
         ),

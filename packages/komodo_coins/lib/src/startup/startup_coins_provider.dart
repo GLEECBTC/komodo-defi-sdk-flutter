@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/src/asset_management/_asset_management_index.dart';
-import 'package:komodo_coins/src/config/custom_coins_config.dart';
+import 'package:komodo_coins/src/config/custom_coins_store.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart'
     show JsonList, JsonMap;
 import 'package:komodo_defi_types/komodo_defi_types.dart'
@@ -37,7 +37,7 @@ class StartupCoinsProvider {
 
     // Ensure any persisted coins-config override is loaded so it can be used
     // as the authoritative source for the coins passed to mm2.
-    await CustomCoinsConfig.instance.load(
+    await CustomCoinsStore.instance.load(
       appStoragePath: appStoragePath,
       appName: resolvedAppName,
     );
@@ -74,12 +74,12 @@ class StartupCoinsProvider {
       // When a custom coins-config override is configured, derive the mm2
       // startup coins from that file exclusively so KDF and the SDK asset
       // registry stay consistent.
-      final overrideSource = CustomCoinsConfig.instance.coinsConfigSource;
-      final sources = overrideSource != null
+      final overrideFile = CustomCoinsStore.instance.coinsConfigFile;
+      final sources = overrideFile != null
           ? <CoinConfigSource>[
               AssetBundleCoinConfigSource(
                 provider: FileCoinConfigProvider(
-                  overrideSource,
+                  overrideFile,
                   transformer: xform,
                 ),
               ),
