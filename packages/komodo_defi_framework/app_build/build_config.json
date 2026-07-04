@@ -1,10 +1,11 @@
 {
   "api": {
-    "api_commit_hash": "d56a7bc5028f10b9c1bb8370bb2ee16444796a23",
-    "branch": "main",
+    "api_commit_hash": "c9753ecb3bd50a24e9d0677945d91a9d5f7fd5d3",
+    "branch": "feat/tron-gasfree",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
     "source_urls": [
+      "https://nitride-kdf-builds.web.app",
       "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
       "https://devbuilds.gleec.com",
       "https://nebula.decker.im"
@@ -13,14 +14,14 @@
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "7653ef16352d4afec8ac11b2c54efd89618e7034d79c06bcc266948109e66ac9"
+          "a9ebbac45809b5f9a955e67a11b1309f35ef39f07ca6177b7d456c712a1758af"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "68719828c7a2616955fd426c949a10bbef224591470d41821739974bf18e9efc"
+          "e9c8d3f9cc27fb3ec42d46f3e9412bcf1dc1b50fc8e9ecc765302560ac876596"
         ],
         "path": "ios"
       },
@@ -28,44 +29,44 @@
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
         "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
         "valid_zip_sha256_checksums": [
-          "d2896495fe813729d5e5612027cd0c8bf18f771d9c49552ee3f545df9bae868b"
+          "5e4e061a4d5d4acb85fb6d9261aeff0e2754a3a203e21da6166c464f92425190"
         ],
         "path": "macos/bin"
-      },
-      "windows": {
-        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
-        "valid_zip_sha256_checksums": [
-          "4839a22f8722e5ab9b249c2e0d602659e74c45dfcac7b0345729aaf4738591b2"
-        ],
-        "path": "windows/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "731af04ea8b95647433b232951c68b57eeab25c5948f2fbe5ee3896c272fa393"
+          "ee0d2252a52e456467c0b56832d6002283997b4ce5192db468cd2c943a12b7d1"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "1f2303240131ce11dec0afa67a014dd8753c1d3989faa9c701996f09c3e7b595"
+          "f0d3290d311bc88bcf631822b7d1fcbf122b5c88346de91b1ad1983c3f27c243"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "20016e48158cc3926febb37bb2c51bce713eb46f53b0be6790ab132ceec2d501"
+          "48cf3a8815083c5f8e782d395499f2b3420a4422abe90fe7f324b76e6f78c6f1"
         ],
         "path": "linux/bin"
+      },
+      "windows": {
+        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
+        "valid_zip_sha256_checksums": [
+          "70f75927489c4b800fa29fd23758f6e457e32a5afd26d0e6aac28411bb7f8292"
+        ],
+        "path": "windows/bin"
       }
     }
   },
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "acc4c32b379fb8b9ea387a269d33b32bcf084079",
+    "bundled_coins_repo_commit": "b0cb1b9e0d201c7a09850fe070adca2b08d9962e",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
     "coins_repo_branch": "master",
