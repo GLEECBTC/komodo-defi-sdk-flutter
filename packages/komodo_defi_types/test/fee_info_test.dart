@@ -137,6 +137,64 @@ void main() {
     });
   });
 
+  group('FeeInfo TronGasless serialization', () {
+    test('deserializes gasless fee details from withdraw response', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2.000000',
+        'total_token_fee': '2.000000',
+        'signed_max_fee': '5.000000',
+        'trace_id': null,
+      };
+
+      final feeInfo = FeeInfo.fromJson(json);
+
+      expect(feeInfo, isA<FeeInfoTronGasless>());
+      final gasless = feeInfo as FeeInfoTronGasless;
+      expect(gasless.coin, equals('USDT-TRC20'));
+      expect(gasless.feeMethod, equals('gasless'));
+      expect(gasless.providerName, equals('gasfree'));
+      expect(
+        gasless.gasfreeAddress,
+        equals('TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF'),
+      );
+      expect(gasless.transferFee, equals(Decimal.parse('2.000000')));
+      expect(gasless.totalTokenFee, equals(Decimal.parse('2.000000')));
+      expect(gasless.signedMaxFee, equals(Decimal.parse('5.000000')));
+      expect(gasless.activationFee, isNull);
+      // The total fee is the token-denominated total.
+      expect(gasless.totalFee, equals(Decimal.parse('2.000000')));
+    });
+
+    test('round-trips through toJson, omitting null optionals', () {
+      final feeInfo = FeeInfo.tronGasless(
+        coin: 'USDT-TRC20',
+        feeMethod: 'gasless',
+        providerName: 'gasfree',
+        gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        transferFee: Decimal.parse('2'),
+        totalTokenFee: Decimal.parse('2'),
+      );
+
+      final json = feeInfo.toJson();
+
+      expect(json['type'], equals('TronGasless'));
+      expect(json['fee_method'], equals('gasless'));
+      expect(json['transfer_fee'], equals('2'));
+      expect(json['total_token_fee'], equals('2'));
+      expect(json.containsKey('activation_fee'), isFalse);
+      expect(json.containsKey('signed_max_fee'), isFalse);
+      expect(json.containsKey('trace_id'), isFalse);
+
+      // Re-parsing yields an equivalent variant.
+      expect(FeeInfo.fromJson(json), equals(feeInfo));
+    });
+  });
+
   group('FeeInfo Tendermint compatibility', () {
     test('should serialize Tendermint fees as CosmosGas for requests', () {
       final feeInfo = FeeInfo.tendermint(

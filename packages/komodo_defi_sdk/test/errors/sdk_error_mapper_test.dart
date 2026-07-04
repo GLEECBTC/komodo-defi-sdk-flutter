@@ -21,6 +21,70 @@ void main() {
       expect(sdkError.messageArgs, ['KMD', '1', '2']);
     });
 
+    test('maps GasFree custody shortfall to insufficient funds', () {
+      const error = GaslessWithdrawErrorInsufficientGasFreeBalanceException(
+        coin: 'USDT-TRC20',
+        gasfreeAddress: '',
+        available: BigDecimal('0'),
+        required: BigDecimal('8'),
+      );
+      final sdkError = mapper.map(error);
+
+      expect(sdkError.code, SdkErrorCode.insufficientFunds);
+      expect(sdkError.category, SdkErrorCategory.funds);
+      expect(sdkError.messageKey, 'withdrawGaslessInsufficientGasFreeBalance');
+      expect(sdkError.messageArgs, [
+        '',
+        '0',
+        'USDT-TRC20',
+        '8',
+        'USDT-TRC20',
+        'USDT-TRC20',
+      ]);
+      expect(sdkError.retryable, isFalse);
+      // Never the native-gas diagnosis: gasless fees are paid in the token.
+      expect(sdkError.code, isNot(SdkErrorCode.insufficientGas));
+      // Empty address must not leave a dangling 'address ' in the fallback.
+      expect(sdkError.fallbackMessage, contains('Your GasFree address has'));
+    });
+
+    test('maps GasFree activation shortfall with the activation fee', () {
+      const error =
+          GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException(
+            coin: 'USDT-TRC20',
+            gasfreeAddress: 'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g',
+            available: BigDecimal('2'),
+            required: BigDecimal('8'),
+            activationFee: BigDecimal('1.5'),
+          );
+      final sdkError = mapper.map(error);
+
+      expect(sdkError.code, SdkErrorCode.insufficientFunds);
+      expect(sdkError.category, SdkErrorCategory.funds);
+      expect(
+        sdkError.messageKey,
+        'withdrawGaslessInsufficientGasFreeBalanceForActivation',
+      );
+      expect(sdkError.messageArgs, [
+        'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g',
+        '2',
+        'USDT-TRC20',
+        '8',
+        'USDT-TRC20',
+        '1.5',
+        'USDT-TRC20',
+        'USDT-TRC20',
+      ]);
+      expect(sdkError.retryable, isFalse);
+      // The technical detail (folded into the fallback) keeps the full
+      // address and the activation fee.
+      expect(sdkError.fallbackMessage, contains('activation fee 1.5'));
+      expect(
+        sdkError.fallbackMessage,
+        contains('TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g'),
+      );
+    });
+
     test('maps web3 timeout to network timeout', () {
       const error = Web3RpcErrorTimeoutException('timeout');
       final sdkError = mapper.map(error);
