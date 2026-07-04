@@ -10,7 +10,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// Activation strategy for custom ERC20 tokens. This strategy is used to
 /// activate tokens that are not part of the live coins configuration.
 class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
-  const CustomErc20ActivationStrategy(super.client);
+  const CustomErc20ActivationStrategy(super.client, {this.tronGaslessProvider});
+
+  /// Optional Tron GasFree provider config. When present, custom TRC20 token
+  /// activation opts in to KDF's gasless token activation contract.
+  final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -70,9 +74,12 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
           asset.protocol.config,
         ),
-        final Trc20Protocol _ => Trc20ActivationParams.fromJsonConfig(
-          asset.protocol.config,
-        ),
+        final Trc20Protocol _ =>
+          Trc20ActivationParams.fromJsonConfig(asset.protocol.config).copyWith(
+            gasless: tronGaslessProvider == null
+                ? null
+                : const TronGaslessTokenActivationConfig(enabled: true),
+          ),
         _ => throw UnsupportedError(
           'Unsupported custom token protocol: ${asset.protocol.runtimeType}',
         ),

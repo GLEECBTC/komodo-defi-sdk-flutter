@@ -59,6 +59,12 @@ class PubkeyManager implements IPubkeyManager {
 
   // Internal state for watching pubkeys per asset
   final Map<AssetId, AssetPubkeys> _pubkeysCache = {};
+
+  /// Addresses ever observed holding funds, per asset. Feeds the TRON gasless
+  /// phantom-address filter (see [filterGaslessPhantomAddresses]) and is
+  /// persisted with the pubkeys so used-then-emptied addresses stay visible
+  /// across restarts.
+  final Map<AssetId, Set<String>> _everFundedAddresses = {};
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
   final Map<AssetId, StreamController<AssetPubkeys>> _pubkeysControllers = {};
   // Track the Asset for each AssetId that has an associated controller so that
@@ -179,9 +185,17 @@ class PubkeyManager implements IPubkeyManager {
         asset: asset,
         strategy: strategy,
       );
-      final pubkeys = await strategy.getPubkeys(asset.id, _client);
+      final raw = await strategy.getPubkeys(asset.id, _client);
+      final everFunded = _observeFundedAddresses(asset.id, raw.keys);
+      final pubkeys = filterGaslessPhantomAddresses(
+        asset,
+        raw,
+        everFunded: everFunded,
+      );
       _pubkeysCache[asset.id] = pubkeys;
-      _persistPubkeysForWallet(walletId, asset, pubkeys).ignore();
+      // `savePubkeys` replaces the record wholesale, so persisting the
+      // filtered list also purges previously-cached phantom addresses.
+      _persistPubkeysForWallet(walletId, asset, pubkeys, everFunded).ignore();
       return pubkeys;
     }();
 
@@ -242,14 +256,33 @@ class PubkeyManager implements IPubkeyManager {
 
   // Removed unused non-wallet-stable helpers to avoid confusion
 
+  /// Records addresses currently holding funds into the per-asset ever-funded
+  /// set and returns it.
+  Set<String> _observeFundedAddresses(
+    AssetId assetId,
+    Iterable<PubkeyInfo> keys,
+  ) {
+    final everFunded = _everFundedAddresses.putIfAbsent(assetId, () => {});
+    for (final key in keys) {
+      if (key.balance.hasValue) everFunded.add(key.address);
+    }
+    return everFunded;
+  }
+
   // Wallet-stable variants to avoid cross-wallet contamination during async ops
   Future<void> _persistPubkeysForWallet(
     WalletId walletId,
     Asset asset,
-    AssetPubkeys pubkeys,
-  ) async {
+    AssetPubkeys pubkeys, [
+    Set<String> everFundedAddresses = const {},
+  ]) async {
     try {
-      await _storage.savePubkeys(walletId, asset.id.id, pubkeys);
+      await _storage.savePubkeys(
+        walletId,
+        asset.id.id,
+        pubkeys,
+        everFundedAddresses: everFundedAddresses,
+      );
     } catch (_) {
       // best-effort persistence
     }
@@ -268,17 +301,23 @@ class PubkeyManager implements IPubkeyManager {
           (raw['addresses'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
           const <Map<String, dynamic>>[];
       final keys = <PubkeyInfo>[];
+      final storedEverFunded = <String>{};
       for (final addr in addresses) {
         final bal = BalanceInfo.fromJson(
           (addr['balance'] as Map).cast<String, dynamic>(),
         );
+        final address = addr['address'] as String;
+        if (addr['ever_funded'] == true) storedEverFunded.add(address);
         keys.add(
           PubkeyInfo(
-            address: addr['address'] as String,
+            address: address,
             derivationPath: addr['derivation_path'] as String?,
             chain: addr['chain'] as String?,
             balance: bal,
             coinTicker: asset.id.id,
+            gasfreeAddress:
+                addr['gasfree_address'] as String? ??
+                addr['gasfreeAddress'] as String?,
           ),
         );
       }
@@ -288,11 +327,19 @@ class PubkeyManager implements IPubkeyManager {
       final sync =
           SyncStatusEnum.tryParse(syncString) ?? SyncStatusEnum.success;
 
-      return AssetPubkeys(
-        assetId: asset.id,
-        keys: keys,
-        availableAddressesCount: available,
-        syncStatus: sync,
+      final everFunded = _everFundedAddresses.putIfAbsent(asset.id, () => {})
+        ..addAll(storedEverFunded);
+      _observeFundedAddresses(asset.id, keys);
+
+      return filterGaslessPhantomAddresses(
+        asset,
+        AssetPubkeys(
+          assetId: asset.id,
+          keys: keys,
+          availableAddressesCount: available,
+          syncStatus: sync,
+        ),
+        everFunded: everFunded,
       );
     } catch (_) {
       return null;
@@ -543,6 +590,7 @@ class PubkeyManager implements IPubkeyManager {
 
     // Clear caches
     _pubkeysCache.clear();
+    _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
 
@@ -601,9 +649,68 @@ class PubkeyManager implements IPubkeyManager {
     }
 
     _pubkeysCache.clear();
+    _everFundedAddresses.clear();
     _hdAddressScanRetryAfter.clear();
     _watchedAssets.clear();
     _currentWalletId = null;
     _logger.fine('Disposed');
   }
+}
+
+/// Drops never-used phantom addresses for TRON gasless assets.
+///
+/// Gasless assets are single-address by design: the custody model (headline
+/// balance, `gasless::account_status`, gasless sends) only covers the enabled
+/// (first-derived) address, and KDF's persistent HD storage keeps re-reporting
+/// every address ever created via `get_new_address` — including never-used
+/// ones from before the wallet gated address creation. Filtering at this
+/// choke point keeps every consumer coherent (receive list, withdraw sources,
+/// transaction-history address groups, stranded-funds notice).
+///
+/// Kept: the enabled address (always), any address currently holding funds
+/// (stranded balances stay visible and consolidatable), and any address in
+/// [everFunded] — ever observed funded, persisted with the pubkeys — so a
+/// used-then-emptied address keeps its transaction history reachable. Only
+/// addresses with no observed use are dropped; they are seed-derivable and
+/// reappear on the next fetch if they ever receive funds (KDF keeps
+/// reporting them; the filter re-admits them on balance).
+///
+/// Applied to both fresh fetches and cache hydration; `savePubkeys` replaces
+/// records wholesale, so the persisted cache self-purges on the first
+/// filtered fetch. Note for SDK consumers: an address created via
+/// `get_new_address` for a gasless asset is hidden until funded — this
+/// wallet gates TRON address creation in the UI for exactly that reason.
+AssetPubkeys filterGaslessPhantomAddresses(
+  Asset asset,
+  AssetPubkeys pubkeys, {
+  Set<String> everFunded = const {},
+}) {
+  final protocol = asset.protocol;
+  if (protocol is! TrxProtocol && protocol is! Trc20Protocol) return pubkeys;
+  if (pubkeys.keys.length <= 1) return pubkeys;
+  // gasfreeAddress is only populated when a gasless provider is configured;
+  // without one, TRON multi-address behaves like any other HD asset.
+  final isGasless = pubkeys.keys.any(
+    (key) => (key.gasfreeAddress ?? '').isNotEmpty,
+  );
+  if (!isGasless) return pubkeys;
+
+  // KDF reports HD addresses in derivation order, so the first entry is the
+  // enabled address that custody status and gasless sends bind to.
+  final keys = [
+    pubkeys.keys.first,
+    ...pubkeys.keys
+        .skip(1)
+        .where(
+          (key) => key.balance.hasValue || everFunded.contains(key.address),
+        ),
+  ];
+  if (keys.length == pubkeys.keys.length) return pubkeys;
+
+  return AssetPubkeys(
+    assetId: pubkeys.assetId,
+    keys: keys,
+    availableAddressesCount: pubkeys.availableAddressesCount,
+    syncStatus: pubkeys.syncStatus,
+  );
 }

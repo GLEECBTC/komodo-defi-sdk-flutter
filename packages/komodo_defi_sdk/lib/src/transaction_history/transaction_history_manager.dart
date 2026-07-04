@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show BalanceEvent;
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
@@ -54,6 +55,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     TransactionStorage? storage,
     AssetHistoryStorage? assetHistoryStorage,
   }) : _storage = storage ?? TransactionStorage.defaultForPlatform(),
+       _pubkeyManager = pubkeyManager,
        _strategyFactory = TransactionHistoryStrategyFactory(
          pubkeyManager,
          _auth,
@@ -70,6 +72,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
+  final PubkeyManager _pubkeyManager;
   final IAssetProvider _assetProvider;
   final SharedActivationCoordinator _activationCoordinator;
   final TransactionStorage _storage;
@@ -84,6 +87,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   final _balanceFallbackSubscriptions =
       <AssetId, StreamSubscription<BalanceEvent>>{};
   final _lastBalanceForPolling = <AssetId, BalanceInfo>{};
+  final _lastCustodyBalanceForPolling = <AssetId, Decimal>{};
   final _syncInProgress = <AssetId>{};
   final _rateLimiter = _RateLimiter(const Duration(milliseconds: 500));
 
@@ -751,15 +755,59 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     try {
       await _ensureAssetActivated(asset);
       final response = await _client.rpc.wallet.myBalance(coin: asset.id.id);
+      final custodyChanged = await _custodyBalanceChanged(asset);
       await _syncHistoryIfBalanceChanged(
         asset,
         balance: response.balance,
-        force: force,
+        force: force || custodyChanged,
       );
     } catch (_) {
       if (force) {
         await _pollNewTransactions(asset);
       }
+    }
+  }
+
+  /// Whether [asset] is a gasless TRC-20 (any pubkey carries a GasFree
+  /// custody address). Custody balance changes are invisible to KDF EOA
+  /// balance events, so these assets need custody-aware polling.
+  Future<bool> _isGaslessTrc20(Asset asset) async {
+    if (asset.protocol is! Trc20Protocol) return false;
+    try {
+      final pubkeys =
+          _pubkeyManager.lastKnown(asset.id) ??
+          await _pubkeyManager.getPubkeys(asset);
+      return pubkeys.keys.any((key) => (key.gasfreeAddress ?? '').isNotEmpty);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Detects GasFree custody balance changes for gasless TRC-20 assets via
+  /// the per-coin gasless account status RPC. Returns false for other assets
+  /// or when the status call fails (provider unreachable), so history syncing
+  /// falls back to EOA balance gating alone.
+  ///
+  /// Note: [_fetchOpaqueCursorTransactionsSince] stops at the stored head, so
+  /// custody transactions older than the head are not backfilled mid-session;
+  /// storage is in-memory and [getTransactionsStreamed] re-fetches from page 1
+  /// on every coin-details open, so the gap self-heals.
+  ///
+  /// The new balance is committed before the triggered sync runs (mirroring
+  /// [_updateLastKnownBalance] for EOA balances), so a sync whose retries all
+  /// fail drops that one trigger; the next custody movement or a coin-details
+  /// reopen (page-1 refetch) recovers.
+  Future<bool> _custodyBalanceChanged(Asset asset) async {
+    if (!await _isGaslessTrc20(asset)) return false;
+    try {
+      final status = await _client.rpc.withdraw.gaslessAccountStatus(
+        coin: asset.id.id,
+      );
+      final previous = _lastCustodyBalanceForPolling[asset.id];
+      _lastCustodyBalanceForPolling[asset.id] = status.onChainBalance;
+      return previous == null || previous != status.onChainBalance;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -824,8 +872,16 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _stopPolling(asset.id);
 
     try {
-      // Prefer balance event stream when supported; otherwise, use timer polling
-      if (!_supportsBalanceStreaming(asset)) {
+      // Prefer balance event stream when supported; otherwise, use timer
+      // polling. ALL TRC-20 assets go straight to timer polling: gasless
+      // custody activity never fires KDF EOA balance events (a dead end for
+      // custody-first users), and detecting gasless-ness from pubkeys here is
+      // unreliable at startup (stale hydrated cache, transient activation
+      // errors) — timer polling degrades gracefully for non-gasless TRC-20,
+      // while a misrouted gasless asset would never see its history update.
+      // _custodyBalanceChanged re-evaluates gasless-ness on every tick.
+      if (!_supportsBalanceStreaming(asset) ||
+          asset.protocol is Trc20Protocol) {
         _startTimerPolling(asset);
         return;
       }
@@ -881,6 +937,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     _lastBalanceForPolling.remove(assetId);
+    _lastCustodyBalanceForPolling.remove(assetId);
   }
 
   // Periodically refresh the most recent transactions to update confirmations

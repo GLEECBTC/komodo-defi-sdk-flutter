@@ -131,23 +131,33 @@ Future<void> bootstrap({
   }, dependsOn: [ApiClient, KomodoDefiLocalAuth, AssetManager]);
 
   // Register BalanceManager BEFORE ActivationManager to avoid circular dependency
-  container.registerSingletonAsync<BalanceManager>(() async {
-    final assets = await container.getAsync<AssetManager>();
-    final auth = await container.getAsync<KomodoDefiLocalAuth>();
-    final eventStreamingManager = await container
-        .getAsync<EventStreamingManager>();
+  container.registerSingletonAsync<BalanceManager>(
+    () async {
+      final assets = await container.getAsync<AssetManager>();
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
+      final eventStreamingManager = await container
+          .getAsync<EventStreamingManager>();
+      final client = await container.getAsync<ApiClient>();
 
-    // Create BalanceManager without its dependencies on SharedActivationCoordinator and PubkeyManager initially
-    return BalanceManager(
-      activationCoordinator:
-          null, // Will be set after SharedActivationCoordinator is created
-      assetLookup: assets,
-      pubkeyManager: null, // Will be set after PubkeyManager is created
-      auth: auth,
-      eventStreamingManager: eventStreamingManager,
-      assetHistoryStorage: container<AssetHistoryStorage>(),
-    );
-  }, dependsOn: [AssetManager, KomodoDefiLocalAuth, EventStreamingManager]);
+      // Create BalanceManager without its dependencies on SharedActivationCoordinator and PubkeyManager initially
+      return BalanceManager(
+        activationCoordinator:
+            null, // Will be set after SharedActivationCoordinator is created
+        assetLookup: assets,
+        pubkeyManager: null, // Will be set after PubkeyManager is created
+        auth: auth,
+        eventStreamingManager: eventStreamingManager,
+        assetHistoryStorage: container<AssetHistoryStorage>(),
+        client: client,
+      );
+    },
+    dependsOn: [
+      AssetManager,
+      KomodoDefiLocalAuth,
+      EventStreamingManager,
+      ApiClient,
+    ],
+  );
 
   // Register activation manager with asset manager dependency
   container.registerSingletonAsync<ActivationManager>(
@@ -171,6 +181,7 @@ Future<void> bootstrap({
         // as the asset manager
         container<KomodoAssetsUpdateManager>(),
         activatedAssetsCache,
+        tronGaslessProvider: config.tronGaslessProvider,
       );
 
       return activationManager;

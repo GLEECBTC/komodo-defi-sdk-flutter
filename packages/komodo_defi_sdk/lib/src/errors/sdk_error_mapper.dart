@@ -375,6 +375,61 @@ class _MmRpcExceptionHandler extends SdkErrorHandler {
           context: context,
           source: error,
         );
+      case GaslessWithdrawErrorInsufficientGasFreeBalanceException():
+        return _build(
+          code: SdkErrorCode.insufficientFunds,
+          category: SdkErrorCategory.funds,
+          messageKey: _keyWithdrawGaslessInsufficientGasFreeBalance,
+          messageArgs: [
+            error.gasfreeAddress,
+            error.available.value,
+            error.coin,
+            error.required.value,
+            error.coin,
+            error.coin,
+          ],
+          fallbackMessage:
+              'Your GasFree address'
+              '${error.gasfreeAddress.isEmpty ? '' : ' ${error.gasfreeAddress}'}'
+              ' has ${_formatAmount(error.available.value, error.coin)}, but '
+              'this send needs '
+              '${_formatAmount(error.required.value, error.coin)}. '
+              'Add more ${error.coin} to your GasFree address.',
+          detail: detail,
+          retryable: false,
+          context: context,
+          source: error,
+        );
+      case GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException():
+        return _build(
+          code: SdkErrorCode.insufficientFunds,
+          category: SdkErrorCategory.funds,
+          messageKey:
+              _keyWithdrawGaslessInsufficientGasFreeBalanceForActivation,
+          messageArgs: [
+            error.gasfreeAddress,
+            error.available.value,
+            error.coin,
+            error.required.value,
+            error.coin,
+            error.activationFee.value,
+            error.coin,
+            error.coin,
+          ],
+          fallbackMessage:
+              'Your GasFree address'
+              '${error.gasfreeAddress.isEmpty ? '' : ' ${error.gasfreeAddress}'}'
+              ' has ${_formatAmount(error.available.value, error.coin)}, but '
+              'this send needs '
+              '${_formatAmount(error.required.value, error.coin)}, including '
+              'a one-time '
+              '${_formatAmount(error.activationFee.value, error.coin)} '
+              'activation fee. Add more ${error.coin} to your GasFree address.',
+          detail: detail,
+          retryable: false,
+          context: context,
+          source: error,
+        );
       case WithdrawErrorNotSufficientPlatformBalanceForFeeException():
         return _build(
           code: SdkErrorCode.insufficientGas,
@@ -1174,6 +1229,23 @@ String? _detailFromMmRpcException(
       final coin = error.coin;
       return 'available ${_formatAmount(error.available.value, coin)}, '
           'required ${_formatAmount(error.required.value, coin)}';
+    case GaslessWithdrawErrorInsufficientGasFreeBalanceException():
+      final coin = error.coin;
+      final address = error.gasfreeAddress.isEmpty
+          ? ''
+          : 'GasFree address ${error.gasfreeAddress}; ';
+      return '${address}available '
+          '${_formatAmount(error.available.value, coin)}, '
+          'required ${_formatAmount(error.required.value, coin)}';
+    case GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException():
+      final coin = error.coin;
+      final address = error.gasfreeAddress.isEmpty
+          ? ''
+          : 'GasFree address ${error.gasfreeAddress}; ';
+      return '${address}available '
+          '${_formatAmount(error.available.value, coin)}, '
+          'required ${_formatAmount(error.required.value, coin)}, '
+          'activation fee ${_formatAmount(error.activationFee.value, coin)}';
     case WithdrawErrorCoinDoesntSupportInitWithdrawException():
       return _detailFromSimpleMessage(error.coin);
     case WithdrawErrorCoinDoesntSupportNftWithdrawException():
@@ -1352,6 +1424,10 @@ const String _keyInvalidAddress = 'sdk_errors.invalid_address';
 const String _keyInvalidAddressApp = 'invalidAddress';
 const String _keyWithdrawNotSufficientBalance =
     'withdrawNotSufficientBalanceError';
+const String _keyWithdrawGaslessInsufficientGasFreeBalance =
+    'withdrawGaslessInsufficientGasFreeBalance';
+const String _keyWithdrawGaslessInsufficientGasFreeBalanceForActivation =
+    'withdrawGaslessInsufficientGasFreeBalanceForActivation';
 const String _keyWithdrawNotEnoughBalanceForGas =
     'withdrawNotEnoughBalanceForGasError';
 const String _keyWithdrawZeroBalance = 'withdrawZeroBalanceError';

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -11,6 +12,13 @@ class LegacyWithdrawalManager implements WithdrawalManager {
 
   final ApiClient _client;
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
+
+  @override
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) {
+    // Gasless is a TRON-only (task-based) feature; the legacy manager only
+    // serves protocols without gasless support, but delegate for completeness.
+    return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
+  }
 
   /// Creates a preview and immediately executes the withdrawal.
   ///
@@ -73,7 +81,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           status: WithdrawalStatus.complete,
           message: 'Withdrawal completed successfully',
           withdrawalResult: WithdrawalResult(
-            txHash: broadcastResponse.txHash,
+            txHash: broadcastResponse.txHash ?? result.txHash,
             balanceChanges: result.balanceChanges,
             coin: result.coin,
             toAddress: result.to.first,
@@ -178,7 +186,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
         status: WithdrawalStatus.complete,
         message: 'Withdrawal completed successfully',
         withdrawalResult: WithdrawalResult(
-          txHash: broadcastResponse.txHash,
+          txHash: broadcastResponse.txHash ?? preview.txHash,
           balanceChanges: preview.balanceChanges,
           coin: assetId,
           toAddress: preview.to.first,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_exceptions.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
@@ -75,11 +76,13 @@ class BalanceManager implements IBalanceManager {
     required SharedActivationCoordinator? activationCoordinator,
     required EventStreamingManager eventStreamingManager,
     AssetHistoryStorage? assetHistoryStorage,
+    ApiClient? client,
   }) : _activationCoordinator = activationCoordinator,
        _pubkeyManager = pubkeyManager,
        _assetLookup = assetLookup,
        _auth = auth,
        _eventStreamingManager = eventStreamingManager,
+       _client = client,
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
     // Listen for auth state changes
     _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
@@ -93,6 +96,11 @@ class BalanceManager implements IBalanceManager {
   final KomodoDefiLocalAuth _auth;
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
+
+  /// RPC client, used to fetch the GasFree custody balance for gasless TRC-20
+  /// assets. Null in contexts (e.g. some tests) where gasless substitution is
+  /// not needed; when null, all assets use their standard (EOA) balance.
+  final ApiClient? _client;
   StreamSubscription<KdfUser?>? _authSubscription;
   final Duration _defaultPollingInterval = const Duration(seconds: 30);
 
@@ -101,6 +109,12 @@ class BalanceManager implements IBalanceManager {
 
   /// Cache of the latest known balances for each asset
   final Map<AssetId, BalanceInfo> _balanceCache = {};
+
+  /// Assets whose cached balance is custody-sourced (GasFree substitution in
+  /// [getBalance]/[precacheBalance]). When a custody refresh fails for one of
+  /// these, the cached custody value is kept instead of being overwritten with
+  /// the EOA balance — which would flash a wrong headline until the next poll.
+  final Set<AssetId> _custodySourcedBalances = {};
 
   /// Track active balance watch streams by asset ID
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
@@ -223,6 +237,7 @@ class BalanceManager implements IBalanceManager {
     }
 
     _balanceCache.clear();
+    _custodySourcedBalances.clear();
     stopwatch.stop();
     _logger.fine(
       'State reset completed in ${stopwatch.elapsedMilliseconds}ms '
@@ -253,15 +268,88 @@ class BalanceManager implements IBalanceManager {
     }
 
     try {
+      // For gasless TRC-20 assets, the spendable balance lives at the GasFree
+      // custody address, not the EOA. Substitute it so every balance surface
+      // (list, portfolio, send-max) reflects what the user can gaslessly spend.
+      // Gated so the non-gasless path is unchanged (no extra async hop).
+      if (_client != null && _isTrc20(asset)) {
+        final custody = await _maybeGaslessCustodyBalance(asset);
+        if (custody != null) {
+          _balanceCache[assetId] = custody;
+          _custodySourcedBalances.add(assetId);
+          return custody;
+        }
+        // Custody fetch failed. If the cache is custody-sourced, keep serving
+        // it: substituting the EOA balance here would overwrite the headline
+        // with a wrong (EOA/zero) number until the next successful poll.
+        final cached = _balanceCache[assetId];
+        if (cached != null && _custodySourcedBalances.contains(assetId)) {
+          return cached;
+        }
+      }
+
       final balance = await _pubkeyManager!
           .getPubkeys(asset)
           .then((pubkeys) => pubkeys.balance);
+      // A concurrent custody fetch may have landed while awaiting the EOA
+      // balance; don't clobber the custody-sourced cache with the EOA number.
+      if (_isTrc20(asset) && _custodySourcedBalances.contains(assetId)) {
+        final custodyCached = _balanceCache[assetId];
+        if (custodyCached != null) return custodyCached;
+      }
       // Update cache with the latest balance
       _balanceCache[assetId] = balance;
       return balance;
     } catch (e) {
       // Rethrow with more context
       throw StateError('Failed to get balance for ${assetId.name}: $e');
+    }
+  }
+
+  /// Whether [asset] is a TRON TRC-20 token, whose gaslessly-spendable balance
+  /// lives at the GasFree custody address rather than the EOA.
+  bool _isTrc20(Asset asset) => asset.protocol is Trc20Protocol;
+
+  /// Returns the GasFree custody balance for a gasless-enabled TRC-20 [asset],
+  /// or null when the asset is not a gasless TRC-20, no client is available, or
+  /// the status could not be fetched (e.g. the token has no GasFree provider) —
+  /// in which case the caller falls back to the standard (EOA) balance.
+  Future<BalanceInfo?> _maybeGaslessCustodyBalance(Asset asset) async {
+    final client = _client;
+    if (client == null || !_isTrc20(asset)) return null;
+    try {
+      final status = await client.rpc.withdraw.gaslessAccountStatus(
+        coin: asset.id.id,
+      );
+      return status.custodyBalance;
+    } catch (e) {
+      // Not gasless-configured or a transient error: fall back to EOA balance.
+      // Permanent errors (asset re-activated without a gasless provider, or
+      // not a gasless-capable coin) also unmark the custody-sourced cache so
+      // the asset degrades to EOA instead of pinning a stale custody number.
+      // The error_type reaches us via GeneralErrorResponse.toString() (which
+      // embeds the raw response); 'no GasFree provider' additionally matches
+      // the human-readable GaslessNotConfigured message as a fallback.
+      //
+      // Deliberately NOT unmarked: TronRpcUnavailable / ProviderError /
+      // InternalError — for those the cached custody value remains the best
+      // available number (the funds ARE at custody on-chain), whereas the EOA
+      // balance would be plain wrong. A prolonged outage therefore serves a
+      // stale-but-plausible custody number; bounding that requires the KDF to
+      // degrade auth failures to its on-chain fallback (tracked in
+      // docs/TRON_GASFREE_KDF_FOLLOWUPS.md).
+      final error = e.toString();
+      if (error.contains('GaslessNotConfigured') ||
+          error.contains('no GasFree provider') ||
+          error.contains('CoinNotSupported') ||
+          error.contains('NotEthCoin')) {
+        _custodySourcedBalances.remove(asset.id);
+      }
+      _logger.fine(
+        'GasFree custody balance unavailable for ${asset.id.name}; '
+        'using standard balance: $e',
+      );
+      return null;
     }
   }
 
@@ -453,14 +541,22 @@ class BalanceManager implements IBalanceManager {
         if (!controller.isClosed) controller.add(balance);
       }
 
-      // Subscribe to balance event stream for real-time updates
-      if (!_supportsBalanceStreaming(asset)) {
-        _attachPubkeyHintListener(
-          asset: asset,
-          assetId: assetId,
-          controller: controller,
-          activateIfNeeded: activateIfNeeded,
-        );
+      // Subscribe to balance event stream for real-time updates.
+      //
+      // TRC-20 assets are polled instead: their displayed balance is the GasFree
+      // custody balance (fetched via `getBalance`), which the EOA balance event
+      // stream and the pubkey-derived hint would not reflect. The pubkey hint is
+      // skipped for them to avoid briefly flashing the EOA balance.
+      final isTrc20Asset = _client != null && _isTrc20(asset);
+      if (!_supportsBalanceStreaming(asset) || isTrc20Asset) {
+        if (!isTrc20Asset) {
+          _attachPubkeyHintListener(
+            asset: asset,
+            assetId: assetId,
+            controller: controller,
+            activateIfNeeded: activateIfNeeded,
+          );
+        }
         await _startBalancePolling(
           asset: asset,
           assetId: assetId,
@@ -924,6 +1020,7 @@ class BalanceManager implements IBalanceManager {
 
     // Clear all other resources
     _balanceCache.clear();
+    _custodySourcedBalances.clear();
     _currentWalletId = null;
     _logger.fine('Disposed');
 
@@ -953,9 +1050,35 @@ class BalanceManager implements IBalanceManager {
 
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        final balance = await _pubkeyManager!
-            .getPubkeys(asset)
-            .then((pubkeys) => pubkeys.balance);
+        BalanceInfo? custody;
+        if (_client != null && _isTrc20(asset)) {
+          custody = await _maybeGaslessCustodyBalance(asset);
+          if (custody != null) {
+            _custodySourcedBalances.add(asset.id);
+          } else {
+            // Keep a custody-sourced cache instead of overwriting it with the
+            // EOA balance; re-emit it so watchers settle (see getBalance).
+            //
+            // With no custody cache yet (first activation), fall through to
+            // the EOA precache: custody errors are swallowed above, so the
+            // coin-not-found retry below never fires for them and the first
+            // number may briefly be the EOA balance — the watcher's own
+            // getBalance / first poll corrects it within one interval.
+            final cached = _balanceCache[asset.id];
+            if (cached != null && _custodySourcedBalances.contains(asset.id)) {
+              final controller = _balanceControllers[asset.id];
+              if (controller != null && !controller.isClosed) {
+                controller.add(cached);
+              }
+              return;
+            }
+          }
+        }
+        final balance =
+            custody ??
+            await _pubkeyManager!
+                .getPubkeys(asset)
+                .then<BalanceInfo>((pubkeys) => pubkeys.balance);
         _balanceCache[asset.id] = balance;
 
         // If there's an active stream controller for this asset, emit the balance

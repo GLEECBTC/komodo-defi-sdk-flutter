@@ -4,18 +4,24 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Storage interface for persisting pubkeys between sessions
 abstract class PubkeysStorage {
+  /// [everFundedAddresses] flags addresses ever observed holding funds, so
+  /// the TRON gasless phantom-address filter can keep used-then-emptied
+  /// addresses across restarts.
   Future<void> savePubkeys(
     WalletId walletId,
     String assetTicker,
-    AssetPubkeys pubkeys,
-  );
+    AssetPubkeys pubkeys, {
+    Set<String> everFundedAddresses,
+  });
 
   /// Returns a map of assetTicker -> stored pubkeys JSON for the wallet
   Future<Map<String, Map<String, dynamic>>> listForWallet(WalletId walletId);
 }
 
 class HivePubkeysStorage implements PubkeysStorage {
-  static const _boxName = 'pubkeys_cache_v1';
+  // v3: HiveStoredPubkey gained a trailing `everFunded` field; the prior box
+  // is orphaned rather than migrated (established pattern for this cache).
+  static const _boxName = 'pubkeys_cache_v3';
   Box<HiveAssetPubkeysRecord>? _box;
   Future<Box<HiveAssetPubkeysRecord>> _openBox() async {
     registerPubkeysAdapters();
@@ -31,10 +37,14 @@ class HivePubkeysStorage implements PubkeysStorage {
   Future<void> savePubkeys(
     WalletId walletId,
     String assetTicker,
-    AssetPubkeys pubkeys,
-  ) async {
+    AssetPubkeys pubkeys, {
+    Set<String> everFundedAddresses = const {},
+  }) async {
     final box = await _openBox();
-    final record = HiveAssetPubkeysRecord.fromDomain(pubkeys);
+    final record = HiveAssetPubkeysRecord.fromDomain(
+      pubkeys,
+      everFundedAddresses: everFundedAddresses,
+    );
     await box.put(_keyFor(walletId, assetTicker), record);
   }
 
@@ -58,8 +68,10 @@ class HivePubkeysStorage implements PubkeysStorage {
             .map(
               (k) => {
                 'address': k.address,
+                'gasfree_address': k.gasfreeAddress,
                 'derivation_path': k.derivationPath,
                 'chain': k.chain,
+                'ever_funded': k.everFunded,
                 'balance': {
                   'spendable': k.spendable,
                   'unspendable': k.unspendable,

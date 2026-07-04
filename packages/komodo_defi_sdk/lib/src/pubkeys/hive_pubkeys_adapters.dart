@@ -13,21 +13,35 @@ class HiveStoredPubkey {
     required this.chain,
     required this.spendable,
     required this.unspendable,
+    this.gasfreeAddress,
+    this.everFunded = false,
   });
 
-  factory HiveStoredPubkey.fromDomain(PubkeyInfo info) => HiveStoredPubkey(
+  factory HiveStoredPubkey.fromDomain(
+    PubkeyInfo info, {
+    bool everFunded = false,
+  }) => HiveStoredPubkey(
     address: info.address,
     derivationPath: info.derivationPath,
     chain: info.chain,
     spendable: info.balance.spendable.toString(),
     unspendable: info.balance.unspendable.toString(),
+    gasfreeAddress: info.gasfreeAddress,
+    everFunded: everFunded,
   );
 
   final String address;
+  final String? gasfreeAddress;
   final String? derivationPath;
   final String? chain;
   final String spendable;
   final String unspendable;
+
+  /// Whether this address has ever been observed holding funds. Used by the
+  /// TRON gasless phantom-address filter to distinguish never-used addresses
+  /// (safe to hide) from used-then-emptied ones (kept so their transaction
+  /// history stays reachable).
+  final bool everFunded;
 
   PubkeyInfo toDomain(String coinTicker) => PubkeyInfo(
     address: address,
@@ -39,6 +53,7 @@ class HiveStoredPubkey {
       unspendable: Decimal.parse(unspendable),
     ),
     coinTicker: coinTicker,
+    gasfreeAddress: gasfreeAddress,
   );
 }
 
@@ -55,12 +70,17 @@ class HiveStoredPubkeyAdapter extends TypeAdapter<HiveStoredPubkey> {
     final chain = hasChain ? reader.readString() : null;
     final spendable = reader.readString();
     final unspendable = reader.readString();
+    final hasGasfreeAddress = reader.readBool();
+    final gasfreeAddress = hasGasfreeAddress ? reader.readString() : null;
+    final everFunded = reader.readBool();
     return HiveStoredPubkey(
       address: address,
       derivationPath: derivation,
       chain: chain,
       spendable: spendable,
       unspendable: unspendable,
+      gasfreeAddress: gasfreeAddress,
+      everFunded: everFunded,
     );
   }
 
@@ -74,7 +94,10 @@ class HiveStoredPubkeyAdapter extends TypeAdapter<HiveStoredPubkey> {
     if (obj.chain != null) writer.writeString(obj.chain!);
     writer
       ..writeString(obj.spendable)
-      ..writeString(obj.unspendable);
+      ..writeString(obj.unspendable)
+      ..writeBool(obj.gasfreeAddress != null);
+    if (obj.gasfreeAddress != null) writer.writeString(obj.gasfreeAddress!);
+    writer.writeBool(obj.everFunded);
   }
 }
 
@@ -85,12 +108,21 @@ class HiveAssetPubkeysRecord {
     required this.keys,
   });
 
-  factory HiveAssetPubkeysRecord.fromDomain(AssetPubkeys pubkeys) =>
-      HiveAssetPubkeysRecord(
-        available: pubkeys.availableAddressesCount,
-        sync: pubkeys.syncStatus.toString(),
-        keys: pubkeys.keys.map(HiveStoredPubkey.fromDomain).toList(),
-      );
+  factory HiveAssetPubkeysRecord.fromDomain(
+    AssetPubkeys pubkeys, {
+    Set<String> everFundedAddresses = const {},
+  }) => HiveAssetPubkeysRecord(
+    available: pubkeys.availableAddressesCount,
+    sync: pubkeys.syncStatus.toString(),
+    keys: pubkeys.keys
+        .map(
+          (info) => HiveStoredPubkey.fromDomain(
+            info,
+            everFunded: everFundedAddresses.contains(info.address),
+          ),
+        )
+        .toList(),
+  );
 
   final int available;
   final String sync;

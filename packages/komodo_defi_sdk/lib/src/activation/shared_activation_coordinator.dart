@@ -54,6 +54,7 @@ class SharedActivationCoordinator {
     // If the wallet ID has changed, reset all state
     if (_currentWalletId != newWalletId) {
       await _resetState();
+      _activationManager.resetActivationSessionState();
       _currentWalletId = newWalletId;
     }
   }
@@ -109,9 +110,12 @@ class SharedActivationCoordinator {
       return existingActivation.future;
     }
 
+    final shouldRefreshTronGaslessActivation = _activationManager
+        .shouldRefreshTronGaslessActivation(asset);
+
     // Check if asset is already active
     final isActive = await _activationManager.isAssetActive(asset.id);
-    if (isActive) {
+    if (isActive && !shouldRefreshTronGaslessActivation) {
       return ActivationResult.success(asset.id);
     }
 

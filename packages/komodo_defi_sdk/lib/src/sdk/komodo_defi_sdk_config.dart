@@ -1,5 +1,6 @@
 // sdk_config.dart
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class KomodoDefiSdkConfig {
   const KomodoDefiSdkConfig({
@@ -12,6 +13,7 @@ class KomodoDefiSdkConfig {
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
     this.marketDataConfig = const MarketDataConfig(),
     this.tronProApiKey,
+    this.tronGaslessProvider,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -43,6 +45,11 @@ class KomodoDefiSdkConfig {
   /// API key. Retained for backward compatibility.
   final String? tronProApiKey;
 
+  /// Optional Tron GasFree provider config. When set, TRX platform activations
+  /// enable gas-free (gasless) TRC20 transfers where the fee is paid in the
+  /// token. Held in memory only — never persisted.
+  final TronGaslessProviderConfig? tronGaslessProvider;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -53,6 +60,7 @@ class KomodoDefiSdkConfig {
     Duration? activatedAssetsCacheTtl,
     MarketDataConfig? marketDataConfig,
     String? tronProApiKey,
+    TronGaslessProviderConfig? tronGaslessProvider,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -69,6 +77,7 @@ class KomodoDefiSdkConfig {
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
+      tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
     );
   }
 }

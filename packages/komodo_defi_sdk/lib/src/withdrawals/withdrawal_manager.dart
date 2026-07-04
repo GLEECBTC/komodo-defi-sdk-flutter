@@ -7,6 +7,8 @@ import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
+import 'package:komodo_defi_types/komodo_defi_type_utils.dart'
+    show jsonFromString;
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Shared fee-estimation strategy classification used by withdrawal flows.
@@ -518,6 +520,17 @@ class WithdrawalManager {
   ///   print('Preview failed: $e');
   /// }
   /// ```
+  /// Fetch the GasFree custody account status for a gasless-enabled TRC-20
+  /// asset: the custody address, its on-chain balance, activation state, fees,
+  /// and the maximum gaslessly-sendable amount.
+  ///
+  /// The GasFree custody address is where a gasless withdrawal settles from, so
+  /// this is the balance a client should treat as spendable for a gasless TRC-20
+  /// asset (the coin's `my_balance` reports the EOA balance instead).
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) {
+    return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
+  }
+
   Future<WithdrawalPreview> previewWithdrawal(
     WithdrawParameters parameters,
   ) async {
@@ -549,10 +562,11 @@ class WithdrawalManager {
       final lastStatus = await stream.last;
 
       if (lastStatus.status.toLowerCase() == 'error') {
-        throw WithdrawalException(
-          lastStatus.details as String,
-          WithdrawalException.mapErrorToCode(lastStatus.details as String),
-        );
+        throw _typedTaskError(lastStatus.details) ??
+            WithdrawalException(
+              lastStatus.details as String,
+              WithdrawalException.mapErrorToCode(lastStatus.details as String),
+            );
       }
 
       if (lastStatus.details is! WithdrawalPreview) {
@@ -640,42 +654,43 @@ class WithdrawalManager {
         );
       }
 
+      final isGasless = _isGaslessPreview(preview);
+
       // Initial progress
       yield WithdrawalProgress(
         status: WithdrawalStatus.inProgress,
-        message: 'Broadcasting signed transaction...',
-        withdrawalResult: WithdrawalResult(
-          txHash: preview.txHash,
-          balanceChanges: preview.balanceChanges,
-          coin: assetId,
-          toAddress: preview.to.first,
-          fee: preview.fee,
-          kmdRewardsEligible:
-              preview.kmdRewards != null &&
-              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
-        ),
+        message: isGasless
+            ? 'Submitting gas-free transfer...'
+            : 'Broadcasting signed transaction...',
+        withdrawalResult: _withdrawalResultFromPreview(preview, assetId),
       );
 
-      // Broadcast the pre-signed transaction
+      // Broadcast the pre-signed transaction (or relay the gas-free payload).
       final response = await _client.rpc.withdraw.sendRawTransaction(
         coin: assetId,
         txHex: preview.txHex,
         txJson: preview.txJson,
       );
 
-      // Final success
+      // A gas-free relay broadcast returns a trace handle, not a tx hash:
+      // poll the relay status until the transfer confirms or fails.
+      if (response.isGaslessRelay) {
+        yield* _pollGaslessTrace(
+          assetId: assetId,
+          traceId: response.traceId!,
+          preview: preview,
+        );
+        return;
+      }
+
+      // Final success (standard broadcast)
       yield WithdrawalProgress(
         status: WithdrawalStatus.complete,
         message: 'Withdrawal complete',
-        withdrawalResult: WithdrawalResult(
+        withdrawalResult: _withdrawalResultFromPreview(
+          preview,
+          assetId,
           txHash: response.txHash,
-          balanceChanges: preview.balanceChanges,
-          coin: assetId,
-          toAddress: preview.to.first,
-          fee: preview.fee,
-          kmdRewardsEligible:
-              preview.kmdRewards != null &&
-              Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
         ),
       );
     } catch (e) {
@@ -684,6 +699,162 @@ class WithdrawalManager {
       );
     }
   }
+
+  /// Whether [preview] represents a gas-free (gasless) transfer that must be
+  /// relayed (rather than directly broadcast) and then tracked.
+  bool _isGaslessPreview(WithdrawalPreview preview) =>
+      preview.fee is FeeInfoTronGasless ||
+      preview.txJson?['relay_type'] == 'tron_gasfree';
+
+  /// Builds a [WithdrawalResult] from a preview, optionally overriding the
+  /// (on-chain) [txHash] and final [fee].
+  WithdrawalResult _withdrawalResultFromPreview(
+    WithdrawalPreview preview,
+    String assetId, {
+    String? txHash,
+    FeeInfo? fee,
+  }) {
+    return WithdrawalResult(
+      txHash: txHash ?? preview.txHash,
+      balanceChanges: preview.balanceChanges,
+      coin: assetId,
+      toAddress: preview.to.isNotEmpty ? preview.to.first : '',
+      fee: fee ?? preview.fee,
+      kmdRewardsEligible:
+          preview.kmdRewards != null &&
+          Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+    );
+  }
+
+  /// Polls `gasless::trace_status` for a relayed gas-free transfer, emitting
+  /// intermediate progress until the transfer reaches a terminal state.
+  ///
+  /// On `confirmed`, completes with the on-chain tx hash and final (token) fee.
+  /// On `failed`, emits a stream error carrying the failure reason.
+  Stream<WithdrawalProgress> _pollGaslessTrace({
+    required String assetId,
+    required String traceId,
+    required WithdrawalPreview preview,
+    // Injectable so the polling/timeout paths are unit-testable.
+    Duration pollInterval = const Duration(seconds: 3),
+    // Bound the loop so a stuck relay cannot poll forever (~5 minutes).
+    int maxAttempts = 100,
+  }) async* {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final GaslessTraceStatusResponse status;
+      try {
+        status = await _client.rpc.withdraw.gaslessTraceStatus(
+          coin: assetId,
+          traceId: traceId,
+        );
+      } catch (e) {
+        // The transfer has ALREADY been relayed on-chain; a transient
+        // status-query failure (network blip, 5xx, proxy 401) must NOT abort
+        // it — surfacing a hard error here would both mislead the user about a
+        // transfer that may still confirm and invite a caller retry that
+        // re-signs and re-relays the same transfer (double-send). Treat it as
+        // still-pending and keep polling; only give up after maxAttempts.
+        log('gasless trace_status poll failed (attempt $attempt): $e');
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+
+      if (status.state.isConfirmed) {
+        final onChainHash = status.txHashOnChain;
+        if (onChainHash != null && onChainHash.isNotEmpty) {
+          yield WithdrawalProgress(
+            status: WithdrawalStatus.complete,
+            message: 'Withdrawal complete',
+            withdrawalResult: _withdrawalResultFromPreview(
+              preview,
+              assetId,
+              txHash: onChainHash,
+              fee: _applyFinalGaslessFee(preview.fee, status.finalFee, traceId),
+            ),
+          );
+          return;
+        }
+        // Confirmed but the on-chain hash has not propagated yet: keep polling
+        // rather than completing with a blank, unlinkable tx hash.
+        log(
+          'gasless transfer confirmed without an on-chain hash; '
+          'continuing to poll (attempt $attempt)',
+        );
+      } else if (status.state.isFailed) {
+        yield* Stream.error(
+          _mapError(
+            status.failureReason ?? 'Gas-free transfer failed',
+            operation: 'withdrawal.gasless',
+            assetId: assetId,
+          ),
+        );
+        return;
+      } else {
+        // Still in flight: surface the relay state to the UI, both as a
+        // human-readable message and as the typed state so consumers can
+        // localize.
+        yield WithdrawalProgress(
+          status: WithdrawalStatus.inProgress,
+          message: _gaslessStateMessage(status.state),
+          gaslessState: status.state,
+          taskId: traceId,
+          withdrawalResult: _withdrawalResultFromPreview(preview, assetId),
+        );
+      }
+
+      await Future<void>.delayed(pollInterval);
+    }
+
+    yield* Stream.error(
+      _mapError(
+        'Gas-free transfer timed out awaiting confirmation',
+        operation: 'withdrawal.gasless',
+        assetId: assetId,
+      ),
+    );
+  }
+
+  /// Replaces the token total in a gasless fee with the authoritative
+  /// `final_fee` reported by the relay, when available.
+  FeeInfo _applyFinalGaslessFee(
+    FeeInfo fee,
+    Decimal? finalFee,
+    String traceId,
+  ) {
+    if (fee is! FeeInfoTronGasless) {
+      // Degenerate state: a gas-free transfer was relayed but the preview fee
+      // is not gas-free-typed, so there is no gas-free fee structure to carry
+      // the relay's authoritative `final_fee` into. This is unreachable on the
+      // normal path (a gas-free preview always carries a FeeInfoTronGasless
+      // fee); surface it rather than silently swallowing the final fee.
+      if (finalFee != null) {
+        log(
+          'gasless trace $traceId reported final_fee=$finalFee but the preview '
+          'fee is ${fee.runtimeType}; cannot apply it to the displayed fee',
+        );
+      }
+      return fee;
+    }
+    return FeeInfo.tronGasless(
+      coin: fee.coin,
+      feeMethod: fee.feeMethod,
+      providerName: fee.providerName,
+      gasfreeAddress: fee.gasfreeAddress,
+      transferFee: fee.transferFee,
+      totalTokenFee: finalFee ?? fee.totalTokenFee,
+      activationFee: fee.activationFee,
+      signedMaxFee: fee.signedMaxFee,
+      traceId: traceId,
+    );
+  }
+
+  String _gaslessStateMessage(GaslessTraceState state) => switch (state) {
+    GaslessTraceState.pending => 'Awaiting gas-free relay...',
+    GaslessTraceState.submitted => 'Gas-free transfer submitted...',
+    GaslessTraceState.onChain => 'Confirming on chain...',
+    GaslessTraceState.confirmed => 'Confirmed',
+    GaslessTraceState.failed => 'Failed',
+  };
 
   /// Creates a preview and immediately executes the withdrawal.
   ///
@@ -768,7 +939,7 @@ class WithdrawalManager {
         if (status.status == 'Error') {
           yield* Stream.error(
             _mapError(
-              status.details as String,
+              _typedTaskError(status.details) ?? status.details as String,
               operation: 'withdrawal.progress',
               assetId: parameters.asset,
             ),
@@ -792,20 +963,28 @@ class WithdrawalManager {
             txHex: details.txHex,
             txJson: details.txJson,
           );
-          yield WithdrawalProgress(
-            status: WithdrawalStatus.complete,
-            message: 'Withdrawal complete',
-            withdrawalResult: WithdrawalResult(
-              txHash: response.txHash,
-              balanceChanges: details.balanceChanges,
-              coin: parameters.asset,
-              toAddress: parameters.toAddress,
-              fee: details.fee,
-              kmdRewardsEligible:
-                  details.kmdRewards != null &&
-                  Decimal.parse(details.kmdRewards!.amount) > Decimal.zero,
-            ),
-          );
+          if (response.isGaslessRelay) {
+            yield* _pollGaslessTrace(
+              assetId: parameters.asset,
+              traceId: response.traceId!,
+              preview: details,
+            );
+          } else {
+            yield WithdrawalProgress(
+              status: WithdrawalStatus.complete,
+              message: 'Withdrawal complete',
+              withdrawalResult: WithdrawalResult(
+                txHash: response.txHash!,
+                balanceChanges: details.balanceChanges,
+                coin: parameters.asset,
+                toAddress: parameters.toAddress,
+                fee: details.fee,
+                kmdRewardsEligible:
+                    details.kmdRewards != null &&
+                    Decimal.parse(details.kmdRewards!.amount) > Decimal.zero,
+              ),
+            );
+          }
         } catch (e, stackTrace) {
           // Log the error and stack trace for debugging purposes
           log('Error while broadcasting transaction: $e');
@@ -845,6 +1024,23 @@ class WithdrawalManager {
       error,
       context: SdkErrorContext(operation: operation, assetId: assetId),
     );
+  }
+
+  /// `task::withdraw` error details arrive as the full MmError JSON object
+  /// (JSON-stringified by [WithdrawStatusResponse.parse]); resolve it to a
+  /// typed exception when the registry recognizes the `error_type` so
+  /// structured data (e.g. GasFree custody shortfall amounts) survives to the
+  /// error mapper instead of collapsing into a display string.
+  MmRpcException? _typedTaskError(dynamic details) {
+    if (details is! String || !details.trimLeft().startsWith('{')) return null;
+    try {
+      return KdfErrorRegistry.tryParse(
+        jsonFromString(details),
+        rpcMethodHint: 'task::withdraw::status',
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   void _validateSiaSourceSelection(WithdrawParameters parameters, Asset asset) {
@@ -1075,6 +1271,8 @@ class WithdrawalManager {
         ibcSourceChannel: params.ibcSourceChannel,
         expirationSeconds: params.expirationSeconds,
         isMax: params.isMax,
+        feeMethod: params.feeMethod,
+        gaslessOptions: params.gaslessOptions,
       );
     } catch (e, stackTrace) {
       // Log the error and stack trace for debugging purposes

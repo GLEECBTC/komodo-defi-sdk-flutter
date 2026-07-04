@@ -22,13 +22,15 @@ export 'package:komodo_defi_framework/komodo_defi_framework.dart'
         TxHistoryEvent;
 export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
-// ZHTLC sync parameters
+// ZHTLC sync parameters + GasFree custody account status
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
-    show ZhtlcSyncParams;
+    show GaslessAccountStatusResponse, GaslessTraceState, ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
 export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
     show BalanceManager;
+export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
+    show MarketDataManager;
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;

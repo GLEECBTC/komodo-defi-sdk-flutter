@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
@@ -23,8 +22,9 @@ class ActivationManager {
     this._balanceManager,
     this._configService,
     this._assetsUpdateManager,
-    this._activatedAssetsCache,
-  );
+    this._activatedAssetsCache, {
+    TronGaslessProviderConfig? tronGaslessProvider,
+  }) : _tronGaslessProvider = tronGaslessProvider;
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
@@ -34,6 +34,11 @@ class ActivationManager {
   final ActivationConfigService _configService;
   final KomodoAssetsUpdateManager _assetsUpdateManager;
   final ActivatedAssetsCache _activatedAssetsCache;
+
+  /// Optional Tron GasFree provider config, attached to TRX platform
+  /// activations to enable gas-free TRC20 transfers. Held in memory only.
+  final TronGaslessProviderConfig? _tronGaslessProvider;
+  final Set<AssetId> _tronGaslessActivationRefreshAttempted = <AssetId>{};
   final _activationMutex = Mutex();
   static const _operationTimeout = Duration(seconds: 30);
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
@@ -54,8 +59,31 @@ class ActivationManager {
   }
 
   /// Activate a single asset
-  Stream<ActivationProgress> activateAsset(Asset asset) =>
-      activateAssets([asset]);
+  Stream<ActivationProgress> activateAsset(Asset asset) {
+    final parentId = asset.id.parentId;
+    if (asset.protocol is Trc20Protocol &&
+        _tronGaslessProvider != null &&
+        parentId != null) {
+      final parentAsset = _assetLookup.fromId(parentId);
+      if (parentAsset != null) {
+        return activateAssets([parentAsset, asset]);
+      }
+    }
+
+    return activateAssets([asset]);
+  }
+
+  /// Whether an active TRC20 token still needs a provider-aware activation
+  /// attempt in this SDK session.
+  bool shouldRefreshTronGaslessActivation(Asset asset) =>
+      _tronGaslessProvider != null &&
+      asset.protocol is Trc20Protocol &&
+      !_tronGaslessActivationRefreshAttempted.contains(asset.id);
+
+  /// Clear per-session activation hints when the active wallet changes.
+  void resetActivationSessionState() {
+    _tronGaslessActivationRefreshAttempted.clear();
+  }
 
   /// Request cancellation of an in-flight activation for [assetId].
   ///
@@ -92,7 +120,7 @@ class ActivationManager {
       throw StateError('ActivationManager has been disposed');
     }
 
-    final groups = _AssetGroup._groupByPrimary(assets);
+    final groups = _AssetGroup._groupByPrimary(assets, _assetLookup);
 
     for (final group in groups) {
       if (_cancelledActivations.containsKey(group.primary.id)) {
@@ -107,9 +135,12 @@ class ActivationManager {
         continue;
       }
 
+      final shouldRefreshTronGaslessActivation =
+          _shouldRefreshTronGaslessActivation(group);
+
       // Check activation status atomically
       final activationStatus = await _checkActivationStatus(group);
-      if (activationStatus.isComplete) {
+      if (activationStatus.isComplete && !shouldRefreshTronGaslessActivation) {
         yield activationStatus;
         continue;
       }
@@ -123,10 +154,6 @@ class ActivationManager {
         );
         try {
           await primaryCompleter.future;
-          yield ActivationProgress.alreadyActiveSuccess(
-            assetName: group.primary.id.name,
-            childCount: group.children?.length ?? 0,
-          );
         } catch (e, st) {
           final mappedError = _mapError(e, group.primary.id);
           yield ActivationProgress.error(
@@ -134,14 +161,35 @@ class ActivationManager {
             sdkError: mappedError,
             stackTrace: st,
           );
+          continue;
         }
-        continue;
-      }
 
-      final parentAsset = group.parentId == null
-          ? null
-          : _assetLookup.fromId(group.parentId!) ??
-                (throw StateError('Parent asset ${group.parentId} not found'));
+        // In-flight activations are keyed on the primary asset id alone, so the
+        // activation we just joined may have enabled the platform WITHOUT our
+        // child tokens — e.g. a concurrent standalone TRX activation racing a
+        // `[TRX, USDT-TRC20]` group. Verify the children are actually enabled
+        // before reporting success: reporting a child as active without ever
+        // registering it in KDF is invisible here and only surfaces later as a
+        // `NoSuchCoin` error at withdraw/preview time.
+        final joinedStatus = await _checkActivationStatus(
+          group,
+          forceRefresh: true,
+        );
+        if (joinedStatus.isComplete) {
+          // The joined activation already enabled our children; record that the
+          // gasless refresh has been attempted so we don't later force a
+          // redundant (and otherwise no-op/hanging) re-activation this session.
+          _markTronGaslessActivationRefreshAttempted(group);
+          yield joinedStatus;
+          continue;
+        }
+
+        // Platform active but our children are missing: fall through to the
+        // activation block below. With the platform already active, the
+        // strategy activates only the still-missing children individually
+        // (enable_erc20, retaining the gasless config) instead of re-running
+        // the platform batch (which KDF would reject as already activated).
+      }
 
       yield ActivationProgress(
         status: 'Starting activation for ${group.primary.id.name}...',
@@ -150,7 +198,7 @@ class ActivationManager {
           stepCount: 1,
           additionalInfo: {
             'primaryAsset': group.primary.id.name,
-            'childCount': group.children?.length ?? 0,
+            'childCount': group.children.length,
           },
         ),
       );
@@ -168,12 +216,13 @@ class ActivationManager {
           privKeyPolicy,
           _configService,
           _activatedAssetsCache,
+          tronGaslessProvider: _tronGaslessProvider,
         );
 
         var completionHandled = false;
         await for (final progress in activator.activate(
-          parentAsset ?? group.primary,
-          group.children?.toList(),
+          group.primary,
+          group.children.toList(),
         )) {
           if (_cancelledActivations.containsKey(group.primary.id)) {
             final reason =
@@ -193,6 +242,27 @@ class ActivationManager {
             break;
           }
 
+          // Complete the join completer BEFORE yielding the terminal progress.
+          // The coordinator breaks out of its `await for` as soon as it
+          // receives a terminal progress, which cancels this async* generator
+          // at the `yield` suspension point below. Concurrent activations that
+          // joined this batch await `primaryCompleter.future` (e.g. a standalone
+          // platform activation racing a `[platform, token]` group); completing
+          // it only inside `_handleActivationComplete` (which runs after the
+          // yield) would never fire once the stream is cancelled, leaving the
+          // joined activation — and therefore the platform coin — hung forever.
+          if (progress.isComplete && !completionHandled) {
+            if (progress.isSuccess) {
+              if (!primaryCompleter.isCompleted) {
+                primaryCompleter.complete();
+              }
+            } else if (!primaryCompleter.isCompleted) {
+              primaryCompleter.completeError(
+                progress.errorMessage ?? 'Unknown error',
+              );
+            }
+          }
+
           yield _attachSdkError(progress, group.primary.id);
 
           if (progress.isComplete) {
@@ -207,9 +277,43 @@ class ActivationManager {
             await _handleActivationComplete(group, progress, primaryCompleter);
           }
         }
+
+        // The strategy can finish WITHOUT emitting a terminal completion event
+        // when the platform and all requested children are already active (the
+        // individual-children path skips already-active children and yields
+        // nothing). Without a terminal event the coordinator's Future
+        // (shared_activation_coordinator) would await forever — emit a synthetic
+        // completion (or failure) so it always resolves.
+        if (!completionHandled &&
+            !_cancelledActivations.containsKey(group.primary.id)) {
+          final status = await _checkActivationStatus(
+            group,
+            forceRefresh: true,
+          );
+          completionHandled = true;
+          if (status.isComplete) {
+            await _handleActivationComplete(group, status, primaryCompleter);
+            yield status;
+          } else {
+            final mappedError = _mapError(
+              StateError(
+                'Activation produced no result for ${group.primary.id.name}',
+              ),
+              group.primary.id,
+            );
+            if (!primaryCompleter.isCompleted) {
+              primaryCompleter.completeError(mappedError);
+            }
+            yield ActivationProgress.error(
+              message: mappedError.fallbackMessage,
+              sdkError: mappedError,
+            );
+          }
+        }
       } catch (e, st) {
         final recoveredProgress = await _tryRecoverAlreadyActivated(group, e);
         if (recoveredProgress != null) {
+          _markTronGaslessActivationRefreshAttempted(group);
           if (!primaryCompleter.isCompleted) {
             primaryCompleter.complete();
           }
@@ -273,16 +377,14 @@ class ActivationManager {
       );
 
       final isActive = enabledAssetIds.contains(group.primary.id);
-      final childrenActive =
-          group.children?.every(
-            (child) => enabledAssetIds.contains(child.id),
-          ) ??
-          true;
+      final childrenActive = group.children.every(
+        (child) => enabledAssetIds.contains(child.id),
+      );
 
       if (isActive && childrenActive) {
         return ActivationProgress.alreadyActiveSuccess(
           assetName: group.primary.id.name,
-          childCount: group.children?.length ?? 0,
+          childCount: group.children.length,
         );
       }
     } catch (e) {
@@ -348,6 +450,7 @@ class ActivationManager {
     Completer<void> completer,
   ) async {
     if (progress.isSuccess) {
+      _markTronGaslessActivationRefreshAttempted(group);
       final user = await _auth.currentUser;
       if (user != null) {
         // Store custom tokens using CoinConfigManager
@@ -360,7 +463,7 @@ class ActivationManager {
           );
         }
 
-        final allAssets = [group.primary, ...(group.children?.toList() ?? [])];
+        final allAssets = [group.primary, ...group.children];
 
         for (final asset in allAssets) {
           if (asset.protocol.isCustomToken) {
@@ -380,6 +483,41 @@ class ActivationManager {
     } else {
       if (!completer.isCompleted) {
         completer.completeError(progress.errorMessage ?? 'Unknown error');
+      }
+    }
+  }
+
+  bool _shouldRefreshTronGaslessActivation(_AssetGroup group) {
+    if (_tronGaslessProvider == null) {
+      return false;
+    }
+
+    if (group.primary.protocol is Trc20Protocol) {
+      return shouldRefreshTronGaslessActivation(group.primary);
+    }
+
+    if (group.primary.protocol is TrxProtocol) {
+      return group.children.any(shouldRefreshTronGaslessActivation);
+    }
+
+    return false;
+  }
+
+  void _markTronGaslessActivationRefreshAttempted(_AssetGroup group) {
+    if (_tronGaslessProvider == null) {
+      return;
+    }
+
+    if (group.primary.protocol is Trc20Protocol) {
+      _tronGaslessActivationRefreshAttempted.add(group.primary.id);
+      return;
+    }
+
+    if (group.primary.protocol is TrxProtocol) {
+      for (final child in group.children) {
+        if (child.protocol is Trc20Protocol) {
+          _tronGaslessActivationRefreshAttempted.add(child.id);
+        }
       }
     }
   }
@@ -451,34 +589,42 @@ class ActivationManager {
 
 /// Internal class for grouping related assets
 class _AssetGroup {
-  _AssetGroup({required this.primary, this.children})
-    : assert(
-        children == null ||
-            children.every((asset) => asset.id.parentId == primary.id),
+  _AssetGroup({required this.primary, Set<Asset>? children})
+    : children = children ?? <Asset>{},
+      assert(
+        (children ?? const <Asset>{}).every(
+          (asset) => asset.id.parentId == primary.id,
+        ),
         'All child assets must have the parent asset as their parent',
       );
 
   final Asset primary;
-  final Set<Asset>? children;
+  final Set<Asset> children;
 
-  AssetId? get parentId =>
-      children?.firstWhereOrNull((asset) => asset.id.isChildAsset)?.id.parentId;
-
-  static List<_AssetGroup> _groupByPrimary(List<Asset> assets) {
+  static List<_AssetGroup> _groupByPrimary(
+    List<Asset> assets,
+    IAssetLookup assetLookup,
+  ) {
     final groups = <AssetId, _AssetGroup>{};
 
     for (final asset in assets) {
-      if (asset.id.parentId != null) {
-        // Child asset
-        final group = groups.putIfAbsent(
-          asset.id.parentId!,
-          () => _AssetGroup(primary: asset, children: {}),
-        );
-        group.children?.add(asset);
-      } else {
-        // Primary asset
+      final parentId = asset.id.parentId;
+      if (parentId == null || asset.protocol.isCustomToken) {
         groups.putIfAbsent(asset.id, () => _AssetGroup(primary: asset));
+        continue;
       }
+
+      final parentAsset = assetLookup.fromId(parentId);
+      if (parentAsset == null) {
+        groups.putIfAbsent(asset.id, () => _AssetGroup(primary: asset));
+        continue;
+      }
+
+      final group = groups.putIfAbsent(
+        parentId,
+        () => _AssetGroup(primary: parentAsset),
+      );
+      group.children.add(asset);
     }
 
     return groups.values.toList();

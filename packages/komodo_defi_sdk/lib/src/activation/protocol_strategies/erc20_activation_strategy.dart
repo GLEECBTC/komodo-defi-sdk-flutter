@@ -7,11 +7,19 @@ import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class Erc20ActivationStrategy extends ProtocolActivationStrategy {
-  const Erc20ActivationStrategy(super.client, this.privKeyPolicy);
+  const Erc20ActivationStrategy(
+    super.client,
+    this.privKeyPolicy, {
+    this.tronGaslessProvider,
+  });
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
+
+  /// Optional Tron GasFree provider config. When present, standalone TRC20
+  /// activations opt in to KDF's gasless token activation contract.
+  final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -73,9 +81,13 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
         final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
           asset.protocol.config,
         ).copyWith(privKeyPolicy: privKeyPolicy),
-        final Trc20Protocol _ => Trc20ActivationParams.fromJsonConfig(
-          asset.protocol.config,
-        ).copyWith(privKeyPolicy: privKeyPolicy),
+        final Trc20Protocol _ =>
+          Trc20ActivationParams.fromJsonConfig(asset.protocol.config).copyWith(
+            privKeyPolicy: privKeyPolicy,
+            gasless: tronGaslessProvider == null
+                ? null
+                : const TronGaslessTokenActivationConfig(enabled: true),
+          ),
         _ => throw UnsupportedError(
           'Unsupported token protocol: ${asset.protocol.runtimeType}',
         ),
