@@ -152,6 +152,7 @@ class GetNewAddressTaskStatusResponse extends BaseResponse {
             chain: addr.chain,
             balance: coinBalance,
             coinTicker: coinTicker,
+            gasfreeAddress: addr.gasfreeAddress,
           ),
           taskId: taskId,
         );

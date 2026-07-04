@@ -32,6 +32,8 @@ class WithdrawRequest
     this.max = false,
     this.ibcSourceChannel,
     this.expirationSeconds,
+    this.feeMethod,
+    this.gaslessOptions,
   }) : assert(
          amount != null || max,
          'Amount cannot be specified if sending the maximum amount',
@@ -51,6 +53,8 @@ class WithdrawRequest
   final bool max;
   final int? ibcSourceChannel;
   final int? expirationSeconds;
+  final WithdrawalFeeMethod? feeMethod;
+  final GaslessWithdrawalOptions? gaslessOptions;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -66,6 +70,8 @@ class WithdrawRequest
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
       if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
       if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+      if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+      if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
     },
   };
 
@@ -101,6 +107,8 @@ class WithdrawInitRequest
        memo = params.memo,
        max = params.isMax ?? false,
        expirationSeconds = params.expirationSeconds,
+       feeMethod = params.feeMethod,
+       gaslessOptions = params.gaslessOptions,
        assert(
          params.amount != null || (params.isMax ?? false),
          'Amount must be non-null if isMax is false and '
@@ -116,6 +124,8 @@ class WithdrawInitRequest
   final String? memo;
   final bool max;
   final int? expirationSeconds;
+  final WithdrawalFeeMethod? feeMethod;
+  final GaslessWithdrawalOptions? gaslessOptions;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -129,6 +139,8 @@ class WithdrawInitRequest
       if (memo != null) 'memo': memo,
       if (max) 'max': max,
       if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+      if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+      if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
     },
   };

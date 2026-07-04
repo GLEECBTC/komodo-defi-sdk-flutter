@@ -133,12 +133,22 @@ class KdfEventStreamingService {
       } else {
         throw ArgumentError('Unsupported event data type: ${data.runtimeType}');
       }
-      final event = KdfEvent.fromJson(map);
-      if (kDebugMode) {
-        final summary = _summarizeEvent(event);
-        print('[EventStream] Received ${event.typeEnum.value}: $summary');
+      // A single raw message can expand to multiple events (e.g. a BALANCE
+      // payload listing several tokens), so add each parsed event.
+      final List<KdfEvent> events = KdfEvent.parseAll(map);
+      for (final event in events) {
+        if (kDebugMode) {
+          final summary = _summarizeEvent(event);
+          // UnknownEvent.typeEnum throws by design, so resolve the label safely
+          // to avoid the debug print aborting this batch (which would drop any
+          // events parsed after an unrecognized one, e.g. an ERROR:BALANCE:*).
+          final typeLabel = event is UnknownEvent
+              ? event.typeString
+              : event.typeEnum.value;
+          print('[EventStream] Received $typeLabel: $summary');
+        }
+        _events.add(event);
       }
-      _events.add(event);
     } catch (e) {
       if (kDebugMode) {
         print('Failed to parse stream event: $e');

@@ -100,6 +100,7 @@ mixin HDWalletMixin on PubkeyStrategy {
             chain: addr.chain,
             balance: addr.balance.balanceOf(assetId.id),
             coinTicker: assetId.id,
+            gasfreeAddress: addr.gasfreeAddress,
           ),
         )
         .toList();
@@ -154,6 +155,7 @@ class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
       chain: newAddress.chain,
       balance: coinBalance,
       coinTicker: assetId.id,
+      gasfreeAddress: newAddress.gasfreeAddress,
     );
   }
 
@@ -189,6 +191,7 @@ class TrezorHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
       chain: newAddress.chain,
       balance: newAddress.balance,
       coinTicker: assetId.id,
+      gasfreeAddress: newAddress.gasfreeAddress,
     );
   }
 

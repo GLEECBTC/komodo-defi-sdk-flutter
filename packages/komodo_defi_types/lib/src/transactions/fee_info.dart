@@ -5,7 +5,7 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 part 'fee_info.freezed.dart';
 // We are doing manual fromJson/toJson, so no need for part 'fee_info.g.dart';
 
-/// A union representing nine possible fee types:
+/// A union representing the possible fee types:
 /// - UtxoFixed
 /// - UtxoPerKbyte
 /// - EthGas (legacy)
@@ -14,6 +14,7 @@ part 'fee_info.freezed.dart';
 /// - CosmosGas
 /// - Tendermint
 /// - Tron
+/// - TronGasless (gas-free TRC20, fee paid in the token)
 /// - Sia
 @Freezed()
 sealed class FeeInfo with _$FeeInfo {
@@ -91,6 +92,22 @@ sealed class FeeInfo with _$FeeInfo {
           totalFeeAmount: json['total_fee'] != null
               ? Decimal.parse(json['total_fee'].toString())
               : null,
+        );
+      case 'TronGasless':
+        return FeeInfo.tronGasless(
+          coin: json['coin'] as String? ?? '',
+          feeMethod: json['fee_method'] as String? ?? 'gasless',
+          providerName: json['provider_name'] as String? ?? '',
+          gasfreeAddress: json['gasfree_address'] as String? ?? '',
+          transferFee: Decimal.parse(json['transfer_fee'].toString()),
+          totalTokenFee: Decimal.parse(json['total_token_fee'].toString()),
+          activationFee: json['activation_fee'] != null
+              ? Decimal.parse(json['activation_fee'].toString())
+              : null,
+          signedMaxFee: json['signed_max_fee'] != null
+              ? Decimal.parse(json['signed_max_fee'].toString())
+              : null,
+          traceId: json['trace_id'] as String?,
         );
       case 'CosmosGas':
         return FeeInfo.cosmosGas(
@@ -262,7 +279,38 @@ sealed class FeeInfo with _$FeeInfo {
     Decimal? totalFeeAmount,
   }) = FeeInfoTron;
 
-  /// 9) SIA fee, with fixed `amount` and `policy`.
+  /// 9) TRON *gas-free* (gasless) fee. The network fee is paid IN THE TOKEN by a
+  /// relay provider (GasFree), not in TRX. Returned for TRC20 withdrawals routed
+  /// through `fee_method: "gasless"`.
+  ///
+  /// Example JSON (from the withdraw `fee_details`):
+  /// ```json
+  /// {
+  ///   "type": "TronGasless",
+  ///   "coin": "USDT-TRC20",
+  ///   "fee_method": "gasless",
+  ///   "provider_name": "gasfree",
+  ///   "gasfree_address": "T...",
+  ///   "transfer_fee": "2.000000",
+  ///   "total_token_fee": "2.000000",
+  ///   "signed_max_fee": "5.000000",
+  ///   "trace_id": null
+  /// }
+  /// ```
+  /// [totalTokenFee] is the total fee charged in the token's own units.
+  const factory FeeInfo.tronGasless({
+    required String coin,
+    required String feeMethod,
+    required String providerName,
+    required String gasfreeAddress,
+    required Decimal transferFee,
+    required Decimal totalTokenFee,
+    Decimal? activationFee,
+    Decimal? signedMaxFee,
+    String? traceId,
+  }) = FeeInfoTronGasless;
+
+  /// 10) SIA fee, with fixed `amount` and `policy`.
   ///
   /// Example JSON:
   /// ```json
@@ -305,6 +353,8 @@ sealed class FeeInfo with _$FeeInfo {
     ) =>
       totalFeeAmount ??
           (bandwidthFee + energyFee + (accountCreationFee ?? Decimal.zero)),
+    // Gasless fee is denominated in the TOKEN, not TRX.
+    FeeInfoTronGasless(:final totalTokenFee) => totalTokenFee,
     FeeInfoSia(:final amount) => amount,
   };
 
@@ -396,6 +446,29 @@ sealed class FeeInfo with _$FeeInfo {
         if (accountCreationFee != null)
           'account_creation_fee': accountCreationFee.toString(),
         if (totalFeeAmount != null) 'total_fee': totalFeeAmount.toString(),
+      },
+    FeeInfoTronGasless(
+      :final coin,
+      :final feeMethod,
+      :final providerName,
+      :final gasfreeAddress,
+      :final transferFee,
+      :final totalTokenFee,
+      :final activationFee,
+      :final signedMaxFee,
+      :final traceId,
+    ) =>
+      {
+        'type': 'TronGasless',
+        'coin': coin,
+        'fee_method': feeMethod,
+        'provider_name': providerName,
+        'gasfree_address': gasfreeAddress,
+        'transfer_fee': transferFee.toString(),
+        'total_token_fee': totalTokenFee.toString(),
+        if (activationFee != null) 'activation_fee': activationFee.toString(),
+        if (signedMaxFee != null) 'signed_max_fee': signedMaxFee.toString(),
+        if (traceId != null) 'trace_id': traceId,
       },
     FeeInfoSia(:final coin, :final amount, :final policy) => {
       'type': 'Sia',

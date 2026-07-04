@@ -4,6 +4,35 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+/// Relay type tag for Tron gas-free (gasless) transfers.
+const String _tronGasfreeRelayType = 'tron_gasfree';
+
+/// Keys that make up the Tron gas-free relay payload, sent verbatim as
+/// `tx_json` to `send_raw_transaction`. Matches the KDF `TronGasfreeRelayPayload`
+/// struct, which rejects unknown fields — so the payload must be exactly these.
+const List<String> _tronGasfreeRelayPayloadKeys = [
+  'relay_type',
+  'chain_id',
+  'coin',
+  'hd_from',
+  'from_address',
+  'gasfree_address',
+  'verifying_contract',
+  'signed_authorization',
+  'created_at',
+];
+
+/// Extracts the gas-free relay payload subset from a withdraw result so it can
+/// be broadcast via `send_raw_transaction`.
+JsonMap _extractTronGasfreeRelayPayload(JsonMap json) {
+  final payload = <String, dynamic>{};
+  for (final key in _tronGasfreeRelayPayloadKeys) {
+    final value = json[key];
+    if (value != null) payload[key] = value;
+  }
+  return payload;
+}
+
 /// Raw API response for a withdrawal operation
 class WithdrawResult {
   WithdrawResult({
@@ -26,15 +55,41 @@ class WithdrawResult {
        );
 
   factory WithdrawResult.fromJson(JsonMap json) {
+    // A gas-free (gasless) relay result carries the relay payload (at the top
+    // level, or already nested under `tx_json`) instead of a signed tx_hex, and
+    // has no on-chain tx hash yet — the hash is only known once the relay
+    // confirms (via `gasless::trace_status`).
+    final isGaslessRelay =
+        json.valueOrNull<String>('relay_type') == _tronGasfreeRelayType;
+    final txJson =
+        json.valueOrNull<JsonMap>('tx_json') ??
+        (isGaslessRelay ? _extractTronGasfreeRelayPayload(json) : null);
+
+    // The relaxed (nullable) parsing below only applies to a gasless relay
+    // result, which legitimately has no on-chain tx hash / from / to / block /
+    // timestamp yet. For a standard withdrawal these fields are always present,
+    // so keep strict parsing — otherwise a malformed standard response would
+    // produce a phantom "complete" with an empty hash, or an empty `to` that
+    // later throws a RangeError at the broadcast call sites.
     return WithdrawResult(
       txHex: json.valueOrNull<String>('tx_hex'),
-      txJson: json.valueOrNull<JsonMap>('tx_json'),
-      txHash: json.value<String>('tx_hash'),
-      from: List<String>.from(json.value('from')),
-      to: List<String>.from(json.value('to')),
+      txJson: txJson,
+      txHash: isGaslessRelay
+          ? (json.valueOrNull<String>('tx_hash') ?? '')
+          : json.value<String>('tx_hash'),
+      from: isGaslessRelay
+          ? List<String>.from(json.valueOrNull('from') ?? const [])
+          : List<String>.from(json.value('from')),
+      to: isGaslessRelay
+          ? List<String>.from(json.valueOrNull('to') ?? const [])
+          : List<String>.from(json.value('to')),
       balanceChanges: BalanceChanges.fromJson(json),
-      blockHeight: json.value<int>('block_height'),
-      timestamp: json.value<int>('timestamp'),
+      blockHeight: isGaslessRelay
+          ? (json.valueOrNull<int>('block_height') ?? 0)
+          : json.value<int>('block_height'),
+      timestamp: isGaslessRelay
+          ? (json.valueOrNull<int>('timestamp') ?? 0)
+          : json.value<int>('timestamp'),
       fee: FeeInfo.fromJson(json.value<JsonMap>('fee_details')),
       coin: json.value<String>('coin'),
       internalId: json.valueOrNull<String>('internal_id'),
@@ -132,6 +187,7 @@ class WithdrawalProgress extends Equatable {
     this.errorMessage,
     this.taskId,
     this.sdkError,
+    this.gaslessState,
   });
 
   final WithdrawalStatus status;
@@ -142,6 +198,12 @@ class WithdrawalProgress extends Equatable {
   final String? taskId;
   final SdkError? sdkError;
 
+  /// Relay lifecycle state for a gas-free (gasless) transfer, so consumers
+  /// can render their own (e.g. localized) status copy instead of the English
+  /// [message]. Null for standard withdrawals and for gasless progress events
+  /// that precede the relay poll.
+  final GaslessTraceState? gaslessState;
+
   @override
   List<Object?> get props => [
     status,
@@ -151,7 +213,53 @@ class WithdrawalProgress extends Equatable {
     errorMessage,
     taskId,
     sdkError,
+    gaslessState,
   ];
+}
+
+/// Preferred fee rail for withdrawals that support alternative fee payment.
+///
+/// `native` keeps the coin's normal fee behavior; `gasless` routes a TRC20
+/// transfer through the GasFree provider with the fee paid in the token.
+enum WithdrawalFeeMethod {
+  native,
+  gasless;
+
+  String get jsonValue => switch (this) {
+    WithdrawalFeeMethod.native => 'native',
+    WithdrawalFeeMethod.gasless => 'gasless',
+  };
+}
+
+/// Caller-supplied constraints for gas-free (gasless) TRC20 withdrawals.
+///
+/// Serializes to the KDF `gasless` withdraw option object.
+class GaslessWithdrawalOptions extends Equatable {
+  const GaslessWithdrawalOptions({
+    this.maxFee,
+    this.deadlineSeconds,
+    this.fallbackToNative = false,
+  });
+
+  /// Maximum provider fee, in the token's own units, the user will accept.
+  /// When null, the provider's default cap applies.
+  final Decimal? maxFee;
+
+  /// Permit deadline, in seconds from now.
+  final int? deadlineSeconds;
+
+  /// Whether to fall back to a native (TRX-funded) transfer when gasless is
+  /// unavailable.
+  final bool fallbackToNative;
+
+  JsonMap toJson() => {
+    if (maxFee != null) 'max_fee': maxFee.toString(),
+    if (deadlineSeconds != null) 'deadline_seconds': deadlineSeconds,
+    'fallback_to_native': fallbackToNative,
+  };
+
+  @override
+  List<Object?> get props => [maxFee, deadlineSeconds, fallbackToNative];
 }
 
 /// Parameters for initiating a withdrawal
@@ -168,6 +276,8 @@ class WithdrawParameters extends Equatable {
     this.ibcSourceChannel,
     this.expirationSeconds,
     this.isMax,
+    this.feeMethod,
+    this.gaslessOptions,
   }) : assert(
          amount != null || (isMax ?? false),
          'Amount must be non-null when not using max',
@@ -185,6 +295,13 @@ class WithdrawParameters extends Equatable {
   final int? expirationSeconds;
   final bool? isMax;
 
+  /// Preferred fee rail (e.g. `gasless` for gas-free TRC20 transfers).
+  final WithdrawalFeeMethod? feeMethod;
+
+  /// Constraints for a gasless withdrawal. Only used when
+  /// [feeMethod] is [WithdrawalFeeMethod.gasless].
+  final GaslessWithdrawalOptions? gaslessOptions;
+
   JsonMap toJson() => {
     'coin': asset,
     'to': toAddress,
@@ -196,6 +313,8 @@ class WithdrawParameters extends Equatable {
     if (ibcTransfer != null) 'ibc_transfer': ibcTransfer,
     if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
     if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+    if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+    if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
   };
 
   @override
@@ -211,6 +330,8 @@ class WithdrawParameters extends Equatable {
     ibcSourceChannel,
     expirationSeconds,
     isMax,
+    feeMethod,
+    gaslessOptions,
   ];
 }
 

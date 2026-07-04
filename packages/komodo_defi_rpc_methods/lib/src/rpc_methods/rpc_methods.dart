@@ -103,6 +103,8 @@ export 'wallet/get_wallet_names_request.dart';
 export 'wallet/get_wallet_names_response.dart';
 export 'wallet/my_balance.dart';
 export 'wallet/unban_pubkeys.dart';
+export 'withdrawal/gasless_account_status_request.dart';
+export 'withdrawal/gasless_trace_status_request.dart';
 export 'withdrawal/send_raw_transaction_request.dart';
 export 'withdrawal/withdraw_request.dart';
 export 'withdrawal/withdrawal_rpc_namespace.dart';
