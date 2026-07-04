@@ -21,13 +21,13 @@ class ChartExtent {
   const ChartExtent.withBounds({
     required this.min,
     required this.max,
-  })  : auto = false,
-        paddingPortion = 0;
+  }) : auto = false,
+       paddingPortion = 0;
 
   const ChartExtent.tight({this.paddingPortion = 0})
-      : auto = true,
-        min = null,
-        max = null;
+    : auto = true,
+      min = null,
+      max = null;
 
   final bool auto;
   final double paddingPortion;
@@ -103,7 +103,7 @@ class LineChart extends StatefulWidget {
   ///
   /// If not provided, a default tooltip will be used.
   final Widget Function(BuildContext, List<ChartData>, List<Color>)?
-      tooltipBuilder;
+  tooltipBuilder;
 
   /// The extent of the domain (x-axis) of the chart.
   ///
@@ -171,8 +171,10 @@ class _LineChartState extends State<LineChart>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: widget.animationDuration);
+    _controller = AnimationController(
+      vsync: this,
+      duration: widget.animationDuration,
+    );
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
     _controller
       ..addListener(() {
@@ -194,7 +196,13 @@ class _LineChartState extends State<LineChart>
   @override
   void didUpdateWidget(covariant LineChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.elements != widget.elements) {
+    // `widget.elements` is rebuilt into a fresh list on every parent build, so
+    // comparing by list identity (`!=`) always reported a change and restarted
+    // the per-frame line animation on EVERY rebuild — even when the rebuild was
+    // caused by something unrelated (a sibling bloc emitting, hover, theme).
+    // That continuous re-animation is a dominant source of main-isolate load.
+    // Only restart the animation when the plotted data actually changed.
+    if (_seriesDataChanged(currentElements, widget.elements)) {
       setState(() {
         oldElements = List.from(currentElements);
         currentElements = List.from(widget.elements);
@@ -206,6 +214,36 @@ class _LineChartState extends State<LineChart>
     } else {
       _updateDomainRange();
     }
+  }
+
+  /// Whether the plotted [ChartDataSeries] differ between [previous] and
+  /// [next]. Non-series elements (grid lines, axis labels) do not animate, so
+  /// they are ignored here. Runs in O(points), far cheaper than the animation
+  /// it gates.
+  static bool _seriesDataChanged(
+    List<ChartElement> previous,
+    List<ChartElement> next,
+  ) {
+    final a = previous.whereType<ChartDataSeries>().toList();
+    final b = next.whereType<ChartDataSeries>().toList();
+    if (a.length != b.length) return true;
+    for (var i = 0; i < a.length; i++) {
+      final sa = a[i];
+      final sb = b[i];
+      if (sa.color != sb.color ||
+          sa.strokeWidth != sb.strokeWidth ||
+          sa.lineType != sb.lineType ||
+          sa.nodeRadius != sb.nodeRadius ||
+          sa.data.length != sb.data.length) {
+        return true;
+      }
+      for (var j = 0; j < sa.data.length; j++) {
+        if (sa.data[j].x != sb.data[j].x || sa.data[j].y != sb.data[j].y) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void _clearHighlightedData() {
@@ -268,14 +306,22 @@ class _LineChartState extends State<LineChart>
     newMinY = widget.rangeExtent.min ?? newMinY;
     newMaxY = widget.rangeExtent.max ?? newMaxY;
 
-    minXAnimation =
-        Tween<double>(begin: minX, end: newMinX).animate(_controller);
-    maxXAnimation =
-        Tween<double>(begin: maxX, end: newMaxX).animate(_controller);
-    minYAnimation =
-        Tween<double>(begin: minY, end: newMinY).animate(_controller);
-    maxYAnimation =
-        Tween<double>(begin: maxY, end: newMaxY).animate(_controller);
+    minXAnimation = Tween<double>(
+      begin: minX,
+      end: newMinX,
+    ).animate(_controller);
+    maxXAnimation = Tween<double>(
+      begin: maxX,
+      end: newMaxX,
+    ).animate(_controller);
+    minYAnimation = Tween<double>(
+      begin: minY,
+      end: newMinY,
+    ).animate(_controller);
+    maxYAnimation = Tween<double>(
+      begin: maxY,
+      end: newMaxY,
+    ).animate(_controller);
 
     minX = newMinX;
     maxX = newMaxX;
@@ -520,7 +566,8 @@ class _LineChartState extends State<LineChart>
     Size tooltipSize,
     Size screenSize,
   ) {
-    var xPosition = widget.padding.left +
+    var xPosition =
+        widget.padding.left +
         globalPosition.dx -
         tooltipSize.width; // Initial offset to the left
     if (xPosition + tooltipSize.width > screenSize.width) {
@@ -542,7 +589,8 @@ class _LineChartState extends State<LineChart>
     Size tooltipSize,
     Size screenSize,
   ) {
-    var yPosition = widget.padding.top +
+    var yPosition =
+        widget.padding.top +
         globalPosition.dy -
         tooltipSize.height; // Initial offset to the top
     if (yPosition + tooltipSize.height > screenSize.height) {
@@ -587,8 +635,9 @@ class _LineChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dataElements = elements.whereType<ChartDataSeries>();
-    final nonDataElements =
-        elements.where((element) => element is! ChartDataSeries);
+    final nonDataElements = elements.where(
+      (element) => element is! ChartDataSeries,
+    );
 
     // Paint non-data elements (e.g., grid lines, axis labels)
     for (final element in nonDataElements) {
