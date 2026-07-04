@@ -13,6 +13,9 @@ class WithdrawAmountField extends StatefulWidget {
     this.amountError,
     this.hasInsufficientBalance = false,
     this.availableBalance,
+    this.maxAmountLabel,
+    this.symbol,
+    this.availableBalanceLabel,
     super.key,
   });
 
@@ -40,6 +43,19 @@ class WithdrawAmountField extends StatefulWidget {
   /// The available balance for the asset.
   final String? availableBalance;
 
+  /// Label shown in the disabled field while max is selected but the concrete
+  /// amount is unknown (e.g. gas-free TRC20). Defaults to `'Maximum'`;
+  /// pass a localized string to override.
+  final String? maxAmountLabel;
+
+  /// Ticker shown in the suffix and available-balance line. Defaults to the
+  /// raw [AssetId.id] (e.g. `USDT-TRC20`); pass a clean symbol to override.
+  final String? symbol;
+
+  /// Label prefix for the available-balance line. Defaults to `'Available:'`;
+  /// pass a localized string to override.
+  final String? availableBalanceLabel;
+
   @override
   State<WithdrawAmountField> createState() => _WithdrawAmountFieldState();
 }
@@ -47,30 +63,44 @@ class WithdrawAmountField extends StatefulWidget {
 class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
   late TextEditingController _controller;
 
+  /// The text shown in the (disabled) field while "max" is selected.
+  ///
+  /// Some rails (e.g. gas-free TRC20, where the fee is deducted from the token
+  /// itself) cannot pre-compute the exact sendable amount, so they request max
+  /// with an amount of `'0'`. Showing a literal `'0'` reads as "send nothing";
+  /// display `Maximum` instead. Rails that do know the amount (native max
+  /// passes the spendable balance) keep showing the concrete value.
+  String get _displayAmount {
+    if (widget.isMaxAmount && (double.tryParse(widget.amount) ?? 0) <= 0) {
+      return widget.maxAmountLabel ?? 'Maximum';
+    }
+    return widget.amount;
+  }
+
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.amount);
+    _controller = TextEditingController(text: _displayAmount);
   }
 
   @override
   void didUpdateWidget(WithdrawAmountField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.amount != oldWidget.amount &&
-        _controller.text != widget.amount) {
+    final displayAmount = _displayAmount;
+    if (_controller.text != displayAmount) {
       // Save current cursor position
       final selection = _controller.selection;
 
       // Update text
-      _controller.text = widget.amount;
+      _controller.text = displayAmount;
 
       // Restore cursor position, but handle potential out-of-bounds
-      if (widget.amount.length >= selection.baseOffset) {
+      if (displayAmount.length >= selection.baseOffset) {
         _controller.selection = selection;
       } else {
         // If new text is shorter, move cursor to end
         _controller.selection = TextSelection.collapsed(
-          offset: widget.amount.length,
+          offset: displayAmount.length,
         );
       }
     }
@@ -99,7 +129,9 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
             ),
             if (widget.availableBalance != null)
               Text(
-                'Available: ${widget.availableBalance} ${widget.asset.id.id}',
+                '${widget.availableBalanceLabel ?? 'Available:'} '
+                '${widget.availableBalance} '
+                '${widget.symbol ?? widget.asset.id.id}',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                 ),
@@ -119,7 +151,7 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    widget.asset.id.id,
+                    widget.symbol ?? widget.asset.id.id,
                     style: theme.textTheme.bodyLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -127,24 +159,21 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
                 ],
               ),
             ),
-            prefixIcon:
-                widget.hasInsufficientBalance
-                    ? Tooltip(
-                      message: 'Insufficient balance',
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        color: theme.colorScheme.error,
-                      ),
-                    )
-                    : null,
-            helperText:
-                widget.hasInsufficientBalance
-                    ? 'Insufficient balance'
-                    : 'Enter the amount to send',
-            helperStyle:
-                widget.hasInsufficientBalance
-                    ? TextStyle(color: theme.colorScheme.error)
-                    : null,
+            prefixIcon: widget.hasInsufficientBalance
+                ? Tooltip(
+                    message: 'Insufficient balance',
+                    child: Icon(
+                      Icons.warning_amber_rounded,
+                      color: theme.colorScheme.error,
+                    ),
+                  )
+                : null,
+            helperText: widget.hasInsufficientBalance
+                ? 'Insufficient balance'
+                : 'Enter the amount to send',
+            helperStyle: widget.hasInsufficientBalance
+                ? TextStyle(color: theme.colorScheme.error)
+                : null,
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           onChanged: widget.onChanged,
