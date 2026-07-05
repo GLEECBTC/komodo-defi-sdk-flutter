@@ -1,6 +1,6 @@
 {
   "api": {
-    "api_commit_hash": "c9753ecb3bd50a24e9d0677945d91a9d5f7fd5d3",
+    "api_commit_hash": "43603a5a4fe74c789f8079f4bad46c3e2119865a",
     "branch": "feat/tron-gasfree",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
@@ -14,14 +14,14 @@
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "a9ebbac45809b5f9a955e67a11b1309f35ef39f07ca6177b7d456c712a1758af"
+          "a425807d8069890cd4658f9366840fddf274cbd79740fb0188d8cc825f887c11"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "e9c8d3f9cc27fb3ec42d46f3e9412bcf1dc1b50fc8e9ecc765302560ac876596"
+          "7743822238919ff06115ca3be88f79d94c9c343a17f9db7b5e09ae7b54ea801a"
         ],
         "path": "ios"
       },
@@ -29,35 +29,35 @@
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
         "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
         "valid_zip_sha256_checksums": [
-          "5e4e061a4d5d4acb85fb6d9261aeff0e2754a3a203e21da6166c464f92425190"
+          "90d3bfa20785f3695a383b02a7ca85f2dece6a8f7240176c00d6fa9c13eac7d4"
         ],
         "path": "macos/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "ee0d2252a52e456467c0b56832d6002283997b4ce5192db468cd2c943a12b7d1"
+          "78b57599f8645a6e04d71534ecbc46ebe754ded777546c29c77829d77b7b6538"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "f0d3290d311bc88bcf631822b7d1fcbf122b5c88346de91b1ad1983c3f27c243"
+          "b0322765869e154c46250c8bf3adf42bfb7879cc62069fe48e4d1b4e77291269"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "48cf3a8815083c5f8e782d395499f2b3420a4422abe90fe7f324b76e6f78c6f1"
+          "f8aca5b567e6663464c846756c4123740a9fa5dfa68b4a7ef3711ecd8be2ebc1"
         ],
         "path": "linux/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "70f75927489c4b800fa29fd23758f6e457e32a5afd26d0e6aac28411bb7f8292"
+          "57a72f8069430569edf297d5422185df5d3ed70a7dceddc1524ba268c8d6438c"
         ],
         "path": "windows/bin"
       }
