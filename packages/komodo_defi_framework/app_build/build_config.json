@@ -33,20 +33,6 @@
         ],
         "path": "macos/bin"
       },
-      "android-armv7": {
-        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
-        "valid_zip_sha256_checksums": [
-          "78b57599f8645a6e04d71534ecbc46ebe754ded777546c29c77829d77b7b6538"
-        ],
-        "path": "android/app/src/main/cpp/libs/armeabi-v7a"
-      },
-      "android-aarch64": {
-        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
-        "valid_zip_sha256_checksums": [
-          "b0322765869e154c46250c8bf3adf42bfb7879cc62069fe48e4d1b4e77291269"
-        ],
-        "path": "android/app/src/main/cpp/libs/arm64-v8a"
-      },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
