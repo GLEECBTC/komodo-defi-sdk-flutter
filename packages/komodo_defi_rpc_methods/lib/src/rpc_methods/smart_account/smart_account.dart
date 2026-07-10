@@ -127,6 +127,8 @@ class SmartAccountIntentCodec {
   PreparedSmartAccountIntent prepare(
     Map<String, dynamic> input, {
     required String safeAddress,
+    required BigInt expectedChainId,
+    required String expectedDelayModule,
     SmartAccountRequestedAction? requested,
   }) {
     final typedData = normalize(input);
@@ -142,6 +144,11 @@ class SmartAccountIntentCodec {
       _string(domain['verifyingContract'], 'verifyingContract'),
     );
     final chainId = _uint(domain['chainId'], 'chainId');
+    if (chainId != expectedChainId || delay != _address(expectedDelayModule)) {
+      throw const SmartAccountIntentException(
+        'The payload network or Delay module does not match the deployed Safe.',
+      );
+    }
     final outer = _decodeOuter(_hex(_string(message['data'], 'data')));
     if (outer.operation != BigInt.zero || outer.target == _zeroAddress) {
       throw const SmartAccountIntentException(

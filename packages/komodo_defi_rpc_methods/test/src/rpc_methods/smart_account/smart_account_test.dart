@@ -24,6 +24,8 @@ void main() {
       final prepared = codec.prepare(
         input,
         safeAddress: _safe,
+        expectedChainId: BigInt.from(100),
+        expectedDelayModule: _delay,
         requested: SmartAccountRequestedAction.withdrawal(
           assetContract: _token,
           recipient: _recipient,
@@ -53,6 +55,8 @@ void main() {
       final prepared = codec.prepare(
         _typedData(_outer(target: _bouncer, inner: inner)),
         safeAddress: _safe,
+        expectedChainId: BigInt.from(100),
+        expectedDelayModule: _delay,
       );
 
       expect(prepared.kind, SmartAccountIntentKind.dailyLimit);
@@ -77,8 +81,18 @@ void main() {
           inner: 'a9059cbb${_addressWord(_recipient)}${_word(BigInt.one)}',
         ),
       );
-      final first = codec.prepare(input, safeAddress: _safe);
-      final second = codec.prepare(input, safeAddress: _safe);
+      final first = codec.prepare(
+        input,
+        safeAddress: _safe,
+        expectedChainId: BigInt.from(100),
+        expectedDelayModule: _delay,
+      );
+      final second = codec.prepare(
+        input,
+        safeAddress: _safe,
+        expectedChainId: BigInt.from(100),
+        expectedDelayModule: _delay,
+      );
       first.typedData['primaryType'] = 'Tampered';
 
       expect(first.payloadDigest, second.payloadDigest);
@@ -90,6 +104,33 @@ void main() {
           intent: first,
         ).toJson()['params'],
         containsPair('typed_data', isA<Map<String, dynamic>>()),
+      );
+    });
+
+    test('rejects a payload from the wrong chain or Delay module', () {
+      final input = _typedData(
+        _outer(
+          target: _token,
+          inner: 'a9059cbb${_addressWord(_recipient)}${_word(BigInt.one)}',
+        ),
+      );
+      expect(
+        () => codec.prepare(
+          input,
+          safeAddress: _safe,
+          expectedChainId: BigInt.one,
+          expectedDelayModule: _delay,
+        ),
+        throwsA(isA<SmartAccountIntentException>()),
+      );
+      expect(
+        () => codec.prepare(
+          input,
+          safeAddress: _safe,
+          expectedChainId: BigInt.from(100),
+          expectedDelayModule: '0x9999999999999999999999999999999999999999',
+        ),
+        throwsA(isA<SmartAccountIntentException>()),
       );
     });
   });
