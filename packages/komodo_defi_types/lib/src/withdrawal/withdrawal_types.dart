@@ -12,6 +12,7 @@ const String _tronGasfreeRelayType = 'tron_gasfree';
 /// struct, which rejects unknown fields — so the payload must be exactly these.
 const List<String> _tronGasfreeRelayPayloadKeys = [
   'relay_type',
+  'request_id',
   'chain_id',
   'coin',
   'hd_from',
@@ -19,6 +20,7 @@ const List<String> _tronGasfreeRelayPayloadKeys = [
   'gasfree_address',
   'verifying_contract',
   'signed_authorization',
+  'authorization_fingerprint',
   'created_at',
 ];
 
@@ -29,6 +31,33 @@ JsonMap _extractTronGasfreeRelayPayload(JsonMap json) {
   for (final key in _tronGasfreeRelayPayloadKeys) {
     final value = json[key];
     if (value != null) payload[key] = value;
+  }
+  const requiredKeys = <String>{
+    'relay_type',
+    'chain_id',
+    'coin',
+    'from_address',
+    'gasfree_address',
+    'verifying_contract',
+    'signed_authorization',
+    'created_at',
+  };
+  final missing = requiredKeys.where(
+    (key) => payload[key] == null || payload[key].toString().isEmpty,
+  );
+  if (missing.isNotEmpty) {
+    throw FormatException(
+      'GasFree relay payload is missing required fields: '
+      '${missing.join(', ')}',
+    );
+  }
+  final hasRequestId = payload['request_id']?.toString().isNotEmpty ?? false;
+  final hasFingerprint =
+      payload['authorization_fingerprint']?.toString().isNotEmpty ?? false;
+  if (hasRequestId != hasFingerprint) {
+    throw const FormatException(
+      'GasFree relay payload has partial binding context',
+    );
   }
   return payload;
 }
@@ -49,21 +78,27 @@ class WithdrawResult {
     this.internalId,
     this.kmdRewards,
     this.memo,
-  }) : assert(
-         txHex != null || txJson != null,
-         'Either txHex or txJson must be provided',
-       );
+  }) {
+    if (txHex == null && txJson == null) {
+      throw ArgumentError('Either txHex or txJson must be provided');
+    }
+  }
 
   factory WithdrawResult.fromJson(JsonMap json) {
     // A gas-free (gasless) relay result carries the relay payload (at the top
     // level, or already nested under `tx_json`) instead of a signed tx_hex, and
     // has no on-chain tx hash yet — the hash is only known once the relay
     // confirms (via `gasless::trace_status`).
+    final nestedTxJson = json.valueOrNull<JsonMap>('tx_json');
+    final relaySource = nestedTxJson ?? json;
     final isGaslessRelay =
-        json.valueOrNull<String>('relay_type') == _tronGasfreeRelayType;
-    final txJson =
-        json.valueOrNull<JsonMap>('tx_json') ??
-        (isGaslessRelay ? _extractTronGasfreeRelayPayload(json) : null);
+        relaySource.valueOrNull<String>('relay_type') == _tronGasfreeRelayType;
+    final txJson = isGaslessRelay
+        ? _extractTronGasfreeRelayPayload(relaySource)
+        : nestedTxJson;
+    final signedAuthorization = txJson?.valueOrNull<JsonMap>(
+      'signed_authorization',
+    );
 
     // The relaxed (nullable) parsing below only applies to a gasless relay
     // result, which legitimately has no on-chain tx hash / from / to / block /
@@ -75,13 +110,17 @@ class WithdrawResult {
       txHex: json.valueOrNull<String>('tx_hex'),
       txJson: txJson,
       txHash: isGaslessRelay
-          ? (json.valueOrNull<String>('tx_hash') ?? '')
+          ? json.valueOrNull<String>('tx_hash')
           : json.value<String>('tx_hash'),
       from: isGaslessRelay
-          ? List<String>.from(json.valueOrNull('from') ?? const [])
+          ? List<String>.from(
+              json.valueOrNull('from') ?? [txJson!['from_address']],
+            )
           : List<String>.from(json.value('from')),
       to: isGaslessRelay
-          ? List<String>.from(json.valueOrNull('to') ?? const [])
+          ? List<String>.from(
+              json.valueOrNull('to') ?? [signedAuthorization!['receiver']],
+            )
           : List<String>.from(json.value('to')),
       balanceChanges: BalanceChanges.fromJson(json),
       blockHeight: isGaslessRelay
@@ -102,7 +141,7 @@ class WithdrawResult {
 
   final String? txHex;
   final JsonMap? txJson;
-  final String txHash;
+  final String? txHash;
   final List<String> from;
   final List<String> to;
   final BalanceChanges balanceChanges;
@@ -114,10 +153,48 @@ class WithdrawResult {
   final KmdRewards? kmdRewards;
   final String? memo;
 
+  /// Signed GasFree authorization metadata, when this is a relay preview.
+  GaslessAuthorization? get gaslessAuthorization {
+    final gaslessFee = fee is FeeInfoTronGasless
+        ? fee as FeeInfoTronGasless
+        : null;
+    if (gaslessFee == null) return null;
+    final authorization = txJson?['signed_authorization'];
+    final auth = authorization is Map
+        ? Map<String, dynamic>.from(authorization)
+        : const <String, dynamic>{};
+    final maxFee =
+        gaslessFee.signedMaxFee ??
+        Decimal.tryParse(auth['max_fee']?.toString() ?? '');
+    final deadline =
+        gaslessFee.authorizationDeadline ??
+        int.tryParse(auth['deadline']?.toString() ?? '');
+    final fingerprint =
+        gaslessFee.authorizationFingerprint ??
+        txJson?['authorization_fingerprint']?.toString();
+    if (maxFee == null ||
+        deadline == null ||
+        fingerprint == null ||
+        fingerprint.isEmpty) {
+      return null;
+    }
+    return GaslessAuthorization(
+      signedMaxFee: maxFee,
+      deadline: deadline,
+      fingerprint: fingerprint,
+      provider:
+          gaslessFee.providerAddress ?? auth['service_provider']?.toString(),
+      tokenContract: auth['token']?.toString(),
+      receiver: auth['receiver']?.toString(),
+      nonce: auth['nonce']?.toString(),
+      version: auth['version']?.toString(),
+    );
+  }
+
   JsonMap toJson() => {
     if (txHex != null) 'tx_hex': txHex,
     if (txJson != null) 'tx_json': txJson,
-    'tx_hash': txHash,
+    if (txHash != null) 'tx_hash': txHash,
     'from': from,
     'to': to,
     ...balanceChanges.toJson(),
@@ -140,6 +217,8 @@ class WithdrawalResult extends Equatable {
     required this.toAddress,
     required this.fee,
     this.kmdRewardsEligible = false,
+    this.confirmationBlockHeight,
+    this.confirmedAt,
   });
 
   /// Create a domain model from API response
@@ -153,15 +232,26 @@ class WithdrawalResult extends Equatable {
       kmdRewardsEligible:
           result.kmdRewards != null &&
           Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+      confirmationBlockHeight: result.blockHeight > 0
+          ? result.blockHeight
+          : null,
+      confirmedAt: result.timestamp > 0
+          ? DateTime.fromMillisecondsSinceEpoch(
+              result.timestamp * 1000,
+              isUtc: true,
+            )
+          : null,
     );
   }
 
-  final String txHash;
+  final String? txHash;
   final BalanceChanges balanceChanges;
   final String coin;
   final String toAddress;
   final FeeInfo fee;
   final bool kmdRewardsEligible;
+  final int? confirmationBlockHeight;
+  final DateTime? confirmedAt;
 
   /// Convenience getter for the withdrawal amount (abs of net change)
   Decimal get amount => balanceChanges.netChange.abs();
@@ -174,6 +264,8 @@ class WithdrawalResult extends Equatable {
     toAddress,
     fee,
     kmdRewardsEligible,
+    confirmationBlockHeight,
+    confirmedAt,
   ];
 }
 
@@ -188,6 +280,8 @@ class WithdrawalProgress extends Equatable {
     this.taskId,
     this.sdkError,
     this.gaslessState,
+    this.gaslessTransferState,
+    this.submission,
   });
 
   final WithdrawalStatus status;
@@ -203,6 +297,8 @@ class WithdrawalProgress extends Equatable {
   /// [message]. Null for standard withdrawals and for gasless progress events
   /// that precede the relay poll.
   final GaslessTraceState? gaslessState;
+  final GaslessTransferState? gaslessTransferState;
+  final WithdrawalSubmission? submission;
 
   @override
   List<Object?> get props => [
@@ -214,6 +310,8 @@ class WithdrawalProgress extends Equatable {
     taskId,
     sdkError,
     gaslessState,
+    gaslessTransferState,
+    submission,
   ];
 }
 

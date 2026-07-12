@@ -11,15 +11,16 @@ enum GaslessTraceState {
   confirmed,
   failed;
 
-  /// Parse a snake_case state string from KDF. Unknown / `WAITING` values map
-  /// to [pending] (still in flight).
+  /// Parse a provider/KDF state. Unknown values are a typed parse failure and
+  /// must never be rendered as an apparently healthy pending transfer.
   static GaslessTraceState parse(String value) => switch (value.toLowerCase()) {
     'pending' => GaslessTraceState.pending,
-    'submitted' => GaslessTraceState.submitted,
-    'on_chain' => GaslessTraceState.onChain,
-    'confirmed' => GaslessTraceState.confirmed,
+    'submitted' || 'inprogress' => GaslessTraceState.submitted,
+    'on_chain' || 'confirming' => GaslessTraceState.onChain,
+    'confirmed' || 'succeed' => GaslessTraceState.confirmed,
     'failed' => GaslessTraceState.failed,
-    _ => GaslessTraceState.pending,
+    'waiting' => GaslessTraceState.pending,
+    _ => throw const FormatException('Unknown GasFree trace state'),
   };
 
   String get jsonValue => switch (this) {
@@ -48,15 +49,22 @@ class GaslessTraceStatusRequest
     required super.rpcPass,
     required this.coin,
     required this.traceId,
+    this.expectedAuthorization,
   }) : super(method: 'gasless::trace_status', mmrpc: RpcVersion.v2_0);
 
   final String coin;
   final String traceId;
+  final GaslessExpectedAuthorization? expectedAuthorization;
 
   @override
   Map<String, dynamic> toJson() => {
     ...super.toJson(),
-    'params': {'coin': coin, 'trace_id': traceId},
+    'params': {
+      'coin': coin,
+      'trace_id': traceId,
+      if (expectedAuthorization != null)
+        'expected_authorization': expectedAuthorization!.toJson(),
+    },
   };
 
   @override
@@ -83,7 +91,9 @@ class GaslessTraceStatusResponse extends BaseResponse {
       state: GaslessTraceState.parse(result.value<String>('state')),
       txHashOnChain: result.valueOrNull<String>('tx_hash_on_chain'),
       blockHeight: result.valueOrNull<int>('block_height'),
-      confirmedAt: result.valueOrNull<int>('confirmed_at'),
+      confirmedAt: _normalizeConfirmedAt(
+        result.valueOrNull<dynamic>('confirmed_at'),
+      ),
       finalFee: finalFeeRaw == null
           ? null
           : Decimal.parse(finalFeeRaw.toString()),
@@ -110,4 +120,13 @@ class GaslessTraceStatusResponse extends BaseResponse {
       if (failureReason != null) 'failure_reason': failureReason,
     },
   };
+}
+
+int? _normalizeConfirmedAt(Object? raw) {
+  if (raw == null) return null;
+  final value = raw is int ? raw : int.tryParse(raw.toString());
+  if (value == null || value <= 0) return null;
+  if (value < 100000000) return value * 1000;
+  if (value > 10000000000) return value ~/ 1000;
+  return value;
 }

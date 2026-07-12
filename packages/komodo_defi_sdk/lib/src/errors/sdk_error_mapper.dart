@@ -75,7 +75,6 @@ class _GeneralErrorResponseHandler extends SdkErrorHandler {
       category: SdkErrorCategory.unknown,
       messageKey: _keyGeneral,
       fallbackMessage: _fallbackGeneral(response.error ?? response),
-      detail: response.error,
       retryable: false,
       context: context,
       source: response,
@@ -1479,5 +1478,4 @@ const String _fallbackAuthUnauthorized =
 const String _fallbackAuthWalletNotFound =
     'Wallet not found. Please verify the wallet name.';
 
-String _fallbackGeneral(Object error) =>
-    'Something went wrong. Please try again. ($error)';
+String _fallbackGeneral(Object _) => 'Something went wrong. Please try again.';

@@ -17,16 +17,20 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
   factory GeneralErrorResponse.parse(Map<String, dynamic> json) {
     final error =
         json.valueOrNull<JsonMap>('result', 'details') ??
-        json.valueOrNull<JsonMap>('message');
+        json.valueOrNull<JsonMap>('message') ??
+        // Legacy RPCs such as send_raw_transaction return their error envelope
+        // at the root. Falling back to the root preserves stable error_type and
+        // error_data fields instead of forcing callers to parse toString().
+        json;
     return GeneralErrorResponse(
       mmrpc: json.valueOrNull<String>('mmrpc') ?? '',
       error:
-          error?.valueOrNull<String>('message') ??
-          error?.valueOrNull<String>('error'),
-      errorPath: error?.valueOrNull<String>('error_path'),
-      errorTrace: error?.valueOrNull<String>('error_trace'),
-      errorType: error?.valueOrNull<String>('error_type'),
-      errorData: error?.valueOrNull<dynamic>('error_data'),
+          error.valueOrNull<String>('message') ??
+          error.valueOrNull<String>('error'),
+      errorPath: error.valueOrNull<String>('error_path'),
+      errorTrace: error.valueOrNull<String>('error_trace'),
+      errorType: error.valueOrNull<String>('error_type'),
+      errorData: error.valueOrNull<dynamic>('error_data'),
       object: json,
     );
   }
@@ -74,10 +78,7 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
       'error_path': errorPath,
       'error_trace': errorTrace,
     };
-    return KdfErrorRegistry.tryParse(
-      errorJson,
-      rpcMethodHint: rpcMethodHint,
-    );
+    return KdfErrorRegistry.tryParse(errorJson, rpcMethodHint: rpcMethodHint);
   }
 
   @override
@@ -94,7 +95,6 @@ class GeneralErrorResponse extends BaseResponse implements Exception {
   }
 
   @override
-  String toString() {
-    return 'GeneralErrorResponse: ${toJson().toJsonString()}';
-  }
+  String toString() =>
+      'GeneralErrorResponse(errorType: ${errorType ?? 'unknown'})';
 }

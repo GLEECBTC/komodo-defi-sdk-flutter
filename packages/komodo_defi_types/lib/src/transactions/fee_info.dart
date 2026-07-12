@@ -107,6 +107,16 @@ sealed class FeeInfo with _$FeeInfo {
           signedMaxFee: json['signed_max_fee'] != null
               ? Decimal.parse(json['signed_max_fee'].toString())
               : null,
+          finalFee: json['final_fee'] != null
+              ? Decimal.parse(json['final_fee'].toString())
+              : null,
+          providerAddress: json['provider_address'] as String?,
+          authorizationDeadline: json['authorization_deadline'] == null
+              ? null
+              : int.tryParse(json['authorization_deadline'].toString()),
+          requestId: json['request_id'] as String?,
+          authorizationFingerprint:
+              json['authorization_fingerprint'] as String?,
           traceId: json['trace_id'] as String?,
         );
       case 'CosmosGas':
@@ -307,6 +317,11 @@ sealed class FeeInfo with _$FeeInfo {
     required Decimal totalTokenFee,
     Decimal? activationFee,
     Decimal? signedMaxFee,
+    Decimal? finalFee,
+    String? providerAddress,
+    int? authorizationDeadline,
+    String? requestId,
+    String? authorizationFingerprint,
     String? traceId,
   }) = FeeInfoTronGasless;
 
@@ -354,7 +369,8 @@ sealed class FeeInfo with _$FeeInfo {
       totalFeeAmount ??
           (bandwidthFee + energyFee + (accountCreationFee ?? Decimal.zero)),
     // Gasless fee is denominated in the TOKEN, not TRX.
-    FeeInfoTronGasless(:final totalTokenFee) => totalTokenFee,
+    FeeInfoTronGasless(:final totalTokenFee, :final finalFee) =>
+      finalFee ?? totalTokenFee,
     FeeInfoSia(:final amount) => amount,
   };
 
@@ -456,6 +472,11 @@ sealed class FeeInfo with _$FeeInfo {
       :final totalTokenFee,
       :final activationFee,
       :final signedMaxFee,
+      :final finalFee,
+      :final providerAddress,
+      :final authorizationDeadline,
+      :final requestId,
+      :final authorizationFingerprint,
       :final traceId,
     ) =>
       {
@@ -468,6 +489,13 @@ sealed class FeeInfo with _$FeeInfo {
         'total_token_fee': totalTokenFee.toString(),
         if (activationFee != null) 'activation_fee': activationFee.toString(),
         if (signedMaxFee != null) 'signed_max_fee': signedMaxFee.toString(),
+        if (finalFee != null) 'final_fee': finalFee.toString(),
+        if (providerAddress != null) 'provider_address': providerAddress,
+        if (authorizationDeadline != null)
+          'authorization_deadline': authorizationDeadline.toString(),
+        if (requestId != null) 'request_id': requestId,
+        if (authorizationFingerprint != null)
+          'authorization_fingerprint': authorizationFingerprint,
         if (traceId != null) 'trace_id': traceId,
       },
     FeeInfoSia(:final coin, :final amount, :final policy) => {

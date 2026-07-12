@@ -9,11 +9,11 @@ class SendRawTransactionLegacyRequest
     required this.coin,
     this.txHex,
     this.txJson,
-  }) : assert(
-         txHex != null || txJson != null,
-         'Either txHex or txJson must be provided',
-       ),
-       super(method: 'send_raw_transaction', mmrpc: null);
+  }) : super(method: 'send_raw_transaction', mmrpc: null) {
+    if (txHex == null && txJson == null) {
+      throw ArgumentError('Either txHex or txJson must be provided');
+    }
+  }
 
   final String coin;
   final String? txHex;
@@ -37,8 +37,10 @@ class SendRawTransactionResponse extends BaseResponse {
     required super.mmrpc,
     this.txHash,
     this.relayType,
+    this.requestId,
     this.traceId,
     this.state,
+    this.expectedAuthorization,
   });
 
   factory SendRawTransactionResponse.parse(Map<String, dynamic> json) {
@@ -51,11 +53,18 @@ class SendRawTransactionResponse extends BaseResponse {
 
     if (relayType != null) {
       final result = json.valueOrNull<JsonMap>('result') ?? json;
+      final expectedAuthorization = result.valueOrNull<JsonMap>(
+        'expected_authorization',
+      );
       return SendRawTransactionResponse(
         mmrpc: json.valueOrNull<String>('mmrpc'),
         relayType: relayType,
+        requestId: result.valueOrNull<String>('request_id'),
         traceId: result.value<String>('trace_id'),
         state: result.valueOrNull<String>('state'),
+        expectedAuthorization: expectedAuthorization == null
+            ? null
+            : GaslessExpectedAuthorization.fromJson(expectedAuthorization),
       );
     }
 
@@ -75,14 +84,24 @@ class SendRawTransactionResponse extends BaseResponse {
   /// Relay type for a gas-free broadcast (`tron_gasfree`). Null for standard.
   final String? relayType;
 
+  /// Wallet-scoped UUID that binds the signed preview to relay acceptance.
+  final String? requestId;
+
   /// Trace handle for polling gas-free transfer status. Null for standard.
   final String? traceId;
 
   /// Initial relay state (e.g. `WAITING`). Null for standard.
   final String? state;
 
+  /// Echoed signed context validated by KDF before relay acceptance.
+  final GaslessExpectedAuthorization? expectedAuthorization;
+
+  /// Whether the relay response supports the hardened bound-response contract.
+  bool get hasBoundRelayContext =>
+      requestId != null && expectedAuthorization != null;
+
   /// Whether this is a gas-free relay broadcast (no immediate tx hash).
-  bool get isGaslessRelay => relayType != null;
+  bool get isGaslessRelay => relayType == 'tron_gasfree';
 
   @override
   Map<String, dynamic> toJson() => {
@@ -90,8 +109,11 @@ class SendRawTransactionResponse extends BaseResponse {
     'result': {
       if (txHash != null) 'tx_hash': txHash,
       if (relayType != null) 'relay_type': relayType,
+      if (requestId != null) 'request_id': requestId,
       if (traceId != null) 'trace_id': traceId,
       if (state != null) 'state': state,
+      if (expectedAuthorization != null)
+        'expected_authorization': expectedAuthorization!.toJson(),
     },
   };
 }

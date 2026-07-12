@@ -40,6 +40,7 @@ class GaslessAccountStatusResponse extends BaseResponse {
     this.transferFee,
     this.activationFee,
     this.maxWithdrawable,
+    this.reasonCode,
   });
 
   factory GaslessAccountStatusResponse.parse(Map<String, dynamic> json) {
@@ -52,15 +53,17 @@ class GaslessAccountStatusResponse extends BaseResponse {
     return GaslessAccountStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
       gasfreeAddress: result.value<String>('gasfree_address'),
-      onChainBalance: dec('on_chain_balance') ?? Decimal.zero,
-      providerAvailable:
-          result.valueOrNull<bool>('provider_available') ?? false,
+      onChainBalance: Decimal.parse(
+        result.value<dynamic>('on_chain_balance').toString(),
+      ),
+      providerAvailable: result.value<bool>('provider_available'),
       active: result.valueOrNull<bool>('active'),
       frozenBalance: dec('frozen_balance'),
       spendableBalance: dec('spendable_balance'),
       transferFee: dec('transfer_fee'),
       activationFee: dec('activation_fee'),
       maxWithdrawable: dec('max_withdrawable'),
+      reasonCode: result.valueOrNull<String>('reason_code'),
     );
   }
 
@@ -98,12 +101,22 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// [gasfreeAddress] and [onChainBalance] are populated.
   final bool providerAvailable;
 
+  /// Stable reason for a provider-unavailable, unsupported, or security state.
+  /// Raw upstream provider content is never exposed here.
+  final String? reasonCode;
+
   /// The custody balance as a [BalanceInfo] (`total` = on-chain,
   /// `spendable` = on-chain minus frozen, `unspendable` = frozen), so it can
   /// drop straight into balance widgets in place of the EOA balance.
   BalanceInfo get custodyBalance {
-    final unspendable = frozenBalance ?? Decimal.zero;
-    final spendable = spendableBalance ?? (onChainBalance - unspendable);
+    final hasAuthoritativeSpendability =
+        providerAvailable && spendableBalance != null && frozenBalance != null;
+    final spendable = hasAuthoritativeSpendability
+        ? spendableBalance!
+        : Decimal.zero;
+    final unspendable = hasAuthoritativeSpendability
+        ? frozenBalance!
+        : onChainBalance;
     return BalanceInfo(
       total: onChainBalance,
       spendable: spendable,
@@ -126,6 +139,7 @@ class GaslessAccountStatusResponse extends BaseResponse {
       if (activationFee != null) 'activation_fee': activationFee.toString(),
       if (maxWithdrawable != null)
         'max_withdrawable': maxWithdrawable.toString(),
+      if (reasonCode != null) 'reason_code': reasonCode,
     },
   };
 }

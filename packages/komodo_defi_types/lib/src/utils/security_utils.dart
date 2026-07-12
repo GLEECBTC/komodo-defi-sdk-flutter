@@ -142,32 +142,88 @@ abstract class SecurityUtils {
   }
 }
 
-extension CensoredJsonMap on JsonMap {
-  JsonMap censored() {
-    // Search recursively for the following keys and replace their values
-    // with "*" characters.
-    // TODO: consider adding regex or wildcard support for "*password*" or "*key*"
-    const sensitive = [
-      'seed',
-      'userpass',
-      'pin',
-      'passphrase',
-      'password',
-      'mnemonic',
-      'private_key',
-      'wif',
-      'view_key',
-      'spend_key',
-      'address',
-      'pubkey',
-      'privkey',
-      'userpass',
-      'rpc_password',
-      'wallet_password',
-    ];
+const _redactedLogValue = '<redacted>';
 
-    return censorKeys(sensitive);
+const _sensitiveLogKeys = <String>{
+  'access_key',
+  'access_token',
+  'api_key',
+  'api_secret',
+  'api_token',
+  'authorization',
+  'authorization_context',
+  'bearer_token',
+  'cookie',
+  'expected_authorization',
+  'gasless_authorization',
+  'id_token',
+  'mnemonic',
+  'passphrase',
+  'password',
+  'pin',
+  'plaintext_mnemonic',
+  'private_key',
+  'private_keys',
+  'privkey',
+  'refresh_token',
+  'rpc_password',
+  'seed',
+  'secret',
+  'secret_key',
+  'set_cookie',
+  'sig',
+  'signature',
+  'signed_authorization',
+  'signed_payload',
+  'signed_transaction',
+  'spend_key',
+  'tx_hex',
+  'userpass',
+  'view_key',
+  'wallet_password',
+  'wif',
+};
+
+bool _isSensitiveLogKey(Object? key) {
+  final snakeCaseKey = key.toString().trim().replaceAllMapped(
+    RegExp('([a-z0-9])([A-Z])'),
+    (match) => '${match.group(1)}_${match.group(2)}',
+  );
+  final normalized = snakeCaseKey.toLowerCase().replaceAll('-', '_');
+  return _sensitiveLogKeys.contains(normalized) ||
+      normalized == 'address' ||
+      normalized.endsWith('_address') ||
+      normalized == 'pubkey' ||
+      normalized.endsWith('_pubkey') ||
+      normalized.endsWith('_pubkey_hash') ||
+      normalized.endsWith('_password') ||
+      normalized.endsWith('_passphrase') ||
+      normalized.endsWith('_private_key') ||
+      normalized.endsWith('_secret') ||
+      normalized.endsWith('_signature');
+}
+
+Object? _censorForLogging(Object? value, {Object? key}) {
+  if (key != null && _isSensitiveLogKey(key)) return _redactedLogValue;
+  if (value is Map) {
+    return <String, dynamic>{
+      for (final entry in value.entries)
+        entry.key.toString(): _censorForLogging(entry.value, key: entry.key),
+    };
   }
+  if (value is Iterable) {
+    return <Object?>[for (final element in value) _censorForLogging(element)];
+  }
+  return value;
+}
+
+extension CensoredJsonMap on JsonMap {
+  /// Returns a recursively redacted copy safe for diagnostic logging.
+  ///
+  /// Secret-bearing containers such as `signed_authorization` are removed as a
+  /// whole, and nested maps/lists are traversed without mutating the RPC object
+  /// that will be sent to KDF.
+  JsonMap censored() => _censorForLogging(this)! as JsonMap;
 }
 
 /// Wrapper for sensitive strings that should never reveal their value when
