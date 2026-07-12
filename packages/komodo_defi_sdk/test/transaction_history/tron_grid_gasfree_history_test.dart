@@ -21,6 +21,10 @@ const _custody2 = 'TSSMHYeV2uE9qYH95DqyoCuNCzEL1NvU3S';
 const _external = 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8';
 const _recipient = 'TVj7RNVHy6thbM7BWdSe9G6gXwKhjhdNZS';
 const _provider = 'TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb';
+const _finalityHash =
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const _mismatchHash =
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 Asset _createTrxAsset() {
   return Asset.fromJson({
@@ -44,30 +48,49 @@ Asset _createTrxAsset() {
   });
 }
 
-Asset _createUsdtTrc20Asset() {
-  return Asset.fromJson({
-    'coin': 'USDT-TRC20',
-    'type': 'TRC-20',
-    'name': 'Tether',
-    'fname': 'Tether',
+Asset _createUsdtTrc20Asset({bool nile = false}) {
+  final platform = nile ? 'TRXT' : 'TRX';
+  final coin = nile ? 'TESTUSDT-TRC20' : 'USDT-TRC20';
+  final contract = nile
+      ? 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'
+      : 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+  final parent = Asset.fromJson({
+    'coin': platform,
+    'type': 'TRX',
+    'name': platform,
+    'fname': platform,
     'wallet_only': true,
     'mm2': 1,
     'decimals': 6,
-    'derivation_path': "m/44'/195'",
-    'explorer_url': 'https://tronscan.org/',
-    'explorer_tx_url': '#/transaction/',
-    'explorer_address_url': '#/address/',
     'protocol': {
-      'type': 'TRC20',
-      'protocol_data': {
-        'platform': 'TRX',
-        'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-      },
+      'type': 'TRX',
+      'protocol_data': {'network': nile ? 'Nile' : 'Mainnet'},
     },
-    'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-    'parent_coin': 'TRX',
     'nodes': <Map<String, dynamic>>[],
-  });
+  }, knownIds: const {});
+  return Asset.fromJson(
+    {
+      'coin': coin,
+      'type': 'TRC-20',
+      'name': 'Tether',
+      'fname': 'Tether',
+      'wallet_only': true,
+      'mm2': 1,
+      'decimals': 6,
+      'derivation_path': "m/44'/195'",
+      'explorer_url': 'https://tronscan.org/',
+      'explorer_tx_url': '#/transaction/',
+      'explorer_address_url': '#/address/',
+      'protocol': {
+        'type': 'TRC20',
+        'protocol_data': {'platform': platform, 'contract_address': contract},
+      },
+      'contract_address': contract,
+      'parent_coin': platform,
+      'nodes': <Map<String, dynamic>>[],
+    },
+    knownIds: {parent.id},
+  );
 }
 
 /// Pubkeys for [asset] with one entry per `{address: gasfreeAddress}` pair.
@@ -98,6 +121,7 @@ Map<String, Object> _makeTrc20Row({
   required String from,
   required String to,
   required String value,
+  String tokenAddress = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
   int timestampMs = 1700000000000,
 }) => {
   'transaction_id': txId,
@@ -107,7 +131,7 @@ Map<String, Object> _makeTrc20Row({
   'type': 'Transfer',
   'token_info': {
     'symbol': 'USDT',
-    'address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+    'address': tokenAddress,
     'decimals': 6,
     'name': 'Tether USD',
   },
@@ -164,6 +188,79 @@ void main() {
   }
 
   group('TronGridTransactionStrategy GasFree custody history', () {
+    for (final nile in [false, true]) {
+      test(
+        'verifies exact ${nile ? 'Nile' : 'mainnet'} recipient event',
+        () async {
+          final asset = _createUsdtTrc20Asset(nile: nile);
+          final contract = nile
+              ? 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'
+              : 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+          stubResponses({
+            _custody: (_) => _gridResponse([
+              _makeTrc20Row(
+                txId: _finalityHash,
+                from: _custody,
+                to: _recipient,
+                value: '10000000',
+                tokenAddress: contract,
+              ),
+              _makeTrc20Row(
+                txId: _finalityHash,
+                from: _custody,
+                to: _provider,
+                value: '1500000',
+                tokenAddress: contract,
+              ),
+            ]),
+          });
+
+          final result = await createStrategy().verifyGaslessTransferEvent(
+            asset: asset,
+            transactionHash: _finalityHash,
+            custodyAddress: _custody,
+            recipientAddress: _recipient,
+            authorizationValue: '10000000',
+          );
+
+          expect(result, GaslessOnChainVerification.verified);
+        },
+      );
+    }
+
+    test(
+      'does not accept the provider-fee aggregate as recipient amount',
+      () async {
+        final usdt = _createUsdtTrc20Asset();
+        stubResponses({
+          _custody: (_) => _gridResponse([
+            _makeTrc20Row(
+              txId: _mismatchHash,
+              from: _custody,
+              to: _recipient,
+              value: '10000000',
+            ),
+            _makeTrc20Row(
+              txId: _mismatchHash,
+              from: _custody,
+              to: _provider,
+              value: '1500000',
+            ),
+          ]),
+        });
+
+        final result = await createStrategy().verifyGaslessTransferEvent(
+          asset: usdt,
+          transactionHash: _mismatchHash,
+          custodyAddress: _custody,
+          recipientAddress: _recipient,
+          authorizationValue: '11500000',
+        );
+
+        expect(result, GaslessOnChainVerification.mismatch);
+      },
+    );
+
     test('queries EOA and custody address in a single call', () async {
       final usdt = _createUsdtTrc20Asset();
       when(() => pubkeyManager.getPubkeys(usdt)).thenAnswer(

@@ -138,6 +138,28 @@ void main() {
       expect(filtered.keys.last.gasfreeAddress, isNull);
     });
 
+    test('finds the canonical primary when KDF ordering changes', () {
+      final filtered = filterGaslessPhantomAddresses(
+        usdt,
+        _pubkeys(usdt, [
+          _pubkey(
+            'T-funded-secondary',
+            spendable: '7',
+            gasfreeAddress: 'T-secondary-custody',
+            path: "m/44'/195'/0'/0/1",
+          ),
+          _pubkey('T-primary', gasfreeAddress: 'T-primary-custody'),
+        ]),
+      );
+
+      expect(filtered.keys.map((key) => key.address), [
+        'T-funded-secondary',
+        'T-primary',
+      ]);
+      expect(filtered.keys.first.gasfreeAddress, isNull);
+      expect(filtered.keys.last.gasfreeAddress, 'T-primary-custody');
+    });
+
     test('keeps used-then-emptied addresses via the ever-funded set', () {
       // An address that once held funds (e.g. consolidated to custody and now
       // empty) must stay visible so its transaction history stays reachable.

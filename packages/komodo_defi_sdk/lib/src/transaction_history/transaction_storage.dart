@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:collection/collection.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_merge_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
@@ -51,13 +52,13 @@ class InMemoryTransactionStorage implements TransactionStorage {
 
   final _mutex = Mutex();
   final Map<AssetTransactionHistoryId, SplayTreeMap<String, Transaction>>
-      _storage;
+  _storage;
   static const int? _maxTransactionsPerAsset = null;
 
   /// Compare transactions for ordering within the SplayTreeMap
-  /// 
-  /// Orders transactions by timestamp (newest first), with internalId as a 
-  /// tiebreaker for stable ordering. All transactions being compared must 
+  ///
+  /// Orders transactions by timestamp (newest first), with internalId as a
+  /// tiebreaker for stable ordering. All transactions being compared must
   /// exist in the provided [transactions] map.
   int _compareTransactions(
     String a,
@@ -90,15 +91,17 @@ class InMemoryTransactionStorage implements TransactionStorage {
         // Convert existing map entries to a regular map for comparison function
         final assetTxMap = <String, Transaction>{...assetTransactions};
         _storage[assetTxHistoryId] = SplayTreeMap<String, Transaction>(
-          (a, b) =>
-              _compareTransactions(a, b, assetTxHistoryId, assetTxMap),
+          (a, b) => _compareTransactions(a, b, assetTxHistoryId, assetTxMap),
         )..addAll(assetTxMap);
       }
     });
   }
 
   @override
-  Future<void> storeTransaction(Transaction transaction, WalletId walletId) async {
+  Future<void> storeTransaction(
+    Transaction transaction,
+    WalletId walletId,
+  ) async {
     if (transaction.internalId.isEmpty) {
       throw TransactionStorageException(
         'Transaction internal ID cannot be empty',
@@ -107,10 +110,12 @@ class InMemoryTransactionStorage implements TransactionStorage {
 
     try {
       await _mutex.protect(() async {
-        final assetHistoryId =
-            AssetTransactionHistoryId(walletId, transaction.assetId);
+        final assetHistoryId = AssetTransactionHistoryId(
+          walletId,
+          transaction.assetId,
+        );
         final newTxMap = {transaction.internalId: transaction};
-        
+
         // Merge existing and new transactions into a single map BEFORE
         // creating the SplayTreeMap. This prevents stack overflow by ensuring
         // the comparison function has direct access to all transactions
@@ -118,12 +123,20 @@ class InMemoryTransactionStorage implements TransactionStorage {
         _storage.update(
           assetHistoryId,
           (existingMap) {
+            final existing = existingMap[transaction.internalId];
+            final mergedTransaction = existing == null
+                ? transaction
+                : TransactionMergeUtils.mergeTransactionFields(
+                    existing,
+                    transaction,
+                  );
+            final mergedNewTxMap = {transaction.internalId: mergedTransaction};
             // Create merged map with all transactions
             final allTxMap = <String, Transaction>{
               ...existingMap,
-              ...newTxMap,
+              ...mergedNewTxMap,
             };
-            
+
             // Create SplayTreeMap with merged map for comparisons
             return SplayTreeMap<String, Transaction>(
               (a, b) => _compareTransactions(a, b, assetHistoryId, allTxMap),
@@ -153,9 +166,17 @@ class InMemoryTransactionStorage implements TransactionStorage {
         final grouped = groupBy(transactions, (tx) => tx.assetId);
 
         for (final entry in grouped.entries) {
-          final newTxMap = Map.fromEntries(
-            entry.value.map((tx) => MapEntry(tx.internalId, tx)),
-          );
+          final newTxMap = <String, Transaction>{};
+          for (final transaction in entry.value) {
+            newTxMap.update(
+              transaction.internalId,
+              (existing) => TransactionMergeUtils.mergeTransactionFields(
+                existing,
+                transaction,
+              ),
+              ifAbsent: () => transaction,
+            );
+          }
           final assetHistoryId = AssetTransactionHistoryId(user, entry.key);
 
           // Merge existing and new transactions into a single map BEFORE
@@ -165,12 +186,21 @@ class InMemoryTransactionStorage implements TransactionStorage {
           _storage.update(
             assetHistoryId,
             (existingMap) {
+              final mergedNewTxMap = <String, Transaction>{
+                for (final entry in newTxMap.entries)
+                  entry.key: existingMap[entry.key] == null
+                      ? entry.value
+                      : TransactionMergeUtils.mergeTransactionFields(
+                          existingMap[entry.key]!,
+                          entry.value,
+                        ),
+              };
               // Create merged map with all transactions
               final allTxMap = <String, Transaction>{
                 ...existingMap,
-                ...newTxMap,
+                ...mergedNewTxMap,
               };
-              
+
               // Create SplayTreeMap with merged map for comparisons
               return SplayTreeMap<String, Transaction>(
                 (a, b) => _compareTransactions(a, b, assetHistoryId, allTxMap),
@@ -216,8 +246,9 @@ class InMemoryTransactionStorage implements TransactionStorage {
       var transactions = assetTransactions.values.toList();
 
       if (fromId != null) {
-        final startIndex =
-            transactions.indexWhere((t) => t.internalId == fromId);
+        final startIndex = transactions.indexWhere(
+          (t) => t.internalId == fromId,
+        );
         if (startIndex == -1) {
           throw TransactionStorageException('Starting transaction not found');
         }
@@ -286,15 +317,18 @@ class InMemoryTransactionStorage implements TransactionStorage {
         final excess = assetTransactions.length - _maxTransactionsPerAsset!;
         final sortedEntries = assetTransactions.entries.toList()
           ..sort((a, b) {
-            final timestampComparison =
-                a.value.timestamp.compareTo(b.value.timestamp);
+            final timestampComparison = a.value.timestamp.compareTo(
+              b.value.timestamp,
+            );
             return timestampComparison != 0
                 ? timestampComparison
                 : a.value.internalId.compareTo(b.value.internalId);
           });
 
-        final keysToRemove =
-            sortedEntries.take(excess).map((e) => e.key).toList();
+        final keysToRemove = sortedEntries
+            .take(excess)
+            .map((e) => e.key)
+            .toList();
 
         for (final key in keysToRemove) {
           assetTransactions.remove(key);
