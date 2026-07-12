@@ -39,7 +39,6 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     this._config,
     this._log,
   );
-  @override
   factory KdfOperationsNativeLibrary.create({
     required void Function(String)? logCallback,
     required LocalConfig config,
@@ -274,7 +273,18 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
       body: json.encode(request),
       headers: {'Content-Type': 'application/json'},
     );
-    return json.decode(response.body) as Map<String, dynamic>;
+    try {
+      final decoded = json.decode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // Never propagate FormatException.source because it contains the raw KDF
+      // response body and may echo credentials or a signed relay payload.
+    }
+    return JsonRpcErrorResponse(
+      code: response.statusCode,
+      error: 'InvalidKdfResponse',
+      message: 'KDF returned a malformed JSON response',
+    );
   }
 
   @override
@@ -331,6 +341,7 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     return bindings.mm2_stop();
   }
 
+  @override
   void dispose() {
     _client.close();
     _logCallback.close(); // Ensure the NativeCallable is properly closed

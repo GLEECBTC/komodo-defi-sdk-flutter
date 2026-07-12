@@ -114,6 +114,8 @@ void main() {
         );
 
         expect(filtered.keys.map((k) => k.address), ['T-enabled', 'T-funded']);
+        expect(filtered.keys.first.gasfreeAddress, 'T-custody-0');
+        expect(filtered.keys.last.gasfreeAddress, isNull);
       },
     );
 
@@ -133,6 +135,7 @@ void main() {
 
       expect(filtered.keys.first.address, 'T-enabled');
       expect(filtered.keys, hasLength(2));
+      expect(filtered.keys.last.gasfreeAddress, isNull);
     });
 
     test('keeps used-then-emptied addresses via the ever-funded set', () {

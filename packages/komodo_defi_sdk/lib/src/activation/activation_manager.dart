@@ -8,6 +8,7 @@ import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
@@ -24,7 +25,11 @@ class ActivationManager {
     this._assetsUpdateManager,
     this._activatedAssetsCache, {
     TronGaslessProviderConfig? tronGaslessProvider,
-  }) : _tronGaslessProvider = tronGaslessProvider;
+    GaslessCapabilityRegistry? gaslessCapabilities,
+  }) : _tronGaslessProvider = tronGaslessProvider,
+       _gaslessCapabilities =
+           gaslessCapabilities ??
+           GaslessCapabilityRegistry(configuredAssetIds: const <String>[]);
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
@@ -38,7 +43,9 @@ class ActivationManager {
   /// Optional Tron GasFree provider config, attached to TRX platform
   /// activations to enable gas-free TRC20 transfers. Held in memory only.
   final TronGaslessProviderConfig? _tronGaslessProvider;
-  final Set<AssetId> _tronGaslessActivationRefreshAttempted = <AssetId>{};
+  final GaslessCapabilityRegistry _gaslessCapabilities;
+  final Map<AssetId, String> _resolvedGaslessProviders = {};
+  final Map<AssetId, _GaslessRuntimeContract> _gaslessRuntimeContracts = {};
   final _activationMutex = Mutex();
   static const _operationTimeout = Duration(seconds: 30);
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
@@ -63,6 +70,7 @@ class ActivationManager {
     final parentId = asset.id.parentId;
     if (asset.protocol is Trc20Protocol &&
         _tronGaslessProvider != null &&
+        _gaslessCapabilities.isConfigured(asset) &&
         parentId != null) {
       final parentAsset = _assetLookup.fromId(parentId);
       if (parentAsset != null) {
@@ -77,12 +85,14 @@ class ActivationManager {
   /// attempt in this SDK session.
   bool shouldRefreshTronGaslessActivation(Asset asset) =>
       _tronGaslessProvider != null &&
-      asset.protocol is Trc20Protocol &&
-      !_tronGaslessActivationRefreshAttempted.contains(asset.id);
+      _gaslessCapabilities.isConfigured(asset) &&
+      !_gaslessCapabilities.isReady(asset.id);
 
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
-    _tronGaslessActivationRefreshAttempted.clear();
+    _gaslessCapabilities.resetSession();
+    _resolvedGaslessProviders.clear();
+    _gaslessRuntimeContracts.clear();
   }
 
   /// Request cancellation of an in-flight activation for [assetId].
@@ -140,9 +150,14 @@ class ActivationManager {
 
       // Check activation status atomically
       final activationStatus = await _checkActivationStatus(group);
-      if (activationStatus.isComplete && !shouldRefreshTronGaslessActivation) {
-        yield activationStatus;
-        continue;
+      if (activationStatus.isComplete) {
+        if (!shouldRefreshTronGaslessActivation) {
+          yield activationStatus;
+          continue;
+        }
+        // Always bind an already-active runtime to the configured provider and
+        // token set through gasless::configure. A successful status probe alone
+        // cannot prove that the live provider matches the current security pin.
       }
 
       // Register activation attempt.
@@ -176,11 +191,10 @@ class ActivationManager {
           forceRefresh: true,
         );
         if (joinedStatus.isComplete) {
-          // The joined activation already enabled our children; record that the
-          // gasless refresh has been attempted so we don't later force a
-          // redundant (and otherwise no-op/hanging) re-activation this session.
-          _markTronGaslessActivationRefreshAttempted(group);
-          yield joinedStatus;
+          final verified = shouldRefreshTronGaslessActivation
+              ? await _verifyGaslessCapability(group, joinedStatus)
+              : joinedStatus;
+          yield verified;
           continue;
         }
 
@@ -210,20 +224,28 @@ class ActivationManager {
             currentUser?.walletId.authOptions.privKeyPolicy ??
             const PrivateKeyPolicy.contextPrivKey();
 
+        final gaslessProvider = privKeyPolicy == const PrivateKeyPolicy.trezor()
+            ? null
+            : _gaslessProviderFor(group);
+
         // Create activator with the user's privKeyPolicy
         final activator = ActivationStrategyFactory.createStrategy(
           _client,
           privKeyPolicy,
           _configService,
           _activatedAssetsCache,
-          tronGaslessProvider: _tronGaslessProvider,
+          tronGaslessProvider: gaslessProvider,
+          tronGaslessAssetIds: _gaslessCapabilities.configuredAssetIds,
         );
 
         var completionHandled = false;
-        await for (final progress in activator.activate(
-          group.primary,
-          group.children.toList(),
-        )) {
+        final activationStream =
+            activationStatus.isComplete &&
+                shouldRefreshTronGaslessActivation &&
+                gaslessProvider != null
+            ? _reconfigureGaslessRuntime(group, gaslessProvider)
+            : activator.activate(group.primary, group.children.toList());
+        await for (final rawProgress in activationStream) {
           if (_cancelledActivations.containsKey(group.primary.id)) {
             final reason =
                 _cancelledActivations[group.primary.id] ??
@@ -240,6 +262,13 @@ class ActivationManager {
               errorCode: 'ACTIVATION_CANCELLED',
             );
             break;
+          }
+
+          var progress = _attachSdkError(rawProgress, group.primary.id);
+          if (progress.isComplete &&
+              progress.isSuccess &&
+              shouldRefreshTronGaslessActivation) {
+            progress = await _verifyGaslessCapability(group, progress);
           }
 
           // Complete the join completer BEFORE yielding the terminal progress.
@@ -263,7 +292,7 @@ class ActivationManager {
             }
           }
 
-          yield _attachSdkError(progress, group.primary.id);
+          yield progress;
 
           if (progress.isComplete) {
             if (completionHandled) {
@@ -292,8 +321,11 @@ class ActivationManager {
           );
           completionHandled = true;
           if (status.isComplete) {
-            await _handleActivationComplete(group, status, primaryCompleter);
-            yield status;
+            final verified = shouldRefreshTronGaslessActivation
+                ? await _verifyGaslessCapability(group, status)
+                : status;
+            await _handleActivationComplete(group, verified, primaryCompleter);
+            yield verified;
           } else {
             final mappedError = _mapError(
               StateError(
@@ -311,9 +343,10 @@ class ActivationManager {
           }
         }
       } catch (e, st) {
-        final recoveredProgress = await _tryRecoverAlreadyActivated(group, e);
+        final recoveredProgress = shouldRefreshTronGaslessActivation
+            ? null
+            : await _tryRecoverAlreadyActivated(group, e);
         if (recoveredProgress != null) {
-          _markTronGaslessActivationRefreshAttempted(group);
           if (!primaryCompleter.isCompleted) {
             primaryCompleter.complete();
           }
@@ -412,6 +445,10 @@ class ActivationManager {
       }
 
       final completer = Completer<void>();
+      // A sole activation attempt has no joiner awaiting this future. Attach a
+      // side listener so completing it with an error does not become an
+      // unhandled zone error; concurrent joiners still receive the same error.
+      unawaited(completer.future.catchError((Object _) {}));
       _activationCompleters[assetId] = completer;
       return _ActivationRegistration(
         completer: completer,
@@ -450,7 +487,6 @@ class ActivationManager {
     Completer<void> completer,
   ) async {
     if (progress.isSuccess) {
-      _markTronGaslessActivationRefreshAttempted(group);
       final user = await _auth.currentUser;
       if (user != null) {
         // Store custom tokens using CoinConfigManager
@@ -503,22 +539,292 @@ class ActivationManager {
     return false;
   }
 
-  void _markTronGaslessActivationRefreshAttempted(_AssetGroup group) {
-    if (_tronGaslessProvider == null) {
-      return;
+  TronGaslessProviderConfig? _gaslessProviderFor(_AssetGroup group) {
+    if (_tronGaslessProvider == null) return null;
+    return _gaslessAssets(group).isEmpty ? null : _tronGaslessProvider;
+  }
+
+  Stream<ActivationProgress> _reconfigureGaslessRuntime(
+    _AssetGroup group,
+    TronGaslessProviderConfig provider,
+  ) async* {
+    final tokens = _gaslessAssets(group)
+        .where((asset) => asset.protocol is Trc20Protocol)
+        .map((asset) => GaslessConfigureToken(coin: asset.id.id))
+        .toList();
+    if (tokens.isEmpty) {
+      throw StateError(
+        'GasFree runtime reconfiguration requires a TRC20 token',
+      );
     }
 
-    if (group.primary.protocol is Trc20Protocol) {
-      _tronGaslessActivationRefreshAttempted.add(group.primary.id);
-      return;
-    }
+    yield const ActivationProgress(
+      status: 'Configuring gas-free runtime...',
+      progressDetails: ActivationProgressDetails(
+        currentStep: ActivationStep.processing,
+        stepCount: 2,
+      ),
+    );
 
-    if (group.primary.protocol is TrxProtocol) {
-      for (final child in group.children) {
-        if (child.protocol is Trc20Protocol) {
-          _tronGaslessActivationRefreshAttempted.add(child.id);
+    final contract = await _configureGaslessRuntime(group, provider, tokens);
+
+    yield ActivationProgress.success(
+      details: ActivationProgressDetails(
+        currentStep: ActivationStep.complete,
+        stepCount: 2,
+        additionalInfo: {
+          'method': contract == _GaslessRuntimeContract.boundConfigure
+              ? 'gasless::configure'
+              : 'gasless::account_status',
+          'tokenCount': tokens.length,
+        },
+      ),
+    );
+  }
+
+  Future<_GaslessRuntimeContract> _configureGaslessRuntime(
+    _AssetGroup group,
+    TronGaslessProviderConfig provider,
+    List<GaslessConfigureToken> tokens,
+  ) async {
+    final GaslessConfigureResponse response;
+    try {
+      response = await _client.rpc.withdraw.configureGasless(
+        platformCoin: group.primary.id.id,
+        provider: provider,
+        tokens: tokens,
+      );
+    } catch (error) {
+      final isMethodMissing =
+          error is DispatcherErrorNoSuchMethodException ||
+          error is GeneralErrorResponse && error.errorType == 'NoSuchMethod';
+      if (!isMethodMissing) rethrow;
+
+      // KDF PR #9 has no runtime configure RPC. Its activation request still
+      // installs the provider, so retain the explicit local pin and require an
+      // authoritative account-status probe before the capability can be ready.
+      final pinnedProvider = provider.serviceProvider?.trim();
+      if (pinnedProvider == null || pinnedProvider.isEmpty) {
+        throw const _GaslessSecurityMismatch(
+          reasonCode: 'legacy_provider_pin_missing',
+        );
+      }
+      final configuredCoins = tokens.map((token) => token.coin).toSet();
+      for (final asset in _gaslessAssets(group)) {
+        if (configuredCoins.contains(asset.id.id)) {
+          _resolvedGaslessProviders[asset.id] = pinnedProvider;
+          _gaslessRuntimeContracts[asset.id] =
+              _GaslessRuntimeContract.legacyAccountStatus;
         }
       }
+      return _GaslessRuntimeContract.legacyAccountStatus;
+    }
+    if (response.platformCoin != group.primary.id.id) {
+      throw const _GaslessSecurityMismatch(
+        reasonCode: 'configure_platform_mismatch',
+      );
+    }
+    final configuredCoins = response.tokens.map((token) => token.coin).toSet();
+    final expectedCoins = tokens.map((token) => token.coin).toSet();
+    if (!configuredCoins.containsAll(expectedCoins) ||
+        configuredCoins.length != expectedCoins.length) {
+      throw const _GaslessSecurityMismatch(
+        reasonCode: 'configure_token_mismatch',
+      );
+    }
+    final pinnedProvider = provider.serviceProvider?.trim();
+    if (pinnedProvider != null &&
+        pinnedProvider.isNotEmpty &&
+        response.serviceProvider != pinnedProvider) {
+      throw const _GaslessSecurityMismatch(
+        reasonCode: 'configure_provider_mismatch',
+      );
+    }
+    if (response.serviceProvider.trim().isEmpty) {
+      throw const _GaslessSecurityMismatch(
+        reasonCode: 'configure_provider_missing',
+      );
+    }
+    for (final asset in _gaslessAssets(group)) {
+      if (expectedCoins.contains(asset.id.id)) {
+        _resolvedGaslessProviders[asset.id] = response.serviceProvider;
+        _gaslessRuntimeContracts[asset.id] =
+            _GaslessRuntimeContract.boundConfigure;
+      }
+    }
+    return _GaslessRuntimeContract.boundConfigure;
+  }
+
+  Iterable<Asset> _gaslessAssets(_AssetGroup group) sync* {
+    if (_gaslessCapabilities.isConfigured(group.primary)) {
+      yield group.primary;
+    }
+    for (final child in group.children) {
+      if (_gaslessCapabilities.isConfigured(child)) yield child;
+    }
+  }
+
+  Future<ActivationProgress> _verifyGaslessCapability(
+    _AssetGroup group,
+    ActivationProgress success,
+  ) async {
+    try {
+      final assets = _gaslessAssets(group).toList();
+      if (assets.isEmpty) return success;
+      final user = await _auth.currentUser;
+      final softwareWallet =
+          user != null &&
+          user.walletId.authOptions.privKeyPolicy ==
+              const PrivateKeyPolicy.contextPrivKey();
+      if (!softwareWallet) {
+        throw StateError('GasFree requires a primary software wallet');
+      }
+      if (_tronGaslessProvider == null) {
+        throw StateError('GasFree provider configuration is unavailable');
+      }
+      if (assets.any(
+        (asset) => !_resolvedGaslessProviders.containsKey(asset.id),
+      )) {
+        final tokens = assets
+            .map((asset) => GaslessConfigureToken(coin: asset.id.id))
+            .toList();
+        await _configureGaslessRuntime(group, _tronGaslessProvider, tokens);
+      }
+      for (final asset in assets) {
+        final requestedPath = asset.id.derivationPath;
+        final walletType = switch (user.walletId.authOptions.derivationMethod) {
+          DerivationMethod.hdWallet => GaslessWalletType.softwareHd,
+          DerivationMethod.iguana => GaslessWalletType.softwareIguana,
+        };
+        final capabilityPath = switch (walletType) {
+          GaslessWalletType.softwareHd =>
+            GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
+          GaslessWalletType.softwareIguana => '',
+        };
+        final sourceIsCanonical = switch (walletType) {
+          GaslessWalletType.softwareHd =>
+            requestedPath == null ||
+                requestedPath == "m/44'/195'" ||
+                requestedPath == capabilityPath,
+          GaslessWalletType.softwareIguana =>
+            requestedPath == null || requestedPath == "m/44'/195'",
+        };
+        if (!sourceIsCanonical) {
+          throw StateError('GasFree requires the canonical TRON derivation');
+        }
+        _gaslessCapabilities.markChecking(asset.id);
+        final status = await _client.rpc.withdraw.gaslessAccountStatus(
+          coin: asset.id.id,
+        );
+        if (!status.providerAvailable) {
+          switch (status.reasonCode) {
+            case 'custody_address_mismatch' ||
+                'provider_identity_mismatch' ||
+                'provider_invalid_response':
+              throw const _GaslessSecurityMismatch(
+                reasonCode: 'provider_security_mismatch',
+              );
+            case 'provider_authentication_failed':
+              throw const _GaslessDisabled(
+                reasonCode: 'provider_authentication_failed',
+              );
+            case 'token_unsupported' || 'token_decimals_mismatch':
+              throw _GaslessUnsupported(
+                reasonCode: status.reasonCode ?? 'token_unsupported',
+              );
+            default:
+              throw const _GaslessTemporarilyUnavailable(
+                reasonCode: 'provider_temporarily_unavailable',
+              );
+          }
+        }
+        if (status.gasfreeAddress.isEmpty ||
+            status.active == null ||
+            status.transferFee == null ||
+            status.maxWithdrawable == null) {
+          throw StateError(
+            'GasFree account status is not provider-authoritative',
+          );
+        }
+        final protocol = asset.protocol as Trc20Protocol;
+        final topLevelContract = protocol.config['contract_address'];
+        final protocolJson = protocol.config['protocol'];
+        final protocolData = protocolJson is Map
+            ? protocolJson['protocol_data']
+            : null;
+        final nestedContract = protocolData is Map
+            ? protocolData['contract_address']
+            : null;
+        final contractAddress = topLevelContract is String
+            ? topLevelContract
+            : nestedContract is String
+            ? nestedContract
+            : null;
+        final providerAddress = _resolvedGaslessProviders[asset.id];
+        final walletPubkeyHash = user.walletId.pubkeyHash;
+        if (contractAddress == null ||
+            providerAddress == null ||
+            walletPubkeyHash == null ||
+            !(_gaslessRuntimeContracts[asset.id] ==
+                    _GaslessRuntimeContract.legacyAccountStatus
+                ? _gaslessCapabilities.markProvisionalFor(
+                    asset,
+                    GaslessCapabilityIdentity(
+                      assetId: asset.id,
+                      platform: protocol.platform,
+                      contractAddress: contractAddress,
+                      providerAddress: providerAddress,
+                      walletPubkeyHash: walletPubkeyHash,
+                      walletType: walletType,
+                      derivationPath: capabilityPath,
+                    ),
+                  )
+                : _gaslessCapabilities.markReadyFor(
+                    asset,
+                    GaslessCapabilityIdentity(
+                      assetId: asset.id,
+                      platform: protocol.platform,
+                      contractAddress: contractAddress,
+                      providerAddress: providerAddress,
+                      walletPubkeyHash: walletPubkeyHash,
+                      walletType: walletType,
+                      derivationPath: capabilityPath,
+                    ),
+                  ))) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'capability_identity_mismatch',
+          );
+        }
+      }
+      return success;
+    } catch (error, stackTrace) {
+      for (final asset in _gaslessAssets(group)) {
+        if (error case _GaslessSecurityMismatch(:final reasonCode)) {
+          _gaslessCapabilities.markSecurityMismatch(
+            asset.id,
+            reasonCode: reasonCode,
+          );
+        } else if (error case _GaslessUnsupported(:final reasonCode)) {
+          _gaslessCapabilities.markUnsupported(
+            asset.id,
+            reasonCode: reasonCode,
+          );
+        } else if (error case _GaslessTemporarilyUnavailable(
+          :final reasonCode,
+        )) {
+          _gaslessCapabilities.markStale(asset.id, reasonCode: reasonCode);
+        } else if (error case _GaslessDisabled(:final reasonCode)) {
+          _gaslessCapabilities.markDisabled(asset.id, reasonCode: reasonCode);
+        } else {
+          _gaslessCapabilities.markUnconfirmed(asset.id);
+        }
+      }
+      final mappedError = _mapError(error, group.primary.id);
+      return ActivationProgress.error(
+        message: mappedError.fallbackMessage,
+        sdkError: mappedError,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -586,6 +892,44 @@ class ActivationManager {
     });
   }
 }
+
+class _GaslessSecurityMismatch implements Exception {
+  const _GaslessSecurityMismatch({required this.reasonCode});
+
+  final String reasonCode;
+
+  @override
+  String toString() => 'GasFree security validation failed';
+}
+
+class _GaslessUnsupported implements Exception {
+  const _GaslessUnsupported({required this.reasonCode});
+
+  final String reasonCode;
+
+  @override
+  String toString() => 'GasFree is unsupported for this token';
+}
+
+class _GaslessTemporarilyUnavailable implements Exception {
+  const _GaslessTemporarilyUnavailable({required this.reasonCode});
+
+  final String reasonCode;
+
+  @override
+  String toString() => 'GasFree is temporarily unavailable';
+}
+
+class _GaslessDisabled implements Exception {
+  const _GaslessDisabled({required this.reasonCode});
+
+  final String reasonCode;
+
+  @override
+  String toString() => 'GasFree provider authentication is unavailable';
+}
+
+enum _GaslessRuntimeContract { legacyAccountStatus, boundConfigure }
 
 /// Internal class for grouping related assets
 class _AssetGroup {

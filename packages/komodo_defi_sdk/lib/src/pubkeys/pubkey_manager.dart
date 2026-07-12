@@ -703,9 +703,28 @@ AssetPubkeys filterGaslessPhantomAddresses(
         .skip(1)
         .where(
           (key) => key.balance.hasValue || everFunded.contains(key.address),
+        )
+        .map(
+          (key) => PubkeyInfo(
+            address: key.address,
+            derivationPath: key.derivationPath,
+            chain: key.chain,
+            balance: key.balance,
+            coinTicker: asset.id.id,
+            // Only the canonical primary may advertise a GasFree custody
+            // receive address. Retained secondary keys are Standard/recovery
+            // sources even if a legacy KDF cache attached a derived value.
+            gasfreeAddress: null,
+            name: key.name,
+          ),
         ),
   ];
-  if (keys.length == pubkeys.keys.length) return pubkeys;
+  final secondaryCustodyWasRemoved = pubkeys.keys
+      .skip(1)
+      .any((key) => (key.gasfreeAddress ?? '').isNotEmpty);
+  if (keys.length == pubkeys.keys.length && !secondaryCustodyWasRemoved) {
+    return pubkeys;
+  }
 
   return AssetPubkeys(
     assetId: pubkeys.assetId,

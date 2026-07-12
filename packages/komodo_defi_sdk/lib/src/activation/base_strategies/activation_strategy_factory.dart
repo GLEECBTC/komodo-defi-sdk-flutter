@@ -19,6 +19,7 @@ class ActivationStrategyFactory {
     ActivationConfigService configService,
     ActivatedAssetsCache activatedAssetsCache, {
     TronGaslessProviderConfig? tronGaslessProvider,
+    Set<String> tronGaslessAssetIds = const <String>{},
   }) {
     return SmartAssetActivator(
       client,
@@ -31,6 +32,7 @@ class ActivationStrategyFactory {
           client,
           privKeyPolicy,
           tronGaslessProvider: tronGaslessProvider,
+          tronGaslessAssetIds: tronGaslessAssetIds,
         ),
         Erc20ActivationStrategy(
           client,
@@ -45,10 +47,7 @@ class ActivationStrategyFactory {
         QtumActivationStrategy(client, privKeyPolicy),
         SiaActivationStrategy(client),
         ZhtlcActivationStrategy(client, privKeyPolicy, configService),
-        CustomErc20ActivationStrategy(
-          client,
-          tronGaslessProvider: tronGaslessProvider,
-        ),
+        CustomErc20ActivationStrategy(client),
       ]),
       activatedAssetsCache,
     );

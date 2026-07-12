@@ -157,8 +157,10 @@ class KdfOperationsRemote implements IKdfOperations {
 
     try {
       response = await http.post(_baseUrl, body: json.encode(request));
-    } on http.ClientException catch (e) {
-      return ConnectionError(e.message, originalException: e);
+    } on http.ClientException {
+      // ClientException can include a credential-bearing URL. Keep the public
+      // failure stable and free of transport internals.
+      return ConnectionError('Remote KDF request failed');
     }
 
     if (response.statusCode != 200) {
@@ -168,11 +170,21 @@ class KdfOperationsRemote implements IKdfOperations {
           'error': 'HTTP Error',
           'status': response.statusCode,
         }.toJsonString(),
-        message: response.body,
+        message: 'Remote KDF returned HTTP ${response.statusCode}',
       );
     }
 
-    return json.decode(response.body) as Map<String, dynamic>;
+    try {
+      final decoded = json.decode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // Do not surface FormatException.source: it contains the upstream body.
+    }
+    return JsonRpcErrorResponse(
+      code: response.statusCode,
+      error: 'InvalidKdfResponse',
+      message: 'Remote KDF returned a malformed JSON response',
+    );
   }
 
   @override
@@ -191,7 +203,7 @@ class KdfOperationsRemote implements IKdfOperations {
       final maybeError = response.valueOrNull<String>('error');
 
       if (maybeError != null) {
-        print('Error getting version: ${response['error']}');
+        _log('Error getting remote KDF version');
         return null;
       }
 

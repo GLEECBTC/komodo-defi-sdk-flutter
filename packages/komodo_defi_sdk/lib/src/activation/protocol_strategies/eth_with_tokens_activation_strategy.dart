@@ -13,6 +13,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
     super.client,
     this.privKeyPolicy, {
     this.tronGaslessProvider,
+    this.tronGaslessAssetIds = const <String>{},
   });
 
   /// The private key management policy to use for this strategy.
@@ -23,6 +24,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
   /// activations so the platform's TRC20 tokens can use gas-free transfers.
   /// Ignored for non-TRX (EVM) protocols.
   final TronGaslessProviderConfig? tronGaslessProvider;
+  final Set<String> tronGaslessAssetIds;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -148,7 +150,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          '[RPC] Activation summary: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'gasless_provider_configured': tronGaslessProvider != null, 'priv_key_policy': privKeyPolicy.runtimeType.toString()})}',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -204,7 +206,10 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
     return children?.map((child) {
           return TokensRequest(
             ticker: child.id.id,
-            gasless: enableTronGasless && child.protocol is Trc20Protocol
+            gasless:
+                enableTronGasless &&
+                    child.protocol is Trc20Protocol &&
+                    tronGaslessAssetIds.contains(child.id.id)
                 ? const TronGaslessTokenActivationConfig(enabled: true)
                 : null,
           );

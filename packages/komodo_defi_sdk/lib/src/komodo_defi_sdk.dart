@@ -324,6 +324,12 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   BalanceManager get balances =>
       _assertSdkInitialized(_container<BalanceManager>());
 
+  /// Whether this wallet may expose a new GasFree custody receive address.
+  /// Legacy KDF contracts are recovery/send-only and always return false.
+  bool canReceiveGasless(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().canReceiveGasless(asset.id),
+  );
+
   /// The event streaming service instance.
   ///
   /// Provides access to SSE (Server-Sent Events) connection lifecycle management

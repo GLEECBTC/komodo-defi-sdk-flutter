@@ -14,6 +14,7 @@ class KomodoDefiSdkConfig {
     this.marketDataConfig = const MarketDataConfig(),
     this.tronProApiKey,
     this.tronGaslessProvider,
+    this.tronGaslessAssetIds = const <String>{},
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -50,6 +51,10 @@ class KomodoDefiSdkConfig {
   /// token. Held in memory only — never persisted.
   final TronGaslessProviderConfig? tronGaslessProvider;
 
+  /// Explicit asset IDs allowed to use GasFree. The default is empty so
+  /// configuring a provider alone never enables every TRC-20 token.
+  final Set<String> tronGaslessAssetIds;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -61,6 +66,7 @@ class KomodoDefiSdkConfig {
     MarketDataConfig? marketDataConfig,
     String? tronProApiKey,
     TronGaslessProviderConfig? tronGaslessProvider,
+    Set<String>? tronGaslessAssetIds,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -78,6 +84,7 @@ class KomodoDefiSdkConfig {
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
       tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
+      tronGaslessAssetIds: tronGaslessAssetIds ?? this.tronGaslessAssetIds,
     );
   }
 }
