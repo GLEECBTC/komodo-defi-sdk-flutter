@@ -16,6 +16,11 @@ class WithdrawAmountField extends StatefulWidget {
     this.maxAmountLabel,
     this.symbol,
     this.availableBalanceLabel,
+    this.amountLabel,
+    this.insufficientBalanceLabel,
+    this.amountHelperLabel,
+    this.sendMaximumLabel,
+    this.maxButtonLabel,
     super.key,
   });
 
@@ -55,6 +60,13 @@ class WithdrawAmountField extends StatefulWidget {
   /// Label prefix for the available-balance line. Defaults to `'Available:'`;
   /// pass a localized string to override.
   final String? availableBalanceLabel;
+
+  /// Localizable labels used by the field.
+  final String? amountLabel;
+  final String? insufficientBalanceLabel;
+  final String? amountHelperLabel;
+  final String? sendMaximumLabel;
+  final String? maxButtonLabel;
 
   @override
   State<WithdrawAmountField> createState() => _WithdrawAmountFieldState();
@@ -118,11 +130,14 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 4,
           children: [
             Text(
-              'Amount',
+              widget.amountLabel ?? 'Amount',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -132,9 +147,7 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
                 '${widget.availableBalanceLabel ?? 'Available:'} '
                 '${widget.availableBalance} '
                 '${widget.symbol ?? widget.asset.id.id}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
+                style: theme.textTheme.bodyMedium,
               ),
           ],
         ),
@@ -145,23 +158,20 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
           decoration: InputDecoration(
             border: const OutlineInputBorder(),
             errorText: widget.amountError,
-            suffixIcon: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.symbol ?? widget.asset.id.id,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
+            suffix: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Text(
+                widget.symbol ?? widget.asset.id.id,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             prefixIcon: widget.hasInsufficientBalance
                 ? Tooltip(
-                    message: 'Insufficient balance',
+                    message:
+                        widget.insufficientBalanceLabel ??
+                        'Insufficient balance',
                     child: Icon(
                       Icons.warning_amber_rounded,
                       color: theme.colorScheme.error,
@@ -169,8 +179,8 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
                   )
                 : null,
             helperText: widget.hasInsufficientBalance
-                ? 'Insufficient balance'
-                : 'Enter the amount to send',
+                ? widget.insufficientBalanceLabel ?? 'Insufficient balance'
+                : widget.amountHelperLabel ?? 'Enter the amount to send',
             helperStyle: widget.hasInsufficientBalance
                 ? TextStyle(color: theme.colorScheme.error)
                 : null,
@@ -178,27 +188,45 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           onChanged: widget.onChanged,
         ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Checkbox(
-                  value: widget.isMaxAmount,
-                  onChanged: (value) => widget.onMaxToggled(value ?? false),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final scaledBodySize = MediaQuery.textScalerOf(context).scale(14);
+            final stackControls =
+                constraints.maxWidth < 360 || scaledBodySize > 18;
+            final toggle = MergeSemantics(
+              child: CheckboxListTile(
+                value: widget.isMaxAmount,
+                onChanged: (value) => widget.onMaxToggled(value ?? false),
+                title: Text(
+                  widget.sendMaximumLabel ?? 'Send maximum available',
                 ),
-                const Text('Send maximum available'),
-              ],
-            ),
-            if (!widget.isMaxAmount)
-              TextButton(
-                onPressed: () {
-                  widget.onMaxToggled(true);
-                },
-                child: const Text('MAX'),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
               ),
-          ],
+            );
+            final maxButton = TextButton(
+              onPressed: () => widget.onMaxToggled(true),
+              child: Text(widget.maxButtonLabel ?? 'MAX'),
+            );
+
+            if (stackControls) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  toggle,
+                  if (!widget.isMaxAmount)
+                    Align(alignment: Alignment.centerRight, child: maxButton),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: toggle),
+                if (!widget.isMaxAmount) maxButton,
+              ],
+            );
+          },
         ),
       ],
     );
