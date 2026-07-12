@@ -1,3 +1,32 @@
+## 1.0.0
+
+> Note: This release has breaking GasFree activation and withdrawal behavior.
+
+ - **BREAKING** **FEAT**(gasfree): require an explicit token allowlist and an
+   authoritative account-status check before custody balance, history, or sends
+   become available.
+ - **FEAT**(gasfree): reconfigure already-active TRON runtimes through
+   `gasless::configure`, with an exact method-missing fallback for KDF PR #9;
+   both contracts require an authoritative account-status check.
+ - **SECURITY**(gasfree): persist wallet-scoped request fingerprints before
+   relay submission, retain ambiguous outcomes, validate relay identity and fee
+   bounds, and automatically resume status-only reconciliation on wallet login.
+ - **SECURITY**(gasfree): keep legacy relay payloads byte-for-byte compatible,
+   keep PR #9 provisional until signed-preview provider proof, assign a local
+   request/fingerprint journal identity, and require an exact raw TRONGrid
+   transfer event before accepting legacy finality. Legacy mode is existing-
+   custody recovery/send only; new receives require bound relay responses.
+ - **FIX**(gasfree): retain stale custody/recovery access, distinguish Iguana
+   and canonical HD identities, preserve cross-page address perspectives, and
+   expose final fee plus confirmation metadata without enabling resubmission.
+ - **FIX**(pubkeys): migrate legacy address metadata conservatively so funded
+   and previously used Standard addresses remain visible.
+ - **FIX**(gasfree): require explicit account-status provenance and retain
+   provider-independent mainnet/Nile custody balance recovery after restart or
+   kill-switch disablement.
+ - **BUILD**(android): hardened arm64/armv7 KDF artifacts remain unavailable;
+   builds stay pinned to the last fetchable full KDF SHA pending promotion.
+
 ## 0.6.0
 
 > Note: This release has breaking changes.

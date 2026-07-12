@@ -1,3 +1,18 @@
+## 1.0.0
+
+> Note: This release has breaking GasFree relay response interfaces.
+
+ - **BREAKING** **FEAT**(gasfree): model nullable immediate transaction hashes,
+   request/trace relay identities, runtime configuration, account status, and
+   trace settlement responses.
+ - **SECURITY**(gasfree): bind relay acceptance to the signed request ID and
+   exact expected authorization; require the same binding on trace polling.
+ - **FIX**(gasfree): accept the PR #9 relay contract without adding unsupported
+   trace parameters and normalize seconds, legacy double-divided timestamps,
+   and millisecond confirmation times.
+ - **FIX**(gasfree): preserve custody totals with stable degraded-status reason
+   codes while leaving spendable/frozen values unknown.
+
 ## 0.5.0
 
 > Note: This release has breaking changes.

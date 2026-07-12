@@ -1,6 +1,6 @@
 {
   "api": {
-    "api_commit_hash": "997332e",
+    "api_commit_hash": "997332e5d6b0c5ca471aa7dc9727a7be96938ae2",
     "branch": "feat-tron-gasfree-gui-tweaks",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,

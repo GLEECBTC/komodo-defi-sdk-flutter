@@ -1,3 +1,17 @@
+## 1.0.0
+
+> Note: This release has breaking GasFree withdrawal interfaces.
+
+ - **BREAKING** **FEAT**(gasfree): add explicit capability, balance snapshot,
+   authorization, relay submission, and durable pending-transfer domain types.
+ - **BREAKING** **FIX**(gasfree): make pre-relay transaction hashes nullable;
+   expose signed maximum, authoritative final fee, provider/request metadata,
+   and confirmation block/time as distinct receipt fields.
+ - **SECURITY**(gasfree): make provider discovery, direct HMAC, and insecure
+   transport explicit development-only opt-ins with redacted value semantics.
+ - **FEAT**(gasfree): persist whether a pending relay uses bound KDF responses
+   or legacy on-chain verification; migrate older records conservatively.
+
 ## 0.4.1
 
  - **FIX**(tron): support TRON explorer URL templates and correct TRC20 badge classification (#338, #344).

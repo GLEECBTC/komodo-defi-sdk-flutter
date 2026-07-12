@@ -30,9 +30,14 @@ Paths in the config are relative to that package directory.
 
 ## Updating artifacts
 
-1. Update `api_commit_hash` and (optionally) checksums
+1. Update `api_commit_hash` and every platform checksum
 2. Run the build transformer (via Flutter asset transformers or CLI)
 3. Commit the updated artifacts if your workflow requires vendoring
+
+An all-zero checksum is an intentional release blocker, never a valid
+artifact. It keeps a declared platform fail-closed while the artifact for the
+pinned commit is still unpublished. Replace it only with the independently
+calculated SHA-256 of that commit's downloaded zip.
 
 ## Tips
 
