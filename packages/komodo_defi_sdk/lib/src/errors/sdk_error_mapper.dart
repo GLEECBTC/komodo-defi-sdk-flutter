@@ -21,6 +21,7 @@ class SdkErrorMapper {
 
   static const List<SdkErrorHandler> _defaultHandlers = [
     _SdkErrorPassthroughHandler(),
+    _GaslessTransferExceptionHandler(),
     _WithdrawalExceptionHandler(),
     _AuthExceptionHandler(),
     _ActivationExceptionHandler(),
@@ -39,6 +40,59 @@ class SdkErrorMapper {
       }
     }
     return const _FallbackHandler().handle(error, context: context);
+  }
+}
+
+class _GaslessTransferExceptionHandler extends SdkErrorHandler {
+  const _GaslessTransferExceptionHandler();
+
+  @override
+  bool canHandle(Object error) => error is GaslessTransferException;
+
+  @override
+  SdkError handle(Object error, {SdkErrorContext? context}) {
+    final gasless = error as GaslessTransferException;
+    final (code, category) = switch (gasless.kind) {
+      GaslessTransferErrorKind.capabilityNotReady ||
+      GaslessTransferErrorKind.configuration => (
+        SdkErrorCode.assetNotActivated,
+        SdkErrorCategory.activation,
+      ),
+      GaslessTransferErrorKind.persistenceUnavailable ||
+      GaslessTransferErrorKind.traceUnavailable => (
+        SdkErrorCode.transport,
+        SdkErrorCategory.network,
+      ),
+      GaslessTransferErrorKind.invalidTrace ||
+      GaslessTransferErrorKind.providerResponse => (
+        SdkErrorCode.invalidResponse,
+        SdkErrorCategory.validation,
+      ),
+      GaslessTransferErrorKind.finalFailure => (
+        SdkErrorCode.general,
+        SdkErrorCategory.unknown,
+      ),
+    };
+    final gaslessContext = SdkErrorContext(
+      operation: context?.operation,
+      assetId: context?.assetId,
+      rpcMethod: context?.rpcMethod,
+      extra: {
+        ...?context?.extra,
+        'gaslessCode': gasless.code.name,
+        'gaslessStage': gasless.stage.name,
+        'gaslessTerminal': gasless.terminal,
+      },
+    );
+    return _build(
+      code: code,
+      category: category,
+      messageKey: gasless.localizationKey,
+      fallbackMessage: gasless.message,
+      retryable: gasless.retryable,
+      context: gaslessContext,
+      source: gasless,
+    );
   }
 }
 
@@ -1443,7 +1497,6 @@ const String _keyAuthInvalidCredentials = 'sdk_errors.auth_invalid_credentials';
 const String _keyAuthUnauthorized = 'sdk_errors.auth_unauthorized';
 const String _keyAuthWalletNotFound = 'sdk_errors.auth_wallet_not_found';
 const String _keyGeneral = 'sdk_errors.general';
-
 const String _fallbackNetworkUnavailable =
     'Network error. Please check your connection and try again.';
 const String _fallbackTimeout = 'The request timed out. Please try again.';

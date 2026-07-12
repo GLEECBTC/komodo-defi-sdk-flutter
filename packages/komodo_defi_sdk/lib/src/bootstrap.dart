@@ -2,6 +2,7 @@
 
 import 'dart:developer';
 
+import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
@@ -12,6 +13,7 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/activation_config/hive_adapters.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show CexMarketDataManager, MarketDataManager;
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
@@ -19,6 +21,7 @@ import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/storage/secure_rpc_password_mixin.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -42,6 +45,24 @@ Future<void> bootstrap({
 }) async {
   log('Bootstrap: Starting dependency injection setup...', name: 'Bootstrap');
   final stopwatch = Stopwatch()..start();
+
+  config.tronGaslessProvider?.validate(
+    allowInsecureTransport: !kReleaseMode,
+    allowDirectCredentials: !kReleaseMode,
+    allowProviderDiscovery: !kReleaseMode,
+  );
+
+  container.registerSingleton(
+    GaslessCapabilityRegistry(
+      configuredAssetIds: config.tronGaslessAssetIds,
+      pinnedProviderAddress: config.tronGaslessProvider?.serviceProvider,
+      allowProviderDiscovery:
+          config.tronGaslessProvider?.allowServiceProviderDiscovery ?? false,
+    ),
+  );
+  container.registerSingleton<PendingGaslessTransferRepository>(
+    SecurePendingGaslessTransferRepository(),
+  );
 
   final rpcPassword = await SecureRpcPasswordMixin().ensureRpcPassword();
 
@@ -149,6 +170,7 @@ Future<void> bootstrap({
         eventStreamingManager: eventStreamingManager,
         assetHistoryStorage: container<AssetHistoryStorage>(),
         client: client,
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
     },
     dependsOn: [
@@ -182,6 +204,7 @@ Future<void> bootstrap({
         container<KomodoAssetsUpdateManager>(),
         activatedAssetsCache,
         tronGaslessProvider: config.tronGaslessProvider,
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
 
       return activationManager;
@@ -311,6 +334,7 @@ Future<void> bootstrap({
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
         assetHistoryStorage: container<AssetHistoryStorage>(),
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
     },
     dependsOn: [
@@ -329,6 +353,9 @@ Future<void> bootstrap({
       final assetProvider = await container.getAsync<AssetManager>();
       final feeManager = await container.getAsync<FeeManager>();
       final legacyManager = await container.getAsync<LegacyWithdrawalManager>();
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
+      final transactionHistory = await container
+          .getAsync<TransactionHistoryManager>();
 
       final activationCoordinator = await container
           .getAsync<SharedActivationCoordinator>();
@@ -338,6 +365,15 @@ Future<void> bootstrap({
         feeManager,
         activationCoordinator,
         legacyManager,
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
+        pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
+        transactionHistoryManager: transactionHistory,
+        walletIdResolver: () async => (await auth.currentUser)?.walletId,
+        authStateChanges: auth.watchCurrentUser(),
+        gaslessPollInterval: Duration(
+          milliseconds:
+              config.tronGaslessProvider?.statusPollIntervalMs ?? 3000,
+        ),
       );
     },
     dependsOn: [
@@ -346,6 +382,8 @@ Future<void> bootstrap({
       SharedActivationCoordinator,
       FeeManager,
       LegacyWithdrawalManager,
+      KomodoDefiLocalAuth,
+      TransactionHistoryManager,
     ],
   );
 

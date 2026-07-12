@@ -9,6 +9,7 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/bootstrap.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart';
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
@@ -323,6 +324,22 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Throws [StateError] if accessed before initialization.
   BalanceManager get balances =>
       _assertSdkInitialized(_container<BalanceManager>());
+
+  /// Current fail-closed GasFree availability for [asset].
+  ///
+  /// A ready result is wallet/session specific and is granted only after KDF
+  /// runtime configuration plus an authoritative provider status check.
+  GaslessCapability gaslessCapability(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().capabilityFor(asset),
+  );
+
+  /// Whether a previously verified stale capability may request a fresh,
+  /// read-only GasFree preview. Relay submission still requires `ready`.
+  bool canAttemptGaslessPreview(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().canAttemptAuthoritativePreview(
+      asset.id,
+    ),
+  );
 
   /// Whether this wallet may expose a new GasFree custody receive address.
   /// Legacy KDF contracts are recovery/send-only and always return false.

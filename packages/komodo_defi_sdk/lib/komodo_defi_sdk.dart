@@ -36,6 +36,24 @@ export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
+export 'package:komodo_defi_types/komodo_defi_types.dart'
+    show
+        GaslessAuthorization,
+        GaslessBalanceProvenance,
+        GaslessBalanceSnapshot,
+        GaslessCapability,
+        GaslessCapabilityState,
+        GaslessOnChainVerification,
+        GaslessStandardBalance,
+        GaslessTransferErrorCode,
+        GaslessTransferErrorKind,
+        GaslessTransferException,
+        GaslessTransferStage,
+        GaslessTransferState,
+        GaslessVerificationMode,
+        PendingGaslessTransfer,
+        WithdrawalSubmission,
+        WithdrawalSubmissionType;
 
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation_config/activation_config_service.dart'
@@ -65,6 +83,12 @@ export 'src/assets/legacy_asset_extensions.dart';
 export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
 export 'src/transaction_history/transaction_merge_utils.dart'
     show TransactionListReconciler, TransactionMergeUtils;
+export 'src/withdrawals/pending_gasless_transfer_repository.dart'
+    show
+        GaslessTransferKeyValueStorage,
+        PendingGaslessTransferRepository,
+        SecureGaslessTransferStorage,
+        SecurePendingGaslessTransferRepository;
 export 'src/widgets/asset_balance_text.dart';
 export 'src/zcash_params/models/download_progress.dart';
 export 'src/zcash_params/models/download_result.dart';

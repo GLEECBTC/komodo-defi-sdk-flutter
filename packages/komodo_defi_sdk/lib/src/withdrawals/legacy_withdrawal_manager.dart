@@ -20,6 +20,30 @@ class LegacyWithdrawalManager implements WithdrawalManager {
     return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
   }
 
+  @override
+  Future<List<PendingGaslessTransfer>> listPendingGaslessTransfers() async =>
+      const [];
+
+  @override
+  Stream<List<PendingGaslessTransfer>> watchPendingGaslessTransfers() =>
+      const Stream<List<PendingGaslessTransfer>>.empty();
+
+  @override
+  Stream<WithdrawalProgress> resumePendingGaslessTransfer(String traceId) =>
+      Stream.error(
+        UnsupportedError('Legacy withdrawals do not support GasFree relays'),
+      );
+
+  @override
+  Stream<WithdrawalProgress> reconcilePendingGaslessTransfers() =>
+      const Stream<WithdrawalProgress>.empty();
+
+  @override
+  Future<void> startGaslessReconciliation() async {}
+
+  @override
+  Future<void> stopGaslessReconciliation() async {}
+
   /// Creates a preview and immediately executes the withdrawal.
   ///
   /// **DEPRECATED:** Use [previewWithdrawal] followed by [executeWithdrawal]
@@ -65,6 +89,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               result.kmdRewards != null &&
               Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: result.blockHeight > 0
+              ? result.blockHeight
+              : null,
+          confirmedAt: result.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  result.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
 
@@ -89,6 +122,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
             kmdRewardsEligible:
                 result.kmdRewards != null &&
                 Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+            confirmationBlockHeight: result.blockHeight > 0
+                ? result.blockHeight
+                : null,
+            confirmedAt: result.timestamp > 0
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    result.timestamp * 1000,
+                    isUtc: true,
+                  )
+                : null,
           ),
         );
       } catch (e) {
@@ -171,6 +213,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               preview.kmdRewards != null &&
               Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: preview.blockHeight > 0
+              ? preview.blockHeight
+              : null,
+          confirmedAt: preview.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  preview.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
 
@@ -194,6 +245,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               preview.kmdRewards != null &&
               Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: preview.blockHeight > 0
+              ? preview.blockHeight
+              : null,
+          confirmedAt: preview.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  preview.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
     } catch (e) {
