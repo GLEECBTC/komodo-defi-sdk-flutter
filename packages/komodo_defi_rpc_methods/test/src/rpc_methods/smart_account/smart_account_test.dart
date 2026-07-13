@@ -41,7 +41,7 @@ void main() {
       expect(prepared.recipient, _recipient);
       expect(prepared.amount, BigInt.from(1250));
       expect(
-        (prepared.typedData['types'] as Map<String, dynamic>),
+        prepared.typedData['types'] as Map<String, dynamic>,
         contains('EIP712Domain'),
       );
     });
