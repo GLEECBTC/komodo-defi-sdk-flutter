@@ -275,8 +275,8 @@ void main() {
 
   test('sensitive refresh revokes evidence on custody mismatch', () {
     final asset = token();
-    final capabilities = registry();
-    capabilities.markStatusAttestedFor(asset, identity(asset), _status());
+    final capabilities = registry()
+      ..markStatusAttestedFor(asset, identity(asset), _status());
 
     expect(
       capabilities.refreshStatusAttestation(
@@ -295,8 +295,8 @@ void main() {
 
   test('provider outage preserves candidate but revokes receive evidence', () {
     final asset = token();
-    final capabilities = registry();
-    capabilities.markStatusAttestedFor(asset, identity(asset), _status());
+    final capabilities = registry()
+      ..markStatusAttestedFor(asset, identity(asset), _status());
 
     expect(
       capabilities.refreshStatusAttestation(
