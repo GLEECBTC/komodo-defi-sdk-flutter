@@ -22,18 +22,48 @@ class GaslessAccountStatusRequest
       GaslessAccountStatusResponse.parse(json);
 }
 
+/// Authoritative availability of a GasFree custody account.
+enum GaslessAccountAvailability {
+  /// Provider status is authoritative and the account may be used now.
+  available('available'),
+
+  /// An existing transfer currently freezes the custody account.
+  pendingTransfer('pending_transfer'),
+
+  /// The provider does not support this token enrollment.
+  tokenUnsupported('token_unsupported'),
+
+  /// Provider status could not be obtained.
+  providerUnreachable('provider_unreachable');
+
+  const GaslessAccountAvailability(this.wireValue);
+
+  /// Stable snake-case value used by KDF.
+  final String wireValue;
+
+  /// Parses KDF's stable snake-case representation.
+  static GaslessAccountAvailability parse(String value) => switch (value) {
+    'available' => available,
+    'pending_transfer' => pendingTransfer,
+    'token_unsupported' => tokenUnsupported,
+    'provider_unreachable' => providerUnreachable,
+    _ => throw const FormatException('Unknown GasFree account availability'),
+  };
+}
+
 /// The GasFree custody account status for one TRC-20 token.
 ///
-/// [onChainBalance] and [gasfreeAddress] are always present. The remaining
-/// fields are provider-derived and `null` when [providerAvailable] is `false`
-/// (the GasFree provider could not be reached), in which case the client should
-/// display the raw on-chain balance and compute fees at withdraw time.
+/// [onChainBalance] and [gasfreeAddress] are always present. Fee and maximum
+/// fields are meaningful only when [availability] is
+/// [GaslessAccountAvailability.available].
 class GaslessAccountStatusResponse extends BaseResponse {
   GaslessAccountStatusResponse({
     required super.mmrpc,
     required this.gasfreeAddress,
     required this.onChainBalance,
-    required this.providerAvailable,
+    required this.availability,
+    required this.hasExplicitAvailability,
+    this.serviceProvider,
     this.active,
     this.frozenBalance,
     this.spendableBalance,
@@ -50,20 +80,41 @@ class GaslessAccountStatusResponse extends BaseResponse {
       return raw == null ? null : Decimal.parse(raw.toString());
     }
 
+    final rawAvailability = result.valueOrNull<String>('availability');
+    final legacyProviderAvailable = result.valueOrNull<bool>(
+      'provider_available',
+    );
+    final reasonCode = result.valueOrNull<String>('reason_code');
+    if (rawAvailability == null && legacyProviderAvailable == null) {
+      throw ArgumentError('GasFree account availability is required');
+    }
+    final availability = rawAvailability != null
+        ? GaslessAccountAvailability.parse(rawAvailability)
+        : switch ((legacyProviderAvailable!, reasonCode)) {
+            (true, _) => GaslessAccountAvailability.available,
+            (false, 'token_unsupported') =>
+              GaslessAccountAvailability.tokenUnsupported,
+            (false, 'pending_transfer') =>
+              GaslessAccountAvailability.pendingTransfer,
+            _ => GaslessAccountAvailability.providerUnreachable,
+          };
+
     return GaslessAccountStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
       gasfreeAddress: result.value<String>('gasfree_address'),
       onChainBalance: Decimal.parse(
         result.value<dynamic>('on_chain_balance').toString(),
       ),
-      providerAvailable: result.value<bool>('provider_available'),
+      availability: availability,
+      hasExplicitAvailability: rawAvailability != null,
+      serviceProvider: result.valueOrNull<String>('service_provider'),
       active: result.valueOrNull<bool>('active'),
       frozenBalance: dec('frozen_balance'),
       spendableBalance: dec('spendable_balance'),
       transferFee: dec('transfer_fee'),
       activationFee: dec('activation_fee'),
       maxWithdrawable: dec('max_withdrawable'),
-      reasonCode: result.valueOrNull<String>('reason_code'),
+      reasonCode: reasonCode,
     );
   }
 
@@ -97,9 +148,23 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// unavailable. Matches the withdraw `max` amount.
   final Decimal? maxWithdrawable;
 
-  /// Whether the provider preflight succeeded. When `false`, only
-  /// [gasfreeAddress] and [onChainBalance] are populated.
-  final bool providerAvailable;
+  /// KDF's authoritative status for the custody account.
+  final GaslessAccountAvailability availability;
+
+  /// Whether [availability] came from the enum contract rather than the
+  /// deprecated boolean compatibility field.
+  final bool hasExplicitAvailability;
+
+  /// Compatibility alias for callers that have not migrated to [availability].
+  @Deprecated('Use availability == GaslessAccountAvailability.available')
+  bool get providerAvailable =>
+      availability == GaslessAccountAvailability.available;
+
+  /// Exact service-provider address that produced the authoritative status.
+  ///
+  /// `null` for degraded responses and KDF versions that predate provider
+  /// identity attestation. A missing value must never enable new receives.
+  final String? serviceProvider;
 
   /// Stable reason for a provider-unavailable, unsupported, or security state.
   /// Raw upstream provider content is never exposed here.
@@ -110,7 +175,9 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// drop straight into balance widgets in place of the EOA balance.
   BalanceInfo get custodyBalance {
     final hasAuthoritativeSpendability =
-        providerAvailable && spendableBalance != null && frozenBalance != null;
+        availability == GaslessAccountAvailability.available &&
+        spendableBalance != null &&
+        frozenBalance != null;
     final spendable = hasAuthoritativeSpendability
         ? spendableBalance!
         : Decimal.zero;
@@ -130,7 +197,11 @@ class GaslessAccountStatusResponse extends BaseResponse {
     'result': {
       'gasfree_address': gasfreeAddress,
       'on_chain_balance': onChainBalance.toString(),
-      'provider_available': providerAvailable,
+      if (hasExplicitAvailability)
+        'availability': availability.wireValue
+      else
+        'provider_available': providerAvailable,
+      if (serviceProvider != null) 'service_provider': serviceProvider,
       if (active != null) 'active': active,
       if (frozenBalance != null) 'frozen_balance': frozenBalance.toString(),
       if (spendableBalance != null)

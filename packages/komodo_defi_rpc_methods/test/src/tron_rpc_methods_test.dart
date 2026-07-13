@@ -555,7 +555,8 @@ void main() {
           'transfer_fee': '2',
           'activation_fee': '1',
           'max_withdrawable': '9.5',
-          'provider_available': true,
+          'availability': 'available',
+          'service_provider': 'TProvider',
         },
       });
 
@@ -565,7 +566,13 @@ void main() {
       expect(response.transferFee, Decimal.parse('2'));
       expect(response.activationFee, Decimal.parse('1'));
       expect(response.maxWithdrawable, Decimal.parse('9.5'));
-      expect(response.providerAvailable, isTrue);
+      expect(response.availability, GaslessAccountAvailability.available);
+      expect(response.hasExplicitAvailability, isTrue);
+      expect(response.serviceProvider, 'TProvider');
+      expect(
+        response.toJson()['result'],
+        containsPair('service_provider', 'TProvider'),
+      );
       // total = on-chain, spendable = on-chain - frozen, unspendable = frozen
       expect(response.custodyBalance.total, Decimal.parse('12.5'));
       expect(response.custodyBalance.spendable, Decimal.parse('12.5'));
@@ -578,16 +585,19 @@ void main() {
         'result': {
           'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
           'on_chain_balance': '7',
-          'provider_available': false,
-          'reason_code': 'provider_temporarily_unavailable',
+          'availability': 'provider_unreachable',
         },
       });
 
-      expect(response.providerAvailable, isFalse);
+      expect(
+        response.availability,
+        GaslessAccountAvailability.providerUnreachable,
+      );
+      expect(response.serviceProvider, isNull);
       expect(response.active, isNull);
       expect(response.transferFee, isNull);
       expect(response.maxWithdrawable, isNull);
-      expect(response.reasonCode, 'provider_temporarily_unavailable');
+      expect(response.reasonCode, isNull);
       // Unknown spendability is represented conservatively, never synthesized.
       expect(response.custodyBalance.total, Decimal.parse('7'));
       expect(response.custodyBalance.spendable, Decimal.zero);

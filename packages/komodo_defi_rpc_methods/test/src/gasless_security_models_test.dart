@@ -6,7 +6,7 @@ void main() {
     final baseResult = <String, dynamic>{
       'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
       'on_chain_balance': '7',
-      'provider_available': false,
+      'availability': 'provider_unreachable',
     };
 
     test('requires the on-chain custody balance', () {
@@ -25,9 +25,39 @@ void main() {
         () => GaslessAccountStatusResponse.parse({
           'mmrpc': '2.0',
           'result': Map<String, dynamic>.from(baseResult)
-            ..remove('provider_available'),
+            ..remove('availability'),
         }),
         throwsArgumentError,
+      );
+    });
+
+    test('marks boolean availability as compatibility-only', () {
+      final explicit = GaslessAccountStatusResponse.parse({
+        'mmrpc': '2.0',
+        'result': baseResult,
+      });
+      final legacy = GaslessAccountStatusResponse.parse({
+        'mmrpc': '2.0',
+        'result': {...baseResult, 'provider_available': false}
+          ..remove('availability'),
+      });
+
+      expect(explicit.hasExplicitAvailability, isTrue);
+      expect(legacy.hasExplicitAvailability, isFalse);
+      expect(
+        legacy.availability,
+        GaslessAccountAvailability.providerUnreachable,
+      );
+      expect(legacy.toJson()['result'], isNot(contains('availability')));
+    });
+
+    test('rejects unknown availability states', () {
+      expect(
+        () => GaslessAccountStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': {...baseResult, 'availability': 'new_provider_state'},
+        }),
+        throwsFormatException,
       );
     });
   });

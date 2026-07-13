@@ -201,6 +201,21 @@ enum GaslessVerificationMode {
   boundRelay,
 }
 
+/// Evidence permitting a wallet UI to expose a new GasFree receive address.
+///
+/// This is intentionally independent from [GaslessVerificationMode], which
+/// describes how an already-submitted transfer reaches finality.
+enum GaslessReceiveEvidence {
+  /// No authoritative evidence permits a new custody deposit.
+  none,
+
+  /// KDF attested the canonical custody address and exact pinned provider.
+  statusAttestedV1,
+
+  /// KDF supports request-bound relay verification in addition to status.
+  boundRelayV2,
+}
+
 /// Result of independently reconciling a legacy relay with on-chain history.
 enum GaslessOnChainVerification {
   /// The expected hash has not propagated to authoritative history yet.

@@ -24,7 +24,11 @@ export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
 // ZHTLC sync parameters + GasFree custody account status
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
-    show GaslessAccountStatusResponse, GaslessTraceState, ZhtlcSyncParams;
+    show
+        GaslessAccountAvailability,
+        GaslessAccountStatusResponse,
+        GaslessTraceState,
+        ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
 export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
@@ -44,6 +48,7 @@ export 'package:komodo_defi_types/komodo_defi_types.dart'
         GaslessCapability,
         GaslessCapabilityState,
         GaslessOnChainVerification,
+        GaslessReceiveEvidence,
         GaslessStandardBalance,
         GaslessTransferErrorCode,
         GaslessTransferErrorKind,
