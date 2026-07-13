@@ -86,7 +86,8 @@ class ActivationManager {
   bool shouldRefreshTronGaslessActivation(Asset asset) =>
       _tronGaslessProvider != null &&
       _gaslessCapabilities.isConfigured(asset) &&
-      !_gaslessCapabilities.isReady(asset.id);
+      !_gaslessCapabilities.isReady(asset.id) &&
+      !_gaslessCapabilities.canReceiveGaslessFromStatus(asset.id);
 
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
