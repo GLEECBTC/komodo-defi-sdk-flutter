@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -90,6 +91,8 @@ class GaslessCapabilityRegistry {
   final Map<AssetId, GaslessCapabilityIdentity> _readyIdentities = {};
   final Map<AssetId, GaslessCapabilityIdentity> _candidateIdentities = {};
   final Map<AssetId, GaslessVerificationMode> _verificationModes = {};
+  final Map<AssetId, GaslessReceiveEvidence> _receiveEvidence = {};
+  final Map<AssetId, String> _attestedReceiveAddresses = {};
   final Map<AssetId, GaslessCapability> _states = {};
 
   Set<String> get configuredAssetIds => _configuredAssetIds;
@@ -131,6 +134,73 @@ class GaslessCapabilityRegistry {
   bool canReceiveGasless(AssetId assetId) =>
       isReady(assetId) &&
       _verificationModes[assetId] == GaslessVerificationMode.boundRelay;
+
+  /// Returns the receive-address evidence retained for this wallet session.
+  GaslessReceiveEvidence receiveEvidenceFor(AssetId assetId) =>
+      _receiveEvidence[assetId] ?? GaslessReceiveEvidence.none;
+
+  /// Wallet-only V1 receive permission. Bound-only integrations must continue
+  /// to use [canReceiveGasless].
+  bool canReceiveGaslessFromStatus(AssetId assetId) =>
+      _candidateIdentities.containsKey(assetId) &&
+      receiveEvidenceFor(assetId) == GaslessReceiveEvidence.statusAttestedV1;
+
+  /// Whether a canonical legacy candidate may make a read-only status probe.
+  bool canAttemptStatusReceiveAttestation(AssetId assetId) =>
+      _candidateIdentities.containsKey(assetId) &&
+      _verificationModes[assetId] == GaslessVerificationMode.legacyOnChain;
+
+  /// Revokes V1 receive permission while retaining custody recovery metadata.
+  void invalidateStatusReceiveEvidence(
+    AssetId assetId, {
+    required String reasonCode,
+  }) {
+    if (_receiveEvidence[assetId] == GaslessReceiveEvidence.statusAttestedV1) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+    }
+    markStale(assetId, reasonCode: reasonCode);
+  }
+
+  /// Maps typed KDF account-status failures without inspecting error messages.
+  bool markAccountStatusError(AssetId assetId, Object error) {
+    if (error is FormatException || error is ArgumentError) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+      return true;
+    }
+    if (error is! GeneralErrorResponse) return false;
+    final reason = switch (error.errorType) {
+      'TokenDecimalsMismatch' => 'token_decimals_mismatch',
+      'CustodyAddressMismatch' => 'custody_address_mismatch',
+      'ProviderIdentityMismatch' => 'provider_identity_mismatch',
+      _ => null,
+    };
+    if (reason != null) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markSecurityMismatch(assetId, reasonCode: reason);
+      return true;
+    }
+    switch (error.errorType) {
+      case 'GaslessNotConfigured':
+        invalidateStatusReceiveEvidence(
+          assetId,
+          reasonCode: 'runtime_restart_required',
+        );
+        return true;
+      case 'CoinNotSupported':
+        _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+        markUnsupported(assetId);
+        return true;
+      case 'ProviderError' || 'TronRpcUnavailable':
+        invalidateStatusReceiveEvidence(
+          assetId,
+          reasonCode: 'provider_unreachable',
+        );
+        return true;
+      default:
+        return false;
+    }
+  }
 
   /// Verifies that signed relay metadata is still bound to the exact canonical
   /// token/network/provider identity that was authoritatively marked ready.
@@ -264,6 +334,7 @@ class GaslessCapabilityRegistry {
     _candidateIdentities[asset.id] = identity;
     _readyIdentities[asset.id] = identity;
     _verificationModes[asset.id] = GaslessVerificationMode.boundRelay;
+    _receiveEvidence[asset.id] = GaslessReceiveEvidence.boundRelayV2;
     _states[asset.id] = GaslessCapability(
       assetId: asset.id,
       state: GaslessCapabilityState.ready,
@@ -278,10 +349,94 @@ class GaslessCapabilityRegistry {
     _candidateIdentities[asset.id] = identity;
     _readyIdentities.remove(asset.id);
     _verificationModes[asset.id] = GaslessVerificationMode.legacyOnChain;
+    _receiveEvidence[asset.id] = GaslessReceiveEvidence.none;
+    _attestedReceiveAddresses.remove(asset.id);
     _states[asset.id] = GaslessCapability(
       assetId: asset.id,
       state: GaslessCapabilityState.temporarilyUnavailable,
       reasonCode: 'provider_pin_preview_required',
+    );
+    return true;
+  }
+
+  /// Records V1 receive evidence without granting transfer readiness.
+  bool markStatusAttestedFor(
+    Asset asset,
+    GaslessCapabilityIdentity identity,
+    GaslessAccountStatusResponse status,
+  ) {
+    if (!markProvisionalFor(asset, identity)) return false;
+    return _applyStatusAttestation(asset.id, status);
+  }
+
+  /// Revalidates a previously attested V1 address for a sensitive UI action.
+  bool refreshStatusAttestation(
+    AssetId assetId,
+    GaslessAccountStatusResponse status, {
+    required String expectedGasfreeAddress,
+  }) {
+    if (!canAttemptStatusReceiveAttestation(assetId)) return false;
+    return _applyStatusAttestation(
+      assetId,
+      status,
+      expectedGasfreeAddress: expectedGasfreeAddress,
+    );
+  }
+
+  bool _applyStatusAttestation(
+    AssetId assetId,
+    GaslessAccountStatusResponse status, {
+    String? expectedGasfreeAddress,
+  }) {
+    _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+    final identity = _candidateIdentities[assetId]!;
+    if (!status.hasExplicitAvailability) {
+      markStale(assetId, reasonCode: 'availability_unattested');
+      return false;
+    }
+    if (status.availability != GaslessAccountAvailability.available) {
+      switch (status.availability) {
+        case GaslessAccountAvailability.pendingTransfer:
+          markStale(assetId, reasonCode: 'pending_transfer');
+        case GaslessAccountAvailability.tokenUnsupported:
+          markUnsupported(assetId);
+        case GaslessAccountAvailability.providerUnreachable:
+          markStale(assetId, reasonCode: 'provider_unreachable');
+        case GaslessAccountAvailability.available:
+          throw StateError('Unreachable GasFree availability branch');
+      }
+      return false;
+    }
+    if (status.serviceProvider != identity.providerAddress) {
+      markSecurityMismatch(assetId, reasonCode: 'provider_identity_mismatch');
+      return false;
+    }
+    final previousAddress = _attestedReceiveAddresses[assetId];
+    if (status.gasfreeAddress.isEmpty ||
+        (expectedGasfreeAddress != null &&
+            status.gasfreeAddress != expectedGasfreeAddress) ||
+        (previousAddress != null && status.gasfreeAddress != previousAddress)) {
+      markSecurityMismatch(assetId, reasonCode: 'custody_address_mismatch');
+      return false;
+    }
+    if (status.reasonCode != null) {
+      markSecurityMismatch(assetId, reasonCode: 'unexpected_ready_reason');
+      return false;
+    }
+    if (status.active == null ||
+        status.frozenBalance == null ||
+        status.spendableBalance == null ||
+        status.transferFee == null ||
+        status.maxWithdrawable == null) {
+      markUnconfirmed(assetId);
+      return false;
+    }
+    _attestedReceiveAddresses[assetId] = status.gasfreeAddress;
+    _receiveEvidence[assetId] = GaslessReceiveEvidence.statusAttestedV1;
+    _states[assetId] = GaslessCapability(
+      assetId: assetId,
+      state: GaslessCapabilityState.temporarilyUnavailable,
+      reasonCode: 'legacy_status_attested_receive_only',
     );
     return true;
   }
@@ -374,6 +529,8 @@ class GaslessCapabilityRegistry {
     _readyIdentities.clear();
     _candidateIdentities.clear();
     _verificationModes.clear();
+    _receiveEvidence.clear();
+    _attestedReceiveAddresses.clear();
     _states.clear();
   }
 }

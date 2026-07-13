@@ -555,32 +555,47 @@ class BalanceManager implements IBalanceManager {
         }
       }
       await _requireWalletContextCurrent(walletContext);
-      if (status != null && !status.providerAvailable) {
-        switch (status.reasonCode) {
-          case 'custody_address_mismatch' ||
-              'provider_identity_mismatch' ||
-              'provider_invalid_response':
-            _gaslessCapabilities?.markSecurityMismatch(
-              assetId,
-              reasonCode: status.reasonCode ?? 'provider_security_mismatch',
-            );
-          case 'provider_authentication_failed':
-            _gaslessCapabilities?.markDisabled(
-              assetId,
-              reasonCode: 'provider_authentication_failed',
-            );
-          case 'token_unsupported' || 'token_decimals_mismatch':
-            _gaslessCapabilities?.markUnsupported(
-              assetId,
-              reasonCode: status.reasonCode ?? 'token_unsupported',
-            );
-          default:
-            _gaslessCapabilities?.markStale(
-              assetId,
-              reasonCode:
-                  status.reasonCode ?? 'provider_temporarily_unavailable',
-            );
+      if (status != null) {
+        if (!status.hasExplicitAvailability) {
+          _gaslessCapabilities?.markStale(
+            assetId,
+            reasonCode: 'availability_unattested',
+          );
+        } else {
+          switch (status.availability) {
+            case GaslessAccountAvailability.available:
+              break;
+            case GaslessAccountAvailability.pendingTransfer:
+              _gaslessCapabilities?.markStale(
+                assetId,
+                reasonCode: 'pending_transfer',
+              );
+            case GaslessAccountAvailability.tokenUnsupported:
+              _gaslessCapabilities?.markUnsupported(assetId);
+            case GaslessAccountAvailability.providerUnreachable:
+              _gaslessCapabilities?.markStale(
+                assetId,
+                reasonCode: 'provider_unreachable',
+              );
+          }
         }
+      }
+      final isAvailable =
+          status?.hasExplicitAvailability == true &&
+          status?.availability == GaslessAccountAvailability.available;
+      if (isAvailable &&
+          (status?.reasonCode != null ||
+              status?.active == null ||
+              status?.frozenBalance == null ||
+              status?.spendableBalance == null ||
+              status?.transferFee == null ||
+              status?.maxWithdrawable == null)) {
+        _gaslessCapabilities?.markSecurityMismatch(
+          assetId,
+          reasonCode: 'invalid_account_status',
+        );
+        if (retained != null) return retained.asStale();
+        throw const FormatException('Incomplete available account status');
       }
       final standardBalances = [
         for (final key in pubkeys.keys)
@@ -597,25 +612,22 @@ class BalanceManager implements IBalanceManager {
       final snapshot = GaslessBalanceSnapshot(
         custodyAddress: custodyAddress,
         custodyTotal: custodyTotal,
-        custodySpendable: status?.providerAvailable == true
-            ? status?.spendableBalance
-            : null,
-        frozenAmount: status?.providerAvailable == true
-            ? status?.frozenBalance
-            : null,
+        custodySpendable: isAvailable ? status?.spendableBalance : null,
+        frozenAmount: isAvailable ? status?.frozenBalance : null,
         standardBalances: standardBalances,
         totalWalletOwned: custodyTotal + standardTotal,
         capturedAt: DateTime.now().toUtc(),
-        provenance: status?.providerAvailable == true
+        provenance: isAvailable
             ? GaslessBalanceProvenance.authoritativeProvider
             : GaslessBalanceProvenance.onChainOnly,
-        isFresh: status?.providerAvailable == true,
+        isFresh: isAvailable,
       );
       _gaslessSnapshotCache[assetId] = snapshot;
       return snapshot;
     } on WalletChangedDisconnectException {
       rethrow;
-    } catch (_) {
+    } catch (error) {
+      _gaslessCapabilities?.markAccountStatusError(assetId, error);
       if (retained != null) return retained.asStale();
       rethrow;
     }

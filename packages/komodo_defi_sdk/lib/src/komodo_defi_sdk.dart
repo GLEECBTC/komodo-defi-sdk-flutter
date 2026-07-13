@@ -347,6 +347,22 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     _container<GaslessCapabilityRegistry>().canReceiveGasless(asset.id),
   );
 
+  /// Receive-address evidence for the current wallet session.
+  GaslessReceiveEvidence gaslessReceiveEvidence(Asset asset) =>
+      _assertSdkInitialized(
+        _container<GaslessCapabilityRegistry>().receiveEvidenceFor(asset.id),
+      );
+
+  /// Whether the core wallet Receive UI may use V1 status attestation.
+  ///
+  /// This deliberately does not satisfy [canReceiveGasless], which remains the
+  /// bound-relay predicate for integrations such as refunds and consolidation.
+  bool canReceiveGaslessFromStatus(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().canReceiveGaslessFromStatus(
+      asset.id,
+    ),
+  );
+
   /// The event streaming service instance.
   ///
   /// Provides access to SSE (Server-Sent Events) connection lifecycle management

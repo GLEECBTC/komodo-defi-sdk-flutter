@@ -21,6 +21,16 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   }
 
   @override
+  Future<GaslessAccountStatusResponse> gaslessAccountStatusForReceive(
+    AssetId assetId, {
+    required String expectedGasfreeAddress,
+  }) {
+    throw UnsupportedError(
+      'Legacy withdrawal manager cannot attest GasFree receive addresses',
+    );
+  }
+
+  @override
   Future<List<PendingGaslessTransfer>> listPendingGaslessTransfers() async =>
       const [];
 

@@ -1,3 +1,4 @@
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:test/test.dart';
@@ -44,6 +45,29 @@ Map<String, dynamic> _tokenConfig({
   'parent_coin': 'TRX',
   'nodes': <Map<String, dynamic>>[],
 };
+
+GaslessAccountStatusResponse _status({
+  String? provider = _provider,
+  String address = 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+  GaslessAccountAvailability availability =
+      GaslessAccountAvailability.available,
+  bool complete = true,
+}) => GaslessAccountStatusResponse.parse({
+  'mmrpc': '2.0',
+  'result': {
+    'gasfree_address': address,
+    'on_chain_balance': '10',
+    'availability': availability.wireValue,
+    if (provider != null) 'service_provider': provider,
+    if (complete) ...{
+      'active': true,
+      'frozen_balance': '1',
+      'spendable_balance': '9',
+      'transfer_fee': '1',
+      'max_withdrawable': '8',
+    },
+  },
+});
 
 void main() {
   final parent = Asset.fromJson(_trxConfig(), knownIds: const {});
@@ -93,6 +117,10 @@ void main() {
     expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
     expect(capabilities.isReady(asset.id), isTrue);
     expect(capabilities.canReceiveGasless(asset.id), isTrue);
+    expect(
+      capabilities.receiveEvidenceFor(asset.id),
+      GaslessReceiveEvidence.boundRelayV2,
+    );
 
     final wrongProvider = registry();
     expect(
@@ -120,6 +148,10 @@ void main() {
     expect(capabilities.markProvisionalFor(asset, identity(asset)), isTrue);
     expect(capabilities.isReady(asset.id), isFalse);
     expect(capabilities.canReceiveGasless(asset.id), isFalse);
+    expect(
+      capabilities.receiveEvidenceFor(asset.id),
+      GaslessReceiveEvidence.none,
+    );
 
     expect(
       capabilities.proveLegacyReadyFromSignedPreview(
@@ -145,6 +177,167 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test(
+    'status attestation enables wallet receive but not bound integrations',
+    () {
+      final asset = token();
+      final capabilities = registry();
+
+      expect(
+        capabilities.markStatusAttestedFor(asset, identity(asset), _status()),
+        isTrue,
+      );
+      expect(capabilities.isReady(asset.id), isFalse);
+      expect(capabilities.canReceiveGasless(asset.id), isFalse);
+      expect(capabilities.canReceiveGaslessFromStatus(asset.id), isTrue);
+      expect(
+        capabilities.receiveEvidenceFor(asset.id),
+        GaslessReceiveEvidence.statusAttestedV1,
+      );
+    },
+  );
+
+  test('status attestation requires provider identity and complete fields', () {
+    final asset = token();
+    final missingProvider = registry();
+    final incomplete = registry();
+
+    expect(
+      missingProvider.markStatusAttestedFor(
+        asset,
+        identity(asset),
+        _status(provider: null),
+      ),
+      isFalse,
+    );
+    expect(
+      missingProvider.capabilityFor(asset).reasonCode,
+      'provider_identity_mismatch',
+    );
+    expect(
+      incomplete.markStatusAttestedFor(
+        asset,
+        identity(asset),
+        _status(complete: false),
+      ),
+      isFalse,
+    );
+    expect(incomplete.canReceiveGaslessFromStatus(asset.id), isFalse);
+  });
+
+  test('legacy boolean availability never enables receive', () {
+    final asset = token();
+    final capabilities = registry();
+    final legacyStatus = GaslessAccountStatusResponse.parse({
+      'mmrpc': '2.0',
+      'result': {
+        ...(_status().toJson()['result'] as Map<String, dynamic>),
+        'provider_available': true,
+      }..remove('availability'),
+    });
+
+    expect(legacyStatus.hasExplicitAvailability, isFalse);
+    expect(
+      capabilities.markStatusAttestedFor(asset, identity(asset), legacyStatus),
+      isFalse,
+    );
+    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
+    expect(
+      capabilities.capabilityFor(asset).reasonCode,
+      'availability_unattested',
+    );
+  });
+
+  test('typed KDF mismatches become stable security reasons', () {
+    final asset = token();
+    for (final entry in const {
+      'TokenDecimalsMismatch': 'token_decimals_mismatch',
+      'CustodyAddressMismatch': 'custody_address_mismatch',
+      'ProviderIdentityMismatch': 'provider_identity_mismatch',
+    }.entries) {
+      final capabilities = registry();
+      final error = GeneralErrorResponse.parse({
+        'mmrpc': '2.0',
+        'error': 'redacted',
+        'error_type': entry.key,
+      });
+
+      expect(capabilities.markAccountStatusError(asset.id, error), isTrue);
+      expect(capabilities.capabilityFor(asset).reasonCode, entry.value);
+      expect(
+        capabilities.capabilityFor(asset).state,
+        GaslessCapabilityState.securityMismatch,
+      );
+    }
+  });
+
+  test('sensitive refresh revokes evidence on custody mismatch', () {
+    final asset = token();
+    final capabilities = registry();
+    capabilities.markStatusAttestedFor(asset, identity(asset), _status());
+
+    expect(
+      capabilities.refreshStatusAttestation(
+        asset.id,
+        _status(),
+        expectedGasfreeAddress: 'TDifferentCustodyAddress',
+      ),
+      isFalse,
+    );
+    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
+    expect(
+      capabilities.capabilityFor(asset).reasonCode,
+      'custody_address_mismatch',
+    );
+  });
+
+  test('provider outage preserves candidate but revokes receive evidence', () {
+    final asset = token();
+    final capabilities = registry();
+    capabilities.markStatusAttestedFor(asset, identity(asset), _status());
+
+    expect(
+      capabilities.refreshStatusAttestation(
+        asset.id,
+        _status(
+          provider: null,
+          availability: GaslessAccountAvailability.providerUnreachable,
+          complete: false,
+        ),
+        expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+      ),
+      isFalse,
+    );
+    expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
+    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
+    expect(
+      capabilities.capabilityFor(asset).reasonCode,
+      'provider_unreachable',
+    );
+  });
+
+  test('pending and unsupported availability remain recovery-only', () {
+    final asset = token();
+    for (final entry in const {
+      GaslessAccountAvailability.pendingTransfer: 'pending_transfer',
+      GaslessAccountAvailability.tokenUnsupported: 'token_unsupported',
+    }.entries) {
+      final capabilities = registry();
+
+      expect(
+        capabilities.markStatusAttestedFor(
+          asset,
+          identity(asset),
+          _status(provider: null, availability: entry.key, complete: false),
+        ),
+        isFalse,
+      );
+      expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
+      expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
+      expect(capabilities.capabilityFor(asset).reasonCode, entry.value);
+    }
   });
 
   test('permits Iguana primary without pretending it has an HD path', () {

@@ -1,4 +1,5 @@
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
@@ -318,6 +319,86 @@ void main() {
         isTrue,
       );
     }
+
+    GaslessCapabilityIdentity legacyIdentity() => GaslessCapabilityIdentity(
+      assetId: trc20Asset.id,
+      platform: 'TRX',
+      contractAddress: _tokenContract,
+      providerAddress: _providerAddress,
+      walletPubkeyHash: walletId.pubkeyHash!,
+      walletType: GaslessWalletType.softwareIguana,
+      derivationPath: '',
+    );
+
+    GaslessAccountStatusResponse receiveStatus({String? address}) =>
+        GaslessAccountStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': {
+            'gasfree_address': address ?? 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+            'on_chain_balance': '10',
+            'availability': 'available',
+            'service_provider': _providerAddress,
+            'active': true,
+            'frozen_balance': '0',
+            'spendable_balance': '10',
+            'transfer_fee': '1',
+            'max_withdrawable': '9',
+          },
+        });
+
+    test(
+      'receive status probe revalidates V1 without bound readiness',
+      () async {
+        gaslessCapabilities.markStatusAttestedFor(
+          trc20Asset,
+          legacyIdentity(),
+          receiveStatus(),
+        );
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) async => receiveStatus().toJson());
+
+        final status = await manager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+
+        expect(status.serviceProvider, _providerAddress);
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isTrue,
+        );
+        expect(gaslessCapabilities.canReceiveGasless(trc20Asset.id), isFalse);
+      },
+    );
+
+    test(
+      'receive status probe revokes V1 evidence on address mismatch',
+      () async {
+        gaslessCapabilities.markStatusAttestedFor(
+          trc20Asset,
+          legacyIdentity(),
+          receiveStatus(),
+        );
+        when(() => client.executeRpc(any())).thenAnswer(
+          (_) async => receiveStatus(address: 'TDifferentCustody').toJson(),
+        );
+
+        await manager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isFalse,
+        );
+        expect(
+          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+          'custody_address_mismatch',
+        );
+      },
+    );
 
     test(
       'literal PR #9 preview proves recovery without enabling receive',

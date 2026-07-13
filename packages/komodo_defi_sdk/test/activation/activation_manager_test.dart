@@ -186,7 +186,7 @@ void main() {
                       'on_chain_balance': '0',
                       'transfer_fee': '1',
                       'max_withdrawable': '0',
-                      'provider_available': true,
+                      'availability': 'available',
                     },
                   },
                 ],
@@ -200,9 +200,11 @@ void main() {
               'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
               'active': true,
               'on_chain_balance': '0',
+              'frozen_balance': '0',
+              'spendable_balance': '0',
               'transfer_fee': '1',
               'max_withdrawable': '0',
-              'provider_available': true,
+              'availability': 'available',
             },
           };
         });
@@ -257,9 +259,12 @@ void main() {
               'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
               'active': true,
               'on_chain_balance': '0',
+              'frozen_balance': '0',
+              'spendable_balance': '0',
               'transfer_fee': '1',
               'max_withdrawable': '0',
-              'provider_available': true,
+              'availability': 'available',
+              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
             },
           };
         });
@@ -334,7 +339,7 @@ void main() {
                   'account_status': {
                     'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
                     'on_chain_balance': '0',
-                    'provider_available': true,
+                    'availability': 'available',
                   },
                 },
               ],

@@ -678,6 +678,53 @@ class WithdrawalManager {
     return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
   }
 
+  /// Revalidates a legacy V1 GasFree receive address without granting relay
+  /// submission readiness.
+  ///
+  /// The caller must use the canonical address currently rendered by the
+  /// wallet as [expectedGasfreeAddress], then check
+  /// `KomodoDefiSdk.canReceiveGaslessFromStatus` after this future completes.
+  /// Bound-only integrations must continue to use [gaslessAccountStatus].
+  Future<GaslessAccountStatusResponse> gaslessAccountStatusForReceive(
+    AssetId assetId, {
+    required String expectedGasfreeAddress,
+  }) async {
+    if (_gaslessCapabilities.canReceiveGasless(assetId)) {
+      return gaslessAccountStatus(assetId);
+    }
+    if (!_gaslessCapabilities.canAttemptStatusReceiveAttestation(assetId)) {
+      _gaslessCapabilities.invalidateStatusReceiveEvidence(
+        assetId,
+        reasonCode: 'runtime_restart_required',
+      );
+      throw GaslessTransferException(
+        kind: GaslessTransferErrorKind.capabilityNotReady,
+        message: 'Gas-free receive needs a wallet runtime restart',
+        retryable: true,
+        terminal: false,
+      );
+    }
+    try {
+      final status = await _client.rpc.withdraw.gaslessAccountStatus(
+        coin: assetId.id,
+      );
+      _gaslessCapabilities.refreshStatusAttestation(
+        assetId,
+        status,
+        expectedGasfreeAddress: expectedGasfreeAddress,
+      );
+      return status;
+    } catch (error) {
+      if (!_gaslessCapabilities.markAccountStatusError(assetId, error)) {
+        _gaslessCapabilities.invalidateStatusReceiveEvidence(
+          assetId,
+          reasonCode: 'provider_unreachable',
+        );
+      }
+      rethrow;
+    }
+  }
+
   Future<WithdrawalPreview> previewWithdrawal(
     WithdrawParameters parameters,
   ) async {

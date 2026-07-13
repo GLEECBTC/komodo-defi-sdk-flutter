@@ -716,30 +716,30 @@ class ActivationManager {
         final status = await _client.rpc.withdraw.gaslessAccountStatus(
           coin: asset.id.id,
         );
-        if (!status.providerAvailable) {
-          switch (status.reasonCode) {
-            case 'custody_address_mismatch' ||
-                'provider_identity_mismatch' ||
-                'provider_invalid_response':
-              throw const _GaslessSecurityMismatch(
-                reasonCode: 'provider_security_mismatch',
-              );
-            case 'provider_authentication_failed':
-              throw const _GaslessDisabled(
-                reasonCode: 'provider_authentication_failed',
-              );
-            case 'token_unsupported' || 'token_decimals_mismatch':
-              throw _GaslessUnsupported(
-                reasonCode: status.reasonCode ?? 'token_unsupported',
-              );
-            default:
-              throw const _GaslessTemporarilyUnavailable(
-                reasonCode: 'provider_temporarily_unavailable',
-              );
-          }
+        if (!status.hasExplicitAvailability) {
+          throw const _GaslessTemporarilyUnavailable(
+            reasonCode: 'availability_unattested',
+          );
+        }
+        switch (status.availability) {
+          case GaslessAccountAvailability.available:
+            break;
+          case GaslessAccountAvailability.pendingTransfer:
+            throw const _GaslessTemporarilyUnavailable(
+              reasonCode: 'pending_transfer',
+            );
+          case GaslessAccountAvailability.tokenUnsupported:
+            throw const _GaslessUnsupported(reasonCode: 'token_unsupported');
+          case GaslessAccountAvailability.providerUnreachable:
+            throw const _GaslessTemporarilyUnavailable(
+              reasonCode: 'provider_unreachable',
+            );
         }
         if (status.gasfreeAddress.isEmpty ||
+            status.reasonCode != null ||
             status.active == null ||
+            status.frozenBalance == null ||
+            status.spendableBalance == null ||
             status.transferFee == null ||
             status.maxWithdrawable == null) {
           throw StateError(
@@ -764,33 +764,36 @@ class ActivationManager {
         final walletPubkeyHash = user.walletId.pubkeyHash;
         if (contractAddress == null ||
             providerAddress == null ||
-            walletPubkeyHash == null ||
-            !(_gaslessRuntimeContracts[asset.id] ==
-                    _GaslessRuntimeContract.legacyAccountStatus
-                ? _gaslessCapabilities.markProvisionalFor(
-                    asset,
-                    GaslessCapabilityIdentity(
-                      assetId: asset.id,
-                      platform: protocol.platform,
-                      contractAddress: contractAddress,
-                      providerAddress: providerAddress,
-                      walletPubkeyHash: walletPubkeyHash,
-                      walletType: walletType,
-                      derivationPath: capabilityPath,
-                    ),
-                  )
-                : _gaslessCapabilities.markReadyFor(
-                    asset,
-                    GaslessCapabilityIdentity(
-                      assetId: asset.id,
-                      platform: protocol.platform,
-                      contractAddress: contractAddress,
-                      providerAddress: providerAddress,
-                      walletPubkeyHash: walletPubkeyHash,
-                      walletType: walletType,
-                      derivationPath: capabilityPath,
-                    ),
-                  ))) {
+            walletPubkeyHash == null) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'capability_identity_mismatch',
+          );
+        }
+        final identity = GaslessCapabilityIdentity(
+          assetId: asset.id,
+          platform: protocol.platform,
+          contractAddress: contractAddress,
+          providerAddress: providerAddress,
+          walletPubkeyHash: walletPubkeyHash,
+          walletType: walletType,
+          derivationPath: capabilityPath,
+        );
+        final isLegacy =
+            _gaslessRuntimeContracts[asset.id] ==
+            _GaslessRuntimeContract.legacyAccountStatus;
+        if (isLegacy && status.serviceProvider != providerAddress) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'provider_identity_mismatch',
+          );
+        }
+        final accepted = isLegacy
+            ? _gaslessCapabilities.markStatusAttestedFor(
+                asset,
+                identity,
+                status,
+              )
+            : _gaslessCapabilities.markReadyFor(asset, identity);
+        if (!accepted) {
           throw const _GaslessSecurityMismatch(
             reasonCode: 'capability_identity_mismatch',
           );
@@ -799,7 +802,9 @@ class ActivationManager {
       return success;
     } catch (error, stackTrace) {
       for (final asset in _gaslessAssets(group)) {
-        if (error case _GaslessSecurityMismatch(:final reasonCode)) {
+        if (_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
+          continue;
+        } else if (error case _GaslessSecurityMismatch(:final reasonCode)) {
           _gaslessCapabilities.markSecurityMismatch(
             asset.id,
             reasonCode: reasonCode,

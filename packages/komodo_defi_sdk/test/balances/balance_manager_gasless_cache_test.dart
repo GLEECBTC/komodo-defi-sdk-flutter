@@ -81,7 +81,7 @@ Map<String, dynamic> _accountStatusJson({
     'spendable_balance': spendable,
     'transfer_fee': '1.5',
     'max_withdrawable': '97',
-    'provider_available': true,
+    'availability': 'available',
   },
 };
 
