@@ -10,6 +10,9 @@
  - **FIX**(gasfree): accept the PR #9 relay contract without adding unsupported
    trace parameters and normalize seconds, legacy double-divided timestamps,
    and millisecond confirmation times.
+ - **FIX**(gasfree): serialize maximum withdrawals with `max: true` and no
+   `amount`, and treat account-status `max_withdrawable` as optional advisory
+   data.
  - **FIX**(gasfree): preserve custody totals with stable degraded-status reason
    codes while leaving spendable/frozen values unknown.
 

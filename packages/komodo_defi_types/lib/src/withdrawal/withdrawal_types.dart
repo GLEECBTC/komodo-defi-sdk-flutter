@@ -378,7 +378,11 @@ class WithdrawParameters extends Equatable {
     this.gaslessOptions,
   }) : assert(
          amount != null || (isMax ?? false),
-         'Amount must be non-null when not using max',
+         'Amount must be specified when isMax is false',
+       ),
+       assert(
+         amount == null || !(isMax ?? false),
+         'Amount must be omitted when isMax is true',
        );
 
   final String asset;
@@ -404,7 +408,7 @@ class WithdrawParameters extends Equatable {
     'coin': asset,
     'to': toAddress,
     if (fee != null) 'fee': fee!.toJson(),
-    if (amount != null) 'amount': amount.toString(),
+    if (!(isMax ?? false) && amount != null) 'amount': amount.toString(),
     if (isMax != null) 'max': isMax,
     if (from != null) 'from': from!.toRpcParams(),
     if (memo != null) 'memo': memo,

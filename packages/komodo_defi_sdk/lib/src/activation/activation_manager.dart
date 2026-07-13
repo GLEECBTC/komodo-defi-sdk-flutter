@@ -952,8 +952,7 @@ class ActivationManager {
             (status.active == false && status.activationFee == null) ||
             status.frozenBalance == null ||
             status.spendableBalance == null ||
-            status.transferFee == null ||
-            status.maxWithdrawable == null) {
+            status.transferFee == null) {
           throw const _GaslessSecurityMismatch(
             reasonCode: 'invalid_account_status',
           );

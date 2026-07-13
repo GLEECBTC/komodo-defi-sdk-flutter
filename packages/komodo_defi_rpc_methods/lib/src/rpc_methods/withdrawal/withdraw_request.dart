@@ -6,6 +6,24 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// Default amount value for KMD rewards when claiming
 const String _kDefaultKmdRewardsAmount = '0';
 
+bool _validatedWithdrawalMax({required Object? amount, required bool max}) {
+  if (max && amount != null) {
+    throw ArgumentError.value(
+      amount,
+      'amount',
+      'Must be omitted when max is true',
+    );
+  }
+  if (!max && amount == null) {
+    throw ArgumentError.value(
+      amount,
+      'amount',
+      'Must be specified when max is false',
+    );
+  }
+  return max;
+}
+
 /// Returns KMD-specific parameters for withdrawal requests
 ///
 /// KDF requires kmd_rewards object with claimed_by_me flag for KMD withdrawals
@@ -29,18 +47,19 @@ class WithdrawRequest
     this.fee,
     this.from,
     this.memo,
-    this.max = false,
+    bool max = false,
     this.ibcSourceChannel,
     this.expirationSeconds,
     this.feeMethod,
     this.gaslessOptions,
-  }) : assert(
+  }) : max = _validatedWithdrawalMax(amount: amount, max: max),
+       assert(
          amount != null || max,
-         'Amount cannot be specified if sending the maximum amount',
+         'Amount must be specified when max is false',
        ),
        assert(
          amount == null || !max,
-         'Amount must be specified if not sending the maximum amount',
+         'Amount must be omitted when max is true',
        ),
        super(method: 'withdraw', mmrpc: RpcVersion.v2_0);
 
@@ -105,14 +124,20 @@ class WithdrawInitRequest
        fee = params.fee,
        from = params.from,
        memo = params.memo,
-       max = params.isMax ?? false,
+       max = _validatedWithdrawalMax(
+         amount: params.amount,
+         max: params.isMax ?? false,
+       ),
        expirationSeconds = params.expirationSeconds,
        feeMethod = params.feeMethod,
        gaslessOptions = params.gaslessOptions,
        assert(
          params.amount != null || (params.isMax ?? false),
-         'Amount must be non-null if isMax is false and '
-         'must be null if isMax is true',
+         'Amount must be specified when isMax is false',
+       ),
+       assert(
+         params.amount == null || !(params.isMax ?? false),
+         'Amount must be omitted when isMax is true',
        ),
        super(method: 'task::withdraw::init', mmrpc: RpcVersion.v2_0);
 
@@ -133,7 +158,7 @@ class WithdrawInitRequest
     'params': {
       'coin': coin,
       'to': to,
-      if (amount != null) 'amount': amount,
+      if (!max && amount != null) 'amount': amount,
       if (fee != null) 'fee': fee!.toJson(),
       if (from != null) 'from': from!.toRpcParams(),
       if (memo != null) 'memo': memo,

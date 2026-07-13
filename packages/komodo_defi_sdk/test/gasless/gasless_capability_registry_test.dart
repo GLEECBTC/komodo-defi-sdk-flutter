@@ -55,6 +55,7 @@ GaslessAccountStatusResponse _status({
   bool complete = true,
   bool active = true,
   bool includeActivationFee = false,
+  bool includeMaxWithdrawable = true,
 }) => GaslessAccountStatusResponse.parse({
   'mmrpc': '2.0',
   'result': {
@@ -68,7 +69,7 @@ GaslessAccountStatusResponse _status({
       'spendable_balance': '9',
       'transfer_fee': '1',
       if (includeActivationFee) 'activation_fee': '2',
-      'max_withdrawable': '8',
+      if (includeMaxWithdrawable) 'max_withdrawable': '8',
     },
   },
 });
@@ -216,6 +217,27 @@ void main() {
       capabilities.capabilityFor(asset).reasonCode,
       'invalid_account_status',
     );
+  });
+
+  test('available status does not require an advisory maximum', () {
+    final asset = token();
+    final status = _status(includeMaxWithdrawable: false);
+
+    final bound = registry();
+    expect(bound.markReadyFor(asset, identity(asset)), isTrue);
+    expect(bound.validateBoundAccountStatus(asset.id, status), isTrue);
+
+    final v1 = registry();
+    expect(
+      v1.markStatusAttestedFor(
+        asset,
+        identity(asset),
+        status,
+        expectedGasfreeAddress: _custody,
+      ),
+      isTrue,
+    );
+    expect(v1.canReceiveGaslessFromStatus(asset.id), isTrue);
   });
 
   test('inactive available status requires an activation fee', () {
@@ -424,6 +446,10 @@ void main() {
       _degradedStatus(
         GaslessAccountAvailability.pendingTransfer,
         extraFields: const {'spendable_balance': '1'},
+      ),
+      _degradedStatus(
+        GaslessAccountAvailability.pendingTransfer,
+        extraFields: const {'max_withdrawable': '1'},
       ),
       _degradedStatus(
         GaslessAccountAvailability.tokenUnsupported,

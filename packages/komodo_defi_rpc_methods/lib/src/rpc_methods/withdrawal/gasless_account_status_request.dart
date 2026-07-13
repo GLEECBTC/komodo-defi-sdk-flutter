@@ -53,8 +53,8 @@ enum GaslessAccountAvailability {
 
 /// The GasFree custody account status for one TRC-20 token.
 ///
-/// [onChainBalance] and [gasfreeAddress] are always present. Fee and maximum
-/// fields are meaningful only when [availability] is
+/// [onChainBalance] and [gasfreeAddress] are always present. Fee fields and the
+/// optional advisory maximum are meaningful only when [availability] is
 /// [GaslessAccountAvailability.available].
 class GaslessAccountStatusResponse extends BaseResponse {
   GaslessAccountStatusResponse({
@@ -151,8 +151,10 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// when the account is already active or the provider is unavailable.
   final Decimal? activationFee;
 
-  /// Largest amount the user can gaslessly send now. `null` if the provider is
-  /// unavailable. Matches the withdraw `max` amount.
+  /// Optional advisory amount the user can gaslessly send now.
+  ///
+  /// KDF remains authoritative for a withdrawal requested with `max: true`,
+  /// which does not require this field or an explicit amount.
   final Decimal? maxWithdrawable;
 
   /// KDF's authoritative status for the custody account.

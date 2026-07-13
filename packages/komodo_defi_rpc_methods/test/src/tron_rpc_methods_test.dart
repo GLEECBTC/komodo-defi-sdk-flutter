@@ -316,6 +316,29 @@ void main() {
         'fallback_to_native': false,
       });
     });
+
+    test('withdraw max omits amount and delegates calculation to KDF', () {
+      final request = WithdrawInitRequest(
+        rpcPass: 'rpc-pass',
+        params: const WithdrawParameters(
+          asset: 'USDT-TRC20',
+          toAddress: 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
+          amount: null,
+          isMax: true,
+          feeMethod: WithdrawalFeeMethod.gasless,
+          gaslessOptions: GaslessWithdrawalOptions(deadlineSeconds: 300),
+        ),
+      );
+
+      final params = request.toJson()['params'] as Map<String, dynamic>;
+      expect(params['max'], isTrue);
+      expect(params, isNot(contains('amount')));
+      expect(params['fee_method'], 'gasless');
+      expect(params['gasless'], {
+        'deadline_seconds': 300,
+        'fallback_to_native': false,
+      });
+    });
   });
 
   group('send_raw_transaction response parsing', () {

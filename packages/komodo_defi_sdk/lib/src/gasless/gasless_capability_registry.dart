@@ -403,8 +403,7 @@ class GaslessCapabilityRegistry {
         (status.active == false && status.activationFee == null) ||
         status.frozenBalance == null ||
         status.spendableBalance == null ||
-        status.transferFee == null ||
-        status.maxWithdrawable == null) {
+        status.transferFee == null) {
       _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
       markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
       return false;
@@ -572,8 +571,7 @@ class GaslessCapabilityRegistry {
         (status.active == false && status.activationFee == null) ||
         status.frozenBalance == null ||
         status.spendableBalance == null ||
-        status.transferFee == null ||
-        status.maxWithdrawable == null) {
+        status.transferFee == null) {
       markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
       return false;
     }

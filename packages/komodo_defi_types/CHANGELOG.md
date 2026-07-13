@@ -7,6 +7,8 @@
  - **BREAKING** **FIX**(gasfree): make pre-relay transaction hashes nullable;
    expose signed maximum, authoritative final fee, provider/request metadata,
    and confirmation block/time as distinct receipt fields.
+ - **BREAKING** **FIX**(withdraw): enforce mutually exclusive explicit-amount
+   and maximum request modes, omitting `amount` whenever `max` is true.
  - **SECURITY**(gasfree): make provider discovery, direct HMAC, and insecure
    transport explicit development-only opt-ins with redacted value semantics.
  - **FEAT**(gasfree): persist whether a pending relay uses bound KDF responses

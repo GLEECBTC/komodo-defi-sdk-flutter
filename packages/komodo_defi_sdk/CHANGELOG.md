@@ -20,6 +20,8 @@
    status response matches the explicit provider pin and locally derived
    canonical custody address; reject stale wallet-session or out-of-order
    responses and mixed current/legacy or available/degraded wire shapes.
+ - **FIX**(gasfree): treat account-status `max_withdrawable` as an optional UI
+   estimate and delegate maximum sends to KDF with `max: true` and no amount.
  - **FIX**(gasfree): retain stale custody/recovery access, distinguish Iguana
    and canonical HD identities, preserve cross-page address perspectives, and
    expose final fee plus confirmation metadata without enabling resubmission.
