@@ -33,12 +33,23 @@ SDK first keeps capability provisional, then proves the configured provider and
 wallet identity from the signed preview without changing or persisting that
 preview. Legacy mode is limited to sending/recovering funds already held in
 custody; `KomodoDefiSdk.canReceiveGasless` remains false. New custody receives
-require `boundRelay`. At execution the SDK keeps PR #9's strict `tx_json`
-unchanged, creates a local UUID and deterministic payload fingerprint before
-submission, and does not confirm or delete the journal record until a raw
+do not unlock bound-only integrations. At execution the SDK keeps PR #9's
+strict `tx_json` unchanged, creates a local UUID and deterministic payload
+fingerprint before submission, and does not confirm or delete the journal
+record until a raw
 TRONGrid event matches the hash, enrolled token, custody source, recipient,
 signed base-unit amount, and fee ceiling. Existing records without a mode
 migrate to `legacyOnChain` and are never silently discarded.
+
+The wallet Receive screen may separately use `statusAttestedV1`. This evidence
+is minted only by a fresh account-status response that repeats the explicit
+production provider pin and exactly matches the canonical custody address
+locally returned for the primary software-wallet key. It never makes
+`canReceiveGasless` true, so refunds, consolidation, and other bound-only
+integrations remain unavailable. Wallet switches and capability resets revoke
+the evidence and invalidate every in-flight status response. Per-asset request
+epochs also prevent an older success or error from overwriting a newer status
+decision, and mixed current/legacy availability fields are rejected.
 
 `WithdrawalResult.txHash` is nullable until relay finality. Receipts should use
 `FeeInfoTronGasless.finalFee` for the authoritative charged fee while retaining

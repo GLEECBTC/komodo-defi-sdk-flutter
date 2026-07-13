@@ -14,8 +14,12 @@
  - **SECURITY**(gasfree): keep legacy relay payloads byte-for-byte compatible,
    keep PR #9 provisional until signed-preview provider proof, assign a local
    request/fingerprint journal identity, and require an exact raw TRONGrid
-   transfer event before accepting legacy finality. Legacy mode is existing-
-   custody recovery/send only; new receives require bound relay responses.
+   transfer event before accepting legacy finality. Legacy relay mode remains
+   existing-custody recovery/send only; integrations require bound responses.
+ - **SECURITY**(gasfree): permit wallet-only V1 receives only after a fresh
+   status response matches the explicit provider pin and locally derived
+   canonical custody address; reject stale wallet-session or out-of-order
+   responses and mixed current/legacy or available/degraded wire shapes.
  - **FIX**(gasfree): retain stale custody/recovery access, distinguish Iguana
    and canonical HD identities, preserve cross-page address perspectives, and
    expose final fee plus confirmation metadata without enabling resubmission.

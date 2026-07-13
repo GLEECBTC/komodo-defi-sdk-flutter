@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
@@ -349,10 +351,10 @@ void main() {
     test(
       'receive status probe revalidates V1 without bound readiness',
       () async {
-        gaslessCapabilities.markStatusAttestedFor(
-          trc20Asset,
-          legacyIdentity(),
-          receiveStatus(),
+        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isFalse,
         );
         when(
           () => client.executeRpc(any()),
@@ -375,11 +377,7 @@ void main() {
     test(
       'receive status probe revokes V1 evidence on address mismatch',
       () async {
-        gaslessCapabilities.markStatusAttestedFor(
-          trc20Asset,
-          legacyIdentity(),
-          receiveStatus(),
-        );
+        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
         when(() => client.executeRpc(any())).thenAnswer(
           (_) async => receiveStatus(address: 'TDifferentCustody').toJson(),
         );
@@ -397,6 +395,248 @@ void main() {
           gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
           'custody_address_mismatch',
         );
+      },
+    );
+
+    test('bound receive status requires the caller custody address', () async {
+      when(
+        () => client.executeRpc(any()),
+      ).thenAnswer((_) async => receiveStatus().toJson());
+
+      await expectLater(
+        manager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TDifferentCustody',
+        ),
+        throwsA(isA<GaslessTransferException>()),
+      );
+      expect(
+        gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+        'custody_address_mismatch',
+      );
+    });
+
+    test(
+      'older available status cannot overwrite a newer hard error',
+      () async {
+        final olderStarted = Completer<void>();
+        final newerStarted = Completer<void>();
+        final older = Completer<Map<String, dynamic>>();
+        final newer = Completer<Map<String, dynamic>>();
+        var callCount = 0;
+        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
+        when(() => client.executeRpc(any())).thenAnswer((_) {
+          callCount++;
+          if (callCount == 1) {
+            olderStarted.complete();
+            return older.future;
+          }
+          newerStarted.complete();
+          return newer.future;
+        });
+
+        final olderRequest = manager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+        await olderStarted.future;
+        final newerRequest = manager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+        await newerStarted.future;
+        newer.complete({
+          'mmrpc': '2.0',
+          'error': 'redacted',
+          'error_type': 'CustodyAddressMismatch',
+        });
+
+        await expectLater(newerRequest, throwsA(isA<GeneralErrorResponse>()));
+        expect(
+          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+          'custody_address_mismatch',
+        );
+
+        older.complete(receiveStatus().toJson());
+        await expectLater(
+          olderRequest,
+          throwsA(isA<GaslessTransferException>()),
+        );
+        expect(
+          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+          'custody_address_mismatch',
+        );
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'receive status ignores an in-flight response after wallet switch',
+      () async {
+        const walletB = WalletId(
+          name: 'wallet-b',
+          pubkeyHash: 'wallet-b-hash',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        );
+        var currentWallet = walletId;
+        final responseStarted = Completer<void>();
+        final response = Completer<Map<String, dynamic>>();
+        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
+        final raceManager = WithdrawalManager(
+          client,
+          assetProvider,
+          feeManager,
+          activationCoordinator,
+          legacyManager,
+          gaslessCapabilities: gaslessCapabilities,
+          pendingGaslessTransfers: pendingRepository,
+          transactionHistoryManager: transactionHistoryManager,
+          walletIdResolver: () async => currentWallet,
+          gaslessPollInterval: Duration.zero,
+        );
+        when(() => client.executeRpc(any())).thenAnswer((_) {
+          responseStarted.complete();
+          return response.future;
+        });
+
+        final pending = raceManager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+        await responseStarted.future;
+        gaslessCapabilities.resetSession();
+        currentWallet = walletB;
+        gaslessCapabilities.markProvisionalFor(
+          trc20Asset,
+          GaslessCapabilityIdentity(
+            assetId: trc20Asset.id,
+            platform: 'TRX',
+            contractAddress: _tokenContract,
+            providerAddress: _providerAddress,
+            walletPubkeyHash: walletB.pubkeyHash!,
+            walletType: GaslessWalletType.softwareIguana,
+            derivationPath: '',
+          ),
+        );
+        response.complete(receiveStatus().toJson());
+
+        await expectLater(
+          pending,
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isFalse,
+        );
+        await raceManager.dispose();
+      },
+    );
+
+    test(
+      'receive status ignores an in-flight error after wallet switch',
+      () async {
+        const walletB = WalletId(
+          name: 'wallet-b',
+          pubkeyHash: 'wallet-b-hash',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        );
+        var currentWallet = walletId;
+        final responseStarted = Completer<void>();
+        final response = Completer<Map<String, dynamic>>();
+        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
+        final raceManager = WithdrawalManager(
+          client,
+          assetProvider,
+          feeManager,
+          activationCoordinator,
+          legacyManager,
+          gaslessCapabilities: gaslessCapabilities,
+          pendingGaslessTransfers: pendingRepository,
+          transactionHistoryManager: transactionHistoryManager,
+          walletIdResolver: () async => currentWallet,
+          gaslessPollInterval: Duration.zero,
+        );
+        when(() => client.executeRpc(any())).thenAnswer((_) {
+          responseStarted.complete();
+          return response.future;
+        });
+
+        final pending = raceManager.gaslessAccountStatusForReceive(
+          trc20Asset.id,
+          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        );
+        await responseStarted.future;
+        gaslessCapabilities.resetSession();
+        currentWallet = walletB;
+        gaslessCapabilities.markProvisionalFor(
+          trc20Asset,
+          GaslessCapabilityIdentity(
+            assetId: trc20Asset.id,
+            platform: 'TRX',
+            contractAddress: _tokenContract,
+            providerAddress: _providerAddress,
+            walletPubkeyHash: walletB.pubkeyHash!,
+            walletType: GaslessWalletType.softwareIguana,
+            derivationPath: '',
+          ),
+        );
+        response.complete({
+          'mmrpc': '2.0',
+          'error': 'redacted',
+          'error_type': 'CustodyAddressMismatch',
+        });
+
+        await expectLater(
+          pending,
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        expect(
+          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+          'awaiting_account_status',
+        );
+        await raceManager.dispose();
+      },
+    );
+
+    test(
+      'wallet capture invalidates old capability before delayed auth event',
+      () async {
+        const walletB = WalletId(
+          name: 'wallet-b',
+          pubkeyHash: 'wallet-b-hash',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        );
+        var currentWallet = walletId;
+        final raceManager = WithdrawalManager(
+          client,
+          assetProvider,
+          feeManager,
+          activationCoordinator,
+          legacyManager,
+          gaslessCapabilities: gaslessCapabilities,
+          pendingGaslessTransfers: pendingRepository,
+          transactionHistoryManager: transactionHistoryManager,
+          walletIdResolver: () async => currentWallet,
+          gaslessPollInterval: Duration.zero,
+        );
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) async => receiveStatus().toJson());
+        await raceManager.gaslessAccountStatus(trc20Asset.id);
+        clearInteractions(client);
+
+        currentWallet = walletB;
+
+        await expectLater(
+          raceManager.gaslessAccountStatus(trc20Asset.id),
+          throwsA(isA<GaslessTransferException>()),
+        );
+        expect(gaslessCapabilities.isReady(trc20Asset.id), isFalse);
+        verifyNever(() => client.executeRpc(any()));
+        await raceManager.dispose();
       },
     );
 

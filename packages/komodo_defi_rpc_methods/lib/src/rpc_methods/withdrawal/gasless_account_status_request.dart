@@ -75,6 +75,13 @@ class GaslessAccountStatusResponse extends BaseResponse {
 
   factory GaslessAccountStatusResponse.parse(Map<String, dynamic> json) {
     final result = json.valueOrNull<JsonMap>('result') ?? json;
+    if (result.containsKey('availability') &&
+        (result.containsKey('provider_available') ||
+            result.containsKey('reason_code'))) {
+      throw const FormatException(
+        'GasFree account status mixes current and legacy status fields',
+      );
+    }
     Decimal? dec(String key) {
       final raw = result.valueOrNull<dynamic>(key);
       return raw == null ? null : Decimal.parse(raw.toString());
@@ -128,8 +135,8 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// Raw TRC-20 balance held at the custody address, in token units.
   final Decimal onChainBalance;
 
-  /// Amount currently locked by an in-flight transfer. `null` if the provider is
-  /// unavailable.
+  /// Amount currently locked by an in-flight transfer. `null` if the provider
+  /// is unavailable.
   final Decimal? frozenBalance;
 
   /// `onChainBalance - frozenBalance` — the balance not locked by a pending

@@ -6,6 +6,7 @@ import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
@@ -51,7 +52,8 @@ class ActivationManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   final Map<AssetId, Completer<void>> _activationCompleters = {};
-  final Map<AssetId, String> _cancelledActivations = <AssetId, String>{};
+  final Map<AssetId, _ActivationCancellation> _cancelledActivations = {};
+  int _activationSessionGeneration = 0;
   bool _isDisposed = false;
 
   /// Helper for mutex-protected operations with timeout
@@ -87,13 +89,59 @@ class ActivationManager {
       _tronGaslessProvider != null &&
       _gaslessCapabilities.isConfigured(asset) &&
       !_gaslessCapabilities.isReady(asset.id) &&
-      !_gaslessCapabilities.canReceiveGaslessFromStatus(asset.id);
+      !_gaslessCapabilities.canAttemptStatusReceiveAttestation(asset.id);
 
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
+    _activationSessionGeneration++;
+    final staleCompleters = _activationCompleters.values.toList();
+    _activationCompleters.clear();
+    _cancelledActivations.clear();
     _gaslessCapabilities.resetSession();
     _resolvedGaslessProviders.clear();
     _gaslessRuntimeContracts.clear();
+
+    for (final completer in staleCompleters) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          const WalletChangedDisconnectException(
+            'Wallet changed during asset activation',
+          ),
+        );
+      }
+    }
+  }
+
+  Future<_GaslessActivationContext> _captureGaslessContext() async {
+    final generation = _gaslessCapabilities.sessionGeneration;
+    final user = await _auth.currentUser;
+    if (user == null || generation != _gaslessCapabilities.sessionGeneration) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed during GasFree activation',
+      );
+    }
+    return _GaslessActivationContext(
+      walletId: user.walletId,
+      sessionGeneration: generation,
+    );
+  }
+
+  Future<void> _requireGaslessContextCurrent(
+    _GaslessActivationContext context,
+  ) async {
+    if (context.sessionGeneration != _gaslessCapabilities.sessionGeneration) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed during GasFree activation',
+      );
+    }
+    final user = await _auth.currentUser;
+    if (user == null ||
+        context.sessionGeneration != _gaslessCapabilities.sessionGeneration ||
+        !isSameStableWallet(context.walletId, user.walletId)) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed during GasFree activation',
+      );
+    }
   }
 
   /// Request cancellation of an in-flight activation for [assetId].
@@ -107,11 +155,16 @@ class ActivationManager {
     if (_isDisposed) return;
     // Only record cancellation for activations that are currently in-flight.
     // This avoids stale cancellation markers cancelling future fresh attempts.
-    if (!_activationCompleters.containsKey(assetId)) {
+    final completer = _activationCompleters[assetId];
+    if (completer == null) {
       _cancelledActivations.remove(assetId);
       return;
     }
-    _cancelledActivations[assetId] = reason;
+    _cancelledActivations[assetId] = _ActivationCancellation(
+      completer: completer,
+      sessionGeneration: _activationSessionGeneration,
+      reason: reason,
+    );
   }
 
   /// Request cancellation for all in-flight activations.
@@ -119,9 +172,13 @@ class ActivationManager {
     String reason = 'Activation cancelled by caller',
   }) {
     if (_isDisposed) return;
-    final pendingIds = _activationCompleters.keys.toList();
-    for (final assetId in pendingIds) {
-      _cancelledActivations[assetId] = reason;
+    final pendingActivations = _activationCompleters.entries.toList();
+    for (final entry in pendingActivations) {
+      _cancelledActivations[entry.key] = _ActivationCancellation(
+        completer: entry.value,
+        sessionGeneration: _activationSessionGeneration,
+        reason: reason,
+      );
     }
   }
 
@@ -134,20 +191,21 @@ class ActivationManager {
     final groups = _AssetGroup._groupByPrimary(assets, _assetLookup);
 
     for (final group in groups) {
-      if (_cancelledActivations.containsKey(group.primary.id)) {
-        final reason =
-            _cancelledActivations[group.primary.id] ??
-            'Activation cancelled by caller';
+      final activationSessionGeneration = _activationSessionGeneration;
+      final pendingCancellation = _currentCancellation(group.primary.id);
+      if (pendingCancellation != null) {
         yield ActivationProgress.error(
-          message: reason,
+          message: pendingCancellation.reason,
           errorCode: 'ACTIVATION_CANCELLED',
         );
-        _cancelledActivations.remove(group.primary.id);
         continue;
       }
 
       final shouldRefreshTronGaslessActivation =
           _shouldRefreshTronGaslessActivation(group);
+      final gaslessContext = shouldRefreshTronGaslessActivation
+          ? await _captureGaslessContext()
+          : null;
 
       // Check activation status atomically
       final activationStatus = await _checkActivationStatus(group);
@@ -162,7 +220,10 @@ class ActivationManager {
       }
 
       // Register activation attempt.
-      final registration = await _registerActivation(group.primary.id);
+      final registration = await _registerActivation(
+        group.primary.id,
+        activationSessionGeneration,
+      );
       final primaryCompleter = registration.completer;
       if (!registration.shouldStartActivation) {
         debugPrint(
@@ -193,7 +254,11 @@ class ActivationManager {
         );
         if (joinedStatus.isComplete) {
           final verified = shouldRefreshTronGaslessActivation
-              ? await _verifyGaslessCapability(group, joinedStatus)
+              ? await _verifyGaslessCapability(
+                  group,
+                  joinedStatus,
+                  gaslessContext!,
+                )
               : joinedStatus;
           yield verified;
           continue;
@@ -244,22 +309,24 @@ class ActivationManager {
             activationStatus.isComplete &&
                 shouldRefreshTronGaslessActivation &&
                 gaslessProvider != null
-            ? _reconfigureGaslessRuntime(group, gaslessProvider)
+            ? _reconfigureGaslessRuntime(
+                group,
+                gaslessProvider,
+                gaslessContext!,
+              )
             : activator.activate(group.primary, group.children.toList());
         await for (final rawProgress in activationStream) {
-          if (_cancelledActivations.containsKey(group.primary.id)) {
-            final reason =
-                _cancelledActivations[group.primary.id] ??
-                'Activation cancelled by caller';
+          final cancellation = _cancellationFor(group.primary.id, registration);
+          if (cancellation != null) {
             final cancellationError = ActivationCancelledException(
               assetId: group.primary.id,
-              message: reason,
+              message: cancellation.reason,
             );
             if (!primaryCompleter.isCompleted) {
               primaryCompleter.completeError(cancellationError);
             }
             yield ActivationProgress.error(
-              message: reason,
+              message: cancellation.reason,
               errorCode: 'ACTIVATION_CANCELLED',
             );
             break;
@@ -269,15 +336,20 @@ class ActivationManager {
           if (progress.isComplete &&
               progress.isSuccess &&
               shouldRefreshTronGaslessActivation) {
-            progress = await _verifyGaslessCapability(group, progress);
+            progress = await _verifyGaslessCapability(
+              group,
+              progress,
+              gaslessContext!,
+            );
           }
 
           // Complete the join completer BEFORE yielding the terminal progress.
           // The coordinator breaks out of its `await for` as soon as it
           // receives a terminal progress, which cancels this async* generator
           // at the `yield` suspension point below. Concurrent activations that
-          // joined this batch await `primaryCompleter.future` (e.g. a standalone
-          // platform activation racing a `[platform, token]` group); completing
+          // joined this batch await `primaryCompleter.future` (for example, a
+          // standalone platform activation racing a `[platform, token]` group);
+          // completing
           // it only inside `_handleActivationComplete` (which runs after the
           // yield) would never fire once the stream is cancelled, leaving the
           // joined activation — and therefore the platform coin — hung forever.
@@ -304,7 +376,12 @@ class ActivationManager {
               continue;
             }
             completionHandled = true;
-            await _handleActivationComplete(group, progress, primaryCompleter);
+            await _handleActivationComplete(
+              group,
+              progress,
+              primaryCompleter,
+              gaslessContext: gaslessContext,
+            );
           }
         }
 
@@ -312,10 +389,10 @@ class ActivationManager {
         // when the platform and all requested children are already active (the
         // individual-children path skips already-active children and yields
         // nothing). Without a terminal event the coordinator's Future
-        // (shared_activation_coordinator) would await forever — emit a synthetic
-        // completion (or failure) so it always resolves.
+        // (shared_activation_coordinator) would await forever. Emit a
+        // synthetic completion (or failure) so it always resolves.
         if (!completionHandled &&
-            !_cancelledActivations.containsKey(group.primary.id)) {
+            _cancellationFor(group.primary.id, registration) == null) {
           final status = await _checkActivationStatus(
             group,
             forceRefresh: true,
@@ -323,9 +400,14 @@ class ActivationManager {
           completionHandled = true;
           if (status.isComplete) {
             final verified = shouldRefreshTronGaslessActivation
-                ? await _verifyGaslessCapability(group, status)
+                ? await _verifyGaslessCapability(group, status, gaslessContext!)
                 : status;
-            await _handleActivationComplete(group, verified, primaryCompleter);
+            await _handleActivationComplete(
+              group,
+              verified,
+              primaryCompleter,
+              gaslessContext: gaslessContext,
+            );
             yield verified;
           } else {
             final mappedError = _mapError(
@@ -367,7 +449,7 @@ class ActivationManager {
         );
       } finally {
         try {
-          await _cleanupActivation(group.primary.id);
+          await _cleanupActivation(group.primary.id, registration);
         } catch (e) {
           debugPrint('Failed to cleanup activation: $e');
         }
@@ -434,13 +516,46 @@ class ActivationManager {
     );
   }
 
+  _ActivationCancellation? _currentCancellation(AssetId assetId) {
+    final cancellation = _cancelledActivations[assetId];
+    if (cancellation == null ||
+        cancellation.sessionGeneration != _activationSessionGeneration ||
+        !identical(_activationCompleters[assetId], cancellation.completer)) {
+      return null;
+    }
+    return cancellation;
+  }
+
+  _ActivationCancellation? _cancellationFor(
+    AssetId assetId,
+    _ActivationRegistration registration,
+  ) {
+    final cancellation = _cancelledActivations[assetId];
+    if (cancellation == null ||
+        cancellation.sessionGeneration != registration.sessionGeneration ||
+        !identical(cancellation.completer, registration.completer)) {
+      return null;
+    }
+    return cancellation;
+  }
+
   /// Register a new activation attempt or join an existing one.
-  Future<_ActivationRegistration> _registerActivation(AssetId assetId) async {
+  Future<_ActivationRegistration> _registerActivation(
+    AssetId assetId,
+    int expectedSessionGeneration,
+  ) async {
     return _protectedOperation(() async {
+      if (expectedSessionGeneration != _activationSessionGeneration) {
+        throw const WalletChangedDisconnectException(
+          'Wallet changed during asset activation',
+        );
+      }
+
       final existingCompleter = _activationCompleters[assetId];
       if (existingCompleter != null) {
         return _ActivationRegistration(
           completer: existingCompleter,
+          sessionGeneration: expectedSessionGeneration,
           shouldStartActivation: false,
         );
       }
@@ -453,6 +568,7 @@ class ActivationManager {
       _activationCompleters[assetId] = completer;
       return _ActivationRegistration(
         completer: completer,
+        sessionGeneration: expectedSessionGeneration,
         shouldStartActivation: true,
       );
     });
@@ -485,32 +601,66 @@ class ActivationManager {
   Future<void> _handleActivationComplete(
     _AssetGroup group,
     ActivationProgress progress,
-    Completer<void> completer,
-  ) async {
+    Completer<void> completer, {
+    _GaslessActivationContext? gaslessContext,
+  }) async {
     if (progress.isSuccess) {
+      if (gaslessContext != null) {
+        await _requireGaslessContextCurrent(gaslessContext);
+      }
       final user = await _auth.currentUser;
+      if (gaslessContext != null) {
+        await _requireGaslessContextCurrent(gaslessContext);
+      }
       if (user != null) {
         // Store custom tokens using CoinConfigManager
         if (group.primary.protocol.isCustomToken) {
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
           await _assetsUpdateManager.assets.storeCustomToken(group.primary);
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
         } else {
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
           await _assetHistory.addAssetToWallet(
             user.walletId,
             group.primary.id.id,
           );
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
         }
 
         final allAssets = [group.primary, ...group.children];
 
         for (final asset in allAssets) {
           if (asset.protocol.isCustomToken) {
+            if (gaslessContext != null) {
+              await _requireGaslessContextCurrent(gaslessContext);
+            }
             await _assetsUpdateManager.assets.storeCustomToken(asset);
+            if (gaslessContext != null) {
+              await _requireGaslessContextCurrent(gaslessContext);
+            }
           }
 
           // Pre-cache balance for the activated asset
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
           await _balanceManager.precacheBalance(asset);
+          if (gaslessContext != null) {
+            await _requireGaslessContextCurrent(gaslessContext);
+          }
         }
 
+        if (gaslessContext != null) {
+          await _requireGaslessContextCurrent(gaslessContext);
+        }
         _activatedAssetsCache.invalidate();
       }
 
@@ -548,6 +698,7 @@ class ActivationManager {
   Stream<ActivationProgress> _reconfigureGaslessRuntime(
     _AssetGroup group,
     TronGaslessProviderConfig provider,
+    _GaslessActivationContext context,
   ) async* {
     final tokens = _gaslessAssets(group)
         .where((asset) => asset.protocol is Trc20Protocol)
@@ -567,7 +718,12 @@ class ActivationManager {
       ),
     );
 
-    final contract = await _configureGaslessRuntime(group, provider, tokens);
+    final contract = await _configureGaslessRuntime(
+      group,
+      provider,
+      tokens,
+      context,
+    );
 
     yield ActivationProgress.success(
       details: ActivationProgressDetails(
@@ -587,7 +743,9 @@ class ActivationManager {
     _AssetGroup group,
     TronGaslessProviderConfig provider,
     List<GaslessConfigureToken> tokens,
+    _GaslessActivationContext context,
   ) async {
+    await _requireGaslessContextCurrent(context);
     final GaslessConfigureResponse response;
     try {
       response = await _client.rpc.withdraw.configureGasless(
@@ -596,6 +754,7 @@ class ActivationManager {
         tokens: tokens,
       );
     } catch (error) {
+      await _requireGaslessContextCurrent(context);
       final isMethodMissing =
           error is DispatcherErrorNoSuchMethodException ||
           error is GeneralErrorResponse && error.errorType == 'NoSuchMethod';
@@ -620,6 +779,7 @@ class ActivationManager {
       }
       return _GaslessRuntimeContract.legacyAccountStatus;
     }
+    await _requireGaslessContextCurrent(context);
     if (response.platformCoin != group.primary.id.id) {
       throw const _GaslessSecurityMismatch(
         reasonCode: 'configure_platform_mismatch',
@@ -668,15 +828,16 @@ class ActivationManager {
   Future<ActivationProgress> _verifyGaslessCapability(
     _AssetGroup group,
     ActivationProgress success,
+    _GaslessActivationContext context,
   ) async {
+    final statusEpochs = <AssetId, int>{};
     try {
+      await _requireGaslessContextCurrent(context);
       final assets = _gaslessAssets(group).toList();
       if (assets.isEmpty) return success;
-      final user = await _auth.currentUser;
       final softwareWallet =
-          user != null &&
-          user.walletId.authOptions.privKeyPolicy ==
-              const PrivateKeyPolicy.contextPrivKey();
+          context.walletId.authOptions.privKeyPolicy ==
+          const PrivateKeyPolicy.contextPrivKey();
       if (!softwareWallet) {
         throw StateError('GasFree requires a primary software wallet');
       }
@@ -689,14 +850,20 @@ class ActivationManager {
         final tokens = assets
             .map((asset) => GaslessConfigureToken(coin: asset.id.id))
             .toList();
-        await _configureGaslessRuntime(group, _tronGaslessProvider, tokens);
+        await _configureGaslessRuntime(
+          group,
+          _tronGaslessProvider,
+          tokens,
+          context,
+        );
       }
       for (final asset in assets) {
         final requestedPath = asset.id.derivationPath;
-        final walletType = switch (user.walletId.authOptions.derivationMethod) {
-          DerivationMethod.hdWallet => GaslessWalletType.softwareHd,
-          DerivationMethod.iguana => GaslessWalletType.softwareIguana,
-        };
+        final walletType =
+            switch (context.walletId.authOptions.derivationMethod) {
+              DerivationMethod.hdWallet => GaslessWalletType.softwareHd,
+              DerivationMethod.iguana => GaslessWalletType.softwareIguana,
+            };
         final capabilityPath = switch (walletType) {
           GaslessWalletType.softwareHd =>
             GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
@@ -713,13 +880,52 @@ class ActivationManager {
         if (!sourceIsCanonical) {
           throw StateError('GasFree requires the canonical TRON derivation');
         }
+        final runtimeContract = _gaslessRuntimeContracts[asset.id];
+        if (runtimeContract == null) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'runtime_contract_missing',
+          );
+        }
+        final providerAddress = _resolvedGaslessProviders[asset.id];
+        if (providerAddress == null || providerAddress.isEmpty) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'capability_identity_mismatch',
+          );
+        }
+        final statusEpoch = _gaslessCapabilities.beginAccountStatusProbe(
+          asset.id,
+        );
+        statusEpochs[asset.id] = statusEpoch;
         _gaslessCapabilities.markChecking(asset.id);
         final status = await _client.rpc.withdraw.gaslessAccountStatus(
           coin: asset.id.id,
         );
+        await _requireGaslessContextCurrent(context);
+        if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
+          asset.id,
+          statusEpoch,
+        )) {
+          throw const _GaslessStatusSuperseded();
+        }
         if (!status.hasExplicitAvailability) {
           throw const _GaslessTemporarilyUnavailable(
             reasonCode: 'availability_unattested',
+          );
+        }
+        if (status.reasonCode != null) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'invalid_account_status',
+          );
+        }
+        if (status.availability != GaslessAccountAvailability.available &&
+            status.serviceProvider != null) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'degraded_provider_identity_present',
+          );
+        }
+        if (!_gaslessCapabilities.hasValidDegradedAccountStatusShape(status)) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'invalid_account_status',
           );
         }
         switch (status.availability) {
@@ -736,15 +942,20 @@ class ActivationManager {
               reasonCode: 'provider_unreachable',
             );
         }
+        if (status.serviceProvider != providerAddress) {
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'provider_identity_mismatch',
+          );
+        }
         if (status.gasfreeAddress.isEmpty ||
-            status.reasonCode != null ||
             status.active == null ||
+            (status.active == false && status.activationFee == null) ||
             status.frozenBalance == null ||
             status.spendableBalance == null ||
             status.transferFee == null ||
             status.maxWithdrawable == null) {
-          throw StateError(
-            'GasFree account status is not provider-authoritative',
+          throw const _GaslessSecurityMismatch(
+            reasonCode: 'invalid_account_status',
           );
         }
         final protocol = asset.protocol as Trc20Protocol;
@@ -761,11 +972,8 @@ class ActivationManager {
             : nestedContract is String
             ? nestedContract
             : null;
-        final providerAddress = _resolvedGaslessProviders[asset.id];
-        final walletPubkeyHash = user.walletId.pubkeyHash;
-        if (contractAddress == null ||
-            providerAddress == null ||
-            walletPubkeyHash == null) {
+        final walletPubkeyHash = context.walletId.pubkeyHash;
+        if (contractAddress == null || walletPubkeyHash == null) {
           throw const _GaslessSecurityMismatch(
             reasonCode: 'capability_identity_mismatch',
           );
@@ -779,21 +987,12 @@ class ActivationManager {
           walletType: walletType,
           derivationPath: capabilityPath,
         );
-        final isLegacy =
-            _gaslessRuntimeContracts[asset.id] ==
-            _GaslessRuntimeContract.legacyAccountStatus;
-        if (isLegacy && status.serviceProvider != providerAddress) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'provider_identity_mismatch',
-          );
-        }
-        final accepted = isLegacy
-            ? _gaslessCapabilities.markStatusAttestedFor(
-                asset,
-                identity,
-                status,
-              )
-            : _gaslessCapabilities.markReadyFor(asset, identity);
+        final accepted = switch (runtimeContract) {
+          _GaslessRuntimeContract.legacyAccountStatus =>
+            _gaslessCapabilities.markProvisionalFor(asset, identity),
+          _GaslessRuntimeContract.boundConfigure =>
+            _gaslessCapabilities.markReadyFor(asset, identity),
+        };
         if (!accepted) {
           throw const _GaslessSecurityMismatch(
             reasonCode: 'capability_identity_mismatch',
@@ -802,6 +1001,37 @@ class ActivationManager {
       }
       return success;
     } catch (error, stackTrace) {
+      Object effectiveError = error;
+      try {
+        await _requireGaslessContextCurrent(context);
+      } on WalletChangedDisconnectException catch (walletError) {
+        effectiveError = walletError;
+      }
+      if (effectiveError is WalletChangedDisconnectException) {
+        final mappedError = _mapError(effectiveError, group.primary.id);
+        return ActivationProgress.error(
+          message: mappedError.fallbackMessage,
+          sdkError: mappedError,
+          stackTrace: stackTrace,
+        );
+      }
+      if (effectiveError is _GaslessStatusSuperseded ||
+          statusEpochs.entries.any(
+            (entry) => !_gaslessCapabilities.isCurrentAccountStatusProbe(
+              entry.key,
+              entry.value,
+            ),
+          )) {
+        final mappedError = _mapError(
+          const _GaslessStatusSuperseded(),
+          group.primary.id,
+        );
+        return ActivationProgress.error(
+          message: mappedError.fallbackMessage,
+          sdkError: mappedError,
+          stackTrace: stackTrace,
+        );
+      }
       for (final asset in _gaslessAssets(group)) {
         if (_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
           continue;
@@ -835,10 +1065,21 @@ class ActivationManager {
   }
 
   /// Cleanup after activation attempt
-  Future<void> _cleanupActivation(AssetId assetId) async {
+  Future<void> _cleanupActivation(
+    AssetId assetId,
+    _ActivationRegistration registration,
+  ) async {
     await _protectedOperation(() async {
+      if (registration.sessionGeneration != _activationSessionGeneration ||
+          !identical(_activationCompleters[assetId], registration.completer)) {
+        return;
+      }
       _activationCompleters.remove(assetId);
-      _cancelledActivations.remove(assetId);
+      final cancellation = _cancelledActivations[assetId];
+      if (cancellation == null ||
+          identical(cancellation.completer, registration.completer)) {
+        _cancelledActivations.remove(assetId);
+      }
     });
   }
 
@@ -935,7 +1176,24 @@ class _GaslessDisabled implements Exception {
   String toString() => 'GasFree provider authentication is unavailable';
 }
 
+class _GaslessStatusSuperseded implements Exception {
+  const _GaslessStatusSuperseded();
+
+  @override
+  String toString() => 'GasFree account status was superseded';
+}
+
 enum _GaslessRuntimeContract { legacyAccountStatus, boundConfigure }
+
+class _GaslessActivationContext {
+  const _GaslessActivationContext({
+    required this.walletId,
+    required this.sessionGeneration,
+  });
+
+  final WalletId walletId;
+  final int sessionGeneration;
+}
 
 /// Internal class for grouping related assets
 class _AssetGroup {
@@ -984,9 +1242,23 @@ class _AssetGroup {
 class _ActivationRegistration {
   const _ActivationRegistration({
     required this.completer,
+    required this.sessionGeneration,
     required this.shouldStartActivation,
   });
 
   final Completer<void> completer;
+  final int sessionGeneration;
   final bool shouldStartActivation;
+}
+
+class _ActivationCancellation {
+  const _ActivationCancellation({
+    required this.completer,
+    required this.sessionGeneration,
+    required this.reason,
+  });
+
+  final Completer<void> completer;
+  final int sessionGeneration;
+  final String reason;
 }

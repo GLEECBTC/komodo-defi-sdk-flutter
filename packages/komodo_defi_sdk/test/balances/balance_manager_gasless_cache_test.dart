@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
@@ -71,6 +72,8 @@ Map<String, dynamic> _accountStatusJson({
   String onChain = '100',
   String frozen = '1.5',
   String spendable = '98.5',
+  bool includeProvider = true,
+  String serviceProvider = 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
 }) => {
   'mmrpc': '2.0',
   'result': {
@@ -82,6 +85,7 @@ Map<String, dynamic> _accountStatusJson({
     'transfer_fee': '1.5',
     'max_withdrawable': '97',
     'availability': 'available',
+    if (includeProvider) 'service_provider': serviceProvider,
   },
 };
 
@@ -155,7 +159,7 @@ void main() {
             platform: 'TRX',
             contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
             providerAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-            walletPubkeyHash: 'wallet-pubkey',
+            walletPubkeyHash: walletA.walletId.pubkeyHash!,
             walletType: GaslessWalletType.softwareIguana,
             derivationPath: '',
           ),
@@ -258,6 +262,37 @@ void main() {
       );
       expect(snapshot.isFresh, isTrue);
     });
+
+    for (final providerCase in const [
+      (include: false, provider: ''),
+      (include: true, provider: 'TDifferentProvider'),
+    ]) {
+      test(
+        'snapshot rejects ${providerCase.include ? 'mismatched' : 'missing'} '
+        'bound provider provenance',
+        () async {
+          when(() => client.executeRpc(any())).thenAnswer(
+            (_) async => _accountStatusJson(
+              includeProvider: providerCase.include,
+              serviceProvider: providerCase.provider,
+            ),
+          );
+
+          await expectLater(
+            manager.getGaslessBalanceSnapshot(trc20Asset.id),
+            throwsA(isA<StateError>()),
+          );
+          expect(
+            manager.lastKnownGaslessBalanceSnapshot(trc20Asset.id),
+            isNull,
+          );
+          expect(
+            gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
+            'provider_identity_mismatch',
+          );
+        },
+      );
+    }
 
     test(
       'unconfirmed capability uses the Standard rail without custody RPC',
@@ -431,6 +466,212 @@ void main() {
         expect(manager.lastKnownGaslessBalanceSnapshot(trc20Asset.id), isNull);
       },
     );
+
+    test(
+      'wallet capture invalidates old capability before delayed auth event',
+      () async {
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) async => _accountStatusJson());
+        await manager.getGaslessBalanceSnapshot(trc20Asset.id);
+        expect(gaslessCapabilities.isReady(trc20Asset.id), isTrue);
+        clearInteractions(client);
+
+        currentUser = walletB;
+
+        await expectLater(
+          manager.getGaslessBalanceSnapshot(trc20Asset.id),
+          throwsA(isA<StateError>()),
+        );
+        expect(gaslessCapabilities.isReady(trc20Asset.id), isFalse);
+        verifyNever(() => client.executeRpc(any()));
+      },
+    );
+
+    test(
+      'slow recovery snapshot cannot overwrite a newer ready snapshot',
+      () async {
+        final reader = _MockCustodyBalanceReader();
+        final recoveryStarted = Completer<void>();
+        final recoveryBalance = Completer<Decimal>();
+        when(() => pubkeyManager.getPubkeys(trc20Asset)).thenAnswer(
+          (_) async => AssetPubkeys(
+            assetId: trc20Asset.id,
+            keys: [
+              PubkeyInfo(
+                address: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
+                derivationPath: null,
+                chain: null,
+                balance: eoaBalance,
+                coinTicker: trc20Asset.id.id,
+                gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+              ),
+            ],
+            availableAddressesCount: 1,
+            syncStatus: SyncStatusEnum.success,
+          ),
+        );
+        when(
+          () => reader.readBalance(
+            trc20Asset,
+            'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+          ),
+        ).thenAnswer((_) {
+          recoveryStarted.complete();
+          return recoveryBalance.future;
+        });
+        final raceManager = BalanceManager(
+          assetLookup: assetLookup,
+          auth: auth,
+          pubkeyManager: pubkeyManager,
+          activationCoordinator: activation,
+          eventStreamingManager: eventStreamingManager,
+          client: client,
+          gaslessCapabilities: gaslessCapabilities,
+          gaslessCustodyBalanceReader: reader,
+        );
+        gaslessCapabilities.markUnconfirmed(trc20Asset.id);
+
+        final recovery = raceManager.getGaslessBalanceSnapshot(trc20Asset.id);
+        final recoveryFailure = expectLater(
+          recovery,
+          throwsA(isA<StateError>()),
+        );
+        await recoveryStarted.future;
+
+        expect(
+          gaslessCapabilities.markReadyFor(
+            trc20Asset,
+            GaslessCapabilityIdentity(
+              assetId: trc20Asset.id,
+              platform: 'TRX',
+              contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+              providerAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+              walletPubkeyHash: walletA.walletId.pubkeyHash!,
+              walletType: GaslessWalletType.softwareIguana,
+              derivationPath: '',
+            ),
+          ),
+          isTrue,
+        );
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) async => _accountStatusJson());
+
+        final authoritative = await raceManager.getGaslessBalanceSnapshot(
+          trc20Asset.id,
+        );
+        expect(
+          authoritative.provenance,
+          GaslessBalanceProvenance.authoritativeProvider,
+        );
+
+        recoveryBalance.complete(Decimal.parse('42'));
+        await recoveryFailure;
+        expect(
+          raceManager
+              .lastKnownGaslessBalanceSnapshot(trc20Asset.id)
+              ?.provenance,
+          GaslessBalanceProvenance.authoritativeProvider,
+        );
+        expect(
+          raceManager
+              .lastKnownGaslessBalanceSnapshot(trc20Asset.id)
+              ?.custodyTotal,
+          Decimal.parse('100'),
+        );
+        await raceManager.dispose();
+      },
+    );
+
+    test(
+      'session reset during pubkey lookup cannot revoke new receive evidence',
+      () async {
+        final pubkeysCompleter = Completer<AssetPubkeys>();
+        when(
+          () => pubkeyManager.getPubkeys(trc20Asset),
+        ).thenAnswer((_) => pubkeysCompleter.future);
+
+        final pending = manager.getGaslessBalanceSnapshot(trc20Asset.id);
+        await Future<void>.delayed(Duration.zero);
+
+        gaslessCapabilities.resetSession();
+        final identity = GaslessCapabilityIdentity(
+          assetId: trc20Asset.id,
+          platform: 'TRX',
+          contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+          providerAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+          walletPubkeyHash: walletA.walletId.pubkeyHash!,
+          walletType: GaslessWalletType.softwareIguana,
+          derivationPath: '',
+        );
+        final status = GaslessAccountStatusResponse.parse(_accountStatusJson());
+        expect(
+          gaslessCapabilities.markStatusAttestedFor(
+            trc20Asset,
+            identity,
+            status,
+            expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+          ),
+          isTrue,
+        );
+        pubkeysCompleter.complete(
+          AssetPubkeys(
+            assetId: trc20Asset.id,
+            keys: [
+              PubkeyInfo(
+                address: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
+                derivationPath: null,
+                chain: null,
+                balance: eoaBalance,
+                coinTicker: trc20Asset.id.id,
+              ),
+            ],
+            availableAddressesCount: 1,
+            syncStatus: SyncStatusEnum.success,
+          ),
+        );
+
+        await expectLater(
+          pending,
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        expect(
+          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
+          isTrue,
+        );
+        verifyNever(() => client.executeRpc(any()));
+      },
+    );
+
+    test('wallet switch invalidates an in-flight custody error '
+        'before capability mutation', () async {
+      final statusCompleter = Completer<Map<String, dynamic>>();
+      when(
+        () => client.executeRpc(any()),
+      ).thenAnswer((_) => statusCompleter.future);
+
+      final pending = manager.getGaslessBalanceSnapshot(trc20Asset.id);
+      await Future<void>.delayed(Duration.zero);
+
+      currentUser = walletB;
+      authChanges.add(walletB);
+      statusCompleter.complete({
+        'mmrpc': '2.0',
+        'error': 'redacted',
+        'error_type': 'CustodyAddressMismatch',
+      });
+
+      await expectLater(
+        pending,
+        throwsA(isA<WalletChangedDisconnectException>()),
+      );
+      expect(
+        gaslessCapabilities.capabilityFor(trc20Asset).state,
+        GaslessCapabilityState.ready,
+      );
+      expect(manager.lastKnownGaslessBalanceSnapshot(trc20Asset.id), isNull);
+    });
 
     test(
       'delayed auth event cannot return wallet A cached custody to wallet B',

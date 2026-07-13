@@ -93,9 +93,26 @@ class GaslessCapabilityRegistry {
   final Map<AssetId, GaslessVerificationMode> _verificationModes = {};
   final Map<AssetId, GaslessReceiveEvidence> _receiveEvidence = {};
   final Map<AssetId, String> _attestedReceiveAddresses = {};
+  final Map<AssetId, int> _accountStatusEpochs = {};
   final Map<AssetId, GaslessCapability> _states = {};
+  String? _boundWalletPubkeyHash;
+  int _sessionGeneration = 0;
 
   Set<String> get configuredAssetIds => _configuredAssetIds;
+
+  /// Monotonically changes whenever wallet-scoped capability state is reset.
+  int get sessionGeneration => _sessionGeneration;
+
+  /// Keeps wallet-scoped capability evidence from crossing an auth-listener
+  /// delay. A mismatched or unavailable pubkey invalidates the old session
+  /// synchronously before callers inspect capability predicates.
+  bool ensureWalletSession(String? walletPubkeyHash) {
+    final boundWallet = _boundWalletPubkeyHash;
+    if (boundWallet == null) return true;
+    if (walletPubkeyHash?.trim() == boundWallet) return true;
+    resetSession();
+    return false;
+  }
 
   bool isConfigured(Asset asset) {
     final protocol = asset.protocol;
@@ -149,6 +166,20 @@ class GaslessCapabilityRegistry {
   bool canAttemptStatusReceiveAttestation(AssetId assetId) =>
       _candidateIdentities.containsKey(assetId) &&
       _verificationModes[assetId] == GaslessVerificationMode.legacyOnChain;
+
+  /// Starts an account-status probe and invalidates older V1 receive proof.
+  int beginAccountStatusProbe(AssetId assetId) {
+    final epoch = (_accountStatusEpochs[assetId] ?? 0) + 1;
+    _accountStatusEpochs[assetId] = epoch;
+    if (_receiveEvidence[assetId] == GaslessReceiveEvidence.statusAttestedV1) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+    }
+    return epoch;
+  }
+
+  /// Whether [epoch] is still the newest account-status probe for [assetId].
+  bool isCurrentAccountStatusProbe(AssetId assetId, int epoch) =>
+      _accountStatusEpochs[assetId] == epoch;
 
   /// Revokes V1 receive permission while retaining custody recovery metadata.
   void invalidateStatusReceiveEvidence(
@@ -312,6 +343,96 @@ class GaslessCapabilityRegistry {
     return true;
   }
 
+  /// Validates the provider wire invariant for an existing bound capability.
+  ///
+  /// Degraded responses may preserve recovery access only when they omit the
+  /// provider identity. Available responses must repeat the exact provider
+  /// that was bound during runtime configuration.
+  bool validateBoundAccountStatus(
+    AssetId assetId,
+    GaslessAccountStatusResponse status,
+  ) {
+    final identity = _readyIdentities[assetId];
+    if (!isReady(assetId) ||
+        identity == null ||
+        _verificationModes[assetId] != GaslessVerificationMode.boundRelay) {
+      return false;
+    }
+    if (!status.hasExplicitAvailability) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markStale(assetId, reasonCode: 'availability_unattested');
+      return false;
+    }
+    if (status.reasonCode != null) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+      return false;
+    }
+    if (status.availability != GaslessAccountAvailability.available) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      if (status.serviceProvider != null) {
+        markSecurityMismatch(
+          assetId,
+          reasonCode: 'degraded_provider_identity_present',
+        );
+        return false;
+      }
+      if (!hasValidDegradedAccountStatusShape(status)) {
+        markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+        return false;
+      }
+      switch (status.availability) {
+        case GaslessAccountAvailability.pendingTransfer:
+          markStale(assetId, reasonCode: 'pending_transfer');
+        case GaslessAccountAvailability.tokenUnsupported:
+          markUnsupported(assetId);
+        case GaslessAccountAvailability.providerUnreachable:
+          markStale(assetId, reasonCode: 'provider_unreachable');
+        case GaslessAccountAvailability.available:
+          throw StateError('Unreachable GasFree availability branch');
+      }
+      return true;
+    }
+    if (status.serviceProvider != identity.providerAddress) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markSecurityMismatch(assetId, reasonCode: 'provider_identity_mismatch');
+      return false;
+    }
+    if (status.gasfreeAddress.isEmpty ||
+        status.active == null ||
+        (status.active == false && status.activationFee == null) ||
+        status.frozenBalance == null ||
+        status.spendableBalance == null ||
+        status.transferFee == null ||
+        status.maxWithdrawable == null) {
+      _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
+      markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+      return false;
+    }
+    return true;
+  }
+
+  /// Whether a degraded response omits every field forbidden by the V1 wire.
+  bool hasValidDegradedAccountStatusShape(GaslessAccountStatusResponse status) {
+    if (status.availability == GaslessAccountAvailability.available) {
+      return true;
+    }
+    if (status.serviceProvider != null ||
+        status.spendableBalance != null ||
+        status.transferFee != null ||
+        status.activationFee != null ||
+        status.maxWithdrawable != null) {
+      return false;
+    }
+    return switch (status.availability) {
+      GaslessAccountAvailability.pendingTransfer => true,
+      GaslessAccountAvailability.tokenUnsupported ||
+      GaslessAccountAvailability.providerUnreachable =>
+        status.active == null && status.frozenBalance == null,
+      GaslessAccountAvailability.available => true,
+    };
+  }
+
   GaslessCapability capabilityFor(Asset asset) {
     if (!isConfigured(asset)) {
       return GaslessCapability(
@@ -331,6 +452,7 @@ class GaslessCapabilityRegistry {
 
   bool markReadyFor(Asset asset, GaslessCapabilityIdentity identity) {
     if (!_validateIdentity(asset, identity)) return false;
+    _boundWalletPubkeyHash = identity.walletPubkeyHash.trim();
     _candidateIdentities[asset.id] = identity;
     _readyIdentities[asset.id] = identity;
     _verificationModes[asset.id] = GaslessVerificationMode.boundRelay;
@@ -346,6 +468,7 @@ class GaslessCapabilityRegistry {
   /// proof, without enabling sends or new receives yet.
   bool markProvisionalFor(Asset asset, GaslessCapabilityIdentity identity) {
     if (!_validateIdentity(asset, identity)) return false;
+    _boundWalletPubkeyHash = identity.walletPubkeyHash.trim();
     _candidateIdentities[asset.id] = identity;
     _readyIdentities.remove(asset.id);
     _verificationModes[asset.id] = GaslessVerificationMode.legacyOnChain;
@@ -363,10 +486,15 @@ class GaslessCapabilityRegistry {
   bool markStatusAttestedFor(
     Asset asset,
     GaslessCapabilityIdentity identity,
-    GaslessAccountStatusResponse status,
-  ) {
+    GaslessAccountStatusResponse status, {
+    required String expectedGasfreeAddress,
+  }) {
     if (!markProvisionalFor(asset, identity)) return false;
-    return _applyStatusAttestation(asset.id, status);
+    return _applyStatusAttestation(
+      asset.id,
+      status,
+      expectedGasfreeAddress: expectedGasfreeAddress,
+    );
   }
 
   /// Revalidates a previously attested V1 address for a sensitive UI action.
@@ -386,7 +514,7 @@ class GaslessCapabilityRegistry {
   bool _applyStatusAttestation(
     AssetId assetId,
     GaslessAccountStatusResponse status, {
-    String? expectedGasfreeAddress,
+    required String expectedGasfreeAddress,
   }) {
     _receiveEvidence[assetId] = GaslessReceiveEvidence.none;
     final identity = _candidateIdentities[assetId]!;
@@ -394,7 +522,22 @@ class GaslessCapabilityRegistry {
       markStale(assetId, reasonCode: 'availability_unattested');
       return false;
     }
+    if (status.reasonCode != null) {
+      markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+      return false;
+    }
     if (status.availability != GaslessAccountAvailability.available) {
+      if (status.serviceProvider != null) {
+        markSecurityMismatch(
+          assetId,
+          reasonCode: 'degraded_provider_identity_present',
+        );
+        return false;
+      }
+      if (!hasValidDegradedAccountStatusShape(status)) {
+        markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
+        return false;
+      }
       switch (status.availability) {
         case GaslessAccountAvailability.pendingTransfer:
           markStale(assetId, reasonCode: 'pending_transfer');
@@ -407,28 +550,31 @@ class GaslessCapabilityRegistry {
       }
       return false;
     }
-    if (status.serviceProvider != identity.providerAddress) {
+    final pinnedProvider = _pinnedProviderAddress;
+    if (pinnedProvider == null || pinnedProvider.isEmpty) {
+      markSecurityMismatch(assetId, reasonCode: 'provider_pin_required');
+      return false;
+    }
+    if (identity.providerAddress != pinnedProvider ||
+        status.serviceProvider != pinnedProvider) {
       markSecurityMismatch(assetId, reasonCode: 'provider_identity_mismatch');
       return false;
     }
     final previousAddress = _attestedReceiveAddresses[assetId];
     if (status.gasfreeAddress.isEmpty ||
-        (expectedGasfreeAddress != null &&
-            status.gasfreeAddress != expectedGasfreeAddress) ||
+        expectedGasfreeAddress.isEmpty ||
+        status.gasfreeAddress != expectedGasfreeAddress ||
         (previousAddress != null && status.gasfreeAddress != previousAddress)) {
       markSecurityMismatch(assetId, reasonCode: 'custody_address_mismatch');
       return false;
     }
-    if (status.reasonCode != null) {
-      markSecurityMismatch(assetId, reasonCode: 'unexpected_ready_reason');
-      return false;
-    }
     if (status.active == null ||
+        (status.active == false && status.activationFee == null) ||
         status.frozenBalance == null ||
         status.spendableBalance == null ||
         status.transferFee == null ||
         status.maxWithdrawable == null) {
-      markUnconfirmed(assetId);
+      markSecurityMismatch(assetId, reasonCode: 'invalid_account_status');
       return false;
     }
     _attestedReceiveAddresses[assetId] = status.gasfreeAddress;
@@ -460,6 +606,8 @@ class GaslessCapabilityRegistry {
         identity.contractAddress == canonical.contract &&
         providerMatches &&
         identity.walletPubkeyHash.trim().isNotEmpty &&
+        (_boundWalletPubkeyHash == null ||
+            identity.walletPubkeyHash.trim() == _boundWalletPubkeyHash) &&
         canonicalWallet;
     if (!valid) {
       markSecurityMismatch(
@@ -526,11 +674,14 @@ class GaslessCapabilityRegistry {
   }
 
   void resetSession() {
+    _sessionGeneration++;
     _readyIdentities.clear();
     _candidateIdentities.clear();
     _verificationModes.clear();
     _receiveEvidence.clear();
     _attestedReceiveAddresses.clear();
+    _accountStatusEpochs.clear();
     _states.clear();
+    _boundWalletPubkeyHash = null;
   }
 }

@@ -237,6 +237,8 @@ class BalanceManager implements IBalanceManager {
   /// funds, which would understate portfolio ownership.
   final Set<AssetId> _gaslessSnapshotSourcedBalances = {};
   final Map<AssetId, GaslessBalanceSnapshot> _gaslessSnapshotCache = {};
+  final Map<AssetId, int> _activeGaslessSnapshotEpochs = {};
+  int _nextGaslessSnapshotEpoch = 0;
 
   /// Track active balance watch streams by asset ID
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
@@ -301,6 +303,7 @@ class BalanceManager implements IBalanceManager {
   Future<void> _handleAuthStateChanged(KdfUser? user) async {
     if (_isDisposed) return;
     final newWalletId = user?.walletId;
+    _gaslessCapabilities?.ensureWalletSession(newWalletId?.pubkeyHash);
     // If the wallet ID has changed, reset all state
     _logger.fine(
       'Auth state changed. wallet: $_currentWalletId -> $newWalletId',
@@ -322,6 +325,7 @@ class BalanceManager implements IBalanceManager {
   Future<WalletOperationContext> _captureWalletContext() async {
     final user = await _auth.currentUser;
     if (user == null) throw AuthException.notSignedIn();
+    _gaslessCapabilities?.ensureWalletSession(user.walletId.pubkeyHash);
 
     if (_currentWalletId == null) {
       _currentWalletId = user.walletId;
@@ -364,6 +368,28 @@ class BalanceManager implements IBalanceManager {
     );
   }
 
+  int _beginGaslessSnapshot(AssetId assetId) {
+    final epoch = ++_nextGaslessSnapshotEpoch;
+    _activeGaslessSnapshotEpochs[assetId] = epoch;
+    return epoch;
+  }
+
+  void _requireGaslessSnapshotCurrent(AssetId assetId, int epoch) {
+    if (_activeGaslessSnapshotEpochs[assetId] == epoch) return;
+    throw StateError('GasFree balance snapshot was superseded');
+  }
+
+  void _requireCapabilityGenerationCurrent(int? generation) {
+    final capabilities = _gaslessCapabilities;
+    if (generation == null && capabilities == null) return;
+    if (capabilities != null && generation == capabilities.sessionGeneration) {
+      return;
+    }
+    throw const WalletChangedDisconnectException(
+      'Wallet changed during GasFree balance status',
+    );
+  }
+
   /// Reset all internal state when wallet changes
   Future<void> _resetState() async {
     _logger.fine('Resetting state');
@@ -374,6 +400,7 @@ class BalanceManager implements IBalanceManager {
     _balanceCache.clear();
     _gaslessSnapshotSourcedBalances.clear();
     _gaslessSnapshotCache.clear();
+    _activeGaslessSnapshotEpochs.clear();
     _pendingFastRefresh.clear();
 
     final List<Future<void>> cleanupFutures = <Future<void>>[];
@@ -498,6 +525,9 @@ class BalanceManager implements IBalanceManager {
     AssetId assetId,
   ) async {
     final walletContext = await _captureWalletContext();
+    final capabilityGeneration = _gaslessCapabilities?.sessionGeneration;
+    final snapshotEpoch = _beginGaslessSnapshot(assetId);
+    int? statusEpoch;
     final asset = _assetLookup.fromId(assetId);
     final client = _client;
     final pubkeyManager = _pubkeyManager;
@@ -516,6 +546,8 @@ class BalanceManager implements IBalanceManager {
     try {
       final pubkeys = await pubkeyManager.getPubkeys(asset);
       await _requireWalletContextCurrent(walletContext);
+      _requireCapabilityGenerationCurrent(capabilityGeneration);
+      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
       final retainedCustody = _canonicalGasfreePrimary(
         pubkeys.keys,
       )?.gasfreeAddress?.trim();
@@ -535,11 +567,34 @@ class BalanceManager implements IBalanceManager {
           asset,
           custodyAddress,
         );
+        await _requireWalletContextCurrent(walletContext);
+        _requireCapabilityGenerationCurrent(capabilityGeneration);
+        _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
         status = null;
       } else {
+        final capabilities = _gaslessCapabilities;
+        if (capabilities == null) {
+          throw StateError('GasFree capability registry is not available');
+        }
+        if (capabilityGeneration != capabilities.sessionGeneration) {
+          throw const WalletChangedDisconnectException(
+            'Wallet changed during GasFree balance status',
+          );
+        }
+        statusEpoch = capabilities.beginAccountStatusProbe(assetId);
         status = await client!.rpc.withdraw.gaslessAccountStatus(
           coin: asset.id.id,
         );
+        await _requireWalletContextCurrent(walletContext);
+        _requireCapabilityGenerationCurrent(capabilityGeneration);
+        _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
+        if (!capabilities.isCurrentAccountStatusProbe(assetId, statusEpoch)) {
+          throw StateError('GasFree balance status was superseded');
+        }
+        if (!capabilities.validateBoundAccountStatus(assetId, status)) {
+          if (retained != null) return retained.asStale();
+          throw StateError('Invalid GasFree account status');
+        }
         custodyAddress = status.gasfreeAddress;
         custodyTotal = status.onChainBalance;
         final expectedCustody = retainedCustody ?? retained?.custodyAddress;
@@ -555,48 +610,11 @@ class BalanceManager implements IBalanceManager {
         }
       }
       await _requireWalletContextCurrent(walletContext);
-      if (status != null) {
-        if (!status.hasExplicitAvailability) {
-          _gaslessCapabilities?.markStale(
-            assetId,
-            reasonCode: 'availability_unattested',
-          );
-        } else {
-          switch (status.availability) {
-            case GaslessAccountAvailability.available:
-              break;
-            case GaslessAccountAvailability.pendingTransfer:
-              _gaslessCapabilities?.markStale(
-                assetId,
-                reasonCode: 'pending_transfer',
-              );
-            case GaslessAccountAvailability.tokenUnsupported:
-              _gaslessCapabilities?.markUnsupported(assetId);
-            case GaslessAccountAvailability.providerUnreachable:
-              _gaslessCapabilities?.markStale(
-                assetId,
-                reasonCode: 'provider_unreachable',
-              );
-          }
-        }
-      }
+      _requireCapabilityGenerationCurrent(capabilityGeneration);
+      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
       final isAvailable =
           status?.hasExplicitAvailability == true &&
           status?.availability == GaslessAccountAvailability.available;
-      if (isAvailable &&
-          (status?.reasonCode != null ||
-              status?.active == null ||
-              status?.frozenBalance == null ||
-              status?.spendableBalance == null ||
-              status?.transferFee == null ||
-              status?.maxWithdrawable == null)) {
-        _gaslessCapabilities?.markSecurityMismatch(
-          assetId,
-          reasonCode: 'invalid_account_status',
-        );
-        if (retained != null) return retained.asStale();
-        throw const FormatException('Incomplete available account status');
-      }
       final standardBalances = [
         for (final key in pubkeys.keys)
           GaslessStandardBalance(
@@ -627,6 +645,21 @@ class BalanceManager implements IBalanceManager {
     } on WalletChangedDisconnectException {
       rethrow;
     } catch (error) {
+      await _requireWalletContextCurrent(walletContext);
+      _requireCapabilityGenerationCurrent(capabilityGeneration);
+      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
+      final capabilities = _gaslessCapabilities;
+      if (statusEpoch != null) {
+        if (capabilities == null ||
+            capabilityGeneration != capabilities.sessionGeneration) {
+          throw const WalletChangedDisconnectException(
+            'Wallet changed during GasFree balance status',
+          );
+        }
+        if (!capabilities.isCurrentAccountStatusProbe(assetId, statusEpoch)) {
+          throw StateError('GasFree balance status was superseded');
+        }
+      }
       _gaslessCapabilities?.markAccountStatusError(assetId, error);
       if (retained != null) return retained.asStale();
       rethrow;

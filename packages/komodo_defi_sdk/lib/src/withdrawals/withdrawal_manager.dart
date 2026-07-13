@@ -269,6 +269,7 @@ class WithdrawalManager {
 
   void _handleGaslessAuthStateChanged(KdfUser? user) {
     final nextWallet = user?.walletId;
+    _gaslessCapabilities.ensureWalletSession(nextWallet?.pubkeyHash);
     if (!_sameOptionalWallet(_currentWalletId, nextWallet)) {
       _walletGeneration++;
       _currentWalletId = nextWallet;
@@ -289,6 +290,7 @@ class WithdrawalManager {
     if (wallet == null) {
       throw StateError('GasFree requires an authenticated wallet');
     }
+    _gaslessCapabilities.ensureWalletSession(wallet.pubkeyHash);
     final current = _currentWalletId;
     if (current == null) {
       _currentWalletId = wallet;
@@ -320,6 +322,36 @@ class WithdrawalManager {
     if (await _isWalletContextCurrent(context)) return;
     throw const WalletChangedDisconnectException(
       'Wallet changed during GasFree transfer',
+    );
+  }
+
+  Future<void> _requireGaslessStatusContextCurrent(
+    WalletOperationContext context,
+    int capabilityGeneration,
+  ) async {
+    if (capabilityGeneration != _gaslessCapabilities.sessionGeneration) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed during GasFree account status',
+      );
+    }
+    await _requireWalletContextCurrent(context);
+    if (capabilityGeneration != _gaslessCapabilities.sessionGeneration) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed during GasFree account status',
+      );
+    }
+  }
+
+  void _requireAccountStatusProbeCurrent(AssetId assetId, int epoch) {
+    if (_gaslessCapabilities.isCurrentAccountStatusProbe(assetId, epoch)) {
+      return;
+    }
+    throw GaslessTransferException(
+      kind: GaslessTransferErrorKind.capabilityNotReady,
+      stage: GaslessTransferStage.status,
+      message: 'Gas-free account status was superseded by a newer check',
+      retryable: true,
+      terminal: false,
     );
   }
 
@@ -666,7 +698,11 @@ class WithdrawalManager {
   /// The GasFree custody address is where a gasless withdrawal settles from, so
   /// this is the balance a client should treat as spendable for a gasless TRC-20
   /// asset (the coin's `my_balance` reports the EOA balance instead).
-  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) {
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus(
+    AssetId assetId,
+  ) async {
+    final walletContext = await _captureWalletContext();
+    final capabilityGeneration = _gaslessCapabilities.sessionGeneration;
     if (!_gaslessCapabilities.isReady(assetId)) {
       throw GaslessTransferException(
         kind: GaslessTransferErrorKind.capabilityNotReady,
@@ -675,7 +711,38 @@ class WithdrawalManager {
         terminal: false,
       );
     }
-    return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
+    final statusEpoch = _gaslessCapabilities.beginAccountStatusProbe(assetId);
+    try {
+      await _requireGaslessStatusContextCurrent(
+        walletContext,
+        capabilityGeneration,
+      );
+      final status = await _client.rpc.withdraw.gaslessAccountStatus(
+        coin: assetId.id,
+      );
+      await _requireGaslessStatusContextCurrent(
+        walletContext,
+        capabilityGeneration,
+      );
+      _requireAccountStatusProbeCurrent(assetId, statusEpoch);
+      if (!_gaslessCapabilities.validateBoundAccountStatus(assetId, status)) {
+        throw GaslessTransferException(
+          kind: GaslessTransferErrorKind.providerResponse,
+          stage: GaslessTransferStage.status,
+          message: 'Gas-free account status failed validation',
+          retryable: false,
+          terminal: true,
+        );
+      }
+      return status;
+    } catch (_) {
+      await _requireGaslessStatusContextCurrent(
+        walletContext,
+        capabilityGeneration,
+      );
+      _requireAccountStatusProbeCurrent(assetId, statusEpoch);
+      rethrow;
+    }
   }
 
   /// Revalidates a legacy V1 GasFree receive address without granting relay
@@ -689,10 +756,16 @@ class WithdrawalManager {
     AssetId assetId, {
     required String expectedGasfreeAddress,
   }) async {
-    if (_gaslessCapabilities.canReceiveGasless(assetId)) {
-      return gaslessAccountStatus(assetId);
-    }
-    if (!_gaslessCapabilities.canAttemptStatusReceiveAttestation(assetId)) {
+    final walletContext = await _captureWalletContext();
+    final capabilityGeneration = _gaslessCapabilities.sessionGeneration;
+    await _requireGaslessStatusContextCurrent(
+      walletContext,
+      capabilityGeneration,
+    );
+    final isBound = _gaslessCapabilities.canReceiveGasless(assetId);
+    final isStatusAttested = _gaslessCapabilities
+        .canAttemptStatusReceiveAttestation(assetId);
+    if (!isBound && !isStatusAttested) {
       _gaslessCapabilities.invalidateStatusReceiveEvidence(
         assetId,
         reasonCode: 'runtime_restart_required',
@@ -704,17 +777,66 @@ class WithdrawalManager {
         terminal: false,
       );
     }
+    final statusEpoch = _gaslessCapabilities.beginAccountStatusProbe(assetId);
     try {
       final status = await _client.rpc.withdraw.gaslessAccountStatus(
         coin: assetId.id,
       );
-      _gaslessCapabilities.refreshStatusAttestation(
-        assetId,
-        status,
-        expectedGasfreeAddress: expectedGasfreeAddress,
+      await _requireGaslessStatusContextCurrent(
+        walletContext,
+        capabilityGeneration,
       );
+      _requireAccountStatusProbeCurrent(assetId, statusEpoch);
+      if (isBound) {
+        if (!_gaslessCapabilities.validateBoundAccountStatus(assetId, status)) {
+          throw GaslessTransferException(
+            kind: GaslessTransferErrorKind.providerResponse,
+            stage: GaslessTransferStage.status,
+            message: 'Gas-free account status failed validation',
+            retryable: false,
+            terminal: true,
+          );
+        }
+        if (status.gasfreeAddress != expectedGasfreeAddress) {
+          _gaslessCapabilities.markSecurityMismatch(
+            assetId,
+            reasonCode: 'custody_address_mismatch',
+          );
+          throw GaslessTransferException(
+            kind: GaslessTransferErrorKind.providerResponse,
+            stage: GaslessTransferStage.status,
+            message: 'Gas-free custody address does not match',
+            retryable: false,
+            terminal: true,
+          );
+        }
+      } else {
+        if (!_gaslessCapabilities.canAttemptStatusReceiveAttestation(assetId)) {
+          throw GaslessTransferException(
+            kind: GaslessTransferErrorKind.providerResponse,
+            stage: GaslessTransferStage.status,
+            message: 'Gas-free receive context changed during validation',
+            retryable: false,
+            terminal: true,
+          );
+        }
+        _gaslessCapabilities.refreshStatusAttestation(
+          assetId,
+          status,
+          expectedGasfreeAddress: expectedGasfreeAddress,
+        );
+      }
       return status;
+    } on WalletChangedDisconnectException {
+      rethrow;
+    } on GaslessTransferException {
+      rethrow;
     } catch (error) {
+      await _requireGaslessStatusContextCurrent(
+        walletContext,
+        capabilityGeneration,
+      );
+      _requireAccountStatusProbeCurrent(assetId, statusEpoch);
       if (!_gaslessCapabilities.markAccountStatusError(assetId, error)) {
         _gaslessCapabilities.invalidateStatusReceiveEvidence(
           assetId,
@@ -2798,6 +2920,8 @@ class WithdrawalManager {
       final asset = _assetProvider
           .findAssetsByConfigId(parameters.asset)
           .single;
+      final isGasless = parameters.feeMethod == WithdrawalFeeMethod.gasless;
+      final walletContext = isGasless ? await _captureWalletContext() : null;
       _validateSiaSourceSelection(parameters, asset);
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
       final isSiaProtocol = asset.protocol is SiaProtocol;
@@ -2821,7 +2945,8 @@ class WithdrawalManager {
         );
       }
 
-      if (parameters.feeMethod == WithdrawalFeeMethod.gasless) {
+      if (isGasless) {
+        await _requireWalletContextCurrent(walletContext!);
         _requireGaslessReady(asset.id);
       }
 

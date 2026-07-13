@@ -51,6 +51,48 @@ void main() {
       expect(legacy.toJson()['result'], isNot(contains('availability')));
     });
 
+    test('preserves pure legacy reason parsing', () {
+      final legacy = GaslessAccountStatusResponse.parse({
+        'mmrpc': '2.0',
+        'result': {
+          ...baseResult,
+          'provider_available': false,
+          'reason_code': 'token_unsupported',
+        }..remove('availability'),
+      });
+
+      expect(legacy.hasExplicitAvailability, isFalse);
+      expect(legacy.availability, GaslessAccountAvailability.tokenUnsupported);
+      expect(legacy.reasonCode, 'token_unsupported');
+    });
+
+    for (final legacyValue in <Object?>[true, false, null]) {
+      test('rejects mixed availability fields ($legacyValue)', () {
+        expect(
+          () => GaslessAccountStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': {...baseResult, 'provider_available': legacyValue},
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+
+    for (final legacyReason in <Object?>[
+      'provider_temporarily_unavailable',
+      null,
+    ]) {
+      test('rejects mixed reason fields ($legacyReason)', () {
+        expect(
+          () => GaslessAccountStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': {...baseResult, 'reason_code': legacyReason},
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+
     test('rejects unknown availability states', () {
       expect(
         () => GaslessAccountStatusResponse.parse({
