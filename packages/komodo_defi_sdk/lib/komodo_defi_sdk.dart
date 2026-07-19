@@ -10,8 +10,11 @@ export 'package:komodo_cex_market_data/komodo_cex_market_data.dart'
 export 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show
         BalanceEvent,
+        ExternalExecutionStartupConfig,
         HeartbeatEvent,
         IKdfHostConfig,
+        LifiStartupConfig,
+        LifiTransport,
         LocalConfig,
         NetworkEvent,
         OrderStatusEvent,
@@ -32,6 +35,19 @@ export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
+// Unified-swap wire models remain owned/exported by komodo_defi_rpc_methods.
+export 'package:komodo_defi_sdk/src/trade_route/trade_route_manager.dart'
+    show
+        ReattachedTradeRoute,
+        TradeRouteActionAcknowledgement,
+        TradeRouteActionNotAuthorizedException,
+        TradeRouteControlNotAuthorizedException,
+        TradeRouteDiscoveryRpcGateway,
+        TradeRouteIdentityMismatchException,
+        TradeRouteManager,
+        TradeRouteManagerException,
+        TradeRouteRpcGateway,
+        TradeRouteTaskHandle;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
 

@@ -85,6 +85,7 @@ export 'trading/start_swap.dart';
 export 'trading/swap_status.dart';
 export 'trading/trade_preimage.dart';
 export 'trading/trading_rpc_namespace.dart';
+export 'trade_route/trade_route.dart';
 export 'transaction_history/my_tx_history.dart';
 export 'transaction_history/transaction_history_namespace.dart';
 export 'trezor/trezor_rpc_namespace.dart';

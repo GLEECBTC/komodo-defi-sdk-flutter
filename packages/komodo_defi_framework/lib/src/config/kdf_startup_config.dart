@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_framework/src/config/event_streaming_config.dart';
+import 'package:komodo_defi_framework/src/config/external_execution_startup_config.dart';
 import 'package:komodo_defi_framework/src/config/seed_node_validator.dart';
 import 'package:komodo_defi_framework/src/services/seed_node_service.dart'
     show SeedNodeService;
@@ -38,7 +39,9 @@ class KdfStartupConfig {
     required this.iAmSeed,
     required this.isBootstrapNode,
     required this.eventStreamingConfiguration,
+    required this.externalExecution,
   }) {
+    externalExecution.validate();
     SeedNodeValidator.validate(
       seedNodes: seedNodes,
       disableP2p: disableP2p,
@@ -68,6 +71,7 @@ class KdfStartupConfig {
   final bool? iAmSeed;
   final bool? isBootstrapNode;
   final EventStreamingConfiguration? eventStreamingConfiguration;
+  final ExternalExecutionStartupConfig externalExecution;
 
   // Either a list of coin JSON objects or a string of the path to a file
   // containing a list of coin JSON objects.
@@ -96,6 +100,8 @@ class KdfStartupConfig {
     bool? iAmSeed,
     bool? isBootstrapNode,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    ExternalExecutionStartupConfig externalExecution =
+        const ExternalExecutionStartupConfig(),
   }) async {
     assert(
       !kIsWeb || userHome == null && dbDir == null,
@@ -105,6 +111,7 @@ class KdfStartupConfig {
       [walletName, walletPassword].every((e) => e.isNotEmpty),
       'Wallet name and password must not be empty',
     );
+    externalExecution.validate();
 
     final (String? userHomePath, String? dbPath) = await _getAndSetupUserHome(
       userHome: userHome,
@@ -150,6 +157,7 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      externalExecution: externalExecution,
     );
   }
 
@@ -175,7 +183,10 @@ class KdfStartupConfig {
     String? rpcIp,
     int rpcPort = 7783,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    ExternalExecutionStartupConfig externalExecution =
+        const ExternalExecutionStartupConfig(),
   }) async {
+    externalExecution.validate();
     final (String? home, String? dbDir) = await _getAndSetupUserHome();
 
     final (seedNodes: seeds, netId: netId) =
@@ -206,6 +217,7 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      externalExecution: externalExecution,
     );
   }
 
@@ -237,6 +249,7 @@ class KdfStartupConfig {
       if (isBootstrapNode != null) 'is_bootstrap_node': isBootstrapNode,
       if (eventStreamingConfiguration != null)
         'event_streaming_configuration': eventStreamingConfiguration!.toJson(),
+      'external_execution': externalExecution.toJson(),
     };
   }
 

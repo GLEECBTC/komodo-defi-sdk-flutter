@@ -120,8 +120,13 @@ abstract interface class IAuthService {
 }
 
 class KdfAuthService implements IAuthService {
-  KdfAuthService(this._kdfFramework, this._hostConfig)
-    : _sessionId = const Uuid().v4() {
+  KdfAuthService(
+    this._kdfFramework,
+    this._hostConfig, {
+    ExternalExecutionStartupConfig externalExecution =
+        const ExternalExecutionStartupConfig(),
+  }) : _externalExecution = externalExecution,
+       _sessionId = const Uuid().v4() {
     _logger.info('[$_sessionId] KdfAuthService initialized');
     _startHealthCheck();
     _subscribeToShutdownSignals();
@@ -129,6 +134,7 @@ class KdfAuthService implements IAuthService {
 
   final KomodoDefiFramework _kdfFramework;
   final IKdfHostConfig _hostConfig;
+  final ExternalExecutionStartupConfig _externalExecution;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage = SecureLocalStorage();
@@ -720,7 +726,10 @@ class KdfAuthService implements IAuthService {
   }
 
   late final Future<KdfStartupConfig> _noAuthConfig =
-      KdfStartupConfig.noAuthStartup(rpcPassword: _hostConfig.rpcPassword);
+      KdfStartupConfig.noAuthStartup(
+        rpcPassword: _hostConfig.rpcPassword,
+        externalExecution: _externalExecution,
+      );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
     final mnemonic = await getMnemonic(

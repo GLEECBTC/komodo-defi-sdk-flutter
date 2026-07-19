@@ -1,7 +1,11 @@
 // sdk_config.dart
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_defi_framework/komodo_defi_framework.dart'
+    show ExternalExecutionStartupConfig;
 
+/// Product-level configuration for one SDK instance.
 class KomodoDefiSdkConfig {
+  /// Creates SDK configuration with fail-closed external execution.
   const KomodoDefiSdkConfig({
     this.defaultAssets = const {'KMD', 'BTC', 'ETH', 'DOC', 'MARTY'},
     this.preActivateDefaultAssets = true,
@@ -11,6 +15,7 @@ class KomodoDefiSdkConfig {
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
     this.marketDataConfig = const MarketDataConfig(),
+    this.externalExecution = const ExternalExecutionStartupConfig(),
     this.tronProApiKey,
   });
 
@@ -39,10 +44,14 @@ class KomodoDefiSdkConfig {
   /// Configuration for market data repositories
   final MarketDataConfig marketDataConfig;
 
+  /// Fail-closed KDF external-execution startup configuration.
+  final ExternalExecutionStartupConfig externalExecution;
+
   /// No longer used. Transaction history now uses TRONGrid which requires no
   /// API key. Retained for backward compatibility.
   final String? tronProApiKey;
 
+  /// Returns a copy with the provided values replaced.
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -52,6 +61,7 @@ class KomodoDefiSdkConfig {
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
     MarketDataConfig? marketDataConfig,
+    ExternalExecutionStartupConfig? externalExecution,
     String? tronProApiKey,
   }) {
     return KomodoDefiSdkConfig(
@@ -68,6 +78,7 @@ class KomodoDefiSdkConfig {
       activatedAssetsCacheTtl:
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
+      externalExecution: externalExecution ?? this.externalExecution,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
     );
   }

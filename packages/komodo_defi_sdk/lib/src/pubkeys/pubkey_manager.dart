@@ -12,6 +12,13 @@ abstract class IPubkeyManager {
   /// Get pubkeys for a given asset, handling HD/non-HD differences internally
   Future<AssetPubkeys> getPubkeys(Asset asset);
 
+  /// Forces an authenticated KDF read for the current wallet and [asset].
+  ///
+  /// Unlike [getPubkeys], this never serves an in-memory or persisted value.
+  /// The normal cache is replaced only after KDF returns a response bound to
+  /// the requested exact asset identity.
+  Future<AssetPubkeys> refreshPubkeys(Asset asset);
+
   /// Watch pubkeys for a given asset, emitting the initial state if available
   /// and polling for updates at a fixed interval. Optionally activates asset.
   Stream<AssetPubkeys> watchPubkeys(
@@ -121,6 +128,18 @@ class PubkeyManager implements IPubkeyManager {
     return _fetchFreshPubkeys(asset, walletId);
   }
 
+  @override
+  Future<AssetPubkeys> refreshPubkeys(Asset asset) async {
+    if (_isDisposed) {
+      throw StateError('PubkeyManager has been disposed');
+    }
+    final currentUser = await _auth.currentUser;
+    if (currentUser == null) {
+      throw AuthException.notSignedIn();
+    }
+    return _fetchFreshPubkeys(asset, currentUser.walletId);
+  }
+
   /// Create a new pubkey for an asset if supported
   @override
   Future<PubkeyInfo> createNewPubkey(Asset asset) async {
@@ -180,6 +199,12 @@ class PubkeyManager implements IPubkeyManager {
         strategy: strategy,
       );
       final pubkeys = await strategy.getPubkeys(asset.id, _client);
+      if (pubkeys.assetId != asset.id) {
+        throw StateError(
+          'KDF returned pubkeys for ${pubkeys.assetId.name} while refreshing '
+          '${asset.id.name}',
+        );
+      }
       _pubkeysCache[asset.id] = pubkeys;
       _persistPubkeysForWallet(walletId, asset, pubkeys).ignore();
       return pubkeys;

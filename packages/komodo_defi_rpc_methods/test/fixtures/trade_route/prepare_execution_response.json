@@ -1,0 +1,459 @@
+{
+  "mmrpc": "2.0",
+  "result": {
+    "review": {
+      "review_version": 1,
+      "prepared_at": "2026-07-16T12:00:10Z",
+      "evaluation_id": "00000000-0000-0000-0000-000000000010",
+      "candidate_id": "00000000-0000-0000-0000-000000000001",
+      "candidate_digest": "aa0935e4ed46f00fef305abd10457254f0d20b034cd50d98669ce5f280774e18",
+      "route_source": "mixed",
+      "source_asset": {
+        "ticker": "ETH",
+        "chain_family": "evm",
+        "chain_id": "1",
+        "asset_kind": "native",
+        "contract_address": null,
+        "decimals": 18
+      },
+      "destination_asset": {
+        "ticker": "BTC",
+        "chain_family": "utxo",
+        "chain_id": "bitcoin-mainnet",
+        "asset_kind": "native",
+        "contract_address": null,
+        "decimals": 8
+      },
+      "source_amount": "1000000000000000000",
+      "source_address_selector": {
+        "selector_type": "active"
+      },
+      "resolved_source_address": "0x9999999999999999999999999999999999999999",
+      "recipient": "bc1qrecipient",
+      "expected_receive": "100000",
+      "minimum_receive": "90000",
+      "fees": [
+        {
+          "fee_type": "network",
+          "asset": {
+            "ticker": "ETH",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 18
+          },
+          "amount": "21000000000000",
+          "included": false,
+          "valuation": {
+            "currency": "USD",
+            "amount": "0.07",
+            "source": "wallet_market_data",
+            "observed_at": "2026-07-16T12:00:00Z"
+          }
+        }
+      ],
+      "estimated_duration_seconds": 999,
+      "warnings": [
+        "not_atomic_end_to_end",
+        "maker_order_not_reserved"
+      ],
+      "expires_at": "2026-07-16T12:00:40Z",
+      "stages": [
+        {
+          "stage_index": 0,
+          "stage_id": "00000000-0000-0000-0000-000000000002",
+          "stage_kind": "external_liquidity",
+          "from_asset": {
+            "ticker": "ETH",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 18
+          },
+          "to_asset": {
+            "ticker": "USDC",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "token",
+            "contract_address": "0x1111111111111111111111111111111111111111",
+            "decimals": 6
+          },
+          "source_amount": "1000000000000000000",
+          "expected_receive": "975000000",
+          "minimum_receive": "950000000",
+          "recipient": "0x2222222222222222222222222222222222222222",
+          "fees": [
+            {
+              "fee_type": "exchange",
+              "asset": {
+                "ticker": "USDC",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "token",
+                "contract_address": "0x1111111111111111111111111111111111111111",
+                "decimals": 6
+              },
+              "amount": "25000000",
+              "included": true,
+              "valuation": {
+                "currency": "USD",
+                "amount": "25.00",
+                "source": "wallet_market_data",
+                "observed_at": "2026-07-16T12:00:00Z"
+              }
+            }
+          ],
+          "warnings": [
+            "not_atomic_end_to_end"
+          ],
+          "selected_tools": {
+            "bridges": [],
+            "exchanges": [
+              "1inch"
+            ]
+          },
+          "non_network_fee_limits": [
+            {
+              "fee_type": "exchange",
+              "asset": {
+                "ticker": "USDC",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "token",
+                "contract_address": "0x1111111111111111111111111111111111111111",
+                "decimals": 6
+              },
+              "max_amount": "30000000"
+            }
+          ],
+          "max_total_network_fee": {
+            "asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "amount": "1000000000000000"
+          },
+          "required_max_network_fee": {
+            "asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "amount": "21000000000000"
+          },
+          "resolved_source_address": "0x9999999999999999999999999999999999999999",
+          "approval": {
+            "approval_type": "not_applicable"
+          }
+        },
+        {
+          "stage_index": 1,
+          "stage_id": "00000000-0000-0000-0000-000000000003",
+          "stage_kind": "kdf_atomic",
+          "from_asset": {
+            "ticker": "USDC",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "token",
+            "contract_address": "0x1111111111111111111111111111111111111111",
+            "decimals": 6
+          },
+          "to_asset": {
+            "ticker": "BTC",
+            "chain_family": "utxo",
+            "chain_id": "bitcoin-mainnet",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 8
+          },
+          "source_amount": "950000000",
+          "expected_receive": "100000",
+          "minimum_receive": "90000",
+          "recipient": "bc1qrecipient",
+          "fees": [
+            {
+              "fee_type": "kdf",
+              "asset": {
+                "ticker": "BTC",
+                "chain_family": "utxo",
+                "chain_id": "bitcoin-mainnet",
+                "asset_kind": "native",
+                "contract_address": null,
+                "decimals": 8
+              },
+              "amount": "1000",
+              "included": false,
+              "valuation": null
+            }
+          ],
+          "warnings": [
+            "maker_order_not_reserved"
+          ]
+        }
+      ]
+    },
+    "route_consent": {
+      "digest_version": 1,
+      "evaluation_id": "00000000-0000-0000-0000-000000000010",
+      "candidate_id": "00000000-0000-0000-0000-000000000001",
+      "candidate_digest": "aa0935e4ed46f00fef305abd10457254f0d20b034cd50d98669ce5f280774e18",
+      "route_intent": {
+        "from_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "to_asset": {
+          "ticker": "BTC",
+          "chain_family": "utxo",
+          "chain_id": "bitcoin-mainnet",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 8
+        },
+        "source_amount": "1000000000000000000",
+        "minimum_receive": "90000",
+        "slippage_bps": 50,
+        "source_address": {
+          "selector_type": "active"
+        },
+        "recipient": "bc1qrecipient",
+        "tool_policy": {
+          "bridges": {
+            "allow": [],
+            "deny": [],
+            "prefer": []
+          },
+          "exchanges": {
+            "allow": [
+              "1inch"
+            ],
+            "deny": [],
+            "prefer": [
+              "1inch"
+            ]
+          }
+        },
+        "consent_expires_at": "2026-07-16T12:00:40Z"
+      },
+      "external_stage_consents": [
+        {
+          "digest_version": 1,
+          "candidate_reference": {
+            "evaluation_id": "00000000-0000-0000-0000-000000000010",
+            "candidate_id": "00000000-0000-0000-0000-000000000001",
+            "candidate_digest": "aa0935e4ed46f00fef305abd10457254f0d20b034cd50d98669ce5f280774e18",
+            "stage_id": "00000000-0000-0000-0000-000000000002"
+          },
+          "route_intent": {
+            "from_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "to_asset": {
+              "ticker": "BTC",
+              "chain_family": "utxo",
+              "chain_id": "bitcoin-mainnet",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 8
+            },
+            "source_amount": "1000000000000000000",
+            "minimum_receive": "90000",
+            "slippage_bps": 50,
+            "source_address": {
+              "selector_type": "active"
+            },
+            "recipient": "bc1qrecipient",
+            "tool_policy": {
+              "bridges": {
+                "allow": [],
+                "deny": [],
+                "prefer": []
+              },
+              "exchanges": {
+                "allow": [
+                  "1inch"
+                ],
+                "deny": [],
+                "prefer": [
+                  "1inch"
+                ]
+              }
+            },
+            "consent_expires_at": "2026-07-16T12:00:40Z"
+          },
+          "stage_intent": {
+            "route_intent_digest": "a5d9c4b11a7dd943382ab13a38c6cc8ec6691acb44e3c5fe0a0ffad121d2f347",
+            "stage_id": "00000000-0000-0000-0000-000000000002",
+            "from_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "to_asset": {
+              "ticker": "USDC",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "token",
+              "contract_address": "0x1111111111111111111111111111111111111111",
+              "decimals": 6
+            },
+            "source_amount": "1000000000000000000",
+            "accepted_expected_receive": "975000000",
+            "minimum_receive": "950000000",
+            "max_expected_receive_degradation_bps": 100,
+            "slippage_bps": 50,
+            "source_address": {
+              "selector_type": "active"
+            },
+            "recipient": "0x2222222222222222222222222222222222222222",
+            "tool_policy": {
+              "bridges": {
+                "allow": [],
+                "deny": [],
+                "prefer": []
+              },
+              "exchanges": {
+                "allow": [
+                  "1inch"
+                ],
+                "deny": [],
+                "prefer": [
+                  "1inch"
+                ]
+              }
+            },
+            "selected_tools": {
+              "bridges": [],
+              "exchanges": [
+                "1inch"
+              ]
+            },
+            "provider_tokens": {
+              "from_token": "0x0000000000000000000000000000000000000000",
+              "to_token": "0x1111111111111111111111111111111111111111"
+            },
+            "provider_chain_ids": {
+              "from_chain": "1",
+              "to_chain": "1"
+            },
+            "non_network_fee_limits": [
+              {
+                "fee_type": "exchange",
+                "asset": {
+                  "ticker": "USDC",
+                  "chain_family": "evm",
+                  "chain_id": "1",
+                  "asset_kind": "token",
+                  "contract_address": "0x1111111111111111111111111111111111111111",
+                  "decimals": 6
+                },
+                "max_amount": "30000000"
+              }
+            ],
+            "max_total_network_fee": {
+              "asset": {
+                "ticker": "ETH",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "native",
+                "contract_address": null,
+                "decimals": 18
+              },
+              "amount": "1000000000000000"
+            },
+            "consent_expires_at": "2026-07-16T12:00:40Z"
+          },
+          "execution_source": {
+            "source_type": "provider_intent",
+            "provider": "lifi",
+            "materialization": "advanced_step",
+            "provider_observed_at": "2026-07-16T12:00:00Z",
+            "provider_step": null,
+            "provider_step_reference": {
+              "evaluation_id": "00000000-0000-0000-0000-000000000010",
+              "candidate_id": "00000000-0000-0000-0000-000000000001",
+              "stage_id": "00000000-0000-0000-0000-000000000002",
+              "provider_step_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "provider_step_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "mode": "sign_and_broadcast",
+          "atomic_order_guard": {
+            "guard_version": 1,
+            "route_intent_digest": "a5d9c4b11a7dd943382ab13a38c6cc8ec6691acb44e3c5fe0a0ffad121d2f347",
+            "order_uuid": "00000000-0000-0000-0000-000000000004",
+            "side": "take_ask",
+            "base_ticker": "BTC",
+            "rel_ticker": "USDC",
+            "limit_price": "9500",
+            "requested_volume": "0.1",
+            "minimum_fill_volume": "50000",
+            "maximum_fill_volume": "150000",
+            "order_snapshot_at": "2026-07-16T12:00:00Z",
+            "expires_at": "2026-07-16T12:00:45Z"
+          },
+          "prepared_execution": {
+            "resolved_source_address": "0x9999999999999999999999999999999999999999",
+            "approval": {
+              "approval_type": "not_applicable"
+            },
+            "required_max_network_fee": {
+              "asset": {
+                "ticker": "ETH",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "native",
+                "contract_address": null,
+                "decimals": 18
+              },
+              "amount": "21000000000000"
+            }
+          },
+          "consent_digest": "61e10a5a7ea49a996c8ed487d83ad572f335ea27d27f85f1fec14f95c553458e"
+        }
+      ],
+      "atomic_order_guards": [
+        {
+          "guard_version": 1,
+          "route_intent_digest": "a5d9c4b11a7dd943382ab13a38c6cc8ec6691acb44e3c5fe0a0ffad121d2f347",
+          "order_uuid": "00000000-0000-0000-0000-000000000004",
+          "side": "take_ask",
+          "base_ticker": "BTC",
+          "rel_ticker": "USDC",
+          "limit_price": "9500",
+          "requested_volume": "0.1",
+          "minimum_fill_volume": "50000",
+          "maximum_fill_volume": "150000",
+          "order_snapshot_at": "2026-07-16T12:00:00Z",
+          "expires_at": "2026-07-16T12:00:45Z"
+        }
+      ],
+      "mode": "sign_and_broadcast",
+      "consent_expires_at": "2026-07-16T12:00:40Z",
+      "prepared_at": "2026-07-16T12:00:10Z",
+      "prepared_review_digest": "03e42f6c9cd689c38d68336de0c8ab24bee918d6257914e30e30d0ad662e5b3a",
+      "route_consent_digest": "d70a520a767944034f667b02070c2465f71bd927fec13ddcdd362fe6b755058c"
+    }
+  }
+}

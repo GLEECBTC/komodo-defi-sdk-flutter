@@ -1,0 +1,437 @@
+{
+  "fixture_version": 1,
+  "candidate": {
+    "value": {
+      "candidate_id": "00000000-0000-0000-0000-000000000001",
+      "candidate_digest": "excluded",
+      "route_source": "mixed",
+      "stages": [
+        {
+          "stage_type": "external_liquidity",
+          "stage_id": "00000000-0000-0000-0000-000000000002",
+          "from_asset": {
+            "ticker": "ETH",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 18
+          },
+          "to_asset": {
+            "ticker": "USDC",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "token",
+            "contract_address": "0x1111111111111111111111111111111111111111",
+            "decimals": 6
+          },
+          "source_amount": "1000000000000000000",
+          "expected_receive": "975000000",
+          "minimum_receive": "950000000",
+          "recipient": "0x2222222222222222222222222222222222222222",
+          "expires_at": "2026-07-16T12:00:50Z",
+          "fees": [
+            {
+              "fee_type": "exchange",
+              "asset": {
+                "ticker": "USDC",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "token",
+                "contract_address": "0x1111111111111111111111111111111111111111",
+                "decimals": 6
+              },
+              "amount": "25000000",
+              "included": true,
+              "valuation": {
+                "currency": "USD",
+                "amount": "25.00",
+                "source": "wallet_market_data",
+                "observed_at": "2026-07-16T12:00:00Z"
+              }
+            }
+          ],
+          "warnings": ["not_atomic_end_to_end"],
+          "provider": "lifi",
+          "provider_route_id": "provider-route-1",
+          "external_candidate_id": "provider-candidate-1",
+          "tool_policy": {
+            "bridges": {"allow": [], "deny": [], "prefer": []},
+            "exchanges": {"allow": ["1inch"], "deny": [], "prefer": ["1inch"]}
+          },
+          "selected_tools": {"bridges": [], "exchanges": ["1inch"]},
+          "provider_tokens": {
+            "from_token": "0x0000000000000000000000000000000000000000",
+            "to_token": "0x1111111111111111111111111111111111111111"
+          },
+          "provider_chain_ids": {"from_chain": "1", "to_chain": "1"},
+          "provider_step_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "stage_type": "kdf_atomic",
+          "stage_id": "00000000-0000-0000-0000-000000000003",
+          "from_asset": {
+            "ticker": "USDC",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "token",
+            "contract_address": "0x1111111111111111111111111111111111111111",
+            "decimals": 6
+          },
+          "to_asset": {
+            "ticker": "BTC",
+            "chain_family": "utxo",
+            "chain_id": "bitcoin-mainnet",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 8
+          },
+          "source_amount": "950000000",
+          "expected_receive": "100000",
+          "minimum_receive": "90000",
+          "recipient": "bc1qrecipient",
+          "expires_at": "2026-07-16T12:00:45Z",
+          "fees": [
+            {
+              "fee_type": "kdf",
+              "asset": {
+                "ticker": "BTC",
+                "chain_family": "utxo",
+                "chain_id": "bitcoin-mainnet",
+                "asset_kind": "native",
+                "contract_address": null,
+                "decimals": 8
+              },
+              "amount": "1000",
+              "included": false,
+              "valuation": null
+            }
+          ],
+          "warnings": ["maker_order_not_reserved"],
+          "trade_source_amount": "950000000",
+          "requested_volume": "0.1",
+          "order_uuid": "00000000-0000-0000-0000-000000000004",
+          "side": "take_ask",
+          "price": "9500",
+          "minimum_volume": "50000",
+          "maximum_volume": "150000",
+          "order_snapshot_at": "2026-07-16T12:00:00Z"
+        }
+      ],
+      "expected_receive": "100000",
+      "minimum_receive": "90000",
+      "fees": [
+        {
+          "fee_type": "network",
+          "asset": {
+            "ticker": "ETH",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 18
+          },
+          "amount": "21000000000000",
+          "included": false,
+          "valuation": {
+            "currency": "USD",
+            "amount": "0.07",
+            "source": "wallet_market_data",
+            "observed_at": "2026-07-16T12:00:00Z"
+          }
+        }
+      ],
+      "net_receive_value": "42.50",
+      "valuation_observed_at": "2026-07-16T12:00:00Z",
+      "rank_status": "ranked",
+      "rank": 7,
+      "estimated_duration_seconds": 999,
+      "quote_observed_at": "2026-07-16T12:00:00Z",
+      "expires_at": "2026-07-16T12:00:45Z",
+      "warnings": ["not_atomic_end_to_end", "maker_order_not_reserved"]
+    },
+    "digest": "aa0935e4ed46f00fef305abd10457254f0d20b034cd50d98669ce5f280774e18"
+  },
+  "stage_consent": {
+    "value": {
+      "digest_version": 1,
+      "candidate_reference": {
+        "evaluation_id": "00000000-0000-0000-0000-000000000010",
+        "candidate_id": "00000000-0000-0000-0000-000000000001",
+        "candidate_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "stage_id": "00000000-0000-0000-0000-000000000003"
+      },
+      "route_intent": {
+        "from_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "to_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "source_amount": "100",
+        "minimum_receive": "90",
+        "slippage_bps": 50,
+        "source_address": {"selector_type": "active"},
+        "recipient": "0x2222222222222222222222222222222222222222",
+        "tool_policy": {
+          "bridges": {"allow": [], "deny": [], "prefer": []},
+          "exchanges": {"allow": [], "deny": [], "prefer": []}
+        },
+        "consent_expires_at": "2026-07-16T12:01:00Z"
+      },
+      "stage_intent": {
+        "route_intent_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "stage_id": "00000000-0000-0000-0000-000000000003",
+        "from_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "to_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "source_amount": "100",
+        "accepted_expected_receive": "95",
+        "minimum_receive": "90",
+        "max_expected_receive_degradation_bps": 100,
+        "slippage_bps": 50,
+        "source_address": {"selector_type": "active"},
+        "recipient": "0x2222222222222222222222222222222222222222",
+        "tool_policy": {
+          "bridges": {"allow": [], "deny": [], "prefer": []},
+          "exchanges": {"allow": [], "deny": [], "prefer": []}
+        },
+        "selected_tools": {"bridges": ["across"], "exchanges": []},
+        "provider_tokens": {
+          "from_token": "0x0000000000000000000000000000000000000000",
+          "to_token": "0x0000000000000000000000000000000000000000"
+        },
+        "provider_chain_ids": {"from_chain": "1", "to_chain": "1"},
+        "non_network_fee_limits": [],
+        "max_total_network_fee": {
+          "asset": {
+            "ticker": "ETH",
+            "chain_family": "evm",
+            "chain_id": "1",
+            "asset_kind": "native",
+            "contract_address": null,
+            "decimals": 18
+          },
+          "amount": "10"
+        },
+        "consent_expires_at": "2026-07-16T12:01:00Z"
+      },
+      "execution_source": {
+        "source_type": "provider_intent",
+        "provider": "lifi",
+        "materialization": "simple_quote",
+        "provider_observed_at": "2026-07-16T12:00:00Z",
+        "provider_step": null,
+        "provider_step_reference": null,
+        "provider_step_digest": null
+      },
+      "mode": "sign_and_broadcast",
+      "atomic_order_guard": null,
+      "consent_digest": "excluded"
+    },
+    "digest": "a58070a1d52c06f41bd7b579496ad425c24662be50f3f8ec622edeb5c66eabe1"
+  },
+  "route_consent": {
+    "value": {
+      "digest_version": 1,
+      "evaluation_id": "00000000-0000-0000-0000-000000000010",
+      "candidate_id": "00000000-0000-0000-0000-000000000001",
+      "candidate_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "route_intent": {
+        "from_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "to_asset": {
+          "ticker": "ETH",
+          "chain_family": "evm",
+          "chain_id": "1",
+          "asset_kind": "native",
+          "contract_address": null,
+          "decimals": 18
+        },
+        "source_amount": "100",
+        "minimum_receive": "90",
+        "slippage_bps": 50,
+        "source_address": {"selector_type": "active"},
+        "recipient": "0x2222222222222222222222222222222222222222",
+        "tool_policy": {
+          "bridges": {"allow": [], "deny": [], "prefer": []},
+          "exchanges": {"allow": [], "deny": [], "prefer": []}
+        },
+        "consent_expires_at": "2026-07-16T12:01:00Z"
+      },
+      "external_stage_consents": [
+        {
+          "digest_version": 1,
+          "candidate_reference": {
+            "evaluation_id": "00000000-0000-0000-0000-000000000010",
+            "candidate_id": "00000000-0000-0000-0000-000000000001",
+            "candidate_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "stage_id": "00000000-0000-0000-0000-000000000003"
+          },
+          "route_intent": {
+            "from_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "to_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "source_amount": "100",
+            "minimum_receive": "90",
+            "slippage_bps": 50,
+            "source_address": {"selector_type": "active"},
+            "recipient": "0x2222222222222222222222222222222222222222",
+            "tool_policy": {
+              "bridges": {"allow": [], "deny": [], "prefer": []},
+              "exchanges": {"allow": [], "deny": [], "prefer": []}
+            },
+            "consent_expires_at": "2026-07-16T12:01:00Z"
+          },
+          "stage_intent": {
+            "route_intent_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "stage_id": "00000000-0000-0000-0000-000000000003",
+            "from_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "to_asset": {
+              "ticker": "ETH",
+              "chain_family": "evm",
+              "chain_id": "1",
+              "asset_kind": "native",
+              "contract_address": null,
+              "decimals": 18
+            },
+            "source_amount": "100",
+            "accepted_expected_receive": "95",
+            "minimum_receive": "90",
+            "max_expected_receive_degradation_bps": 100,
+            "slippage_bps": 50,
+            "source_address": {"selector_type": "active"},
+            "recipient": "0x2222222222222222222222222222222222222222",
+            "tool_policy": {
+              "bridges": {"allow": [], "deny": [], "prefer": []},
+              "exchanges": {"allow": [], "deny": [], "prefer": []}
+            },
+            "selected_tools": {"bridges": ["across"], "exchanges": []},
+            "provider_tokens": {
+              "from_token": "0x0000000000000000000000000000000000000000",
+              "to_token": "0x0000000000000000000000000000000000000000"
+            },
+            "provider_chain_ids": {"from_chain": "1", "to_chain": "1"},
+            "non_network_fee_limits": [],
+            "max_total_network_fee": {
+              "asset": {
+                "ticker": "ETH",
+                "chain_family": "evm",
+                "chain_id": "1",
+                "asset_kind": "native",
+                "contract_address": null,
+                "decimals": 18
+              },
+              "amount": "10"
+            },
+            "consent_expires_at": "2026-07-16T12:01:00Z"
+          },
+          "execution_source": {
+            "source_type": "provider_intent",
+            "provider": "lifi",
+            "materialization": "simple_quote",
+            "provider_observed_at": "2026-07-16T12:00:00Z",
+            "provider_step": null,
+            "provider_step_reference": null,
+            "provider_step_digest": null
+          },
+          "mode": "sign_and_broadcast",
+          "atomic_order_guard": null,
+          "consent_digest": "excluded"
+        }
+      ],
+      "atomic_order_guards": [],
+      "mode": "sign_and_broadcast",
+      "consent_expires_at": "2026-07-16T12:01:00Z",
+      "route_consent_digest": "excluded"
+    },
+    "digest": "af843a41b576477c2a31ca270e3f130d7612fd80a8a6e3ac258ff4a74b0188dd"
+  },
+  "action_plan": {
+    "value": {
+      "digest_version": 1,
+      "plan_revision": 2,
+      "actions": [
+        {
+          "action_id": "00000000-0000-0000-0000-000000000004",
+          "action_kind": "main",
+          "chain_id": "1",
+          "sender": "0x1111111111111111111111111111111111111111",
+          "target": "0x3333333333333333333333333333333333333333",
+          "calldata": "0x1234",
+          "value": "0",
+          "gas_limit_bound": "21000",
+          "token": null,
+          "spender": null,
+          "approval_amount": null
+        }
+      ]
+    },
+    "digest": "9a63414c83ba733376e827bfceab0dbfa0303a560f6f198400bfd7b6213c039d"
+  },
+  "action_execution": {
+    "value": {
+      "digest_version": 1,
+      "action_id": "00000000-0000-0000-0000-000000000004",
+      "plan_revision": 2,
+      "chain_id": "1",
+      "sender": "0x1111111111111111111111111111111111111111",
+      "nonce": "7",
+      "target": "0x3333333333333333333333333333333333333333",
+      "calldata": "0x1234",
+      "value": "0",
+      "gas_limit": "21000",
+      "fee_fields": {"gas_price": "1000000000"}
+    },
+    "digest": "a446897dbfe0a3dbbc621244012a72049d82e2701ae63e19bee6180c575b1229"
+  }
+}

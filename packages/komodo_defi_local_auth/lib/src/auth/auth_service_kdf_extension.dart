@@ -311,6 +311,7 @@ extension KdfExtensions on KdfAuthService {
       allowWeakPassword: allowWeakPassword,
       seedNodes: seedNodes,
       netid: netId,
+      externalExecution: _externalExecution,
     );
   }
 }

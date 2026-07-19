@@ -13,6 +13,7 @@ import 'package:logging/logging.dart';
 
 export 'package:komodo_defi_framework/src/client/kdf_api_client.dart';
 export 'package:komodo_defi_framework/src/config/event_streaming_config.dart';
+export 'package:komodo_defi_framework/src/config/external_execution_startup_config.dart';
 export 'package:komodo_defi_framework/src/config/kdf_config.dart';
 export 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 export 'package:komodo_defi_framework/src/config/kdf_startup_config.dart';

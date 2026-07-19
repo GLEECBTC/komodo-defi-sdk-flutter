@@ -167,6 +167,74 @@ void main() {
     );
 
     test(
+      'refreshPubkeys bypasses cache and stores the fresh KDF value',
+      () async {
+        final user = nonHdUser();
+        when(() => auth.currentUser).thenAnswer((_) async => user);
+        await stubActivationAlwaysActive(tendermintAsset);
+        var reads = 0;
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          if (request['method'] != 'my_balance') {
+            return <String, dynamic>{'result': <String, dynamic>{}};
+          }
+          reads++;
+          return {
+            'address': reads == 1 ? 'cosmos1cached' : 'cosmos1fresh',
+            'balance': reads == 1 ? '1' : '2',
+            'unspendable_balance': '0',
+            'coin': tendermintAsset.id.id,
+          };
+        });
+
+        final cached = await manager.getPubkeys(tendermintAsset);
+        final fresh = await manager.refreshPubkeys(tendermintAsset);
+
+        expect(cached.keys.single.address, 'cosmos1cached');
+        expect(fresh.keys.single.address, 'cosmos1fresh');
+        expect(reads, 2);
+        expect(
+          manager.lastKnown(tendermintAsset.id)?.keys.single.address,
+          'cosmos1fresh',
+        );
+      },
+    );
+
+    test('refreshPubkeys preserves the prior cache when KDF fails', () async {
+      final user = nonHdUser();
+      when(() => auth.currentUser).thenAnswer((_) async => user);
+      await stubActivationAlwaysActive(tendermintAsset);
+      var reads = 0;
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as Map<String, dynamic>;
+        if (request['method'] != 'my_balance') {
+          return <String, dynamic>{'result': <String, dynamic>{}};
+        }
+        reads++;
+        if (reads > 1) throw StateError('KDF unavailable');
+        return {
+          'address': 'cosmos1known',
+          'balance': '1',
+          'unspendable_balance': '0',
+          'coin': tendermintAsset.id.id,
+        };
+      });
+
+      await manager.getPubkeys(tendermintAsset);
+
+      await expectLater(
+        manager.refreshPubkeys(tendermintAsset),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        manager.lastKnown(tendermintAsset.id)?.keys.single.address,
+        'cosmos1known',
+      );
+    });
+
+    test(
       'createNewPubkey throws UnsupportedError for single-address assets',
       () async {
         final user = nonHdUser();

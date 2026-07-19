@@ -48,6 +48,8 @@ class KomodoDefiRpcMethods {
 
   // Trading and DeFi namespaces
   TradingMethodsNamespace get trading => TradingMethodsNamespace(_client);
+  TradeRouteMethodsNamespace get tradeRoute =>
+      TradeRouteMethodsNamespace(_client);
   OrderbookMethodsNamespace get orderbook => OrderbookMethodsNamespace(_client);
   LightningMethodsNamespace get lightning => LightningMethodsNamespace(_client);
 

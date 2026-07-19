@@ -260,8 +260,14 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     required KomodoDefiFramework kdf,
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
+    ExternalExecutionStartupConfig externalExecution =
+        const ExternalExecutionStartupConfig(),
   }) : _allowRegistrations = allowRegistrations,
-       _authService = KdfAuthService(kdf, hostConfig) {
+       _authService = KdfAuthService(
+         kdf,
+         hostConfig,
+         externalExecution: externalExecution,
+       ) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }
 
@@ -687,10 +693,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     if (signedIn != expected) {
       throw AuthException(
         'User is ${signedIn ? 'signed in' : 'not signed in'}.',
-        type:
-            signedIn
-                ? AuthExceptionType.alreadySignedIn
-                : AuthExceptionType.unauthorized,
+        type: signedIn
+            ? AuthExceptionType.alreadySignedIn
+            : AuthExceptionType.unauthorized,
       );
     }
   }

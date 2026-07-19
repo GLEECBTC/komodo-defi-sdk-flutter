@@ -316,6 +316,10 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   TradingManager get trading =>
       _assertSdkInitialized(_container<TradingManager>());
 
+  /// Manages durable unified-swap routes and their local observations.
+  TradeRouteManager get tradeRoutes =>
+      _assertSdkInitialized(_container<TradeRouteManager>());
+
   /// Gets a reference to the balance manager for checking asset balances.
   ///
   /// Provides functionality for checking and monitoring asset balances.
@@ -576,6 +580,7 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       _disposeIfRegistered<TransactionHistoryManager>((m) => m.dispose()),
       _disposeIfRegistered<MarketDataManager>((m) => m.dispose()),
       _disposeIfRegistered<FeeManager>((m) => m.dispose()),
+      _disposeIfRegistered<TradeRouteManager>((m) => m.dispose()),
       _disposeIfRegistered<WithdrawalManager>((m) => m.dispose()),
       _disposeIfRegistered<SecurityManager>((m) => m.dispose()),
     ]);

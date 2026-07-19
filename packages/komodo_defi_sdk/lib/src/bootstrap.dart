@@ -79,6 +79,7 @@ Future<void> bootstrap({
       kdf: framework,
       hostConfig:
           hostConfig ?? LocalConfig(https: true, rpcPassword: rpcPassword),
+      externalExecution: config.externalExecution,
     );
     await auth.ensureInitialized();
     return auth;
@@ -276,6 +277,11 @@ Future<void> bootstrap({
       eventStreamingManager: eventStreamingManager,
     );
   }, dependsOn: [ApiClient, EventStreamingManager]);
+
+  container.registerSingletonAsync<TradeRouteManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    return TradeRouteManager(client: client);
+  }, dependsOn: [ApiClient]);
 
   container.registerSingletonAsync<LegacyWithdrawalManager>(() async {
     final client = await container.getAsync<ApiClient>();

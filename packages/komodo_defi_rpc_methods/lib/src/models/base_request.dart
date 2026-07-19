@@ -10,37 +10,7 @@ extension BaseRequestApiClientExtension on ApiClient {
     BaseRequest<T, E> request,
   ) async {
     final response = await executeRpc(request.toJson());
-
-    if (GeneralErrorResponse.isErrorResponse(response)) {
-      // Try to parse into a typed KDF exception first
-      final typedException = _tryParseTypedException(
-        response,
-        rpcMethodHint: request.method,
-      );
-      if (typedException != null) {
-        throw typedException;
-      }
-      throw GeneralErrorResponse.parse(response);
-    }
-
     return request.parseResponse(jsonEncode(response));
-  }
-
-  /// Attempts to parse the error response into a typed [MmRpcException].
-  MmRpcException? _tryParseTypedException(
-    JsonMap response, {
-    required String rpcMethodHint,
-  }) {
-    // Extract error details from the response structure
-    final errorDetails =
-        response.valueOrNull<JsonMap>('result', 'details') ??
-        response.valueOrNull<JsonMap>('message') ??
-        response;
-
-    return KdfErrorRegistry.tryParse(
-      errorDetails,
-      rpcMethodHint: rpcMethodHint,
-    );
   }
 }
 
@@ -101,8 +71,16 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   T parseResponse(String responseBody) {
     final json = jsonFromString(responseBody);
 
+    final isTaskErrorStatus =
+        json.valueOrNull<String>('result', 'status') == 'Error' &&
+        !json.containsKey('error') &&
+        json.valueOrNull<int>('code') != -1;
+    final isErrorResponse =
+        GeneralErrorResponse.isErrorResponse(json) &&
+        !(parseTaskErrorStatusAsResponse && isTaskErrorStatus);
+
     // First check if this is an error response
-    if (GeneralErrorResponse.isErrorResponse(json)) {
+    if (isErrorResponse) {
       // Try to parse into a typed KDF exception first
       final typedException = _tryParseTypedException(
         json,
@@ -148,6 +126,15 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   /// Override this method to provide custom error handling for specific error
   /// types. Return null if the error is not of a type that this request can handle.
   E? parseCustomErrorResponse(JsonMap json) => null;
+
+  /// Whether a task result whose envelope has `status: "Error"` is a normal
+  /// response variant for this request.
+  ///
+  /// KDF task RPCs return domain failures inside a successful HTTP/RPC
+  /// response. Status requests that model the complete task union should
+  /// override this to `true`; top-level RPC errors remain exceptions.
+  @protected
+  bool get parseTaskErrorStatusAsResponse => false;
 
   /// Handles general error responses. This is a fallback for when
   /// [parseCustomErrorResponse] returns null.
