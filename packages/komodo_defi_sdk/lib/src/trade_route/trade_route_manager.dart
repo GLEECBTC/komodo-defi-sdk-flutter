@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+/// Revalidates caller-owned deadline and identity state immediately before an
+/// irreversible or task-creating route RPC is invoked.
+typedef TradeRouteMutationGuard = FutureOr<void> Function();
+
 /// The RPC boundary used by [TradeRouteManager].
 ///
 /// The public boundary keeps lifecycle and authorization behavior independently
@@ -310,7 +314,10 @@ class TradeRouteManager {
   Future<TradeRouteTaskHandle> initTradeRoute({
     required String routeExecutionId,
     required RouteConsent routeConsent,
+    TradeRouteMutationGuard? beforeMutation,
   }) async {
+    _ensureNotDisposed();
+    await beforeMutation?.call();
     _ensureNotDisposed();
     final response = await _gateway.initTradeRoute(
       routeExecutionId: routeExecutionId,
@@ -342,8 +349,10 @@ class TradeRouteManager {
   /// proof, so restart does not depend on wallet-local full consent material.
   Future<ReattachedTradeRoute> reattachTradeRoute({
     required String routeExecutionId,
+    TradeRouteMutationGuard? beforeMutation,
   }) async {
     final execution = await getExecution(routeExecutionId: routeExecutionId);
+    await beforeMutation?.call();
     _ensureNotDisposed();
     final response = await _gateway.initTradeRoute(
       routeExecutionId: routeExecutionId,
@@ -405,6 +414,7 @@ class TradeRouteManager {
   /// control combinations fail closed without invoking the backend cancel RPC.
   Future<RouteCancelResponse> cancelTradeRoute({
     required String routeExecutionId,
+    TradeRouteMutationGuard? beforeMutation,
   }) async {
     final execution = await getExecution(routeExecutionId: routeExecutionId);
     if (!_hasKnownExecutionState(execution.status) ||
@@ -415,6 +425,7 @@ class TradeRouteManager {
         control: 'cancel',
       );
     }
+    await beforeMutation?.call();
     _ensureNotDisposed();
     return _gateway.cancelTradeRoute(routeExecutionId: routeExecutionId);
   }
@@ -426,6 +437,7 @@ class TradeRouteManager {
   /// server controls explicitly advertise `can_stop_after_current`.
   Future<RouteCancelResponse> stopAfterCurrent({
     required String routeExecutionId,
+    TradeRouteMutationGuard? beforeMutation,
   }) async {
     final execution = await getExecution(routeExecutionId: routeExecutionId);
     if (!_hasKnownExecutionState(execution.status) ||
@@ -436,6 +448,7 @@ class TradeRouteManager {
         control: 'stop_after_current',
       );
     }
+    await beforeMutation?.call();
     _ensureNotDisposed();
     return _gateway.cancelTradeRoute(routeExecutionId: routeExecutionId);
   }
@@ -449,6 +462,7 @@ class TradeRouteManager {
   Future<TradeRouteActionAcknowledgement> deliverUserAction({
     required TradeRouteTaskHandle task,
     required RouteExecutionUserAction userAction,
+    TradeRouteMutationGuard? beforeMutation,
   }) async {
     final execution = await getExecution(
       routeExecutionId: task.routeExecutionId,
@@ -514,6 +528,7 @@ class TradeRouteManager {
       );
     }
 
+    await beforeMutation?.call();
     _ensureNotDisposed();
     final response = await _gateway.tradeRouteUserAction(
       taskId: task.taskId,
