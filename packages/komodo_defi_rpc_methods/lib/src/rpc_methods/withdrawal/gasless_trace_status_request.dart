@@ -11,15 +11,13 @@ enum GaslessTraceState {
   confirmed,
   failed;
 
-  /// Parse a provider/KDF state. Unknown values are a typed parse failure and
-  /// must never be rendered as an apparently healthy pending transfer.
-  static GaslessTraceState parse(String value) => switch (value.toLowerCase()) {
+  /// Parse KDF's stable lowercase state contract.
+  static GaslessTraceState parse(String value) => switch (value) {
     'pending' => GaslessTraceState.pending,
-    'submitted' || 'inprogress' => GaslessTraceState.submitted,
-    'on_chain' || 'confirming' => GaslessTraceState.onChain,
-    'confirmed' || 'succeed' => GaslessTraceState.confirmed,
+    'submitted' => GaslessTraceState.submitted,
+    'on_chain' => GaslessTraceState.onChain,
+    'confirmed' => GaslessTraceState.confirmed,
     'failed' => GaslessTraceState.failed,
-    'waiting' => GaslessTraceState.pending,
     _ => throw const FormatException('Unknown GasFree trace state'),
   };
 
@@ -42,34 +40,36 @@ enum GaslessTraceState {
   bool get isFailed => this == GaslessTraceState.failed;
 }
 
-/// Polls the status of a gas-free (gasless) transfer by its trace id.
+/// Fetches one authoritative GasFree transfer snapshot by trace id.
+///
+/// Use this once immediately after submission and for restart or stream
+/// disconnection recovery. Steady-state updates come from the pre-attached
+/// `GASLESS_TRACE:<coin>` stream.
 class GaslessTraceStatusRequest
-    extends BaseRequest<GaslessTraceStatusResponse, GeneralErrorResponse> {
+    extends
+        BaseRequest<GaslessTraceStatusResponse, GaslessTraceStatusException> {
   GaslessTraceStatusRequest({
     required super.rpcPass,
     required this.coin,
     required this.traceId,
-    this.expectedAuthorization,
   }) : super(method: 'gasless::trace_status', mmrpc: RpcVersion.v2_0);
 
   final String coin;
   final String traceId;
-  final GaslessExpectedAuthorization? expectedAuthorization;
 
   @override
   Map<String, dynamic> toJson() => {
     ...super.toJson(),
-    'params': {
-      'coin': coin,
-      'trace_id': traceId,
-      if (expectedAuthorization != null)
-        'expected_authorization': expectedAuthorization!.toJson(),
-    },
+    'params': {'coin': coin, 'trace_id': traceId},
   };
 
   @override
   GaslessTraceStatusResponse parse(Map<String, dynamic> json) =>
       GaslessTraceStatusResponse.parse(json);
+
+  @override
+  GaslessTraceStatusException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessTraceStatusException.tryParse(json);
 }
 
 class GaslessTraceStatusResponse extends BaseResponse {
@@ -81,19 +81,43 @@ class GaslessTraceStatusResponse extends BaseResponse {
     this.confirmedAt,
     this.finalFee,
     this.failureReason,
-  });
+  }) {
+    if (state == GaslessTraceState.failed && failureReason == null) {
+      throw const FormatException(
+        'A failed GasFree trace must include failure_reason',
+      );
+    }
+    if (state != GaslessTraceState.failed && failureReason != null) {
+      throw const FormatException(
+        'Only a failed GasFree trace may include failure_reason',
+      );
+    }
+  }
 
   factory GaslessTraceStatusResponse.parse(Map<String, dynamic> json) {
     final result = json.valueOrNull<JsonMap>('result') ?? json;
+    const allowedKeys = {
+      'state',
+      'tx_hash_on_chain',
+      'block_height',
+      'confirmed_at',
+      'final_fee',
+      'failure_reason',
+    };
+    final unknownKeys = result.keys.where((key) => !allowedKeys.contains(key));
+    if (unknownKeys.isNotEmpty) {
+      throw FormatException(
+        'GasFree trace status contains unknown fields: '
+        '${unknownKeys.join(', ')}',
+      );
+    }
     final finalFeeRaw = result.valueOrNull<dynamic>('final_fee');
     return GaslessTraceStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
       state: GaslessTraceState.parse(result.value<String>('state')),
       txHashOnChain: result.valueOrNull<String>('tx_hash_on_chain'),
       blockHeight: result.valueOrNull<int>('block_height'),
-      confirmedAt: _normalizeConfirmedAt(
-        result.valueOrNull<dynamic>('confirmed_at'),
-      ),
+      confirmedAt: result.valueOrNull<int>('confirmed_at'),
       finalFee: finalFeeRaw == null
           ? null
           : Decimal.parse(finalFeeRaw.toString()),
@@ -113,20 +137,11 @@ class GaslessTraceStatusResponse extends BaseResponse {
     'mmrpc': mmrpc,
     'result': {
       'state': state.jsonValue,
-      if (txHashOnChain != null) 'tx_hash_on_chain': txHashOnChain,
-      if (blockHeight != null) 'block_height': blockHeight,
-      if (confirmedAt != null) 'confirmed_at': confirmedAt,
-      if (finalFee != null) 'final_fee': finalFee.toString(),
-      if (failureReason != null) 'failure_reason': failureReason,
+      'tx_hash_on_chain': txHashOnChain,
+      'block_height': blockHeight,
+      'confirmed_at': confirmedAt,
+      'final_fee': finalFee?.toString(),
+      'failure_reason': failureReason,
     },
   };
-}
-
-int? _normalizeConfirmedAt(Object? raw) {
-  if (raw == null) return null;
-  final value = raw is int ? raw : int.tryParse(raw.toString());
-  if (value == null || value <= 0) return null;
-  if (value < 100000000) return value * 1000;
-  if (value > 10000000000) return value ~/ 1000;
-  return value;
 }

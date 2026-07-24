@@ -3,6 +3,28 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:test/test.dart';
 
+TronGasfreeRelayPayload _relayPayload() => TronGasfreeRelayPayload(
+  chainId: '728126428',
+  coin: 'USDT-TRC20',
+  hdFrom: const {'account_id': 0, 'chain': 'external', 'address_id': 0},
+  fromAddress: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
+  gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+  verifyingContract: 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
+  signedAuthorization: const GaslessSignedAuthorization(
+    token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+    serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+    user: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
+    receiver: 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
+    value: '5000000',
+    maxFee: '5000000',
+    deadline: 1999999999,
+    version: '1',
+    nonce: '9',
+    signature: 'signed-authorization',
+  ),
+  createdAt: '2026-07-10T12:00:00Z',
+);
+
 void main() {
   group('TRON RPC request serialization', () {
     test('enable_eth_with_tokens serializes TRX without swap contracts', () {
@@ -352,34 +374,48 @@ void main() {
       );
     });
 
+    test('serializes the exact typed GasFree relay payload', () {
+      final relay = _relayPayload();
+      final request = SendRawTransactionLegacyRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'USDT-TRC20',
+        gaslessRelayPayload: relay,
+      );
+
+      expect(request.toJson(), {
+        'method': 'send_raw_transaction',
+        'rpc_pass': 'rpc-pass',
+        'coin': 'USDT-TRC20',
+        'tx_json': relay.toJson(),
+      });
+    });
+
+    test('rejects legacy relay generations passed as raw tx_json', () {
+      final request = SendRawTransactionLegacyRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'USDT-TRC20',
+        txJson: {..._relayPayload().toJson(), 'relay_type': 'tron_gasfree_v1'},
+      );
+
+      expect(request.toJson, throwsFormatException);
+    });
+
     test('parses a gasless relay response', () {
       final response = SendRawTransactionResponse.parse({
         'relay_type': 'tron_gasfree',
-        'request_id': '123e4567-e89b-42d3-a456-426614174000',
         'trace_id': '6c3ff67e-0bf4-4c09-91ca-0c7c254b01a0',
         'state': 'WAITING',
-        'expected_authorization': {
-          'request_id': '123e4567-e89b-42d3-a456-426614174000',
-          'account': 'TAccount',
-          'custody_address': 'TCustody',
-          'provider': 'TProvider',
-          'receiver': 'TReceiver',
-          'token': 'TToken',
-          'amount': '5000000',
-          'max_fee': '2000000',
-          'deadline': '1783690000',
-          'version': '1',
-          'nonce': '9',
-          'signature_fingerprint':
-              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        },
       });
 
       expect(response.isGaslessRelay, isTrue);
-      expect(response.requestId, '123e4567-e89b-42d3-a456-426614174000');
       expect(response.traceId, '6c3ff67e-0bf4-4c09-91ca-0c7c254b01a0');
-      expect(response.state, 'WAITING');
+      expect(response.state, GaslessSubmitState.waiting);
       expect(response.txHash, isNull);
+      expect(response.toJson(), {
+        'relay_type': 'tron_gasfree',
+        'trace_id': '6c3ff67e-0bf4-4c09-91ca-0c7c254b01a0',
+        'state': 'WAITING',
+      });
     });
 
     test('parses a standard tx_hash response', () {
@@ -391,109 +427,30 @@ void main() {
       expect(response.txHash, 'abc123');
     });
 
-    test('parses the legacy relay response without bound context', () {
-      final response = SendRawTransactionResponse.parse({
-        'relay_type': 'tron_gasfree',
-        'trace_id': 'legacy-trace',
-        'state': 'WAITING',
-      });
-
-      expect(response.isGaslessRelay, isTrue);
-      expect(response.hasBoundRelayContext, isFalse);
-      expect(response.requestId, isNull);
-      expect(response.expectedAuthorization, isNull);
-    });
-  });
-
-  group('gasless::configure', () {
-    const provider = TronGaslessProviderConfig(
-      baseUrl: 'https://quicknode.gleec.com/gasfree',
-      service: GaslessServiceKomodoProxy(),
-      serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-    );
-
-    test('serializes provider and non-empty token configuration', () {
-      final request = GaslessConfigureRequest(
-        rpcPass: 'rpc-pass',
-        platformCoin: 'TRX',
-        provider: provider,
-        tokens: [
-          GaslessConfigureToken(
-            coin: 'USDT-TRC20',
-            transferMaxFee: Decimal.parse('2'),
-          ),
-        ],
-      );
-
-      final json = request.toJson();
-      expect(json['method'], 'gasless::configure');
-      expect(json['params'], {
-        'platform_coin': 'TRX',
-        'provider': provider.toJson(),
-        'tokens': [
-          {'coin': 'USDT-TRC20', 'transfer_max_fee': '2'},
-        ],
-      });
-    });
-
-    test('rejects an empty token list at runtime', () {
+    test('rejects undocumented relay response fields', () {
       expect(
-        () => GaslessConfigureRequest(
-          rpcPass: 'rpc-pass',
-          platformCoin: 'TRX',
-          provider: provider,
-          tokens: const [],
-        ),
-        throwsArgumentError,
+        () => SendRawTransactionResponse.parse({
+          'relay_type': 'tron_gasfree',
+          'trace_id': 'trace-1',
+          'state': 'WAITING',
+          'request_id': 'must-not-be-accepted',
+        }),
+        throwsFormatException,
       );
     });
   });
 
   group('gasless::trace_status', () {
-    const expected = GaslessExpectedAuthorization(
-      requestId: '123e4567-e89b-42d3-a456-426614174000',
-      account: 'TAccount',
-      custodyAddress: 'TCustody',
-      provider: 'TProvider',
-      receiver: 'TReceiver',
-      token: 'TToken',
-      amount: '5000000',
-      maxFee: '2000000',
-      deadline: '1783690000',
-      version: '1',
-      nonce: '9',
-      signatureFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    );
-
     test('request serializes coin and trace_id', () {
       final request = GaslessTraceStatusRequest(
         rpcPass: 'rpc-pass',
         coin: 'USDT-TRC20',
         traceId: 'trace-1',
-        expectedAuthorization: expected,
       );
 
       final json = request.toJson();
       expect(json['method'], 'gasless::trace_status');
-      expect(json['params'], {
-        'coin': 'USDT-TRC20',
-        'trace_id': 'trace-1',
-        'expected_authorization': expected.toJson(),
-      });
-    });
-
-    test('legacy request omits unsupported authorization binding', () {
-      final request = GaslessTraceStatusRequest(
-        rpcPass: 'rpc-pass',
-        coin: 'USDT-TRC20',
-        traceId: 'trace-1',
-      );
-
-      expect(request.toJson()['params'], {
-        'coin': 'USDT-TRC20',
-        'trace_id': 'trace-1',
-      });
+      expect(json['params'], {'coin': 'USDT-TRC20', 'trace_id': 'trace-1'});
     });
 
     test('parses a confirmed status', () {
@@ -517,17 +474,6 @@ void main() {
       expect(response.confirmedAt, 1747909638);
     });
 
-    test('normalizes legacy double-divided and millisecond timestamps', () {
-      GaslessTraceStatusResponse parse(Object timestamp) =>
-          GaslessTraceStatusResponse.parse({
-            'result': {'state': 'confirmed', 'confirmed_at': timestamp},
-          });
-
-      expect(parse(1747909).confirmedAt, 1747909000);
-      expect(parse(1747909638).confirmedAt, 1747909638);
-      expect(parse(1747909638000).confirmedAt, 1747909638);
-    });
-
     test('parses a failed status', () {
       final response = GaslessTraceStatusResponse.parse({
         'mmrpc': '2.0',
@@ -540,16 +486,30 @@ void main() {
 
     test('GaslessTraceState.parse maps known values and rejects unknown', () {
       expect(GaslessTraceState.parse('on_chain'), GaslessTraceState.onChain);
-      expect(GaslessTraceState.parse('WAITING'), GaslessTraceState.pending);
-      expect(
-        GaslessTraceState.parse('INPROGRESS'),
-        GaslessTraceState.submitted,
+      expect(() => GaslessTraceState.parse('WAITING'), throwsFormatException);
+    });
+  });
+
+  group('stream::gasless_trace::enable', () {
+    test('serializes the coin-scoped stream request', () {
+      final request = StreamGaslessTraceEnableRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'USDT-TRC20',
+        clientId: 7,
       );
-      expect(GaslessTraceState.parse('CONFIRMING'), GaslessTraceState.onChain);
-      expect(GaslessTraceState.parse('SUCCEED'), GaslessTraceState.confirmed);
+
+      expect(request.toJson(), {
+        'method': 'stream::gasless_trace::enable',
+        'mmrpc': '2.0',
+        'rpc_pass': 'rpc-pass',
+        'params': {'coin': 'USDT-TRC20', 'client_id': 7},
+      });
       expect(
-        () => GaslessTraceState.parse('provider_added_new_state'),
-        throwsFormatException,
+        request.parse({
+          'mmrpc': '2.0',
+          'result': {'streamer_id': 'GASLESS_TRACE:USDT-TRC20'},
+        }).streamerId,
+        'GASLESS_TRACE:USDT-TRC20',
       );
     });
   });
@@ -590,16 +550,13 @@ void main() {
       expect(response.activationFee, Decimal.parse('1'));
       expect(response.maxWithdrawable, Decimal.parse('9.5'));
       expect(response.availability, GaslessAccountAvailability.available);
-      expect(response.hasExplicitAvailability, isTrue);
       expect(response.serviceProvider, 'TProvider');
       expect(
         response.toJson()['result'],
         containsPair('service_provider', 'TProvider'),
       );
-      // total = on-chain, spendable = on-chain - frozen, unspendable = frozen
-      expect(response.custodyBalance.total, Decimal.parse('12.5'));
-      expect(response.custodyBalance.spendable, Decimal.parse('12.5'));
-      expect(response.custodyBalance.unspendable, Decimal.zero);
+      expect(response.spendableBalance, Decimal.parse('12.5'));
+      expect(response.frozenBalance, Decimal.zero);
     });
 
     test('parses a degraded (provider-unavailable) status', () {
@@ -620,15 +577,14 @@ void main() {
       expect(response.active, isNull);
       expect(response.transferFee, isNull);
       expect(response.maxWithdrawable, isNull);
-      expect(response.reasonCode, isNull);
-      // Unknown spendability is represented conservatively, never synthesized.
-      expect(response.custodyBalance.total, Decimal.parse('7'));
-      expect(response.custodyBalance.spendable, Decimal.zero);
-      expect(response.custodyBalance.unspendable, Decimal.parse('7'));
+      // The fresh custody total remains distinct from unknown spendability.
+      expect(response.onChainBalance, Decimal.parse('7'));
+      expect(response.spendableBalance, isNull);
+      expect(response.frozenBalance, isNull);
     });
   });
 
-  test('root legacy error preserves typed GasFree relay envelope', () {
+  test('root submission error remains a safe generic envelope', () {
     final error = GeneralErrorResponse.parse({
       'error': 'GasFree relay submission failed',
       'error_type': 'GaslessRelaySubmission',

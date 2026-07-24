@@ -39,29 +39,6 @@ JsonMap _asJsonMap(dynamic json) {
   return <String, dynamic>{};
 }
 
-dynamic _valueFromAny(JsonMap map, List<String> keys) {
-  for (final key in keys) {
-    if (map.containsKey(key)) return map[key];
-  }
-  throw StateError('Missing expected JSON field: ${keys.join(' or ')}');
-}
-
-String _stringFromAny(JsonMap map, List<String> keys) =>
-    _stringFromJson(_valueFromAny(map, keys));
-
-/// Like [_stringFromAny] but tolerant of the field being absent entirely —
-/// for optional payload fields (e.g. `gasfree_address`, which current KDF
-/// builds do not include in the gasless shortfall errors).
-String _stringFromAnyOrEmpty(JsonMap map, List<String> keys) {
-  for (final key in keys) {
-    if (map.containsKey(key)) return _stringFromJson(map[key]);
-  }
-  return '';
-}
-
-BigDecimal _bigDecimalFromAny(JsonMap map, List<String> keys) =>
-    BigDecimal.fromJson(_valueFromAny(map, keys));
-
 List<dynamic> _asJsonList(dynamic json) {
   if (json is List) {
     return List<dynamic>.from(json);
@@ -18393,100 +18370,6 @@ final class WithdrawErrorNotSufficientBalanceException
   final BigDecimal required;
 }
 
-final class GaslessWithdrawErrorInsufficientGasFreeBalanceException
-    extends WithdrawErrorException {
-  const GaslessWithdrawErrorInsufficientGasFreeBalanceException({
-    required this.coin,
-    required this.gasfreeAddress,
-    required this.available,
-    required this.required,
-    super.message,
-    super.path,
-    super.trace,
-  }) : super(errorType: 'InsufficientGasFreeBalance');
-
-  factory GaslessWithdrawErrorInsufficientGasFreeBalanceException.fromJson(
-    dynamic json, {
-    String? message,
-    String? path,
-    String? trace,
-  }) {
-    final map = _asJsonMap(json);
-    return GaslessWithdrawErrorInsufficientGasFreeBalanceException(
-      coin: _stringFromAny(map, const ['coin', 'ticker']),
-      // Not sent by current KDF builds — empty when absent; clients that know
-      // the custody address (e.g. from gasless::account_status) substitute it.
-      gasfreeAddress: _stringFromAnyOrEmpty(map, const [
-        'gasfree_address',
-        'gasfreeAddress',
-        'gas_free_address',
-        'gasFreeAddress',
-      ]),
-      available: _bigDecimalFromAny(map, const ['available']),
-      required: _bigDecimalFromAny(map, const ['required']),
-      message: message,
-      path: path,
-      trace: trace,
-    );
-  }
-
-  final String coin;
-  final String gasfreeAddress;
-  final BigDecimal available;
-  final BigDecimal required;
-}
-
-final class GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException
-    extends WithdrawErrorException {
-  const GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException({
-    required this.coin,
-    required this.gasfreeAddress,
-    required this.available,
-    required this.required,
-    required this.activationFee,
-    super.message,
-    super.path,
-    super.trace,
-  }) : super(errorType: 'InsufficientGasFreeBalanceForActivation');
-
-  factory GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException.fromJson(
-    dynamic json, {
-    String? message,
-    String? path,
-    String? trace,
-  }) {
-    final map = _asJsonMap(json);
-    return GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException(
-      coin: _stringFromAny(map, const ['coin', 'ticker']),
-      // Not sent by current KDF builds — empty when absent; clients that know
-      // the custody address (e.g. from gasless::account_status) substitute it.
-      gasfreeAddress: _stringFromAnyOrEmpty(map, const [
-        'gasfree_address',
-        'gasfreeAddress',
-        'gas_free_address',
-        'gasFreeAddress',
-      ]),
-      available: _bigDecimalFromAny(map, const ['available']),
-      required: _bigDecimalFromAny(map, const ['required']),
-      activationFee: _bigDecimalFromAny(map, const [
-        'activation_fee',
-        'activationFee',
-        'activate_fee',
-        'activateFee',
-      ]),
-      message: message,
-      path: path,
-      trace: trace,
-    );
-  }
-
-  final String coin;
-  final String gasfreeAddress;
-  final BigDecimal available;
-  final BigDecimal required;
-  final BigDecimal activationFee;
-}
-
 final class WithdrawErrorNotSufficientPlatformBalanceForFeeException
     extends WithdrawErrorException {
   const WithdrawErrorNotSufficientPlatformBalanceForFeeException({
@@ -25154,27 +25037,6 @@ abstract final class KdfErrorRegistry {
     final path = json['error_path'] as String?;
     final trace = json['error_trace'] as String?;
 
-    // KDF's WithdrawError::Gasless(GaslessWithdrawError) is adjacently tagged
-    // on BOTH levels, so gasless withdraw errors arrive nested:
-    //   {error_type: 'Gasless',
-    //    error_data: {error_type: 'InsufficientGasFreeBalance',
-    //                 error_data: {coin, available, required, ...}}}
-    // Unwrap so the inner variant dispatches through the same registry. The
-    // outer display message/path/trace carry through (the outer Display is
-    // "{_0}", i.e. the inner message).
-    if (errorType == 'Gasless' && errorData is Map) {
-      final innerType = errorData['error_type'];
-      if (innerType is String) {
-        return tryParse(<String, dynamic>{
-          'error_type': innerType,
-          'error_data': errorData['error_data'],
-          if (message != null) 'error': message,
-          if (path != null) 'error_path': path,
-          if (trace != null) 'error_trace': trace,
-        }, rpcMethodHint: rpcMethodHint);
-      }
-    }
-
     final withdrawScoped = _tryParseWithdrawScopedAmbiguousType(
       errorType: errorType,
       errorData: errorData,
@@ -25962,21 +25824,6 @@ abstract final class KdfErrorRegistry {
               path: path,
               trace: trace,
             ),
-        'InsufficientGasFreeBalance': (errorData, message, path, trace) =>
-            GaslessWithdrawErrorInsufficientGasFreeBalanceException.fromJson(
-              errorData,
-              message: message,
-              path: path,
-              trace: trace,
-            ),
-        'InsufficientGasFreeBalanceForActivation':
-            (errorData, message, path, trace) =>
-                GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException.fromJson(
-                  errorData,
-                  message: message,
-                  path: path,
-                  trace: trace,
-                ),
         'InsufficientAmountInCache': (errorData, message, path, trace) {
           final map = _asJsonMap(errorData);
           return UpdateNftErrorInsufficientAmountInCacheException(

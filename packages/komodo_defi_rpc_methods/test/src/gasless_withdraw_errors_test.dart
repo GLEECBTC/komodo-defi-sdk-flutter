@@ -1,130 +1,210 @@
+import 'dart:convert';
+
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:test/test.dart';
 
-/// The canonical wire shape from the KDF fork: `WithdrawError` and
-/// `GaslessWithdrawError` are BOTH adjacently tagged (`error_type` /
-/// `error_data`), so gasless withdraw errors arrive nested under an outer
-/// `error_type: 'Gasless'` envelope. `gasfree_address` is NOT sent by current
-/// KDF builds.
+/// `WithdrawError::Gasless` and `GaslessWithdrawError` are both adjacently
+/// tagged in KDF, so every GasFree failure is nested under an outer `Gasless`
+/// envelope.
 Map<String, dynamic> _nestedGaslessError({
-  required String innerType,
-  required Map<String, dynamic> innerData,
-  required String message,
+  required GaslessWithdrawErrorType type,
+  Object? errorData,
 }) => {
-  'error': message,
+  'error': 'GasFree withdrawal failed: ${type.wireValue}',
   'error_path': 'eth_withdraw.withdraw',
-  'error_trace': 'eth_withdraw:348]',
+  'error_trace': 'eth_withdraw:348',
   'error_type': 'Gasless',
-  'error_data': {'error_type': innerType, 'error_data': innerData},
+  'error_data': {'error_type': type.wireValue, 'error_data': errorData},
+};
+
+Object? _fixtureData(GaslessWithdrawErrorType type) => switch (type) {
+  GaslessWithdrawErrorType.insufficientGasFreeBalance => {
+    'coin': 'USDT-TRC20',
+    'available': '0',
+    'required': '8',
+  },
+  GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation => {
+    'coin': 'USDT-TRC20',
+    'available': '2',
+    'required': '8',
+    'activation_fee': '1.5',
+  },
+  _ => null,
 };
 
 void main() {
-  group('GasFree custody shortfall error parsing', () {
-    test(
-      'parses nested InsufficientGasFreeBalance without gasfree_address',
-      () {
-        final result = KdfErrorRegistry.tryParse(
-          _nestedGaslessError(
-            innerType: 'InsufficientGasFreeBalance',
-            innerData: {
-              'coin': 'USDT-TRC20',
-              'available': '0',
-              'required': '8',
-            },
-            message:
-                'Not enough USDT-TRC20 in your GasFree deposit address: '
-                'available 0, required 8. Deposit USDT-TRC20 into your GasFree '
-                'address.',
-          ),
-          rpcMethodHint: 'task::withdraw::status',
+  final request = WithdrawStatusRequest(rpcPass: 'rpc-pass', taskId: 42);
+
+  group('GasFree withdrawal errors', () {
+    for (final type in GaslessWithdrawErrorType.values) {
+      test('parses exact nested ${type.wireValue}', () {
+        final wire = _nestedGaslessError(
+          type: type,
+          errorData: _fixtureData(type),
         );
 
         expect(
-          result,
-          isA<GaslessWithdrawErrorInsufficientGasFreeBalanceException>(),
+          () => request.parseResponse(jsonEncode(wire)),
+          throwsA(
+            isA<GaslessWithdrawException>()
+                .having((error) => error.type, 'type', type)
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains(type.wireValue),
+                )
+                .having((error) => error.path, 'path', 'eth_withdraw.withdraw')
+                .having((error) => error.trace, 'trace', 'eth_withdraw:348'),
+          ),
         );
-        final typed =
-            result! as GaslessWithdrawErrorInsufficientGasFreeBalanceException;
-        expect(typed.coin, 'USDT-TRC20');
-        expect(typed.available.value, '0');
-        expect(typed.required.value, '8');
-        expect(typed.gasfreeAddress, isEmpty);
-        expect(typed.message, contains('GasFree deposit address'));
+      });
+    }
+
+    test(
+      'preserves structured custody shortfall data without inventing fields',
+      () {
+        final error = GaslessWithdrawException.tryParse(
+          _nestedGaslessError(
+            type: GaslessWithdrawErrorType
+                .insufficientGasFreeBalanceForActivation,
+            errorData: _fixtureData(
+              GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation,
+            ),
+          ),
+        );
+
+        expect(error, isNotNull);
+        expect(error!.errorData, {
+          'coin': 'USDT-TRC20',
+          'available': '2',
+          'required': '8',
+          'activation_fee': '1.5',
+        });
+        expect(error.toJson(), {
+          'error_type': 'Gasless',
+          'error_data': {
+            'error_type': 'InsufficientGasFreeBalanceForActivation',
+            'error_data': {
+              'coin': 'USDT-TRC20',
+              'available': '2',
+              'required': '8',
+              'activation_fee': '1.5',
+            },
+          },
+          'error':
+              'GasFree withdrawal failed: '
+              'InsufficientGasFreeBalanceForActivation',
+          'error_path': 'eth_withdraw.withdraw',
+          'error_trace': 'eth_withdraw:348',
+        });
+        expect(error.toJson(), isNot(contains('gasfree_address')));
       },
     );
 
-    test('parses nested InsufficientGasFreeBalanceForActivation without '
-        'gasfree_address', () {
-      final result = KdfErrorRegistry.tryParse(
-        _nestedGaslessError(
-          innerType: 'InsufficientGasFreeBalanceForActivation',
-          innerData: {
-            'coin': 'USDT-TRC20',
-            'available': '2',
-            'required': '8',
-            'activation_fee': '1.5',
-          },
-          message:
-              'Not enough USDT-TRC20 in your GasFree deposit address: '
-              'available 2, required 8 (incl. one-time activation fee 1.5). '
-              'Deposit USDT-TRC20 into your GasFree address.',
-        ),
-        rpcMethodHint: 'task::withdraw::status',
-      );
+    test('parses task-status details after KDF JSON-stringifies the error', () {
+      final wire = {
+        'mmrpc': '2.0',
+        'result': {
+          'status': 'Error',
+          'details': jsonEncode(
+            _nestedGaslessError(type: GaslessWithdrawErrorType.pendingTransfer),
+          ),
+        },
+      };
 
+      final response = request.parseResponse(jsonEncode(wire));
+
+      expect(response.status, 'Error');
       expect(
-        result,
-        isA<
-          GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException
-        >(),
+        response.details,
+        isA<GaslessWithdrawException>().having(
+          (error) => error.type,
+          'type',
+          GaslessWithdrawErrorType.pendingTransfer,
+        ),
       );
-      final typed =
-          result!
-              as GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException;
-      expect(typed.coin, 'USDT-TRC20');
-      expect(typed.available.value, '2');
-      expect(typed.required.value, '8');
-      expect(typed.activationFee.value, '1.5');
-      expect(typed.gasfreeAddress, isEmpty);
+    });
+
+    test('exposes a registry-parsed task error as typed details', () {
+      final wire = {
+        'mmrpc': '2.0',
+        'result': {
+          'status': 'Error',
+          'details': jsonEncode({
+            'error': 'Invalid GasFree fee options',
+            'error_type': 'InvalidFee',
+            'error_data': {
+              'reason': 'deadline_seconds must be greater than zero',
+              'details': null,
+            },
+          }),
+        },
+      };
+
+      final response = request.parseResponse(jsonEncode(wire));
+
+      expect(response.status, 'Error');
+      expect(
+        response.details,
+        isA<WithdrawErrorInvalidFeeException>().having(
+          (error) => error.reason,
+          'reason',
+          'deadline_seconds must be greater than zero',
+        ),
+      );
+    });
+
+    test('preserves a plain-string task error without inferring a type', () {
+      final wire = {
+        'mmrpc': '2.0',
+        'result': {
+          'status': 'Error',
+          'details': 'Provider returned an undocumented failure',
+        },
+      };
+
+      final response = request.parseResponse(jsonEncode(wire));
+
+      expect(response.status, 'Error');
+      expect(response.details, 'Provider returned an undocumented failure');
+    });
+
+    test('rejects the removed flat compatibility shape', () {
+      expect(
+        GaslessWithdrawException.tryParse({
+          'error': 'GasFree withdrawal failed',
+          'error_type': 'PendingTransfer',
+          'error_data': null,
+        }),
+        isNull,
+      );
+    });
+
+    test('does not claim standard withdrawal errors', () {
+      expect(
+        request.parseCustomErrorResponse({
+          'error': 'Coin is not active',
+          'error_type': 'CoinIsNotActivated',
+          'error_data': {'coin': 'USDT-TRC20'},
+        }),
+        isNull,
+      );
     });
 
     test(
-      'parses a flat (unnested) shape with gasfree_address, forward-compat',
+      'does not invent a lifecycle state from an unknown provider string',
       () {
-        final result = KdfErrorRegistry.tryParse({
-          'error': 'Not enough USDT-TRC20 in your GasFree deposit address',
-          'error_type': 'InsufficientGasFreeBalance',
-          'error_data': {
-            'coin': 'USDT-TRC20',
-            'gasfree_address': 'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g',
-            'available': '0',
-            'required': '8',
-          },
-        });
-
         expect(
-          result,
-          isA<GaslessWithdrawErrorInsufficientGasFreeBalanceException>(),
+          GaslessWithdrawException.tryParse({
+            'error': 'upstream returned an unexpected text failure',
+            'error_type': 'Gasless',
+            'error_data': {
+              'error_type': 'UnknownProviderState',
+              'error_data': null,
+            },
+          }),
+          isNull,
         );
-        final typed =
-            result! as GaslessWithdrawErrorInsufficientGasFreeBalanceException;
-        expect(typed.gasfreeAddress, 'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g');
-      },
-    );
-
-    test(
-      'non-shortfall Gasless variants degrade to null (no typed parser)',
-      () {
-        final result = KdfErrorRegistry.tryParse(
-          _nestedGaslessError(
-            innerType: 'PendingTransfer',
-            innerData: const {},
-            message:
-                'A gasless transfer is already pending; wait for settlement '
-                'and retry',
-          ),
-        );
-        expect(result, isNull);
       },
     );
   });

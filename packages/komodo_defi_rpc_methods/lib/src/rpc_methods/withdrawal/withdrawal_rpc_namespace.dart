@@ -59,6 +59,7 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
     required String coin,
     String? txHex,
     Map<String, dynamic>? txJson,
+    TronGasfreeRelayPayload? gaslessRelayPayload,
     WithdrawalSource? from,
   }) {
     return execute(
@@ -67,22 +68,21 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
         coin: coin,
         txHex: txHex,
         txJson: txJson,
+        gaslessRelayPayload: gaslessRelayPayload,
       ),
     );
   }
 
-  /// Poll the status of a gas-free (gasless) transfer by its trace id.
+  /// Fetch a one-shot gas-free (gasless) trace status for reconciliation.
   Future<GaslessTraceStatusResponse> gaslessTraceStatus({
     required String coin,
     required String traceId,
-    GaslessExpectedAuthorization? expectedAuthorization,
   }) {
     return execute(
       GaslessTraceStatusRequest(
         rpcPass: rpcPass ?? '',
         coin: coin,
         traceId: traceId,
-        expectedAuthorization: expectedAuthorization,
       ),
     );
   }
@@ -95,23 +95,6 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
   }) {
     return execute(
       GaslessAccountStatusRequest(rpcPass: rpcPass ?? '', coin: coin),
-    );
-  }
-
-  /// Installs or replaces provider/token GasFree configuration without
-  /// restarting an already-active TRON platform.
-  Future<GaslessConfigureResponse> configureGasless({
-    required String platformCoin,
-    required TronGaslessProviderConfig provider,
-    required List<GaslessConfigureToken> tokens,
-  }) {
-    return execute(
-      GaslessConfigureRequest(
-        rpcPass: rpcPass ?? '',
-        platformCoin: platformCoin,
-        provider: provider,
-        tokens: tokens,
-      ),
     );
   }
 }

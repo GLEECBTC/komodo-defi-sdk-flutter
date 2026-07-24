@@ -6,6 +6,7 @@ library models;
 export 'base_request.dart';
 export 'base_response.dart';
 export 'error_response.dart';
+export 'gasless_rpc_exceptions.dart';
 export 'kdf_error_messages.dart';
 export 'mm2_rpc_exceptions.dart';
 export 'new_task.dart';

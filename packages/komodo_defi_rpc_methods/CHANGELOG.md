@@ -2,19 +2,16 @@
 
 > Note: This release has breaking GasFree relay response interfaces.
 
- - **BREAKING** **FEAT**(gasfree): model nullable immediate transaction hashes,
-   request/trace relay identities, runtime configuration, account status, and
-   trace settlement responses.
- - **SECURITY**(gasfree): bind relay acceptance to the signed request ID and
-   exact expected authorization; require the same binding on trace polling.
- - **FIX**(gasfree): accept the PR #9 relay contract without adding unsupported
-   trace parameters and normalize seconds, legacy double-divided timestamps,
-   and millisecond confirmation times.
+ - **BREAKING** **FEAT**(gasfree): adopt the final activation, four-state account
+   status, signed relay, submission, and trace settlement contracts.
+ - **FEAT**(gasfree): add typed `stream::gasless_trace::enable` success and
+   error events for coin-scoped trace reconciliation.
+ - **SECURITY**(gasfree): remove request/fingerprint/expected-authorization
+   compatibility fields and reject undocumented relay generations.
+ - **FIX**(gasfree): generate endpoint-scoped account, withdrawal, trace, and
+   streaming exceptions from the pinned KDF Rust error enums.
  - **FIX**(gasfree): serialize maximum withdrawals with `max: true` and no
-   `amount`, and treat account-status `max_withdrawable` as optional advisory
-   data.
- - **FIX**(gasfree): preserve custody totals with stable degraded-status reason
-   codes while leaving spendable/frozen values unknown.
+   `amount`, and serialize only documented GasFree withdrawal options.
 
 ## 0.5.0
 

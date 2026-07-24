@@ -5,7 +5,11 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 /// Fetches a read-only snapshot of the user's GasFree custody account for a
 /// gasless-enabled TRC-20 token via `gasless::account_status`.
 class GaslessAccountStatusRequest
-    extends BaseRequest<GaslessAccountStatusResponse, GeneralErrorResponse> {
+    extends
+        BaseRequest<
+          GaslessAccountStatusResponse,
+          GaslessAccountStatusException
+        > {
   GaslessAccountStatusRequest({required super.rpcPass, required this.coin})
     : super(method: 'gasless::account_status', mmrpc: RpcVersion.v2_0);
 
@@ -20,11 +24,15 @@ class GaslessAccountStatusRequest
   @override
   GaslessAccountStatusResponse parse(Map<String, dynamic> json) =>
       GaslessAccountStatusResponse.parse(json);
+
+  @override
+  GaslessAccountStatusException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessAccountStatusException.tryParse(json);
 }
 
 /// Authoritative availability of a GasFree custody account.
 enum GaslessAccountAvailability {
-  /// Provider status is authoritative and the account may be used now.
+  /// The provider preflight responded with a full account snapshot.
   available('available'),
 
   /// An existing transfer currently freezes the custody account.
@@ -54,15 +62,14 @@ enum GaslessAccountAvailability {
 /// The GasFree custody account status for one TRC-20 token.
 ///
 /// [onChainBalance] and [gasfreeAddress] are always present. Fee fields and the
-/// optional advisory maximum are meaningful only when [availability] is
-/// [GaslessAccountAvailability.available].
+/// provider-derived balance split are retained for both `available` and
+/// `pending_transfer`; [maxWithdrawable] is populated only for `available`.
 class GaslessAccountStatusResponse extends BaseResponse {
   GaslessAccountStatusResponse({
     required super.mmrpc,
     required this.gasfreeAddress,
     required this.onChainBalance,
     required this.availability,
-    required this.hasExplicitAvailability,
     this.serviceProvider,
     this.active,
     this.frozenBalance,
@@ -70,41 +77,36 @@ class GaslessAccountStatusResponse extends BaseResponse {
     this.transferFee,
     this.activationFee,
     this.maxWithdrawable,
-    this.reasonCode,
-  });
+  }) {
+    _validateShape();
+  }
 
   factory GaslessAccountStatusResponse.parse(Map<String, dynamic> json) {
     final result = json.valueOrNull<JsonMap>('result') ?? json;
-    if (result.containsKey('availability') &&
-        (result.containsKey('provider_available') ||
-            result.containsKey('reason_code'))) {
-      throw const FormatException(
-        'GasFree account status mixes current and legacy status fields',
+    const allowedKeys = {
+      'gasfree_address',
+      'service_provider',
+      'availability',
+      'active',
+      'on_chain_balance',
+      'frozen_balance',
+      'spendable_balance',
+      'transfer_fee',
+      'activation_fee',
+      'max_withdrawable',
+    };
+    final unknownKeys = result.keys.where((key) => !allowedKeys.contains(key));
+    if (unknownKeys.isNotEmpty) {
+      throw FormatException(
+        'GasFree account status contains unknown fields: '
+        '${unknownKeys.join(', ')}',
       );
     }
+
     Decimal? dec(String key) {
       final raw = result.valueOrNull<dynamic>(key);
       return raw == null ? null : Decimal.parse(raw.toString());
     }
-
-    final rawAvailability = result.valueOrNull<String>('availability');
-    final legacyProviderAvailable = result.valueOrNull<bool>(
-      'provider_available',
-    );
-    final reasonCode = result.valueOrNull<String>('reason_code');
-    if (rawAvailability == null && legacyProviderAvailable == null) {
-      throw ArgumentError('GasFree account availability is required');
-    }
-    final availability = rawAvailability != null
-        ? GaslessAccountAvailability.parse(rawAvailability)
-        : switch ((legacyProviderAvailable!, reasonCode)) {
-            (true, _) => GaslessAccountAvailability.available,
-            (false, 'token_unsupported') =>
-              GaslessAccountAvailability.tokenUnsupported,
-            (false, 'pending_transfer') =>
-              GaslessAccountAvailability.pendingTransfer,
-            _ => GaslessAccountAvailability.providerUnreachable,
-          };
 
     return GaslessAccountStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
@@ -112,8 +114,9 @@ class GaslessAccountStatusResponse extends BaseResponse {
       onChainBalance: Decimal.parse(
         result.value<dynamic>('on_chain_balance').toString(),
       ),
-      availability: availability,
-      hasExplicitAvailability: rawAvailability != null,
+      availability: GaslessAccountAvailability.parse(
+        result.value<String>('availability'),
+      ),
       serviceProvider: result.valueOrNull<String>('service_provider'),
       active: result.valueOrNull<bool>('active'),
       frozenBalance: dec('frozen_balance'),
@@ -121,34 +124,35 @@ class GaslessAccountStatusResponse extends BaseResponse {
       transferFee: dec('transfer_fee'),
       activationFee: dec('activation_fee'),
       maxWithdrawable: dec('max_withdrawable'),
-      reasonCode: reasonCode,
     );
   }
 
-  /// Locally-derived CREATE2 custody address the tokens settle from.
+  /// Opaque GasFree custody address returned and verified by KDF.
   final String gasfreeAddress;
 
-  /// Whether the GasFree account has been on-chain activated. `null` if the
-  /// provider is unavailable.
+  /// Whether the GasFree account has been on-chain activated. `null` when the
+  /// token is unsupported or the provider is unavailable.
   final bool? active;
 
   /// Raw TRC-20 balance held at the custody address, in token units.
   final Decimal onChainBalance;
 
-  /// Amount currently locked by an in-flight transfer. `null` if the provider
-  /// is unavailable.
+  /// Amount currently locked by an in-flight transfer. `null` when the token is
+  /// unsupported or the provider is unavailable.
   final Decimal? frozenBalance;
 
   /// `onChainBalance - frozenBalance` — the balance not locked by a pending
-  /// transfer. `null` if the provider is unavailable.
+  /// transfer. `null` when the token is unsupported or the provider is
+  /// unavailable.
   final Decimal? spendableBalance;
 
-  /// Per-transfer provider fee, charged in the token. `null` if the provider is
-  /// unavailable.
+  /// Per-transfer provider fee, charged in the token. `null` when the token is
+  /// unsupported or the provider is unavailable.
   final Decimal? transferFee;
 
   /// One-time activation fee charged in the token on the first transfer; `null`
-  /// when the account is already active or the provider is unavailable.
+  /// when the account is already active, the token is unsupported, or the
+  /// provider is unavailable.
   final Decimal? activationFee;
 
   /// Optional advisory amount the user can gaslessly send now.
@@ -157,47 +161,65 @@ class GaslessAccountStatusResponse extends BaseResponse {
   /// which does not require this field or an explicit amount.
   final Decimal? maxWithdrawable;
 
-  /// KDF's authoritative status for the custody account.
+  /// KDF's normalized status for the custody account.
   final GaslessAccountAvailability availability;
-
-  /// Whether [availability] came from the enum contract rather than the
-  /// deprecated boolean compatibility field.
-  final bool hasExplicitAvailability;
-
-  /// Compatibility alias for callers that have not migrated to [availability].
-  @Deprecated('Use availability == GaslessAccountAvailability.available')
-  bool get providerAvailable =>
-      availability == GaslessAccountAvailability.available;
 
   /// Exact service-provider address that produced the authoritative status.
   ///
-  /// `null` for degraded responses and KDF versions that predate provider
-  /// identity attestation. A missing value must never enable new receives.
+  /// Present for every provider-reachable state and `null` only when the
+  /// provider is unreachable.
   final String? serviceProvider;
 
-  /// Stable reason for a provider-unavailable, unsupported, or security state.
-  /// Raw upstream provider content is never exposed here.
-  final String? reasonCode;
-
-  /// The custody balance as a [BalanceInfo] (`total` = on-chain,
-  /// `spendable` = on-chain minus frozen, `unspendable` = frozen), so it can
-  /// drop straight into balance widgets in place of the EOA balance.
-  BalanceInfo get custodyBalance {
-    final hasAuthoritativeSpendability =
-        availability == GaslessAccountAvailability.available &&
+  void _validateShape() {
+    final providerPresent = serviceProvider?.trim().isNotEmpty ?? false;
+    final providerFieldsPresent =
+        active != null &&
+        frozenBalance != null &&
         spendableBalance != null &&
-        frozenBalance != null;
-    final spendable = hasAuthoritativeSpendability
-        ? spendableBalance!
-        : Decimal.zero;
-    final unspendable = hasAuthoritativeSpendability
-        ? frozenBalance!
-        : onChainBalance;
-    return BalanceInfo(
-      total: onChainBalance,
-      spendable: spendable,
-      unspendable: unspendable,
-    );
+        transferFee != null;
+
+    switch (availability) {
+      case GaslessAccountAvailability.available:
+        if (!providerPresent ||
+            !providerFieldsPresent ||
+            maxWithdrawable == null) {
+          throw const FormatException(
+            'Invalid available GasFree account status shape',
+          );
+        }
+      case GaslessAccountAvailability.pendingTransfer:
+        if (!providerPresent ||
+            !providerFieldsPresent ||
+            maxWithdrawable != null) {
+          throw const FormatException(
+            'Invalid pending_transfer GasFree account status shape',
+          );
+        }
+      case GaslessAccountAvailability.tokenUnsupported:
+        if (!providerPresent ||
+            active != null ||
+            frozenBalance != null ||
+            spendableBalance != null ||
+            transferFee != null ||
+            activationFee != null ||
+            maxWithdrawable != null) {
+          throw const FormatException(
+            'Invalid token_unsupported GasFree account status shape',
+          );
+        }
+      case GaslessAccountAvailability.providerUnreachable:
+        if (serviceProvider != null ||
+            active != null ||
+            frozenBalance != null ||
+            spendableBalance != null ||
+            transferFee != null ||
+            activationFee != null ||
+            maxWithdrawable != null) {
+          throw const FormatException(
+            'Invalid provider_unreachable GasFree account status shape',
+          );
+        }
+    }
   }
 
   @override
@@ -205,21 +227,15 @@ class GaslessAccountStatusResponse extends BaseResponse {
     'mmrpc': mmrpc,
     'result': {
       'gasfree_address': gasfreeAddress,
+      'service_provider': serviceProvider,
+      'availability': availability.wireValue,
+      'active': active,
       'on_chain_balance': onChainBalance.toString(),
-      if (hasExplicitAvailability)
-        'availability': availability.wireValue
-      else
-        'provider_available': providerAvailable,
-      if (serviceProvider != null) 'service_provider': serviceProvider,
-      if (active != null) 'active': active,
-      if (frozenBalance != null) 'frozen_balance': frozenBalance.toString(),
-      if (spendableBalance != null)
-        'spendable_balance': spendableBalance.toString(),
-      if (transferFee != null) 'transfer_fee': transferFee.toString(),
-      if (activationFee != null) 'activation_fee': activationFee.toString(),
-      if (maxWithdrawable != null)
-        'max_withdrawable': maxWithdrawable.toString(),
-      if (reasonCode != null) 'reason_code': reasonCode,
+      'frozen_balance': frozenBalance?.toString(),
+      'spendable_balance': spendableBalance?.toString(),
+      'transfer_fee': transferFee?.toString(),
+      'activation_fee': activationFee?.toString(),
+      'max_withdrawable': maxWithdrawable?.toString(),
     },
   };
 }

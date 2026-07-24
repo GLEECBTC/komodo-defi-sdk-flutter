@@ -37,7 +37,7 @@ Map<String, dynamic> _kmdRewardsParams() => {
 /// will be deprecated in favor of the new task-based withdrawal API.
 // @Deprecated('Use the new task-based withdrawal API')
 class WithdrawRequest
-    extends BaseRequest<WithdrawStatusResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawStatusResponse, GaslessWithdrawException> {
   // @Deprecated('Use the new task-based withdrawal API')
   WithdrawRequest({
     required super.rpcPass,
@@ -110,11 +110,15 @@ class WithdrawRequest
       ),
     );
   }
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
 
 /// Request to initialize withdrawal task
 class WithdrawInitRequest
-    extends BaseRequest<WithdrawInitResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawInitResponse, GaslessWithdrawException> {
   WithdrawInitRequest({
     required super.rpcPass,
     required WithdrawParameters params,
@@ -173,13 +177,17 @@ class WithdrawInitRequest
   @override
   WithdrawInitResponse parse(Map<String, dynamic> json) =>
       WithdrawInitResponse.parse(json);
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
 
 typedef WithdrawInitResponse = NewTaskResponse;
 
 /// Request to check withdrawal task status
 class WithdrawStatusRequest
-    extends BaseRequest<WithdrawStatusResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawStatusResponse, GaslessWithdrawException> {
   WithdrawStatusRequest({
     required super.rpcPass,
     required this.taskId,
@@ -198,7 +206,37 @@ class WithdrawStatusRequest
   @override
   WithdrawStatusResponse parse(Map<String, dynamic> json) =>
       WithdrawStatusResponse.parse(json);
+
+  @override
+  bool shouldParseErrorAsResponse(JsonMap json) =>
+      json.valueOrNull<String>('result', 'status') == 'Error' &&
+      json.hasNestedKey('result', 'details');
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
+
+Object? _typedWithdrawTaskError(Object details) {
+  final errorJson = switch (details) {
+    final String value => tryParseJson(value),
+    final Map<dynamic, dynamic> value => convertToJsonMap(value),
+    _ => null,
+  };
+  if (errorJson == null) return null;
+
+  return GaslessWithdrawException.tryParse(errorJson) ??
+      KdfErrorRegistry.tryParse(
+        errorJson,
+        rpcMethodHint: 'task::withdraw::status',
+      );
+}
+
+Object _untypedWithdrawTaskError(Object details) => switch (details) {
+  final String value => value,
+  final Map<dynamic, dynamic> value => convertToJsonMap(value).toJsonString(),
+  _ => details.toString(),
+};
 
 class WithdrawStatusResponse extends BaseResponse {
   WithdrawStatusResponse({
@@ -210,30 +248,39 @@ class WithdrawStatusResponse extends BaseResponse {
   factory WithdrawStatusResponse.parse(Map<String, dynamic> json) {
     final result = json.value<JsonMap>('result');
     final status = result.value<String>('status');
+    final rawDetails = result.value<Object>('details');
 
     return WithdrawStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
       status: status,
       details: status == 'Ok'
           ? WithdrawResult.fromJson(result.value<JsonMap>('details'))
+          : status == 'Error'
+          ? _typedWithdrawTaskError(rawDetails) ??
+                _untypedWithdrawTaskError(rawDetails)
           : result.value<String>('details'),
     );
   }
 
   final String status;
 
-  /// String for in-progress/error states, WithdrawResult for completed state
-  // TODO: Refactor this class to avoid dynamic
-  final dynamic details;
+  /// Progress text, a completed [WithdrawResult], or a typed terminal error.
+  ///
+  /// JSON-stringified task errors are decoded at this RPC boundary so SDK
+  /// consumers never need to inspect or regex-match the raw error text.
+  final Object details;
 
   @override
   Map<String, dynamic> toJson() => {
     'mmrpc': mmrpc,
     'result': {
       'status': status,
-      'details': (details is WithdrawResult)
-          ? (details as WithdrawResult).toJson()
-          : details,
+      'details': switch (details) {
+        final WithdrawResult result => result.toJson(),
+        final GaslessWithdrawException error => error.toJson().toJsonString(),
+        final MmRpcException error => error.toString(),
+        final Object value => value,
+      },
     },
   };
 
