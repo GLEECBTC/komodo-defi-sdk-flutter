@@ -196,13 +196,7 @@ class _LineChartState extends State<LineChart>
   @override
   void didUpdateWidget(covariant LineChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // `widget.elements` is rebuilt into a fresh list on every parent build, so
-    // comparing by list identity (`!=`) always reported a change and restarted
-    // the per-frame line animation on EVERY rebuild — even when the rebuild was
-    // caused by something unrelated (a sibling bloc emitting, hover, theme).
-    // That continuous re-animation is a dominant source of main-isolate load.
-    // Only restart the animation when the plotted data actually changed.
-    if (_seriesDataChanged(currentElements, widget.elements)) {
+    if (oldWidget.elements != widget.elements) {
       setState(() {
         oldElements = List.from(currentElements);
         currentElements = List.from(widget.elements);
@@ -214,36 +208,6 @@ class _LineChartState extends State<LineChart>
     } else {
       _updateDomainRange();
     }
-  }
-
-  /// Whether the plotted [ChartDataSeries] differ between [previous] and
-  /// [next]. Non-series elements (grid lines, axis labels) do not animate, so
-  /// they are ignored here. Runs in O(points), far cheaper than the animation
-  /// it gates.
-  static bool _seriesDataChanged(
-    List<ChartElement> previous,
-    List<ChartElement> next,
-  ) {
-    final a = previous.whereType<ChartDataSeries>().toList();
-    final b = next.whereType<ChartDataSeries>().toList();
-    if (a.length != b.length) return true;
-    for (var i = 0; i < a.length; i++) {
-      final sa = a[i];
-      final sb = b[i];
-      if (sa.color != sb.color ||
-          sa.strokeWidth != sb.strokeWidth ||
-          sa.lineType != sb.lineType ||
-          sa.nodeRadius != sb.nodeRadius ||
-          sa.data.length != sb.data.length) {
-        return true;
-      }
-      for (var j = 0; j < sa.data.length; j++) {
-        if (sa.data[j].x != sb.data[j].x || sa.data[j].y != sb.data[j].y) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   void _clearHighlightedData() {
