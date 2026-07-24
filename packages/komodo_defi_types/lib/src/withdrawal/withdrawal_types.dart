@@ -4,15 +4,11 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
-/// Relay type tag for Tron gas-free (gasless) transfers.
-const String _tronGasfreeRelayType = 'tron_gasfree';
-
 /// Keys that make up the Tron gas-free relay payload, sent verbatim as
-/// `tx_json` to `send_raw_transaction`. Matches the KDF `TronGasfreeRelayPayload`
-/// struct, which rejects unknown fields — so the payload must be exactly these.
+/// `tx_json` to `send_raw_transaction`. Matches KDF's
+/// `TronGasfreeRelayPayload`, which rejects unknown fields.
 const List<String> _tronGasfreeRelayPayloadKeys = [
   'relay_type',
-  'request_id',
   'chain_id',
   'coin',
   'hd_from',
@@ -20,53 +16,36 @@ const List<String> _tronGasfreeRelayPayloadKeys = [
   'gasfree_address',
   'verifying_contract',
   'signed_authorization',
-  'authorization_fingerprint',
   'created_at',
 ];
 
+const Set<String> _removedTronGasfreeRelayKeys = {
+  'request_id',
+  'authorization_fingerprint',
+  'expected_authorization',
+};
+
 /// Extracts the gas-free relay payload subset from a withdraw result so it can
 /// be broadcast via `send_raw_transaction`.
-JsonMap _extractTronGasfreeRelayPayload(JsonMap json) {
+TronGasfreeRelayPayload _extractTronGasfreeRelayPayload(JsonMap json) {
+  final removedKeys = json.keys.where(_removedTronGasfreeRelayKeys.contains);
+  if (removedKeys.isNotEmpty) {
+    throw FormatException(
+      'GasFree withdraw result contains removed relay fields: '
+      '${removedKeys.join(', ')}',
+    );
+  }
   final payload = <String, dynamic>{};
   for (final key in _tronGasfreeRelayPayloadKeys) {
     final value = json[key];
     if (value != null) payload[key] = value;
   }
-  const requiredKeys = <String>{
-    'relay_type',
-    'chain_id',
-    'coin',
-    'from_address',
-    'gasfree_address',
-    'verifying_contract',
-    'signed_authorization',
-    'created_at',
-  };
-  final missing = requiredKeys.where(
-    (key) => payload[key] == null || payload[key].toString().isEmpty,
-  );
-  if (missing.isNotEmpty) {
-    throw FormatException(
-      'GasFree relay payload is missing required fields: '
-      '${missing.join(', ')}',
-    );
-  }
-  final hasRequestId = payload['request_id']?.toString().isNotEmpty ?? false;
-  final hasFingerprint =
-      payload['authorization_fingerprint']?.toString().isNotEmpty ?? false;
-  if (hasRequestId != hasFingerprint) {
-    throw const FormatException(
-      'GasFree relay payload has partial binding context',
-    );
-  }
-  return payload;
+  return TronGasfreeRelayPayload.fromJson(payload);
 }
 
 /// Raw API response for a withdrawal operation
 class WithdrawResult {
   WithdrawResult({
-    this.txHex,
-    this.txJson,
     required this.txHash,
     required this.from,
     required this.to,
@@ -75,6 +54,8 @@ class WithdrawResult {
     required this.timestamp,
     required this.fee,
     required this.coin,
+    this.txHex,
+    this.txJson,
     this.internalId,
     this.kmdRewards,
     this.memo,
@@ -85,20 +66,31 @@ class WithdrawResult {
   }
 
   factory WithdrawResult.fromJson(JsonMap json) {
-    // A gas-free (gasless) relay result carries the relay payload (at the top
-    // level, or already nested under `tx_json`) instead of a signed tx_hex, and
-    // has no on-chain tx hash yet — the hash is only known once the relay
-    // confirms (via `gasless::trace_status`).
+    // KDF serializes TransactionData::Unsigned through TransactionDetails'
+    // serde(flatten), so a GasFree relay is always at the result's top level.
+    // A nested relay would be a locally fabricated compatibility shape and
+    // must not be accepted. Standard platform-specific JSON transactions
+    // (including SIA) continue to use tx_json.
     final nestedTxJson = json.valueOrNull<JsonMap>('tx_json');
-    final relaySource = nestedTxJson ?? json;
+    final nestedRelayType = nestedTxJson?.valueOrNull<String>('relay_type');
+    if (nestedRelayType == TronGasfreeRelayPayload.relayTypeValue) {
+      throw const FormatException(
+        'GasFree relay payload must be flattened into the withdrawal result',
+      );
+    }
+    final relaySource = json;
     final isGaslessRelay =
-        relaySource.valueOrNull<String>('relay_type') == _tronGasfreeRelayType;
-    final txJson = isGaslessRelay
+        relaySource.valueOrNull<String>('relay_type') ==
+        TronGasfreeRelayPayload.relayTypeValue;
+    if (isGaslessRelay && nestedTxJson != null) {
+      throw const FormatException(
+        'GasFree withdrawal result must not also contain tx_json',
+      );
+    }
+    final relayPayload = isGaslessRelay
         ? _extractTronGasfreeRelayPayload(relaySource)
-        : nestedTxJson;
-    final signedAuthorization = txJson?.valueOrNull<JsonMap>(
-      'signed_authorization',
-    );
+        : null;
+    final txJson = relayPayload?.toJson() ?? nestedTxJson;
 
     // The relaxed (nullable) parsing below only applies to a gasless relay
     // result, which legitimately has no on-chain tx hash / from / to / block /
@@ -114,12 +106,13 @@ class WithdrawResult {
           : json.value<String>('tx_hash'),
       from: isGaslessRelay
           ? List<String>.from(
-              json.valueOrNull('from') ?? [txJson!['from_address']],
+              json.valueOrNull('from') ?? [relayPayload!.fromAddress],
             )
           : List<String>.from(json.value('from')),
       to: isGaslessRelay
           ? List<String>.from(
-              json.valueOrNull('to') ?? [signedAuthorization!['receiver']],
+              json.valueOrNull('to') ??
+                  [relayPayload!.signedAuthorization.receiver],
             )
           : List<String>.from(json.value('to')),
       balanceChanges: BalanceChanges.fromJson(json),
@@ -153,59 +146,37 @@ class WithdrawResult {
   final KmdRewards? kmdRewards;
   final String? memo;
 
-  /// Signed GasFree authorization metadata, when this is a relay preview.
-  GaslessAuthorization? get gaslessAuthorization {
-    final gaslessFee = fee is FeeInfoTronGasless
-        ? fee as FeeInfoTronGasless
-        : null;
-    if (gaslessFee == null) return null;
-    final authorization = txJson?['signed_authorization'];
-    final auth = authorization is Map
-        ? Map<String, dynamic>.from(authorization)
-        : const <String, dynamic>{};
-    final maxFee =
-        gaslessFee.signedMaxFee ??
-        Decimal.tryParse(auth['max_fee']?.toString() ?? '');
-    final deadline =
-        gaslessFee.authorizationDeadline ??
-        int.tryParse(auth['deadline']?.toString() ?? '');
-    final fingerprint =
-        gaslessFee.authorizationFingerprint ??
-        txJson?['authorization_fingerprint']?.toString();
-    if (maxFee == null ||
-        deadline == null ||
-        fingerprint == null ||
-        fingerprint.isEmpty) {
+  /// Strictly typed relay payload for a GasFree withdraw preview.
+  TronGasfreeRelayPayload? get gaslessRelayPayload {
+    final relayJson = txJson;
+    if (relayJson == null ||
+        relayJson['relay_type'] != TronGasfreeRelayPayload.relayTypeValue) {
       return null;
     }
-    return GaslessAuthorization(
-      signedMaxFee: maxFee,
-      deadline: deadline,
-      fingerprint: fingerprint,
-      provider:
-          gaslessFee.providerAddress ?? auth['service_provider']?.toString(),
-      tokenContract: auth['token']?.toString(),
-      receiver: auth['receiver']?.toString(),
-      nonce: auth['nonce']?.toString(),
-      version: auth['version']?.toString(),
-    );
+    return TronGasfreeRelayPayload.fromJson(relayJson);
   }
 
-  JsonMap toJson() => {
-    if (txHex != null) 'tx_hex': txHex,
-    if (txJson != null) 'tx_json': txJson,
-    if (txHash != null) 'tx_hash': txHash,
-    'from': from,
-    'to': to,
-    ...balanceChanges.toJson(),
-    'block_height': blockHeight,
-    'timestamp': timestamp,
-    'fee_details': fee.toJson(),
-    'coin': coin,
-    if (internalId != null) 'internal_id': internalId,
-    if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
-    if (memo != null) 'memo': memo,
-  };
+  JsonMap toJson() {
+    final relayPayload = gaslessRelayPayload;
+    return {
+      if (txHex != null) 'tx_hex': txHex,
+      if (relayPayload != null)
+        ...relayPayload.toJson()
+      else if (txJson != null)
+        'tx_json': txJson,
+      if (txHash != null) 'tx_hash': txHash,
+      'from': from,
+      'to': to,
+      ...balanceChanges.toJson(),
+      'block_height': blockHeight,
+      'timestamp': timestamp,
+      'fee_details': fee.toJson(),
+      'coin': coin,
+      if (internalId != null) 'internal_id': internalId,
+      if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
+      if (memo != null) 'memo': memo,
+    };
+  }
 }
 
 /// Domain model for a successful withdrawal operation
@@ -219,10 +190,13 @@ class WithdrawalResult extends Equatable {
     this.kmdRewardsEligible = false,
     this.confirmationBlockHeight,
     this.confirmedAt,
+    this.gaslessFinalFee,
+    this.gaslessTraceId,
   });
 
   /// Create a domain model from API response
   factory WithdrawalResult.fromWithdrawResult(WithdrawResult result) {
+    final isGaslessPreview = result.gaslessRelayPayload != null;
     return WithdrawalResult(
       txHash: result.txHash,
       balanceChanges: result.balanceChanges,
@@ -232,10 +206,10 @@ class WithdrawalResult extends Equatable {
       kmdRewardsEligible:
           result.kmdRewards != null &&
           Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
-      confirmationBlockHeight: result.blockHeight > 0
+      confirmationBlockHeight: !isGaslessPreview && result.blockHeight > 0
           ? result.blockHeight
           : null,
-      confirmedAt: result.timestamp > 0
+      confirmedAt: !isGaslessPreview && result.timestamp > 0
           ? DateTime.fromMillisecondsSinceEpoch(
               result.timestamp * 1000,
               isUtc: true,
@@ -253,6 +227,17 @@ class WithdrawalResult extends Equatable {
   final int? confirmationBlockHeight;
   final DateTime? confirmedAt;
 
+  /// Authoritative token fee reported by `gasless::trace_status`.
+  ///
+  /// This is intentionally separate from GasFree preview fee details.
+  final Decimal? gaslessFinalFee;
+
+  /// Trace identifier accepted by KDF for a GasFree relay.
+  ///
+  /// This is domain-only receipt metadata and is never part of fee preview
+  /// serialization.
+  final String? gaslessTraceId;
+
   /// Convenience getter for the withdrawal amount (abs of net change)
   Decimal get amount => balanceChanges.netChange.abs();
 
@@ -266,6 +251,8 @@ class WithdrawalResult extends Equatable {
     kmdRewardsEligible,
     confirmationBlockHeight,
     confirmedAt,
+    gaslessFinalFee,
+    gaslessTraceId,
   ];
 }
 
@@ -295,7 +282,7 @@ class WithdrawalProgress extends Equatable {
   /// Relay lifecycle state for a gas-free (gasless) transfer, so consumers
   /// can render their own (e.g. localized) status copy instead of the English
   /// [message]. Null for standard withdrawals and for gasless progress events
-  /// that precede the relay poll.
+  /// that precede relay submission and trace reconciliation.
   final GaslessTraceState? gaslessState;
   final GaslessTransferState? gaslessTransferState;
   final WithdrawalSubmission? submission;

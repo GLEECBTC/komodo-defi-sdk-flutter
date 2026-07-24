@@ -146,13 +146,9 @@ void main() {
         'provider_name': 'gasfree',
         'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
         'transfer_fee': '2.000000',
-        'total_token_fee': '2.000000',
+        'activation_fee': '1.000000',
+        'total_token_fee': '3.000000',
         'signed_max_fee': '5.000000',
-        'final_fee': '1.500000',
-        'provider_address': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-        'authorization_deadline': '1999999999',
-        'request_id': '123e4567-e89b-42d3-a456-426614174000',
-        'authorization_fingerprint': 'a' * 64,
         'trace_id': null,
       };
 
@@ -168,20 +164,10 @@ void main() {
         equals('TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF'),
       );
       expect(gasless.transferFee, equals(Decimal.parse('2.000000')));
-      expect(gasless.totalTokenFee, equals(Decimal.parse('2.000000')));
+      expect(gasless.activationFee, equals(Decimal.parse('1.000000')));
+      expect(gasless.totalTokenFee, equals(Decimal.parse('3.000000')));
       expect(gasless.signedMaxFee, equals(Decimal.parse('5.000000')));
-      expect(gasless.finalFee, equals(Decimal.parse('1.500000')));
-      expect(
-        gasless.providerAddress,
-        equals('TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E'),
-      );
-      expect(gasless.authorizationDeadline, 1999999999);
-      expect(gasless.requestId, '123e4567-e89b-42d3-a456-426614174000');
-      expect(gasless.authorizationFingerprint, 'a' * 64);
-      expect(gasless.activationFee, isNull);
-      // Once confirmed, totalFee is the authoritative final charge while the
-      // preview total and signed maximum remain separately available.
-      expect(gasless.totalFee, equals(Decimal.parse('1.500000')));
+      expect(gasless.totalFee, equals(Decimal.parse('3.000000')));
     });
 
     test('round-trips through toJson, omitting null optionals', () {
@@ -202,15 +188,41 @@ void main() {
       expect(json['total_token_fee'], equals('2'));
       expect(json.containsKey('activation_fee'), isFalse);
       expect(json.containsKey('signed_max_fee'), isFalse);
-      expect(json.containsKey('final_fee'), isFalse);
-      expect(json.containsKey('provider_address'), isFalse);
-      expect(json.containsKey('authorization_deadline'), isFalse);
-      expect(json.containsKey('request_id'), isFalse);
-      expect(json.containsKey('authorization_fingerprint'), isFalse);
-      expect(json.containsKey('trace_id'), isFalse);
+      expect(json, containsPair('trace_id', null));
 
       // Re-parsing yields an equivalent variant.
       expect(FeeInfo.fromJson(json), equals(feeInfo));
+    });
+
+    test('rejects undocumented GasFree fee fields', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2',
+        'total_token_fee': '2',
+        'trace_id': null,
+        'request_id': 'must-not-be-accepted',
+      };
+
+      expect(() => FeeInfo.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects a non-null preview trace', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2',
+        'total_token_fee': '2',
+        'trace_id': 'trace-belongs-to-submit',
+      };
+
+      expect(() => FeeInfo.fromJson(json), throwsFormatException);
     });
   });
 

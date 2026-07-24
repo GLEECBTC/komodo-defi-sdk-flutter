@@ -10,5 +10,6 @@ export 'src/utils/live_data.dart';
 export 'src/utils/live_data_builder.dart';
 export 'src/utils/mnemonic_validator.dart';
 export 'src/utils/poll_utils.dart';
+export 'src/utils/protocol_type_utils.dart';
 export 'src/utils/retry_utils.dart';
 export 'src/utils/security_utils.dart';

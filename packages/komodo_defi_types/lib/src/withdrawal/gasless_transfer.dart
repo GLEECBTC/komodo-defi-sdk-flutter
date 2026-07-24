@@ -8,7 +8,6 @@ enum GaslessCapabilityState {
   initial,
   checking,
   ready,
-  stale,
   temporarilyUnavailable,
   disabled,
   unsupported,
@@ -17,163 +16,15 @@ enum GaslessCapabilityState {
 
 /// Authoritative SDK view of whether an asset may use the GasFree rail.
 class GaslessCapability extends Equatable {
-  const GaslessCapability({
-    required this.assetId,
-    required this.state,
-    this.reasonCode,
-  });
+  const GaslessCapability({required this.assetId, required this.state});
 
   final AssetId assetId;
   final GaslessCapabilityState state;
 
-  /// Stable, non-sensitive reason for a non-ready capability.
-  final String? reasonCode;
-
-  @Deprecated('Use reasonCode')
-  String? get reason => reasonCode;
-
   bool get isReady => state == GaslessCapabilityState.ready;
 
   @override
-  List<Object?> get props => [assetId, state, reasonCode];
-}
-
-enum GaslessBalanceProvenance {
-  /// Custody limits and balances were confirmed by the provider-backed RPC.
-  authoritativeProvider,
-
-  /// Only the custody contract balance could be read; spend limits are stale.
-  onChainOnly,
-
-  /// A prior custody snapshot is being retained during a transient outage.
-  cached,
-}
-
-class GaslessStandardBalance extends Equatable {
-  const GaslessStandardBalance({
-    required this.address,
-    required this.balance,
-    this.derivationPath,
-  });
-
-  final String address;
-  final String? derivationPath;
-  final BalanceInfo balance;
-
-  @override
-  List<Object?> get props => [address, derivationPath, balance];
-}
-
-/// One coherent view of custody and Standard-rail funds owned by a wallet.
-class GaslessBalanceSnapshot extends Equatable {
-  const GaslessBalanceSnapshot({
-    required this.custodyAddress,
-    required this.custodyTotal,
-    required this.custodySpendable,
-    required this.frozenAmount,
-    required this.standardBalances,
-    required this.totalWalletOwned,
-    required this.capturedAt,
-    required this.provenance,
-    required this.isFresh,
-  });
-
-  final String custodyAddress;
-  final Decimal custodyTotal;
-
-  /// Null when only the on-chain custody total is available.
-  final Decimal? custodySpendable;
-
-  /// Null when the provider cannot authoritatively report pending locks.
-  final Decimal? frozenAmount;
-  final List<GaslessStandardBalance> standardBalances;
-  final Decimal totalWalletOwned;
-  final DateTime capturedAt;
-  final GaslessBalanceProvenance provenance;
-  final bool isFresh;
-
-  BalanceInfo get walletBalance {
-    final standard = standardBalances.fold(
-      BalanceInfo.zero(),
-      (total, item) => total + item.balance,
-    );
-    final spendable = standard.spendable + (custodySpendable ?? Decimal.zero);
-    return BalanceInfo(
-      total: totalWalletOwned,
-      spendable: spendable,
-      unspendable: totalWalletOwned - spendable,
-    );
-  }
-
-  GaslessBalanceSnapshot asStale() => GaslessBalanceSnapshot(
-    custodyAddress: custodyAddress,
-    custodyTotal: custodyTotal,
-    custodySpendable: custodySpendable,
-    frozenAmount: frozenAmount,
-    standardBalances: standardBalances,
-    totalWalletOwned: totalWalletOwned,
-    capturedAt: capturedAt,
-    provenance: GaslessBalanceProvenance.cached,
-    isFresh: false,
-  );
-
-  @override
-  List<Object?> get props => [
-    custodyAddress,
-    custodyTotal,
-    custodySpendable,
-    frozenAmount,
-    standardBalances,
-    totalWalletOwned,
-    capturedAt,
-    provenance,
-    isFresh,
-  ];
-}
-
-/// Non-replayable metadata that identifies a signed GasFree authorization.
-class GaslessAuthorization extends Equatable {
-  const GaslessAuthorization({
-    required this.signedMaxFee,
-    required this.deadline,
-    required this.fingerprint,
-    this.provider,
-    this.tokenContract,
-    this.receiver,
-    this.nonce,
-    this.version,
-  });
-
-  final Decimal signedMaxFee;
-
-  /// Signed deadline in seconds since Unix epoch.
-  final int deadline;
-
-  /// SHA-256 correlation fingerprint. The signature itself is never retained.
-  final String fingerprint;
-  final String? provider;
-  final String? tokenContract;
-  final String? receiver;
-  final String? nonce;
-  final String? version;
-
-  DateTime get expiresAt =>
-      DateTime.fromMillisecondsSinceEpoch(deadline * 1000, isUtc: true);
-
-  bool isExpiredAt(DateTime instant) =>
-      deadline <= instant.toUtc().millisecondsSinceEpoch ~/ 1000;
-
-  @override
-  List<Object?> get props => [
-    signedMaxFee,
-    deadline,
-    fingerprint,
-    provider,
-    tokenContract,
-    receiver,
-    nonce,
-    version,
-  ];
+  List<Object?> get props => [assetId, state];
 }
 
 /// Durable lifecycle of a GasFree transfer from signing through settlement.
@@ -189,43 +40,6 @@ enum GaslessTransferState {
   bool get isTerminal =>
       this == GaslessTransferState.confirmed ||
       this == GaslessTransferState.failedFinal;
-}
-
-/// Strength of the relay response verification available for a transfer.
-enum GaslessVerificationMode {
-  /// KDF PR #9 does not echo the signed request context. Finality therefore
-  /// requires an independent, asset-scoped on-chain history match.
-  legacyOnChain,
-
-  /// KDF echoes and validates the request identity and signed authorization.
-  boundRelay,
-}
-
-/// Evidence permitting a wallet UI to expose a new GasFree receive address.
-///
-/// This is intentionally independent from [GaslessVerificationMode], which
-/// describes how an already-submitted transfer reaches finality.
-enum GaslessReceiveEvidence {
-  /// No authoritative evidence permits a new custody deposit.
-  none,
-
-  /// KDF attested the canonical custody address and exact pinned provider.
-  statusAttestedV1,
-
-  /// KDF supports request-bound relay verification in addition to status.
-  boundRelayV2,
-}
-
-/// Result of independently reconciling a legacy relay with on-chain history.
-enum GaslessOnChainVerification {
-  /// The expected hash has not propagated to authoritative history yet.
-  pending,
-
-  /// Hash, token, custody source, recipient, and amount all match.
-  verified,
-
-  /// A transaction with the expected hash exists but its signed context differs.
-  mismatch,
 }
 
 /// Stable categories for GasFree-specific failures.
@@ -269,6 +83,7 @@ enum GaslessTransferErrorCode {
   unsupportedToken,
   authorizationExpired,
   pendingTransfer,
+  maxFeeExceeded,
   relayRejected,
   rateLimited,
   providerUnavailable,
@@ -372,44 +187,60 @@ enum WithdrawalSubmissionType { onChain, gaslessRelay }
 
 /// Identity returned when a withdrawal has been accepted for broadcast.
 class WithdrawalSubmission extends Equatable {
-  const WithdrawalSubmission.onChain({required String txHash})
+  const WithdrawalSubmission.onChain({required this.txHash})
     : type = WithdrawalSubmissionType.onChain,
-      txHash = txHash,
       traceId = null,
-      requestId = null;
+      journalId = null;
 
   const WithdrawalSubmission.gaslessRelay({
-    required String traceId,
-    required String requestId,
+    required this.traceId,
+    required this.journalId,
   }) : type = WithdrawalSubmissionType.gaslessRelay,
-       txHash = null,
-       traceId = traceId,
-       requestId = requestId;
+       txHash = null;
 
-  const WithdrawalSubmission.gaslessUnknown({required String requestId})
+  const WithdrawalSubmission.gaslessUnknown({required this.journalId})
     : type = WithdrawalSubmissionType.gaslessRelay,
       txHash = null,
-      traceId = null,
-      requestId = requestId;
+      traceId = null;
 
   final WithdrawalSubmissionType type;
   final String? txHash;
   final String? traceId;
-  final String? requestId;
+  final String? journalId;
 
   @override
-  List<Object?> get props => [type, txHash, traceId, requestId];
+  List<Object?> get props => [type, txHash, traceId, journalId];
+}
+
+FeeInfo _parsePersistedFee(JsonMap json) {
+  if (json['type'] != 'TronGasless') return FeeInfo.fromJson(json);
+
+  // Older encrypted journal entries copied submission-local echoes into the
+  // preview fee. Migrate only the documented preview subset and deliberately
+  // discard request ids, fingerprints, provider echoes, and accepted traces.
+  return FeeInfo.fromJson({
+    'type': 'TronGasless',
+    'coin': json['coin'],
+    'fee_method': json['fee_method'],
+    'provider_name': json['provider_name'],
+    'gasfree_address': json['gasfree_address'],
+    'transfer_fee': json['transfer_fee'],
+    'total_token_fee': json['total_token_fee'],
+    if (json['activation_fee'] != null)
+      'activation_fee': json['activation_fee'],
+    if (json['signed_max_fee'] != null)
+      'signed_max_fee': json['signed_max_fee'],
+    'trace_id': null,
+  });
 }
 
 /// Encrypted, wallet-scoped record of a GasFree relay awaiting settlement.
 ///
-/// The signed authorization and its signature are deliberately not persisted.
-/// [authorizationFingerprint] is sufficient to correlate diagnostics without
-/// retaining replayable authorization material.
+/// [journalId] is a local reservation identity and is never sent to KDF. The
+/// signed authorization and signature are deliberately not persisted.
 class PendingGaslessTransfer extends Equatable {
   const PendingGaslessTransfer({
-    required this.traceId,
-    required this.requestId,
+    required this.journalId,
     required this.assetId,
     required this.network,
     required this.sourceAddress,
@@ -418,33 +249,33 @@ class PendingGaslessTransfer extends Equatable {
     required this.requestedAmount,
     required this.signedMaxFee,
     required this.authorizationDeadline,
-    required this.authorizationFingerprint,
     required this.balanceChanges,
     required this.fee,
     required this.acceptedAt,
     required this.updatedAt,
     required this.state,
-    this.verificationMode = GaslessVerificationMode.boundRelay,
-    this.provider,
-    this.tokenContract,
-    this.authorizationNonce,
-    this.authorizationVersion,
-    this.authorizationAmount,
-    this.authorizationMaxFee,
+    this.traceId,
   });
 
   factory PendingGaslessTransfer.fromJson(JsonMap json) {
+    final traceId = json.valueOrNull<String>('trace_id');
+    final journalId =
+        json.valueOrNull<String>('journal_id') ??
+        // One-way migration from the pre-contract local persistence name.
+        json.valueOrNull<String>('request_id') ??
+        (traceId == null ? null : 'legacy:$traceId');
+    if (journalId == null || journalId.trim().isEmpty) {
+      throw const FormatException(
+        'Pending GasFree transfer is missing its local journal id',
+      );
+    }
+    final persistedState = GaslessTransferState.values.byName(
+      json.value<String>('state'),
+    );
+
     return PendingGaslessTransfer(
-      traceId: json.valueOrNull<String>('trace_id'),
-      requestId:
-          json.valueOrNull<String>('request_id') ??
-          'legacy:${json.value<String>('trace_id')}',
-      provider: json.valueOrNull<String>('provider'),
-      tokenContract: json.valueOrNull<String>('token_contract'),
-      authorizationNonce: json.valueOrNull<String>('authorization_nonce'),
-      authorizationVersion: json.valueOrNull<String>('authorization_version'),
-      authorizationAmount: json.valueOrNull<String>('authorization_amount'),
-      authorizationMaxFee: json.valueOrNull<String>('authorization_max_fee'),
+      traceId: traceId,
+      journalId: journalId,
       assetId: json.value<String>('asset_id'),
       network: json.value<String>('network'),
       sourceAddress: json.value<String>('source_address'),
@@ -453,31 +284,24 @@ class PendingGaslessTransfer extends Equatable {
       requestedAmount: Decimal.parse(json.value<String>('requested_amount')),
       signedMaxFee: Decimal.parse(json.value<String>('signed_max_fee')),
       authorizationDeadline: json.value<int>('authorization_deadline'),
-      authorizationFingerprint: json.value<String>('authorization_fingerprint'),
       balanceChanges: BalanceChanges.fromJson(
         json.value<JsonMap>('balance_changes'),
       ),
-      fee: FeeInfo.fromJson(json.value<JsonMap>('fee')),
+      fee: _parsePersistedFee(json.value<JsonMap>('fee')),
       acceptedAt: DateTime.parse(json.value<String>('accepted_at')).toUtc(),
       updatedAt: DateTime.parse(json.value<String>('updated_at')).toUtc(),
-      state: GaslessTransferState.values.byName(json.value<String>('state')),
-      verificationMode: GaslessVerificationMode.values.byName(
-        json.valueOrNull<String>('verification_mode') ??
-            GaslessVerificationMode.legacyOnChain.name,
-      ),
+      // A reservation without a KDF trace cannot be proven unsent after a
+      // restart. Preserve the no-blind-resubmit invariant.
+      state: traceId == null
+          ? GaslessTransferState.submittedUnknown
+          : persistedState,
     );
   }
 
   final String? traceId;
 
-  /// Required idempotency identity created before relay submission.
-  final String requestId;
-  final String? provider;
-  final String? tokenContract;
-  final String? authorizationNonce;
-  final String? authorizationVersion;
-  final String? authorizationAmount;
-  final String? authorizationMaxFee;
+  /// Local identity created before relay submission.
+  final String journalId;
 
   final String assetId;
   final String network;
@@ -490,41 +314,21 @@ class PendingGaslessTransfer extends Equatable {
   /// Signed authorization expiry as seconds since Unix epoch.
   final int authorizationDeadline;
 
-  final String authorizationFingerprint;
   final BalanceChanges balanceChanges;
   final FeeInfo fee;
   final DateTime acceptedAt;
   final DateTime updatedAt;
   final GaslessTransferState state;
-  final GaslessVerificationMode verificationMode;
-
-  GaslessAuthorization get authorization => GaslessAuthorization(
-    signedMaxFee: signedMaxFee,
-    deadline: authorizationDeadline,
-    fingerprint: authorizationFingerprint,
-    provider: provider,
-    tokenContract: tokenContract,
-    receiver: destinationAddress,
-    nonce: authorizationNonce,
-    version: authorizationVersion,
-  );
 
   PendingGaslessTransfer copyWith({
     String? traceId,
     GaslessTransferState? state,
     FeeInfo? fee,
     DateTime? updatedAt,
-    GaslessVerificationMode? verificationMode,
   }) {
     return PendingGaslessTransfer(
       traceId: traceId ?? this.traceId,
-      requestId: requestId,
-      provider: provider,
-      tokenContract: tokenContract,
-      authorizationNonce: authorizationNonce,
-      authorizationVersion: authorizationVersion,
-      authorizationAmount: authorizationAmount,
-      authorizationMaxFee: authorizationMaxFee,
+      journalId: journalId,
       assetId: assetId,
       network: network,
       sourceAddress: sourceAddress,
@@ -533,28 +337,17 @@ class PendingGaslessTransfer extends Equatable {
       requestedAmount: requestedAmount,
       signedMaxFee: signedMaxFee,
       authorizationDeadline: authorizationDeadline,
-      authorizationFingerprint: authorizationFingerprint,
       balanceChanges: balanceChanges,
       fee: fee ?? this.fee,
       acceptedAt: acceptedAt,
       updatedAt: updatedAt ?? this.updatedAt,
       state: state ?? this.state,
-      verificationMode: verificationMode ?? this.verificationMode,
     );
   }
 
   JsonMap toJson() => {
     if (traceId != null) 'trace_id': traceId,
-    'request_id': requestId,
-    if (provider != null) 'provider': provider,
-    if (tokenContract != null) 'token_contract': tokenContract,
-    if (authorizationNonce != null) 'authorization_nonce': authorizationNonce,
-    if (authorizationVersion != null)
-      'authorization_version': authorizationVersion,
-    if (authorizationAmount != null)
-      'authorization_amount': authorizationAmount,
-    if (authorizationMaxFee != null)
-      'authorization_max_fee': authorizationMaxFee,
+    'journal_id': journalId,
     'asset_id': assetId,
     'network': network,
     'source_address': sourceAddress,
@@ -563,25 +356,17 @@ class PendingGaslessTransfer extends Equatable {
     'requested_amount': requestedAmount.toString(),
     'signed_max_fee': signedMaxFee.toString(),
     'authorization_deadline': authorizationDeadline,
-    'authorization_fingerprint': authorizationFingerprint,
     'balance_changes': balanceChanges.toJson(),
     'fee': fee.toJson(),
     'accepted_at': acceptedAt.toUtc().toIso8601String(),
     'updated_at': updatedAt.toUtc().toIso8601String(),
     'state': state.name,
-    'verification_mode': verificationMode.name,
   };
 
   @override
   List<Object?> get props => [
     traceId,
-    requestId,
-    provider,
-    tokenContract,
-    authorizationNonce,
-    authorizationVersion,
-    authorizationAmount,
-    authorizationMaxFee,
+    journalId,
     assetId,
     network,
     sourceAddress,
@@ -590,12 +375,10 @@ class PendingGaslessTransfer extends Equatable {
     requestedAmount,
     signedMaxFee,
     authorizationDeadline,
-    authorizationFingerprint,
     balanceChanges,
     fee,
     acceptedAt,
     updatedAt,
     state,
-    verificationMode,
   ];
 }

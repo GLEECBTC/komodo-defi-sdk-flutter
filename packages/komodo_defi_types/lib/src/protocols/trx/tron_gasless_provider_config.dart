@@ -22,8 +22,6 @@ sealed class GaslessService extends Equatable {
         return GaslessServiceGasFree(
           apiKey: gasFree.value<String>('api_key'),
           apiSecret: gasFree.value<String>('api_secret'),
-          unsafeAllowDirectHmac:
-              gasFree.valueOrNull<bool>('unsafe_allow_direct_hmac') ?? false,
         );
       }
     }
@@ -50,30 +48,18 @@ class GaslessServiceKomodoProxy extends GaslessService {
 /// Call the GasFree API directly with an API key/secret. Not recommended for
 /// shipped clients, as it embeds credentials in the request.
 class GaslessServiceGasFree extends GaslessService {
-  const GaslessServiceGasFree({
-    required this.apiKey,
-    required this.apiSecret,
-    this.unsafeAllowDirectHmac = false,
-  });
+  const GaslessServiceGasFree({required this.apiKey, required this.apiSecret});
 
   final String apiKey;
   final String apiSecret;
 
-  /// Explicit development-only opt-in required by KDF for direct HMAC mode.
-  final bool unsafeAllowDirectHmac;
-
   @override
   Object toJson() => {
-    'gas_free': {
-      'api_key': apiKey,
-      'api_secret': apiSecret,
-      if (unsafeAllowDirectHmac)
-        'unsafe_allow_direct_hmac': unsafeAllowDirectHmac,
-    },
+    'gas_free': {'api_key': apiKey, 'api_secret': apiSecret},
   };
 
   @override
-  List<Object?> get props => [unsafeAllowDirectHmac];
+  List<Object?> get props => [apiKey, apiSecret];
 
   @override
   String toString() =>
@@ -91,9 +77,7 @@ class TronGaslessProviderConfig extends Equatable {
   const TronGaslessProviderConfig({
     required this.baseUrl,
     required this.service,
-    required this.serviceProvider,
-    this.allowServiceProviderDiscovery = false,
-    this.unsafeAllowInsecureHttp = false,
+    this.serviceProvider,
     this.requestTimeoutMs = 15000,
     this.statusPollIntervalMs = 3000,
   });
@@ -103,10 +87,6 @@ class TronGaslessProviderConfig extends Equatable {
       baseUrl: json.value<String>('base_url'),
       service: GaslessService.fromJson(json.value<Object>('service')),
       serviceProvider: json.valueOrNull<String>('service_provider'),
-      allowServiceProviderDiscovery:
-          json.valueOrNull<bool>('allow_service_provider_discovery') ?? false,
-      unsafeAllowInsecureHttp:
-          json.valueOrNull<bool>('unsafe_allow_insecure_http') ?? false,
       requestTimeoutMs: json.valueOrNull<int>('request_timeout_ms') ?? 15000,
       statusPollIntervalMs:
           json.valueOrNull<int>('status_poll_interval_ms') ?? 3000,
@@ -121,14 +101,10 @@ class TronGaslessProviderConfig extends Equatable {
   final GaslessService service;
 
   /// Service-provider TRON address used in the TIP-712 permit.
+  ///
+  /// When omitted, KDF resolves the first provider offered by the configured
+  /// service on first use and caches it for the activation lifetime.
   final String? serviceProvider;
-
-  /// Development-only opt-in to select the first provider returned by KDF.
-  /// Production configurations must pin [serviceProvider].
-  final bool allowServiceProviderDiscovery;
-
-  /// Development-only opt-in for a plain-HTTP proxy endpoint.
-  final bool unsafeAllowInsecureHttp;
 
   /// Request timeout for GasFree API calls, in milliseconds.
   final int requestTimeoutMs;
@@ -140,99 +116,52 @@ class TronGaslessProviderConfig extends Equatable {
     'base_url': baseUrl,
     'service': service.toJson(),
     if (serviceProvider?.trim().isNotEmpty ?? false)
-      'service_provider': serviceProvider,
-    if (allowServiceProviderDiscovery) 'allow_service_provider_discovery': true,
-    if (unsafeAllowInsecureHttp) 'unsafe_allow_insecure_http': true,
+      'service_provider': serviceProvider!.trim(),
     'request_timeout_ms': requestTimeoutMs,
     'status_poll_interval_ms': statusPollIntervalMs,
   };
 
-  /// Validate security-sensitive runtime invariants before KDF startup.
-  void validate({
-    bool allowInsecureTransport = false,
-    bool allowDirectCredentials = false,
-    bool allowProviderDiscovery = false,
-  }) {
+  /// Validate the documented KDF activation shape before startup.
+  void validate() {
     final uri = Uri.tryParse(baseUrl);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
       throw ArgumentError.value(baseUrl, 'baseUrl', 'Must be an absolute URL');
     }
     final scheme = uri.scheme.toLowerCase();
-    if (scheme != 'https') {
-      final explicitlyAllowed =
-          scheme == 'http' &&
-          unsafeAllowInsecureHttp &&
-          allowInsecureTransport &&
-          service is GaslessServiceKomodoProxy;
-      if (!explicitlyAllowed) {
-        throw ArgumentError.value(baseUrl, 'baseUrl', 'HTTPS is required');
-      }
+    switch (service) {
+      case GaslessServiceGasFree():
+        if (scheme != 'https') {
+          throw ArgumentError.value(
+            baseUrl,
+            'baseUrl',
+            'Direct GasFree mode requires HTTPS',
+          );
+        }
+        if (uri.path.isNotEmpty && uri.path != '/') {
+          throw ArgumentError.value(
+            baseUrl,
+            'baseUrl',
+            'Direct GasFree mode requires a host-only URL',
+          );
+        }
+      case GaslessServiceKomodoProxy():
+        if (scheme != 'http' && scheme != 'https') {
+          throw ArgumentError.value(
+            baseUrl,
+            'baseUrl',
+            'Komodo proxy mode requires HTTP or HTTPS',
+          );
+        }
     }
-    if (uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) {
-      throw ArgumentError.value(
-        baseUrl,
-        'baseUrl',
-        'Credentials, query parameters, and fragments are not allowed',
-      );
+    // KDF deserializes both values as unsigned integers without imposing
+    // client-side minimums or maximums.
+    if (requestTimeoutMs < 0) {
+      throw RangeError.value(requestTimeoutMs, 'requestTimeoutMs');
     }
-    final String decodedPath;
-    try {
-      decodedPath = Uri.decodeComponent(uri.path);
-    } on FormatException {
-      throw ArgumentError.value(
-        baseUrl,
-        'baseUrl',
-        'Malformed URL path encoding is not allowed',
-      );
-    }
-    if (uri.path.contains('\\') ||
-        uri.path.contains('//') ||
-        decodedPath.split('/').any((segment) => segment == '..')) {
-      throw ArgumentError.value(
-        baseUrl,
-        'baseUrl',
-        'Ambiguous or traversing URL paths are not allowed',
-      );
-    }
-    if (service is GaslessServiceGasFree &&
-        uri.path.isNotEmpty &&
-        uri.path != '/') {
-      throw ArgumentError.value(
-        baseUrl,
-        'baseUrl',
-        'Direct GasFree mode requires a host-only URL',
-      );
-    }
-    if (allowServiceProviderDiscovery && !allowProviderDiscovery) {
-      throw ArgumentError(
-        'Service-provider discovery is development-only; pin a provider',
-      );
-    }
-    if ((serviceProvider?.trim().isEmpty ?? true) &&
-        !allowServiceProviderDiscovery) {
-      throw ArgumentError.value(
-        serviceProvider,
-        'serviceProvider',
-        'A pinned service provider is required',
-      );
-    }
-    if (requestTimeoutMs < 1000 || requestTimeoutMs > 60000) {
-      throw RangeError.range(requestTimeoutMs, 1000, 60000, 'requestTimeoutMs');
-    }
-    if (statusPollIntervalMs < 500 || statusPollIntervalMs > 60000) {
-      throw RangeError.range(
-        statusPollIntervalMs,
-        500,
-        60000,
-        'statusPollIntervalMs',
-      );
+    if (statusPollIntervalMs < 0) {
+      throw RangeError.value(statusPollIntervalMs, 'statusPollIntervalMs');
     }
     if (service case final GaslessServiceGasFree direct) {
-      if (!direct.unsafeAllowDirectHmac || !allowDirectCredentials) {
-        throw ArgumentError(
-          'Direct GasFree credentials are development-only; use komodo_proxy',
-        );
-      }
       if (direct.apiKey.trim().isEmpty || direct.apiSecret.trim().isEmpty) {
         throw ArgumentError('Direct GasFree credentials must be non-empty');
       }
@@ -244,8 +173,6 @@ class TronGaslessProviderConfig extends Equatable {
     baseUrl,
     service,
     serviceProvider,
-    allowServiceProviderDiscovery,
-    unsafeAllowInsecureHttp,
     requestTimeoutMs,
     statusPollIntervalMs,
   ];
