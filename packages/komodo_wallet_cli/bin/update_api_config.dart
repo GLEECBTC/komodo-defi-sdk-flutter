@@ -8,6 +8,10 @@ import 'package:crypto/crypto.dart';
 import 'package:html/parser.dart' as parser;
 import 'package:http/http.dart' as http;
 import 'package:komodo_wallet_build_transformer/komodo_wallet_build_transformer.dart';
+import 'package:komodo_wallet_cli/src/update_api_config/artifact_filename.dart';
+import 'package:komodo_wallet_cli/src/update_api_config/commit_hash_resolver.dart';
+import 'package:komodo_wallet_cli/src/update_api_config/mirror_asset_matcher.dart';
+import 'package:komodo_wallet_cli/src/update_api_config/platform_update_scope.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 
@@ -64,7 +68,9 @@ void main(List<String> arguments) async {
       'commit',
       abbr: 'm',
       help:
-          'Commit hash to pin (short or full). Overrides latest commit lookup.',
+          'Commit hash to pin. Short SHAs are resolved remotely; the manifest '
+          'always stores a full 40-character lowercase SHA. Overrides latest '
+          'commit lookup.',
     )
     ..addOption(
       'source',
@@ -155,29 +161,39 @@ void main(List<String> arguments) async {
       log.info('Latest commit: $commitHash');
     }
 
-    // Ensure the build config is updated with a full 40-char commit SHA
-    if (commitHash.length < 40) {
-      try {
-        final fullSha = await fetcher.resolveCommitSha(commitHash);
-        log.info('Resolved short commit to full SHA: $fullSha');
-        commitHash = fullSha;
-      } catch (e) {
-        log.warning(
-          'Failed to resolve short commit to full SHA; proceeding with provided value: $commitHash',
-        );
-      }
+    final requestedCommitHash = commitHash;
+    commitHash = await resolveCommitHashForUpdate(
+      commitHash,
+      strict: strict,
+      requireFullCommitHash: true,
+      resolveShortCommit: fetcher.resolveCommitSha,
+    );
+    if (commitHash != requestedCommitHash) {
+      log.info('Resolved short commit to full SHA: $commitHash');
     }
 
-    if (platform == 'all') {
-      final platforms = fetcher.getSupportedPlatforms();
-      log.info('Updating config for all platforms: ${platforms.join(', ')}');
+    final supportedPlatforms = fetcher.getSupportedPlatforms();
+    final platforms = resolveRequestedApiPlatforms(
+      requestedPlatform: platform,
+      supportedPlatforms: supportedPlatforms,
+    );
+    validateApiCommitUpdateScope(
+      previousCommitHash: fetcher.currentApiCommitHash,
+      nextCommitHash: commitHash,
+      updatedPlatforms: platforms,
+      requiredPlatforms: fetcher.requiredPlatforms,
+      supportedPlatforms: supportedPlatforms,
+      strict: strict,
+      requireFullCommitHash: fetcher.requiresFullCommitHash,
+    );
 
-      for (final plat in platforms) {
-        await fetcher.updatePlatformConfig(plat, commitHash);
-      }
+    if (platform == 'all') {
+      log.info('Updating config for all platforms: ${platforms.join(', ')}');
     } else {
       log.info('Updating config for platform: $platform');
-      await fetcher.updatePlatformConfig(platform, commitHash);
+    }
+    for (final plat in platforms) {
+      await fetcher.updatePlatformConfig(plat, commitHash);
     }
 
     await fetcher.updateBuildConfig(commitHash);
@@ -274,12 +290,6 @@ class KdfFetcher {
     owner = parts[0];
     repository = parts[1];
 
-    // Create output directory if it doesn't exist
-    final outputDirObj = Directory(outputDir);
-    if (!outputDirObj.existsSync()) {
-      outputDirObj.createSync(recursive: true);
-    }
-
     if (source != 'github' && source != 'mirror') {
       throw ArgumentError('Source must be either "github" or "mirror"');
     }
@@ -310,6 +320,7 @@ class KdfFetcher {
   }
 
   Map<String, dynamic>? _configData;
+  final Map<String, String> _updatedPlatformCommits = <String, String>{};
 
   /// Headers to use for GitHub API requests
   Map<String, String> get _headers {
@@ -399,13 +410,62 @@ class KdfFetcher {
     return platforms.keys.toList();
   }
 
+  /// Whether the loaded manifest requires an immutable full commit SHA.
+  bool get requiresFullCommitHash {
+    final apiConfig = _configData?['api'] as Map<String, dynamic>?;
+    if (apiConfig == null) {
+      throw StateError('Build config not loaded or missing api section');
+    }
+    final value = apiConfig['require_full_commit_hash'];
+    if (value == null) return false;
+    if (value is! bool) {
+      throw StateError('require_full_commit_hash must be a boolean');
+    }
+    return value;
+  }
+
+  /// Whether artifact selection must match the requested commit exactly.
+  bool get requiresExactArtifactCommit => strict || requiresFullCommitHash;
+
+  /// The commit currently stored in the loaded global API manifest.
+  String get currentApiCommitHash {
+    final apiConfig = _configData?['api'] as Map<String, dynamic>?;
+    if (apiConfig == null) {
+      throw StateError('Build config not loaded or missing api section');
+    }
+    final value = apiConfig['api_commit_hash'];
+    if (value is! String) {
+      throw StateError('api_commit_hash must be a string');
+    }
+    return value;
+  }
+
+  /// Platforms that must move together when the global commit changes.
+  List<String> get requiredPlatforms {
+    final apiConfig = _configData?['api'] as Map<String, dynamic>?;
+    if (apiConfig == null) {
+      throw StateError('Build config not loaded or missing api section');
+    }
+    final value = apiConfig['required_platforms'];
+    if (value == null) return const <String>[];
+    if (value is! List || value.any((platform) => platform is! String)) {
+      throw StateError('required_platforms must be a list of strings');
+    }
+    return List<String>.unmodifiable(value.cast<String>());
+  }
+
   /// Locates and verifies download URL for a platform
   Future<void> updatePlatformConfig(String platform, String commitHash) async {
+    final config = await loadBuildConfig();
+    validateResolvedCommitHashForUpdate(
+      commitHash,
+      strict: strict,
+      requireFullCommitHash: true,
+    );
     log.info(
       'Updating config for platform: $platform with commit: $commitHash',
     );
 
-    final config = await loadBuildConfig();
     final apiConfig = config['api'] as Map<String, dynamic>;
 
     final platforms = apiConfig['platforms'] as Map<String, dynamic>;
@@ -452,6 +512,7 @@ class KdfFetcher {
           log.info('Checksum already exists in platform config');
         }
       }
+      _updatedPlatformCommits[platform] = commitHash;
     } catch (e) {
       log.severe('Error updating platform config for $platform: $e');
       throw Exception('Failed to update platform $platform: $e');
@@ -522,30 +583,26 @@ class KdfFetcher {
 
     final releases = jsonDecode(response.body) as List<dynamic>;
 
-    // Look for the asset with the matching pattern/keyword and commit hash
-    final shortHash = commitHash.substring(0, 7);
-
     final candidates = <String, String>{};
     for (final release in releases) {
       final assets = release['assets'] as List<dynamic>;
 
       for (final asset in assets) {
-        final fileName = asset['name'] as String;
+        final fileName = apiArtifactFilenameFromUrl(asset['name'] as String);
 
         var matches = false;
-        if (matchingPattern != null) {
-          try {
-            final regex = RegExp(matchingPattern);
-            matches = regex.hasMatch(fileName);
-          } catch (e) {
-            log.warning('Invalid regex pattern: $matchingPattern');
-          }
-        } else if (matchingKeyword != null) {
-          matches = fileName.contains(matchingKeyword);
+        try {
+          matches = matchesApiArtifactFilename(
+            fileName,
+            matchingPattern: matchingPattern,
+            matchingKeyword: matchingKeyword,
+            commitHash: commitHash,
+          );
+        } on FormatException {
+          log.warning('Invalid regex pattern: $matchingPattern');
         }
 
-        if (matches &&
-            (fileName.contains(commitHash) || fileName.contains(shortHash))) {
+        if (matches) {
           candidates[fileName] = asset['browser_download_url'] as String;
         }
       }
@@ -557,25 +614,24 @@ class KdfFetcher {
     }
 
     // In strict mode do not fallback – require exact commit match
-    if (!strict) {
+    if (!requiresExactArtifactCommit) {
       // If we couldn't find an exact match, try just matching the platform pattern
       final candidates = <String, String>{};
       for (final release in releases) {
         final assets = release['assets'] as List<dynamic>;
 
         for (final asset in assets) {
-          final fileName = asset['name'] as String;
+          final fileName = apiArtifactFilenameFromUrl(asset['name'] as String);
 
           var matches = false;
-          if (matchingPattern != null) {
-            try {
-              final regex = RegExp(matchingPattern);
-              matches = regex.hasMatch(fileName);
-            } catch (e) {
-              log.warning('Invalid regex pattern: $matchingPattern');
-            }
-          } else if (matchingKeyword != null) {
-            matches = fileName.contains(matchingKeyword);
+          try {
+            matches = matchesApiArtifactFilename(
+              fileName,
+              matchingPattern: matchingPattern,
+              matchingKeyword: matchingKeyword,
+            );
+          } on FormatException {
+            log.warning('Invalid regex pattern: $matchingPattern');
           }
 
           if (matches) {
@@ -645,25 +701,21 @@ class KdfFetcher {
           if (href == null) continue;
           attemptedFiles.add(href);
 
-          // Prefer checking the path portion for extensions to ignore query params
           final hrefPath = Uri.tryParse(href)?.path ?? href;
-          if (!extensions.any(hrefPath.endsWith)) continue;
-          if (href.contains('wallet')) continue; // Ignore wallet builds
-
           var matches = false;
-          if (matchingPattern != null) {
-            try {
-              final regex = RegExp(matchingPattern);
-              matches = regex.hasMatch(hrefPath);
-            } catch (e) {
-              log.warning('Invalid regex pattern: $matchingPattern');
-            }
-          } else if (matchingKeyword != null) {
-            matches = hrefPath.contains(matchingKeyword);
+          try {
+            matches = matchesMirrorArchiveHref(
+              href,
+              extensions: extensions,
+              matchingPattern: matchingPattern,
+              matchingKeyword: matchingKeyword,
+              commitHash: commitHash,
+            );
+          } on FormatException {
+            log.warning('Invalid regex pattern: $matchingPattern');
           }
 
-          if (matches &&
-              (hrefPath.contains(fullHash) || hrefPath.contains(shortHash))) {
+          if (matches) {
             final fileName = path.basename(hrefPath);
             final resolved = href.startsWith('http')
                 ? href
@@ -683,25 +735,23 @@ class KdfFetcher {
         }
 
         // Second pass: latest matching asset without commit constraint (only when not strict)
-        if (!strict) {
+        if (!requiresExactArtifactCommit) {
           final candidates = <String, String>{};
           for (final element in document.querySelectorAll('a')) {
             final href = element.attributes['href'];
             if (href == null) continue;
             final hrefPath = Uri.tryParse(href)?.path ?? href;
-            if (!extensions.any(hrefPath.endsWith)) continue;
-            if (href.contains('wallet')) continue;
 
             var matches = false;
-            if (matchingPattern != null) {
-              try {
-                final regex = RegExp(matchingPattern);
-                matches = regex.hasMatch(hrefPath);
-              } catch (e) {
-                log.warning('Invalid regex pattern: $matchingPattern');
-              }
-            } else if (matchingKeyword != null) {
-              matches = hrefPath.contains(matchingKeyword);
+            try {
+              matches = matchesMirrorArchiveHref(
+                href,
+                extensions: extensions,
+                matchingPattern: matchingPattern,
+                matchingKeyword: matchingKeyword,
+              );
+            } on FormatException {
+              log.warning('Invalid regex pattern: $matchingPattern');
             }
 
             if (matches) {
@@ -754,9 +804,10 @@ class KdfFetcher {
       );
     }
 
-    final fileName = path.basename(url);
+    final fileName = apiArtifactFilenameFromUrl(url);
     final filePath = path.join(outputDir, fileName);
 
+    await Directory(outputDir).create(recursive: true);
     await File(filePath).writeAsBytes(response.bodyBytes);
     log.info('Downloaded to: $filePath');
 
@@ -782,7 +833,25 @@ class KdfFetcher {
   /// Updates the build config with the new commit hash and branch name, then writes it back to disk
   Future<void> updateBuildConfig(String commitHash) async {
     final config = await loadBuildConfig();
+    validateResolvedCommitHashForUpdate(
+      commitHash,
+      strict: strict,
+      requireFullCommitHash: true,
+    );
     final apiConfig = config['api'] as Map<String, dynamic>;
+    final supportedPlatforms = getSupportedPlatforms();
+    validateApiCommitUpdateScope(
+      previousCommitHash: currentApiCommitHash,
+      nextCommitHash: commitHash,
+      updatedPlatforms: apiPlatformsUpdatedForCommit(
+        _updatedPlatformCommits,
+        commitHash,
+      ),
+      requiredPlatforms: requiredPlatforms,
+      supportedPlatforms: supportedPlatforms,
+      strict: strict,
+      requireFullCommitHash: requiresFullCommitHash,
+    );
 
     // Update commit hash
     apiConfig['api_commit_hash'] = commitHash;
@@ -798,7 +867,11 @@ class KdfFetcher {
 
     // Write config back to disk
     final configFile = File(configPath);
-    await configFile.writeAsString(formatJsonForIde(config));
+    try {
+      await configFile.writeAsString(formatJsonForIde(config));
+    } finally {
+      _updatedPlatformCommits.clear();
+    }
 
     log.info(
       'Updated build config with commit hash: $commitHash${currentBranch != branch ? ' and branch: $branch' : ''}',

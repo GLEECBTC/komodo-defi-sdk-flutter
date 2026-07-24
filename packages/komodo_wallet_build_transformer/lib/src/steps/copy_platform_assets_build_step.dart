@@ -59,19 +59,18 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
 
   Future<void> _copyKdfWebFiles() async {
     final kdfWebPath = buildConfig.apiConfig.platforms['web']!.path;
-    final sourceDir =
-        Directory(path.join(artifactOutputDirectory.path, kdfWebPath));
-    final destDir = Directory(path.joinAll([projectRoot.path, kdfWebPath]));
-    await _copyAssetsFromDir(
-      sourceDir: sourceDir,
-      destDir: destDir,
+    final sourceDir = Directory(
+      path.join(artifactOutputDirectory.path, kdfWebPath),
     );
+    final destDir = Directory(path.joinAll([projectRoot.path, kdfWebPath]));
+    await _copyAssetsFromDir(sourceDir: sourceDir, destDir: destDir);
   }
 
   Future<void> _copyOtherWebFiles() async {
     final kdfWebPath = buildConfig.apiConfig.platforms['web']!.path;
-    final kdfLibDestDirectory =
-        Directory(path.join(projectRoot.path, kdfWebPath));
+    final kdfLibDestDirectory = Directory(
+      path.join(projectRoot.path, kdfWebPath),
+    );
     final sourceDir = Directory(path.join(artifactOutputDirectory.path, 'web'));
     // TODO: Make configurable with a pubspec.yaml setting (cli parameter)
     final destDir = kdfLibDestDirectory.parent;
@@ -143,10 +142,7 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
           final destFile = File(path.join(destDir.path, relativePath));
 
           if (skipDir != null &&
-              path.isWithin(
-                skipDir.absolute.path,
-                entity.absolute.path,
-              )) {
+              path.isWithin(skipDir.absolute.path, entity.absolute.path)) {
             // Skip files within the skipDir
             continue;
           }
@@ -199,13 +195,10 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
 
   bool _canSkipKdfWebFiles() {
     final kdfWebPath = buildConfig.apiConfig.platforms['web']!.path;
-    final sourceDir = Directory(
-      path.join(
-        projectRoot.path,
-        kdfWebPath,
-      ),
+    final sourceDir = Directory(path.join(artifactOutputDirectory.path, 'web'));
+    final destDir = Directory(
+      path.join(projectRoot.path, path.dirname(kdfWebPath)),
     );
-    final destDir = Directory(path.join(projectRoot.path, kdfWebPath));
 
     if (!sourceDir.existsSync()) {
       _log.info(
@@ -241,17 +234,18 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
 
     final sourceFiles = sourceDir.listSync(recursive: true).whereType<File>();
     final destFiles = destDir.listSync(recursive: true).whereType<File>();
-    final destFilePaths =
-        destFiles.map((f) => path.relative(f.path, from: destDir.path)).toSet();
+    final destFilePaths = destFiles
+        .map((f) => path.relative(f.path, from: destDir.path))
+        .toSet();
 
     for (final sourceFile in sourceFiles) {
       final relativePath = path.relative(sourceFile.path, from: sourceDir.path);
       final correspondingDestFile = File(path.join(destDir.path, relativePath));
 
       if (!correspondingDestFile.existsSync() ||
-          sourceFile
-              .lastModifiedSync()
-              .isAfter(correspondingDestFile.lastModifiedSync())) {
+          sourceFile.lastModifiedSync().isAfter(
+            correspondingDestFile.lastModifiedSync(),
+          )) {
         return true;
       }
 
@@ -274,29 +268,29 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
       File(path.joinAll([projectRoot.path, 'linux', '$appName.svg']));
 
   File _destIcon(String appName) => File(
-        path.joinAll([
-          projectRoot.path,
-          'build',
-          'linux',
-          'x64',
-          'release',
-          'bundle',
-          '$appName.svg',
-        ]),
-      );
+    path.joinAll([
+      projectRoot.path,
+      'build',
+      'linux',
+      'x64',
+      'release',
+      'bundle',
+      '$appName.svg',
+    ]),
+  );
 
   File _sourceDesktop(String appName) =>
       File(path.joinAll([projectRoot.path, 'linux', '$appName.desktop']));
 
   File _destDesktop(String appName) => File(
-        path.joinAll([
-          projectRoot.path,
-          'build',
-          'linux',
-          'x64',
-          'release',
-          'bundle',
-          '$appName.desktop',
-        ]),
-      );
+    path.joinAll([
+      projectRoot.path,
+      'build',
+      'linux',
+      'x64',
+      'release',
+      'bundle',
+      '$appName.desktop',
+    ]),
+  );
 }

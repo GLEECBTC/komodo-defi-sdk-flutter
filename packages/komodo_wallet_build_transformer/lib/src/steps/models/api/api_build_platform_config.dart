@@ -53,6 +53,24 @@ class ApiBuildPlatformConfig {
       );
     }
 
+    final parsedChecksums = checksums.whereType<String>().toList();
+    if (parsedChecksums.length != checksums.length ||
+        parsedChecksums.any(
+          (checksum) => !RegExp(r'^[a-f0-9]{64}$').hasMatch(checksum),
+        )) {
+      throw FormatException(
+        'valid_zip_sha256_checksums must contain lowercase SHA-256 values',
+        json.toString(),
+      );
+    }
+    if (parsedChecksums.contains(releaseBlockerChecksum) &&
+        parsedChecksums.length != 1) {
+      throw FormatException(
+        'The all-zero release blocker must be the only checksum',
+        json.toString(),
+      );
+    }
+
     final matchingConfig = ApiFileMatchingConfig(
       matchingKeyword: json['matching_keyword'] as String?,
       matchingPattern: json['matching_pattern'] as String?,
@@ -63,10 +81,13 @@ class ApiBuildPlatformConfig {
 
     return ApiBuildPlatformConfig(
       matchingConfig: matchingConfig,
-      validZipSha256Checksums: List<String>.from(checksums),
+      validZipSha256Checksums: parsedChecksums,
       path: json['path'] as String,
     );
   }
+
+  static const releaseBlockerChecksum =
+      '0000000000000000000000000000000000000000000000000000000000000000';
 
   /// Configuration for matching the correct API file
   final ApiFileMatchingConfig matchingConfig;
@@ -81,6 +102,11 @@ class ApiBuildPlatformConfig {
   ///
   /// This path is relative to the project's artifact output directory.
   final String path;
+
+  /// Whether this platform is declared but intentionally blocked from release.
+  bool get isReleaseBlocked =>
+      validZipSha256Checksums.length == 1 &&
+      validZipSha256Checksums.single == releaseBlockerChecksum;
 
   /// Converts the configuration to a JSON map.
   Map<String, dynamic> toJson() => {
