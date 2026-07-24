@@ -32,11 +32,20 @@ class EventStreamingManager {
     required KdfEventStreamingService eventService,
   }) : _rpcMethods = KomodoDefiRpcMethods(client),
        _eventService = eventService {
+    _disconnectSubscription = _eventService.disconnections.listen(
+      _handleServiceDisconnected,
+    );
     _log('EventStreamingManager initialized (instance=${hashCode})');
   }
 
   final KomodoDefiRpcMethods _rpcMethods;
   final KdfEventStreamingService _eventService;
+  late final StreamSubscription<KdfEventDisconnection> _disconnectSubscription;
+  int _connectionGeneration = 0;
+  Completer<void> _generationChanged = Completer<void>();
+  Future<void> _registrationCleanup = Future<void>.value();
+  Future<void>? _managedDisconnectFuture;
+  bool _isDisposed = false;
 
   // Client ID used for all streaming operations
   // In a production app, this could be configurable or derived from app state
@@ -48,73 +57,42 @@ class EventStreamingManager {
   // Reference counters for shared streams (e.g., heartbeat, network)
   final Map<String, int> _streamRefCounts = {};
 
-  // Track if SSE connection is ready (first byte received + grace period elapsed)
+  // Track whether the transport has confirmed KDF client registration.
   bool _sseReadinessComplete = false;
-  Timer? _gracePeriodTimer;
 
-  // Post-connect delay before first enable_* call (1500ms for robust readiness)
-  static const Duration _postConnectDelay = Duration(milliseconds: 1500);
-
-  /// Per-attempt wait for the first real event from SSE / SharedWorker (KDF
-  /// client registration). Short timeouts caused enable_* before registration.
+  /// Bound the transport registration handshake without inventing retries.
   static const Duration _firstByteTimeout = Duration(seconds: 30);
-
-  static const int _firstByteMaxAttempts = 3;
-
-  static const Duration _firstByteReconnectDelay = Duration(seconds: 1);
 
   // Per-key in-flight guards to prevent duplicate enable_* calls
   final Map<String, Future<StreamSubscription<KdfEvent>>> _inFlightEnables = {};
 
-  /// Wait for SSE readiness: first byte received + grace period elapsed
-  Future<void> _waitForSseReadiness() async {
-    if (_sseReadinessComplete) return;
-
-    _log(
-      'Waiting for SSE readiness (first real event + '
-      '${_postConnectDelay.inMilliseconds}ms grace period)...',
-    );
-
-    for (var attempt = 1; attempt <= _firstByteMaxAttempts; attempt++) {
-      _eventService.connectIfNeeded();
-
-      try {
-        await _eventService.firstByteReceived.timeout(
-          _firstByteTimeout,
-          onTimeout: () {
-            _log(
-              'First byte timeout after ${_firstByteTimeout.inSeconds}s '
-              '(attempt $attempt/$_firstByteMaxAttempts)',
-            );
-            throw TimeoutException('First byte not received');
-          },
-        );
-        _log('First byte received from SSE stream');
-        break;
-      } on TimeoutException {
-        if (attempt >= _firstByteMaxAttempts) {
-          _log(
-            'SSE first byte not received after $_firstByteMaxAttempts attempts; '
-            'aborting enable_* (avoid UnknownClient)',
-          );
-          rethrow;
-        }
-        _log('Reconnecting SSE before next first-byte wait...');
-        _eventService.disconnect();
-        await Future<void>.delayed(_firstByteReconnectDelay);
-      } catch (e) {
-        _log('Error waiting for first byte: $e');
-        if (attempt >= _firstByteMaxAttempts) rethrow;
-        _eventService.disconnect();
-        await Future<void>.delayed(_firstByteReconnectDelay);
-      }
+  /// Wait for the native SSE handshake or the Web worker registration ack.
+  Future<void> _waitForSseReadiness(int expectedGeneration) async {
+    if (_sseReadinessComplete &&
+        expectedGeneration == _connectionGeneration &&
+        _eventService.isConnected) {
+      return;
     }
 
-    _log('Waiting ${_postConnectDelay.inMilliseconds}ms grace period...');
-    await Future<void>.delayed(_postConnectDelay);
+    _log('Waiting for KDF event-client registration...');
+    _eventService.connectIfNeeded();
+    final generationChanged = _generationChanged.future;
+    await Future.any<void>([
+      _eventService.firstByteReceived,
+      generationChanged,
+    ]).timeout(
+      _firstByteTimeout,
+      onTimeout: () {
+        throw TimeoutException('KDF event-client registration timed out');
+      },
+    );
+    if (expectedGeneration != _connectionGeneration ||
+        !_eventService.isConnected) {
+      throw StateError('KDF event connection changed before stream readiness');
+    }
 
     _sseReadinessComplete = true;
-    _log('SSE readiness complete - ready for enable_* calls');
+    _log('KDF event-client registration is ready for stream::enable');
   }
 
   /// Generic method to handle stream subscription with automatic lifecycle
@@ -126,6 +104,11 @@ class EventStreamingManager {
     required String streamType,
     String? coin,
   }) async {
+    await _awaitEnableGate();
+    if (_isDisposed) {
+      throw StateError('Event streaming manager is disposed');
+    }
+
     // Check if stream is already active
     final existing = _activeStreams[key];
     if (existing != null && !existing.isCancelled) {
@@ -138,9 +121,13 @@ class EventStreamingManager {
     final inFlight = _inFlightEnables[key];
     if (inFlight != null) {
       _log('Enable already in-flight for $key, awaiting completion...');
-      final subscription = await inFlight;
+      await inFlight;
+      final enabled = _activeStreams[key];
+      if (enabled == null || enabled.isCancelled) {
+        throw StateError('KDF stream registration changed while enabling $key');
+      }
       _incrementRefCount(key);
-      return subscription as StreamSubscription<T>;
+      return _createTypedSubscription<T>(key, eventStream);
     }
 
     // Create the enable future and store it to prevent duplicates
@@ -150,6 +137,7 @@ class EventStreamingManager {
       eventStream: eventStream,
       streamType: streamType,
       coin: coin,
+      expectedGeneration: _connectionGeneration,
     );
     _inFlightEnables[key] = enableFuture;
 
@@ -158,86 +146,51 @@ class EventStreamingManager {
       return subscription;
     } finally {
       // Remove from in-flight map once complete
-      _inFlightEnables.remove(key);
+      if (identical(_inFlightEnables[key], enableFuture)) {
+        _inFlightEnables.remove(key);
+      }
     }
   }
 
-  /// Performs the actual enable stream operation with readiness checks and retries
+  /// Performs one enable operation against the current connection generation.
   Future<StreamSubscription<T>> _performEnableStream<T extends KdfEvent>({
     required String key,
     required Future<StreamEnableResponse> Function() enableStream,
     required Stream<T> eventStream,
     required String streamType,
     String? coin,
+    required int expectedGeneration,
   }) async {
-    // Wait for SSE readiness (first byte + grace period)
-    await _waitForSseReadiness();
+    await _waitForSseReadiness(expectedGeneration);
 
-    // Log enable_* attempt with details
     final coinInfo = coin != null ? ', coin=$coin' : '';
     _log(
       'Enable stream attempt: type=$streamType, key=$key, client_id=$_defaultClientId$coinInfo',
     );
 
-    int attemptCount = 0;
-    const maxAttempts = 3;
-    const retryDelay = Duration(seconds: 1);
-
-    while (attemptCount < maxAttempts) {
-      try {
-        attemptCount++;
-
-        // Enable new stream
-        final response = await enableStream();
-
-        final streamerId = response.streamerId;
-        _activeStreams[key] = _StreamSubscription(
-          streamerId: streamerId,
+    final response = await enableStream();
+    if (expectedGeneration != _connectionGeneration ||
+        !_eventService.isConnected) {
+      await _disableRegistration(
+        _StreamSubscription(
+          streamerId: response.streamerId,
           clientId: _defaultClientId,
-        );
-        _incrementRefCount(key);
-
-        _log(
-          'Enable stream success: type=$streamType, key=$key, streamer_id=$streamerId',
-        );
-        return _createTypedSubscription<T>(key, eventStream);
-      } catch (e) {
-        _log(
-          'Enable stream failed (attempt $attemptCount/$maxAttempts): type=$streamType, error=$e',
-        );
-
-        // Check if it's an UnknownClient error
-        final errorStr = e.toString();
-        if (errorStr.contains('UnknownClient')) {
-          _log(
-            'UnknownClient error detected - server forgot client registration',
-          );
-
-          if (attemptCount < maxAttempts) {
-            // Force full SSE reconnect on UnknownClient regardless of connection state
-            // The client may think it's connected, but KDF has dropped the registration
-            _log('Forcing SSE reconnect due to UnknownClient error...');
-            _eventService.disconnect();
-            _sseReadinessComplete = false; // Reset readiness flag
-            _activeStreams.remove(key); // Clear stale stream entry
-
-            // Wait for first real event + grace (same as initial connect)
-            await _waitForSseReadiness();
-
-            _log('Retrying enable_* after SSE reconnection...');
-            await Future<void>.delayed(retryDelay);
-            continue;
-          }
-        }
-
-        // Rethrow if max attempts reached or non-UnknownClient error
-        rethrow;
-      }
+        ),
+      );
+      throw StateError('KDF connection changed while enabling $streamType');
     }
 
-    throw Exception(
-      'Failed to enable stream after $maxAttempts attempts: $key',
+    final streamerId = response.streamerId;
+    _activeStreams[key] = _StreamSubscription(
+      streamerId: streamerId,
+      clientId: _defaultClientId,
     );
+    _incrementRefCount(key);
+
+    _log(
+      'Enable stream success: type=$streamType, key=$key, streamer_id=$streamerId',
+    );
+    return _createTypedSubscription<T>(key, eventStream);
   }
 
   /// Enable balance stream for a specific coin.
@@ -295,6 +248,28 @@ class EventStreamingManager {
       clientId: _defaultClientId,
     ),
     eventStream: _eventService.txHistoryEvents.where((e) => e.coin == coin),
+  );
+
+  /// Enable GasFree trace streaming for [coin].
+  ///
+  /// The returned subscription carries both lifecycle snapshots and
+  /// `ERROR:GASLESS_TRACE:<coin>` events. Callers must attach it before relay
+  /// submission because KDF trace registration is not retroactive.
+  Future<StreamSubscription<KdfEvent>> subscribeToGaslessTrace({
+    required String coin,
+  }) => _subscribeToStream<KdfEvent>(
+    key: 'gasless_trace:$coin',
+    streamType: 'gasless_trace',
+    coin: coin,
+    enableStream: () => _rpcMethods.streaming.enableGaslessTrace(
+      coin: coin,
+      clientId: _defaultClientId,
+    ),
+    eventStream: _eventService.events.where(
+      (event) =>
+          (event is GaslessTraceEvent && event.coin == coin) ||
+          (event is GaslessTraceErrorEvent && event.coin == coin),
+    ),
   );
 
   /// Enable swap status stream.
@@ -379,6 +354,11 @@ class EventStreamingManager {
     String key,
     Stream<T> stream,
   ) {
+    final serverSubscription = _activeStreams[key];
+    if (serverSubscription == null || serverSubscription.isCancelled) {
+      throw StateError('KDF stream registration disappeared for $key');
+    }
+
     // Create a broadcast stream controller to wrap the original stream
     // This allows us to properly handle cleanup
     final controller = StreamController<T>.broadcast();
@@ -388,15 +368,102 @@ class EventStreamingManager {
       onError: controller.addError,
       onDone: controller.close,
     );
+    final invalidationSubscription = serverSubscription.invalidations.listen((
+      error,
+    ) {
+      if (!controller.isClosed) {
+        controller.addError(error);
+        unawaited(controller.close());
+      }
+      unawaited(innerSubscription.cancel());
+    });
 
     // Wrap the subscription to handle cleanup on cancel
     return _ManagedStreamSubscription<T>(
       controller.stream.listen(null),
       onCancel: () async {
+        // Detach this exact server-generation reference before the first
+        // await. A replacement registration with the same key must never be
+        // decremented or disabled by this older handle.
+        final serverCleanup = _handleStreamCancelled(key, serverSubscription);
         await innerSubscription.cancel();
-        await controller.close();
-        await _handleStreamCancelled(key);
+        await invalidationSubscription.cancel();
+        if (!controller.isClosed) await controller.close();
+        await serverCleanup;
       },
+    );
+  }
+
+  void _handleServiceDisconnected(KdfEventDisconnection event) {
+    if (_isDisposed) return;
+    _advanceConnectionGeneration();
+    final registrations = _invalidateAllStreams(
+      StateError('KDF event connection was disconnected'),
+    );
+    if (event.registrationsMayPersist) {
+      _queueRegistrationCleanup(registrations);
+    }
+  }
+
+  void _advanceConnectionGeneration() {
+    _connectionGeneration++;
+    _sseReadinessComplete = false;
+    if (!_generationChanged.isCompleted) {
+      _generationChanged.complete();
+    }
+    _generationChanged = Completer<void>();
+  }
+
+  List<_StreamSubscription> _invalidateAllStreams(Object error) {
+    final subscriptions = _activeStreams.values.toList(growable: false);
+    _activeStreams.clear();
+    _streamRefCounts.clear();
+    for (final subscription in subscriptions) {
+      subscription.invalidate(error);
+    }
+    return subscriptions;
+  }
+
+  Future<void> _queueRegistrationCleanup(
+    Iterable<_StreamSubscription> registrations,
+  ) {
+    final snapshot = registrations.toList(growable: false);
+    if (snapshot.isEmpty) return _registrationCleanup;
+
+    final previous = _registrationCleanup;
+    final cleanup = () async {
+      await previous;
+      await Future.wait(snapshot.map(_disableRegistration), eagerError: false);
+    }();
+    _registrationCleanup = cleanup;
+    return cleanup;
+  }
+
+  Future<void> _awaitEnableGate() async {
+    while (true) {
+      if (_isDisposed) {
+        throw StateError('Event streaming manager is disposed');
+      }
+      final disconnect = _managedDisconnectFuture;
+      if (disconnect != null) await disconnect;
+      final cleanup = _registrationCleanup;
+      await cleanup;
+      if (_managedDisconnectFuture == null &&
+          identical(cleanup, _registrationCleanup)) {
+        return;
+      }
+    }
+  }
+
+  Future<void> _settleInFlight(
+    Iterable<Future<StreamSubscription<KdfEvent>>> operations,
+  ) async {
+    await Future.wait(
+      operations.map(
+        (operation) =>
+            operation.then<void>((_) {}, onError: (Object _, StackTrace __) {}),
+      ),
+      eagerError: false,
     );
   }
 
@@ -406,39 +473,34 @@ class EventStreamingManager {
   }
 
   /// Handle stream cancellation with reference counting.
-  Future<void> _handleStreamCancelled(String key) async {
-    final refCount = (_streamRefCounts[key] ?? 1) - 1;
-    _streamRefCounts[key] = refCount;
-
-    // Only disable the stream if no more references exist
-    if (refCount <= 0) {
-      _streamRefCounts.remove(key);
-      await _disableStream(key);
+  Future<void> _handleStreamCancelled(
+    String key,
+    _StreamSubscription generation,
+  ) {
+    if (!identical(_activeStreams[key], generation)) {
+      return Future<void>.value();
     }
+    final refCount = (_streamRefCounts[key] ?? 1) - 1;
+    if (refCount > 0) {
+      _streamRefCounts[key] = refCount;
+      return Future<void>.value();
+    }
+    _streamRefCounts.remove(key);
+    _activeStreams.remove(key);
+    generation.markCancelled();
+    return _queueRegistrationCleanup([generation]);
   }
 
-  /// Disable a stream by key.
-  Future<void> _disableStream(String key) async {
-    final subscription = _activeStreams[key];
-    if (subscription == null || subscription.isCancelled) {
-      return;
-    }
-
+  Future<void> _disableRegistration(_StreamSubscription subscription) async {
     try {
       await _rpcMethods.streaming.disable(
         clientId: subscription.clientId,
         streamerId: subscription.streamerId,
       );
-
-      subscription.markCancelled();
-      _activeStreams.remove(key);
-    } on Exception catch (e) {
+    } catch (e) {
       if (kDebugMode) {
-        print('Failed to disable stream $key: $e');
+        print('Failed to disable stream ${subscription.streamerId}: $e');
       }
-      // Still mark as cancelled and remove from active streams
-      subscription.markCancelled();
-      _activeStreams.remove(key);
     }
   }
 
@@ -451,18 +513,75 @@ class EventStreamingManager {
     return subscription != null && !subscription.isCancelled;
   }
 
+  /// Disables every managed KDF registration before closing the transport.
+  ///
+  /// New enables are gated until cleanup and transport shutdown are complete.
+  Future<void> disconnect() {
+    final existing = _managedDisconnectFuture;
+    if (existing != null) return existing;
+    if (_isDisposed) return Future<void>.value();
+
+    final completer = Completer<void>();
+    final future = completer.future;
+    _managedDisconnectFuture = future;
+
+    _advanceConnectionGeneration();
+    final registrations = _invalidateAllStreams(
+      StateError('KDF event connection was disconnected'),
+    );
+    final inFlight = _inFlightEnables.values.toList(growable: false);
+    unawaited(
+      _finishManagedDisconnect(
+        future: future,
+        completer: completer,
+        registrations: registrations,
+        inFlight: inFlight,
+      ),
+    );
+    return future;
+  }
+
+  Future<void> _finishManagedDisconnect({
+    required Future<void> future,
+    required Completer<void> completer,
+    required List<_StreamSubscription> registrations,
+    required List<Future<StreamSubscription<KdfEvent>>> inFlight,
+  }) async {
+    try {
+      await _queueRegistrationCleanup(registrations);
+      await _settleInFlight(inFlight);
+      await _registrationCleanup;
+      await _eventService.disconnect();
+      if (identical(_managedDisconnectFuture, future)) {
+        _managedDisconnectFuture = null;
+      }
+      completer.complete();
+    } catch (error, stackTrace) {
+      if (identical(_managedDisconnectFuture, future)) {
+        _managedDisconnectFuture = null;
+      }
+      completer.completeError(error, stackTrace);
+    }
+  }
+
   /// Disable all active streams and clean up resources.
   Future<void> dispose() async {
-    final keys = _activeStreams.keys.toList();
-
-    // Disable all streams in parallel
-    await Future.wait(
-      keys.map(_disableStream),
-      eagerError: false, // Continue even if some fail
+    if (_isDisposed) return;
+    _isDisposed = true;
+    final managedDisconnect = _managedDisconnectFuture;
+    if (managedDisconnect != null) {
+      await managedDisconnect;
+    }
+    _advanceConnectionGeneration();
+    await _disconnectSubscription.cancel();
+    final registrations = _invalidateAllStreams(
+      StateError('Event streaming manager disposed'),
     );
-
-    _activeStreams.clear();
-    _streamRefCounts.clear();
+    final inFlight = _inFlightEnables.values.toList(growable: false);
+    await _queueRegistrationCleanup(registrations);
+    await _settleInFlight(inFlight);
+    await _registrationCleanup;
+    await _eventService.disconnect();
   }
 }
 
@@ -472,10 +591,23 @@ class _StreamSubscription {
 
   final String streamerId;
   final int clientId;
+  final StreamController<Object> _invalidations =
+      StreamController<Object>.broadcast(sync: true);
   bool isCancelled = false;
 
-  void markCancelled() {
+  Stream<Object> get invalidations => _invalidations.stream;
+
+  void invalidate(Object error) {
+    if (isCancelled) return;
     isCancelled = true;
+    _invalidations.add(error);
+    unawaited(_invalidations.close());
+  }
+
+  void markCancelled() {
+    if (isCancelled) return;
+    isCancelled = true;
+    unawaited(_invalidations.close());
   }
 }
 
@@ -485,11 +617,17 @@ class _ManagedStreamSubscription<T> implements StreamSubscription<T> {
 
   final StreamSubscription<T> _inner;
   final Future<void> Function() onCancel;
+  Future<void>? _cancelFuture;
 
   @override
-  Future<void> cancel() async {
+  Future<void> cancel() => _cancelFuture ??= _cancel();
+
+  Future<void> _cancel() async {
+    // [onCancel] removes this handle's server-generation reference
+    // synchronously before its first await.
+    final cleanup = onCancel();
     await _inner.cancel();
-    await onCancel();
+    await cleanup;
   }
 
   @override

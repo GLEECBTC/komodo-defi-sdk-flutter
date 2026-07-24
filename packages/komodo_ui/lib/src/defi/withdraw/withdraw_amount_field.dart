@@ -78,10 +78,10 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
   /// The text shown in the (disabled) field while "max" is selected.
   ///
   /// Some rails (e.g. gas-free TRC20, where the fee is deducted from the token
-  /// itself) cannot pre-compute the exact sendable amount, so they request max
-  /// with an amount of `'0'`. Showing a literal `'0'` reads as "send nothing";
-  /// display `Maximum` instead. Rails that do know the amount (native max
-  /// passes the spendable balance) keep showing the concrete value.
+  /// itself) cannot pre-compute the exact sendable amount. Showing an empty or
+  /// zero advisory value reads as "send nothing"; display `Maximum` instead.
+  /// Rails that do know the amount (native max passes the spendable balance)
+  /// keep showing the concrete value.
   String get _displayAmount {
     if (widget.isMaxAmount && (double.tryParse(widget.amount) ?? 0) <= 0) {
       return widget.maxAmountLabel ?? 'Maximum';

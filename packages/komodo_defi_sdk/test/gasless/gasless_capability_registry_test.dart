@@ -4,8 +4,8 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:test/test.dart';
 
 const _provider = 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E';
-const _contract = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const _custody = 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF';
+const _contract = 'TArbitraryEnrolledTrc20Contract111111111';
 
 Map<String, dynamic> _trxConfig() => {
   'coin': 'TRX',
@@ -25,92 +25,82 @@ Map<String, dynamic> _trxConfig() => {
 };
 
 Map<String, dynamic> _tokenConfig({
-  String platform = 'TRX',
-  String contract = _contract,
-  bool custom = false,
+  String ticker = 'ANY-TRC20',
+  bool gaslessEnabled = true,
+  bool includeGaslessConfig = true,
 }) => {
-  'coin': 'USDT-TRC20',
+  'coin': ticker,
   'type': 'TRC-20',
-  'name': 'Tether',
-  'fname': 'Tether',
+  'name': 'Enrolled token',
+  'fname': 'Enrolled token',
   'wallet_only': true,
   'mm2': 1,
   'decimals': 6,
   'derivation_path': "m/44'/195'",
-  'is_custom_token': custom,
+  if (includeGaslessConfig)
+    'gasless': {'enabled': gaslessEnabled, 'transfer_max_fee': '3.5'},
   'protocol': {
     'type': 'TRC20',
-    'protocol_data': {'platform': platform, 'contract_address': contract},
+    'protocol_data': {'platform': 'TRX', 'contract_address': _contract},
   },
-  'contract_address': contract,
+  'contract_address': _contract,
   'parent_coin': 'TRX',
   'nodes': <Map<String, dynamic>>[],
 };
 
-GaslessAccountStatusResponse _status({
-  String? provider = _provider,
-  String address = _custody,
-  GaslessAccountAvailability availability =
-      GaslessAccountAvailability.available,
-  bool complete = true,
-  bool active = true,
-  bool includeActivationFee = false,
-  bool includeMaxWithdrawable = true,
-}) => GaslessAccountStatusResponse.parse({
-  'mmrpc': '2.0',
-  'result': {
-    'gasfree_address': address,
-    'on_chain_balance': '10',
-    'availability': availability.wireValue,
-    if (provider != null) 'service_provider': provider,
-    if (complete) ...{
-      'active': active,
-      'frozen_balance': '1',
-      'spendable_balance': '9',
-      'transfer_fee': '1',
-      if (includeActivationFee) 'activation_fee': '2',
-      if (includeMaxWithdrawable) 'max_withdrawable': '8',
-    },
-  },
-});
-
-GaslessAccountStatusResponse _degradedStatus(
+GaslessAccountStatusResponse _status(
   GaslessAccountAvailability availability, {
-  Map<String, dynamic> extraFields = const {},
+  String gasfreeAddress = _custody,
+  String? serviceProvider = _provider,
+  String? active = 'true',
+  String? frozenBalance = '0',
+  String? spendableBalance = '25',
+  String? transferFee = '1',
+  String? activationFee,
+  String? maxWithdrawable = '24',
 }) {
-  final result = Map<String, dynamic>.from(
-    _status(
-          provider: null,
-          availability: availability,
-          complete: false,
-        ).toJson()['result']!
-        as Map<String, dynamic>,
-  )..addAll(extraFields);
-  return GaslessAccountStatusResponse.parse({'mmrpc': '2.0', 'result': result});
+  return GaslessAccountStatusResponse.parse({
+    'mmrpc': '2.0',
+    'result': {
+      'gasfree_address': gasfreeAddress,
+      'service_provider': serviceProvider,
+      'availability': availability.wireValue,
+      'active': active == null ? null : active == 'true',
+      'on_chain_balance': '25',
+      'frozen_balance': frozenBalance,
+      'spendable_balance': spendableBalance,
+      'transfer_fee': transferFee,
+      'activation_fee': activationFee,
+      'max_withdrawable': maxWithdrawable,
+    },
+  });
 }
 
 void main() {
-  final parent = Asset.fromJson(_trxConfig(), knownIds: const {});
+  final platform = Asset.fromJson(_trxConfig(), knownIds: const {});
 
   Asset token({
-    String platform = 'TRX',
-    String contract = _contract,
-    bool custom = false,
+    String ticker = 'ANY-TRC20',
+    bool gaslessEnabled = true,
+    bool includeGaslessConfig = true,
   }) => Asset.fromJson(
-    _tokenConfig(platform: platform, contract: contract, custom: custom),
-    knownIds: {parent.id},
+    _tokenConfig(
+      ticker: ticker,
+      gaslessEnabled: gaslessEnabled,
+      includeGaslessConfig: includeGaslessConfig,
+    ),
+    knownIds: {platform.id},
   );
 
-  GaslessCapabilityRegistry registry() => GaslessCapabilityRegistry(
-    configuredAssetIds: const {'USDT-TRC20'},
-    pinnedProviderAddress: _provider,
-  );
+  GaslessCapabilityRegistry registry({String? provider = _provider}) =>
+      GaslessCapabilityRegistry(
+        configuredAssetIds: const {},
+        pinnedProviderAddress: provider,
+      );
 
   GaslessCapabilityIdentity identity(
     Asset asset, {
     String provider = _provider,
-    GaslessWalletType walletType = GaslessWalletType.softwareHd,
-    String path = GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
     String walletPubkeyHash = 'wallet-pubkey',
   }) => GaslessCapabilityIdentity(
     assetId: asset.id,
@@ -118,480 +108,255 @@ void main() {
     contractAddress: _contract,
     providerAddress: provider,
     walletPubkeyHash: walletPubkeyHash,
-    walletType: walletType,
-    derivationPath: path,
+    walletType: GaslessWalletType.softwareHd,
+    derivationPath: GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
   );
 
-  test('requires the exact canonical asset, network, and contract', () {
+  test('derives generic TRC20 eligibility from the activated asset config', () {
     final capabilities = registry();
 
     expect(capabilities.isConfigured(token()), isTrue);
-    expect(capabilities.isConfigured(token(custom: true)), isFalse);
-    expect(capabilities.isConfigured(token(platform: 'TRXT')), isFalse);
-    expect(capabilities.isConfigured(token(contract: 'TWrong')), isFalse);
+    expect(capabilities.isConfigured(token(gaslessEnabled: false)), isFalse);
+
+    final explicitRollout = GaslessCapabilityRegistry(
+      configuredAssetIds: const {'ROLLOUT-TRC20'},
+    );
+    expect(
+      explicitRollout.isConfigured(
+        token(ticker: 'ROLLOUT-TRC20', gaslessEnabled: false),
+      ),
+      isFalse,
+    );
+    expect(
+      explicitRollout.isConfigured(
+        token(ticker: 'ROLLOUT-TRC20', includeGaslessConfig: false),
+      ),
+      isTrue,
+    );
   });
 
-  test('binds readiness to the pinned provider and HD primary path', () {
+  test('available status authorizes send and receive with an optional pin', () {
     final asset = token();
     final capabilities = registry();
+    final inactiveWithoutActivationFee = _status(
+      GaslessAccountAvailability.available,
+      active: 'false',
+    );
 
-    expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
+    expect(
+      capabilities.recordAccountStatus(
+        asset,
+        identity(asset),
+        inactiveWithoutActivationFee,
+      ),
+      isTrue,
+    );
     expect(capabilities.isReady(asset.id), isTrue);
+    expect(capabilities.canSendGasless(asset.id), isTrue);
     expect(capabilities.canReceiveGasless(asset.id), isTrue);
     expect(
-      capabilities.receiveEvidenceFor(asset.id),
-      GaslessReceiveEvidence.boundRelayV2,
+      capabilities.statusFor(asset.id),
+      same(inactiveWithoutActivationFee),
     );
+  });
 
-    final wrongProvider = registry();
+  test('provider discovery is accepted by the generic SDK', () {
+    final asset = token();
+    final capabilities = registry(provider: null);
+    final status = _status(GaslessAccountAvailability.available);
+
     expect(
-      wrongProvider.markReadyFor(
+      capabilities.bindActivatedIdentity(asset, identity(asset, provider: '')),
+      isTrue,
+    );
+    expect(capabilities.refreshAccountStatus(asset, status), isTrue);
+    expect(
+      capabilities.bindActivatedIdentity(asset, identity(asset, provider: '')),
+      isTrue,
+    );
+    expect(capabilities.isReady(asset.id), isTrue);
+
+    expect(
+      capabilities.refreshAccountStatus(
         asset,
-        identity(asset, provider: 'TUnexpectedProvider'),
+        _status(
+          GaslessAccountAvailability.available,
+          serviceProvider: 'TChangedProvider',
+        ),
       ),
       isFalse,
     );
     expect(
-      wrongProvider.capabilityFor(asset).state,
+      capabilities.capabilityFor(asset).state,
       GaslessCapabilityState.securityMismatch,
     );
-
-    final secondary = registry();
-    expect(
-      secondary.markReadyFor(asset, identity(asset, path: "m/44'/195'/0'/0/1")),
-      isFalse,
-    );
   });
 
-  test('wallet binding synchronously resets mismatched session evidence', () {
+  test('an activation-bound identity can recover after a provider outage', () {
     final asset = token();
     final capabilities = registry();
-    expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
-    final generation = capabilities.sessionGeneration;
 
-    expect(capabilities.ensureWalletSession('wallet-pubkey'), isTrue);
-    expect(capabilities.ensureWalletSession('different-wallet'), isFalse);
-
-    expect(capabilities.sessionGeneration, generation + 1);
-    expect(capabilities.isReady(asset.id), isFalse);
-    expect(
-      capabilities.receiveEvidenceFor(asset.id),
-      GaslessReceiveEvidence.none,
-    );
-  });
-
-  test('bound status requires the configured provider identity', () {
-    final asset = token();
-    for (final provider in <String?>[null, 'TDifferentProvider']) {
-      final capabilities = registry();
-      expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
-
-      expect(
-        capabilities.validateBoundAccountStatus(
-          asset.id,
-          _status(provider: provider),
-        ),
-        isFalse,
-      );
-      expect(capabilities.canReceiveGasless(asset.id), isFalse);
-      expect(
-        capabilities.capabilityFor(asset).reasonCode,
-        'provider_identity_mismatch',
-      );
-    }
-  });
-
-  test('bound available status requires complete authoritative fields', () {
-    final asset = token();
-    final capabilities = registry();
-    expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
-
-    expect(
-      capabilities.validateBoundAccountStatus(
-        asset.id,
-        _status(complete: false),
+    expect(capabilities.bindActivatedIdentity(asset, identity(asset)), isTrue);
+    capabilities.markAccountStatusError(
+      asset.id,
+      const GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.providerError,
+        message: 'redacted',
       ),
-      isFalse,
     );
     expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'invalid_account_status',
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.temporarilyUnavailable,
     );
-  });
 
-  test('available status does not require an advisory maximum', () {
-    final asset = token();
-    final status = _status(includeMaxWithdrawable: false);
-
-    final bound = registry();
-    expect(bound.markReadyFor(asset, identity(asset)), isTrue);
-    expect(bound.validateBoundAccountStatus(asset.id, status), isTrue);
-
-    final v1 = registry();
     expect(
-      v1.markStatusAttestedFor(
+      capabilities.refreshAccountStatus(
         asset,
-        identity(asset),
-        status,
-        expectedGasfreeAddress: _custody,
+        _status(GaslessAccountAvailability.available),
       ),
       isTrue,
     );
-    expect(v1.canReceiveGaslessFromStatus(asset.id), isTrue);
-  });
-
-  test('inactive available status requires an activation fee', () {
-    final asset = token();
-    final missingFee = _status(active: false);
-
-    final bound = registry();
-    expect(bound.markReadyFor(asset, identity(asset)), isTrue);
-    expect(bound.validateBoundAccountStatus(asset.id, missingFee), isFalse);
-    expect(bound.capabilityFor(asset).reasonCode, 'invalid_account_status');
-
-    final v1 = registry();
-    expect(
-      v1.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        missingFee,
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(v1.capabilityFor(asset).reasonCode, 'invalid_account_status');
-
-    final completeBound = registry();
-    expect(completeBound.markReadyFor(asset, identity(asset)), isTrue);
-    expect(
-      completeBound.validateBoundAccountStatus(
-        asset.id,
-        _status(active: false, includeActivationFee: true),
-      ),
-      isTrue,
-    );
-
-    final completeV1 = registry();
-    expect(
-      completeV1.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(active: false, includeActivationFee: true),
-        expectedGasfreeAddress: _custody,
-      ),
-      isTrue,
-    );
-  });
-
-  test('legacy preview proof enables recovery send but never receive', () {
-    final asset = token();
-    final capabilities = registry();
-    expect(capabilities.markProvisionalFor(asset, identity(asset)), isTrue);
-    expect(capabilities.isReady(asset.id), isFalse);
-    expect(capabilities.canReceiveGasless(asset.id), isFalse);
-    expect(
-      capabilities.receiveEvidenceFor(asset.id),
-      GaslessReceiveEvidence.none,
-    );
-
-    expect(
-      capabilities.proveLegacyReadyFromSignedPreview(
-        asset.id,
-        chainId: '728126428',
-        tokenContract: _contract,
-        providerAddress: _provider,
-        walletPubkeyHash: 'wallet-pubkey',
-      ),
-      isTrue,
-    );
-
     expect(capabilities.isReady(asset.id), isTrue);
-    expect(capabilities.canReceiveGasless(asset.id), isFalse);
+  });
+
+  test('a refreshed status cannot replace the wallet custody identity', () {
+    final asset = token();
+    final capabilities = registry();
+
     expect(
-      capabilities.matchesReadyAuthorizationContext(
-        asset.id,
-        chainId: '728126428',
-        tokenContract: _contract,
-        providerAddress: _provider,
-        walletPubkeyHash: 'wallet-pubkey',
-        verificationMode: GaslessVerificationMode.boundRelay,
+      capabilities.recordAccountStatus(
+        asset,
+        identity(asset),
+        _status(GaslessAccountAvailability.available),
+      ),
+      isTrue,
+    );
+    expect(
+      capabilities.refreshAccountStatus(
+        asset,
+        _status(
+          GaslessAccountAvailability.available,
+          gasfreeAddress: 'TChangedGasfreeAddress1111111111111',
+        ),
       ),
       isFalse,
     );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.securityMismatch,
+    );
   });
 
-  test(
-    'status attestation enables wallet receive but not bound integrations',
-    () {
-      final asset = token();
-      final capabilities = registry();
+  test('a provider mismatch is a hard security state', () {
+    final asset = token();
+    final capabilities = registry();
+    final status = _status(
+      GaslessAccountAvailability.available,
+      serviceProvider: 'TUnexpectedProvider',
+    );
 
+    expect(
+      capabilities.recordAccountStatus(
+        asset,
+        identity(asset, provider: 'TUnexpectedProvider'),
+        status,
+      ),
+      isFalse,
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.securityMismatch,
+    );
+  });
+
+  test('pending transfer retains provider balance and fee status', () {
+    final asset = token();
+    final capabilities = registry();
+    final status = _status(
+      GaslessAccountAvailability.pendingTransfer,
+      frozenBalance: '5',
+      spendableBalance: '20',
+      maxWithdrawable: null,
+    );
+
+    expect(
+      capabilities.recordAccountStatus(asset, identity(asset), status),
+      isTrue,
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.temporarilyUnavailable,
+    );
+    expect(capabilities.statusFor(asset.id)?.frozenBalance.toString(), '5');
+    expect(capabilities.statusFor(asset.id)?.transferFee.toString(), '1');
+    expect(capabilities.canSendGasless(asset.id), isFalse);
+  });
+
+  test('unsupported status retains the service provider for recovery UI', () {
+    final asset = token();
+    final capabilities = registry();
+    final status = _status(
+      GaslessAccountAvailability.tokenUnsupported,
+      active: null,
+      frozenBalance: null,
+      spendableBalance: null,
+      transferFee: null,
+      maxWithdrawable: null,
+    );
+
+    expect(
+      capabilities.recordAccountStatus(asset, identity(asset), status),
+      isTrue,
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.unsupported,
+    );
+    expect(capabilities.statusFor(asset.id)?.serviceProvider, _provider);
+    expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
+  });
+
+  test('provider outage retains only KDF fresh on-chain custody data', () {
+    final asset = token();
+    final capabilities = registry();
+    final status = _status(
+      GaslessAccountAvailability.providerUnreachable,
+      serviceProvider: null,
+      active: null,
+      frozenBalance: null,
+      spendableBalance: null,
+      transferFee: null,
+      maxWithdrawable: null,
+    );
+
+    expect(
+      capabilities.recordAccountStatus(asset, identity(asset), status),
+      isTrue,
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.temporarilyUnavailable,
+    );
+    expect(capabilities.statusFor(asset.id)?.onChainBalance.toString(), '25');
+    expect(capabilities.statusFor(asset.id)?.spendableBalance, isNull);
+  });
+
+  test('maps exact KDF safety errors without inspecting messages', () {
+    final asset = token();
+    final capabilities = registry();
+
+    for (final type in [
+      GaslessAccountStatusErrorType.providerIdentityMismatch,
+      GaslessAccountStatusErrorType.gasfreeAddressMismatch,
+      GaslessAccountStatusErrorType.tokenDecimalMismatch,
+    ]) {
       expect(
-        capabilities.markStatusAttestedFor(
-          asset,
-          identity(asset),
-          _status(),
-          expectedGasfreeAddress: _custody,
+        capabilities.markAccountStatusError(
+          asset.id,
+          GaslessAccountStatusException(type: type, message: 'redacted'),
         ),
         isTrue,
       );
-      expect(capabilities.isReady(asset.id), isFalse);
-      expect(capabilities.canReceiveGasless(asset.id), isFalse);
-      expect(capabilities.canReceiveGaslessFromStatus(asset.id), isTrue);
-      expect(
-        capabilities.receiveEvidenceFor(asset.id),
-        GaslessReceiveEvidence.statusAttestedV1,
-      );
-    },
-  );
-
-  test('status attestation requires provider identity and complete fields', () {
-    final asset = token();
-    final missingProvider = registry();
-    final incomplete = registry();
-
-    expect(
-      missingProvider.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(provider: null),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(
-      missingProvider.capabilityFor(asset).reasonCode,
-      'provider_identity_mismatch',
-    );
-    expect(
-      incomplete.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(complete: false),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(incomplete.canReceiveGaslessFromStatus(asset.id), isFalse);
-  });
-
-  test('initial status attestation requires the local custody candidate', () {
-    final asset = token();
-    final capabilities = registry();
-
-    expect(
-      capabilities.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(address: 'TWrongCustodyAddress'),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'custody_address_mismatch',
-    );
-  });
-
-  test('provider discovery cannot authorize V1 receive', () {
-    final asset = token();
-    final capabilities = GaslessCapabilityRegistry(
-      configuredAssetIds: const {'USDT-TRC20'},
-      allowProviderDiscovery: true,
-    );
-
-    expect(
-      capabilities.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'provider_pin_required',
-    );
-  });
-
-  test('degraded status rejects an exposed provider identity', () {
-    final asset = token();
-    final capabilities = registry();
-
-    expect(
-      capabilities.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(
-          availability: GaslessAccountAvailability.providerUnreachable,
-          complete: false,
-        ),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'degraded_provider_identity_present',
-    );
-  });
-
-  test('legacy degraded status rejects forbidden provider fields', () {
-    final asset = token();
-    final invalidStatuses = [
-      _degradedStatus(
-        GaslessAccountAvailability.pendingTransfer,
-        extraFields: const {'spendable_balance': '1'},
-      ),
-      _degradedStatus(
-        GaslessAccountAvailability.pendingTransfer,
-        extraFields: const {'max_withdrawable': '1'},
-      ),
-      _degradedStatus(
-        GaslessAccountAvailability.tokenUnsupported,
-        extraFields: const {'active': false},
-      ),
-      _degradedStatus(
-        GaslessAccountAvailability.providerUnreachable,
-        extraFields: const {'frozen_balance': '0'},
-      ),
-    ];
-
-    for (final status in invalidStatuses) {
-      final capabilities = registry();
-      expect(
-        capabilities.markStatusAttestedFor(
-          asset,
-          identity(asset),
-          status,
-          expectedGasfreeAddress: _custody,
-        ),
-        isFalse,
-      );
-      expect(
-        capabilities.capabilityFor(asset).reasonCode,
-        'invalid_account_status',
-      );
-    }
-  });
-
-  test('bound degraded status rejects forbidden provider fields', () {
-    final asset = token();
-    final invalidStatuses = [
-      _degradedStatus(
-        GaslessAccountAvailability.pendingTransfer,
-        extraFields: const {'transfer_fee': '1'},
-      ),
-      _degradedStatus(
-        GaslessAccountAvailability.tokenUnsupported,
-        extraFields: const {'active': false},
-      ),
-      _degradedStatus(
-        GaslessAccountAvailability.providerUnreachable,
-        extraFields: const {'activation_fee': '1'},
-      ),
-    ];
-
-    for (final status in invalidStatuses) {
-      final capabilities = registry();
-      expect(capabilities.markReadyFor(asset, identity(asset)), isTrue);
-      expect(
-        capabilities.validateBoundAccountStatus(asset.id, status),
-        isFalse,
-      );
-      expect(
-        capabilities.capabilityFor(asset).reasonCode,
-        'invalid_account_status',
-      );
-    }
-  });
-
-  test('pending status may retain only active and frozen metadata', () {
-    final asset = token();
-    final status = _degradedStatus(
-      GaslessAccountAvailability.pendingTransfer,
-      extraFields: const {'active': true, 'frozen_balance': '10'},
-    );
-    final legacy = registry();
-    final bound = registry();
-    expect(bound.markReadyFor(asset, identity(asset)), isTrue);
-
-    expect(
-      legacy.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        status,
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(legacy.capabilityFor(asset).reasonCode, 'pending_transfer');
-    expect(bound.validateBoundAccountStatus(asset.id, status), isTrue);
-    expect(bound.capabilityFor(asset).reasonCode, 'pending_transfer');
-  });
-
-  test('wire parser rejects explicit availability with a legacy reason', () {
-    final result = Map<String, dynamic>.from(
-      _status().toJson()['result']! as Map<String, dynamic>,
-    )..['reason_code'] = 'provider_temporarily_unavailable';
-
-    expect(
-      () => GaslessAccountStatusResponse.parse({
-        'mmrpc': '2.0',
-        'result': result,
-      }),
-      throwsFormatException,
-    );
-  });
-
-  test('legacy boolean availability never enables receive', () {
-    final asset = token();
-    final capabilities = registry();
-    final legacyStatus = GaslessAccountStatusResponse.parse({
-      'mmrpc': '2.0',
-      'result': {
-        ...(_status().toJson()['result'] as Map<String, dynamic>),
-        'provider_available': true,
-      }..remove('availability'),
-    });
-
-    expect(legacyStatus.hasExplicitAvailability, isFalse);
-    expect(
-      capabilities.markStatusAttestedFor(
-        asset,
-        identity(asset),
-        legacyStatus,
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'availability_unattested',
-    );
-  });
-
-  test('typed KDF mismatches become stable security reasons', () {
-    final asset = token();
-    for (final entry in const {
-      'TokenDecimalsMismatch': 'token_decimals_mismatch',
-      'CustodyAddressMismatch': 'custody_address_mismatch',
-      'ProviderIdentityMismatch': 'provider_identity_mismatch',
-    }.entries) {
-      final capabilities = registry();
-      final error = GeneralErrorResponse.parse({
-        'mmrpc': '2.0',
-        'error': 'redacted',
-        'error_type': entry.key,
-      });
-
-      expect(capabilities.markAccountStatusError(asset.id, error), isTrue);
-      expect(capabilities.capabilityFor(asset).reasonCode, entry.value);
       expect(
         capabilities.capabilityFor(asset).state,
         GaslessCapabilityState.securityMismatch,
@@ -599,130 +364,17 @@ void main() {
     }
   });
 
-  test('sensitive refresh revokes evidence on custody mismatch', () {
-    final asset = token();
-    final capabilities = registry()
-      ..markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(),
-        expectedGasfreeAddress: _custody,
-      );
-
-    expect(
-      capabilities.refreshStatusAttestation(
-        asset.id,
-        _status(),
-        expectedGasfreeAddress: 'TDifferentCustodyAddress',
-      ),
-      isFalse,
-    );
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'custody_address_mismatch',
-    );
-  });
-
-  test('newer account-status probe supersedes older receive evidence', () {
-    final asset = token();
-    final capabilities = registry()
-      ..markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(),
-        expectedGasfreeAddress: _custody,
-      );
-
-    final older = capabilities.beginAccountStatusProbe(asset.id);
-    final newer = capabilities.beginAccountStatusProbe(asset.id);
-
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(capabilities.isCurrentAccountStatusProbe(asset.id, older), isFalse);
-    expect(capabilities.isCurrentAccountStatusProbe(asset.id, newer), isTrue);
-  });
-
-  test('provider outage preserves candidate but revokes receive evidence', () {
-    final asset = token();
-    final capabilities = registry()
-      ..markStatusAttestedFor(
-        asset,
-        identity(asset),
-        _status(),
-        expectedGasfreeAddress: _custody,
-      );
-
-    expect(
-      capabilities.refreshStatusAttestation(
-        asset.id,
-        _status(
-          provider: null,
-          availability: GaslessAccountAvailability.providerUnreachable,
-          complete: false,
-        ),
-        expectedGasfreeAddress: _custody,
-      ),
-      isFalse,
-    );
-    expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
-    expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-    expect(
-      capabilities.capabilityFor(asset).reasonCode,
-      'provider_unreachable',
-    );
-  });
-
-  test('pending and unsupported availability remain recovery-only', () {
-    final asset = token();
-    for (final entry in const {
-      GaslessAccountAvailability.pendingTransfer: 'pending_transfer',
-      GaslessAccountAvailability.tokenUnsupported: 'token_unsupported',
-    }.entries) {
-      final capabilities = registry();
-
-      expect(
-        capabilities.markStatusAttestedFor(
-          asset,
-          identity(asset),
-          _status(provider: null, availability: entry.key, complete: false),
-          expectedGasfreeAddress: _custody,
-        ),
-        isFalse,
-      );
-      expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
-      expect(capabilities.canReceiveGaslessFromStatus(asset.id), isFalse);
-      expect(capabilities.capabilityFor(asset).reasonCode, entry.value);
-    }
-  });
-
-  test('permits Iguana primary without pretending it has an HD path', () {
+  test('wallet reset removes all capability and custody state', () {
     final asset = token();
     final capabilities = registry();
-
-    expect(
-      capabilities.markReadyFor(
-        asset,
-        identity(asset, walletType: GaslessWalletType.softwareIguana, path: ''),
-      ),
-      isTrue,
+    capabilities.recordAccountStatus(
+      asset,
+      identity(asset),
+      _status(GaslessAccountAvailability.available),
     );
-  });
 
-  test('stale verified identity keeps custody and preview recovery access', () {
-    final asset = token();
-    final capabilities = registry();
-    capabilities.markReadyFor(asset, identity(asset));
-
-    capabilities.markStale(asset.id);
-
+    expect(capabilities.ensureWalletSession('another-wallet'), isFalse);
+    expect(capabilities.statusFor(asset.id), isNull);
     expect(capabilities.isReady(asset.id), isFalse);
-    expect(capabilities.canAccessExistingCustody(asset.id), isTrue);
-    expect(capabilities.canAttemptAuthoritativePreview(asset.id), isTrue);
-    expect(
-      capabilities.capabilityFor(asset).state,
-      GaslessCapabilityState.stale,
-    );
-    expect(capabilities.restoreReadyAfterAuthoritativeStatus(asset.id), isTrue);
-    expect(capabilities.isReady(asset.id), isTrue);
   });
 }

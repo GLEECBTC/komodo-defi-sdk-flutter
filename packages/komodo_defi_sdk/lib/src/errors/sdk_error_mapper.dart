@@ -22,6 +22,7 @@ class SdkErrorMapper {
   static const List<SdkErrorHandler> _defaultHandlers = [
     _SdkErrorPassthroughHandler(),
     _GaslessTransferExceptionHandler(),
+    _GaslessWithdrawExceptionHandler(),
     _WithdrawalExceptionHandler(),
     _AuthExceptionHandler(),
     _ActivationExceptionHandler(),
@@ -94,6 +95,185 @@ class _GaslessTransferExceptionHandler extends SdkErrorHandler {
       source: gasless,
     );
   }
+}
+
+class _GaslessWithdrawExceptionHandler extends SdkErrorHandler {
+  const _GaslessWithdrawExceptionHandler();
+
+  @override
+  bool canHandle(Object error) => error is GaslessWithdrawException;
+
+  @override
+  SdkError handle(Object error, {SdkErrorContext? context}) {
+    final endpointError = error as GaslessWithdrawException;
+    final converted = _gaslessTransferFromWithdrawEndpoint(endpointError);
+    final data = endpointError.errorData is Map<String, dynamic>
+        ? endpointError.errorData as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final coin = data['coin']?.toString() ?? context?.assetId ?? '';
+    final available = data['available']?.toString() ?? '';
+    final required = data['required']?.toString() ?? '';
+    final activationFee = data['activation_fee']?.toString();
+    final convertedContext = SdkErrorContext(
+      operation: context?.operation,
+      assetId: context?.assetId,
+      rpcMethod: context?.rpcMethod,
+      extra: {
+        ...?context?.extra,
+        'gaslessCode': converted.code.name,
+        'gaslessStage': converted.stage.name,
+        'gaslessTerminal': converted.terminal,
+        'gaslessEndpointType': endpointError.type.wireValue,
+      },
+    );
+
+    if (endpointError.type ==
+        GaslessWithdrawErrorType.insufficientGasFreeBalance) {
+      return _build(
+        code: SdkErrorCode.insufficientFunds,
+        category: SdkErrorCategory.funds,
+        messageKey: _keyWithdrawGaslessInsufficientGasFreeBalance,
+        messageArgs: ['', available, coin, required, coin, coin],
+        fallbackMessage:
+            'The GasFree custody balance has '
+            '${_formatAmount(available, coin)}, but this send needs '
+            '${_formatAmount(required, coin)}. Add more $coin to the '
+            'GasFree address.',
+        retryable: false,
+        context: convertedContext,
+        source: converted,
+      );
+    }
+    if (endpointError.type ==
+        GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation) {
+      return _build(
+        code: SdkErrorCode.insufficientFunds,
+        category: SdkErrorCategory.funds,
+        messageKey: _keyWithdrawGaslessInsufficientGasFreeBalanceForActivation,
+        messageArgs: [
+          '',
+          available,
+          coin,
+          required,
+          coin,
+          activationFee ?? '',
+          coin,
+          coin,
+        ],
+        fallbackMessage:
+            'The GasFree custody balance has '
+            '${_formatAmount(available, coin)}, but this send needs '
+            '${_formatAmount(required, coin)}, including a one-time '
+            '${_formatAmount(activationFee ?? '', coin)} activation fee. '
+            'Add more $coin to the GasFree address.',
+        retryable: false,
+        context: convertedContext,
+        source: converted,
+      );
+    }
+
+    return const _GaslessTransferExceptionHandler().handle(
+      converted,
+      context: SdkErrorContext(
+        operation: context?.operation,
+        assetId: context?.assetId,
+        rpcMethod: context?.rpcMethod,
+        extra: {
+          ...?context?.extra,
+          'gaslessEndpointType': endpointError.type.wireValue,
+        },
+      ),
+    );
+  }
+}
+
+GaslessTransferException _gaslessTransferFromWithdrawEndpoint(
+  GaslessWithdrawException error,
+) {
+  final (
+    GaslessTransferErrorKind,
+    GaslessTransferErrorCode,
+    String,
+    bool,
+    bool,
+    String,
+  )
+  mapping = switch (error.type) {
+    GaslessWithdrawErrorType.unavailable => (
+      GaslessTransferErrorKind.traceUnavailable,
+      GaslessTransferErrorCode.providerUnavailable,
+      'GasFree withdrawal is temporarily unavailable',
+      true,
+      false,
+      'sdk_errors.gasless_status_unavailable',
+    ),
+    GaslessWithdrawErrorType.pendingTransfer => (
+      GaslessTransferErrorKind.capabilityNotReady,
+      GaslessTransferErrorCode.pendingTransfer,
+      'A GasFree transfer is already pending',
+      true,
+      false,
+      'sdk_errors.gasless_capability_not_ready',
+    ),
+    GaslessWithdrawErrorType.maxFeeExceeded => (
+      GaslessTransferErrorKind.providerResponse,
+      GaslessTransferErrorCode.maxFeeExceeded,
+      'The GasFree quote exceeds the requested maximum fee',
+      true,
+      true,
+      'sdk_errors.gasless_max_fee_exceeded',
+    ),
+    GaslessWithdrawErrorType.providerRejected => (
+      GaslessTransferErrorKind.providerResponse,
+      GaslessTransferErrorCode.relayRejected,
+      'The GasFree provider rejected the withdrawal',
+      false,
+      true,
+      'sdk_errors.gasless_response_invalid',
+    ),
+    GaslessWithdrawErrorType.invalidProviderResponse => (
+      GaslessTransferErrorKind.providerResponse,
+      GaslessTransferErrorCode.responseMismatch,
+      'The GasFree provider returned an invalid response',
+      false,
+      true,
+      'sdk_errors.gasless_response_invalid',
+    ),
+    GaslessWithdrawErrorType.traceNotFound => (
+      GaslessTransferErrorKind.invalidTrace,
+      GaslessTransferErrorCode.traceInvalid,
+      'The GasFree trace was not found',
+      false,
+      false,
+      'sdk_errors.gasless_response_invalid',
+    ),
+    GaslessWithdrawErrorType.quoteExpired => (
+      GaslessTransferErrorKind.configuration,
+      GaslessTransferErrorCode.authorizationExpired,
+      'The GasFree quote expired',
+      true,
+      true,
+      'sdk_errors.gasless_authorization_expired',
+    ),
+    GaslessWithdrawErrorType.insufficientGasFreeBalance ||
+    GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation => (
+      GaslessTransferErrorKind.providerResponse,
+      GaslessTransferErrorCode.relayRejected,
+      'The GasFree custody balance is insufficient',
+      false,
+      true,
+      'sdk_errors.gasless_response_invalid',
+    ),
+  };
+  return GaslessTransferException(
+    kind: mapping.$1,
+    code: mapping.$2,
+    stage: GaslessTransferStage.preview,
+    message: mapping.$3,
+    retryable: mapping.$4,
+    terminal: mapping.$5,
+    localizationKey: mapping.$6,
+  );
 }
 
 class _SdkErrorPassthroughHandler extends SdkErrorHandler {
@@ -423,61 +603,6 @@ class _MmRpcExceptionHandler extends SdkErrorHandler {
             error.required.value,
           ],
           fallbackMessage: _fallbackInsufficientFunds,
-          detail: detail,
-          retryable: false,
-          context: context,
-          source: error,
-        );
-      case GaslessWithdrawErrorInsufficientGasFreeBalanceException():
-        return _build(
-          code: SdkErrorCode.insufficientFunds,
-          category: SdkErrorCategory.funds,
-          messageKey: _keyWithdrawGaslessInsufficientGasFreeBalance,
-          messageArgs: [
-            error.gasfreeAddress,
-            error.available.value,
-            error.coin,
-            error.required.value,
-            error.coin,
-            error.coin,
-          ],
-          fallbackMessage:
-              'Your GasFree address'
-              '${error.gasfreeAddress.isEmpty ? '' : ' ${error.gasfreeAddress}'}'
-              ' has ${_formatAmount(error.available.value, error.coin)}, but '
-              'this send needs '
-              '${_formatAmount(error.required.value, error.coin)}. '
-              'Add more ${error.coin} to your GasFree address.',
-          detail: detail,
-          retryable: false,
-          context: context,
-          source: error,
-        );
-      case GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException():
-        return _build(
-          code: SdkErrorCode.insufficientFunds,
-          category: SdkErrorCategory.funds,
-          messageKey:
-              _keyWithdrawGaslessInsufficientGasFreeBalanceForActivation,
-          messageArgs: [
-            error.gasfreeAddress,
-            error.available.value,
-            error.coin,
-            error.required.value,
-            error.coin,
-            error.activationFee.value,
-            error.coin,
-            error.coin,
-          ],
-          fallbackMessage:
-              'Your GasFree address'
-              '${error.gasfreeAddress.isEmpty ? '' : ' ${error.gasfreeAddress}'}'
-              ' has ${_formatAmount(error.available.value, error.coin)}, but '
-              'this send needs '
-              '${_formatAmount(error.required.value, error.coin)}, including '
-              'a one-time '
-              '${_formatAmount(error.activationFee.value, error.coin)} '
-              'activation fee. Add more ${error.coin} to your GasFree address.',
           detail: detail,
           retryable: false,
           context: context,
@@ -1282,23 +1407,6 @@ String? _detailFromMmRpcException(
       final coin = error.coin;
       return 'available ${_formatAmount(error.available.value, coin)}, '
           'required ${_formatAmount(error.required.value, coin)}';
-    case GaslessWithdrawErrorInsufficientGasFreeBalanceException():
-      final coin = error.coin;
-      final address = error.gasfreeAddress.isEmpty
-          ? ''
-          : 'GasFree address ${error.gasfreeAddress}; ';
-      return '${address}available '
-          '${_formatAmount(error.available.value, coin)}, '
-          'required ${_formatAmount(error.required.value, coin)}';
-    case GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException():
-      final coin = error.coin;
-      final address = error.gasfreeAddress.isEmpty
-          ? ''
-          : 'GasFree address ${error.gasfreeAddress}; ';
-      return '${address}available '
-          '${_formatAmount(error.available.value, coin)}, '
-          'required ${_formatAmount(error.required.value, coin)}, '
-          'activation fee ${_formatAmount(error.activationFee.value, coin)}';
     case WithdrawErrorCoinDoesntSupportInitWithdrawException():
       return _detailFromSimpleMessage(error.coin);
     case WithdrawErrorCoinDoesntSupportNftWithdrawException():

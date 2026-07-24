@@ -22,11 +22,9 @@ void main() {
     });
 
     test('maps GasFree custody shortfall to insufficient funds', () {
-      const error = GaslessWithdrawErrorInsufficientGasFreeBalanceException(
-        coin: 'USDT-TRC20',
-        gasfreeAddress: '',
-        available: BigDecimal('0'),
-        required: BigDecimal('8'),
+      const error = GaslessWithdrawException(
+        type: GaslessWithdrawErrorType.insufficientGasFreeBalance,
+        errorData: {'coin': 'USDT-TRC20', 'available': '0', 'required': '8'},
       );
       final sdkError = mapper.map(error);
 
@@ -44,19 +42,19 @@ void main() {
       expect(sdkError.retryable, isFalse);
       // Never the native-gas diagnosis: gasless fees are paid in the token.
       expect(sdkError.code, isNot(SdkErrorCode.insufficientGas));
-      // Empty address must not leave a dangling 'address ' in the fallback.
-      expect(sdkError.fallbackMessage, contains('Your GasFree address has'));
+      expect(sdkError.fallbackMessage, contains('custody balance has'));
     });
 
     test('maps GasFree activation shortfall with the activation fee', () {
-      const error =
-          GaslessWithdrawErrorInsufficientGasFreeBalanceForActivationException(
-            coin: 'USDT-TRC20',
-            gasfreeAddress: 'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g',
-            available: BigDecimal('2'),
-            required: BigDecimal('8'),
-            activationFee: BigDecimal('1.5'),
-          );
+      const error = GaslessWithdrawException(
+        type: GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation,
+        errorData: {
+          'coin': 'USDT-TRC20',
+          'available': '2',
+          'required': '8',
+          'activation_fee': '1.5',
+        },
+      );
       final sdkError = mapper.map(error);
 
       expect(sdkError.code, SdkErrorCode.insufficientFunds);
@@ -66,7 +64,7 @@ void main() {
         'withdrawGaslessInsufficientGasFreeBalanceForActivation',
       );
       expect(sdkError.messageArgs, [
-        'TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g',
+        '',
         '2',
         'USDT-TRC20',
         '8',
@@ -77,11 +75,88 @@ void main() {
       ]);
       expect(sdkError.retryable, isFalse);
       // The technical detail (folded into the fallback) keeps the full
-      // address and the activation fee.
+      // activation fee without inventing a provider-address echo.
       expect(sdkError.fallbackMessage, contains('activation fee 1.5'));
+      expect(sdkError.fallbackMessage, isNot(contains('TPRN')));
+    });
+
+    for (final entry in const {
+      GaslessWithdrawErrorType.unavailable: (
+        GaslessTransferErrorCode.providerUnavailable,
+        true,
+      ),
+      GaslessWithdrawErrorType.pendingTransfer: (
+        GaslessTransferErrorCode.pendingTransfer,
+        true,
+      ),
+      GaslessWithdrawErrorType.maxFeeExceeded: (
+        GaslessTransferErrorCode.maxFeeExceeded,
+        true,
+      ),
+      GaslessWithdrawErrorType.providerRejected: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+      GaslessWithdrawErrorType.invalidProviderResponse: (
+        GaslessTransferErrorCode.responseMismatch,
+        false,
+      ),
+      GaslessWithdrawErrorType.traceNotFound: (
+        GaslessTransferErrorCode.traceInvalid,
+        false,
+      ),
+      GaslessWithdrawErrorType.quoteExpired: (
+        GaslessTransferErrorCode.authorizationExpired,
+        true,
+      ),
+      GaslessWithdrawErrorType.insufficientGasFreeBalance: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+      GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+    }.entries) {
+      test('maps exact GasFree endpoint ${entry.key.wireValue}', () {
+        final sdkError = mapper.map(
+          GaslessWithdrawException(
+            type: entry.key,
+            errorData: const {
+              'coin': 'USDT-TRC20',
+              'available': '1',
+              'required': '2',
+              'activation_fee': '0.5',
+            },
+          ),
+        );
+
+        expect(sdkError.context?.extra['gaslessCode'], entry.value.$1.name);
+        expect(sdkError.retryable, entry.value.$2);
+        expect(
+          sdkError.source,
+          isA<GaslessTransferException>()
+              .having((error) => error.code, 'code', entry.value.$1)
+              .having(
+                (error) => error.stage,
+                'stage',
+                GaslessTransferStage.preview,
+              ),
+        );
+      });
+    }
+
+    test('maps GasFree maximum-fee failures to dedicated copy', () {
+      final sdkError = mapper.map(
+        const GaslessWithdrawException(
+          type: GaslessWithdrawErrorType.maxFeeExceeded,
+        ),
+      );
+
+      expect(sdkError.messageKey, 'sdk_errors.gasless_max_fee_exceeded');
       expect(
         sdkError.fallbackMessage,
-        contains('TPRN9HuCCTUuEsw5DsPBM8CQGRq77Aey5g'),
+        'The GasFree quote exceeds the requested maximum fee',
       );
     });
 

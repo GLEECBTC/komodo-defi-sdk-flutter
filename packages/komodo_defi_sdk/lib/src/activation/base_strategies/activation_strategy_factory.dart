@@ -47,7 +47,10 @@ class ActivationStrategyFactory {
         QtumActivationStrategy(client, privKeyPolicy),
         SiaActivationStrategy(client),
         ZhtlcActivationStrategy(client, privKeyPolicy, configService),
-        CustomErc20ActivationStrategy(client),
+        CustomErc20ActivationStrategy(
+          client,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
       ]),
       activatedAssetsCache,
     );

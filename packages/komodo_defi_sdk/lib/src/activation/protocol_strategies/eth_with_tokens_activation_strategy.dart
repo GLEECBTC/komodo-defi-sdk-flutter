@@ -204,13 +204,22 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
         asset.protocol is TrxProtocol && tronGaslessProvider != null;
 
     return children?.map((child) {
+          final isTrc20 = child.protocol is Trc20Protocol;
+          final hasConfiguredGasless =
+              isTrc20 && child.protocol.config['gasless'] is Map;
+          final configuredGasless = isTrc20
+              ? Trc20ActivationParams.fromJsonConfig(
+                  child.protocol.config,
+                ).gasless
+              : null;
+          final gaslessEnabled = hasConfiguredGasless
+              ? configuredGasless?.enabled == true
+              : tronGaslessAssetIds.contains(child.id.id);
           return TokensRequest(
             ticker: child.id.id,
-            gasless:
-                enableTronGasless &&
-                    child.protocol is Trc20Protocol &&
-                    tronGaslessAssetIds.contains(child.id.id)
-                ? const TronGaslessTokenActivationConfig(enabled: true)
+            gasless: enableTronGasless && isTrc20 && gaslessEnabled
+                ? configuredGasless ??
+                      const TronGaslessTokenActivationConfig(enabled: true)
                 : null,
           );
         }).toList() ??

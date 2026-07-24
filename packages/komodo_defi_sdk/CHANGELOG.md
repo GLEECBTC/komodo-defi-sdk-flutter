@@ -2,36 +2,43 @@
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.
 
- - **BREAKING** **FEAT**(gasfree): require an explicit token allowlist and an
-   authoritative account-status check before custody balance, history, or sends
-   become available.
- - **FEAT**(gasfree): reconfigure already-active TRON runtimes through
-   `gasless::configure`, with an exact method-missing fallback for KDF PR #9;
-   both contracts require an authoritative account-status check.
- - **SECURITY**(gasfree): persist wallet-scoped request fingerprints before
-   relay submission, retain ambiguous outcomes, validate relay identity and fee
-   bounds, and automatically resume status-only reconciliation on wallet login.
- - **SECURITY**(gasfree): keep legacy relay payloads byte-for-byte compatible,
-   keep PR #9 provisional until signed-preview provider proof, assign a local
-   request/fingerprint journal identity, and require an exact raw TRONGrid
-   transfer event before accepting legacy finality. Legacy relay mode remains
-   existing-custody recovery/send only; integrations require bound responses.
- - **SECURITY**(gasfree): permit wallet-only V1 receives only after a fresh
-   status response matches the explicit provider pin and locally derived
-   canonical custody address; reject stale wallet-session or out-of-order
-   responses and mixed current/legacy or available/degraded wire shapes.
- - **FIX**(gasfree): treat account-status `max_withdrawable` as an optional UI
-   estimate and delegate maximum sends to KDF with `max: true` and no amount.
- - **FIX**(gasfree): retain stale custody/recovery access, distinguish Iguana
-   and canonical HD identities, preserve cross-page address perspectives, and
-   expose final fee plus confirmation metadata without enabling resubmission.
+ - **BREAKING** **FEAT**(gasfree): derive token enrollment from activated TRC20
+   configuration (plus optional application rollout IDs) and require an
+   authoritative account-status check before custody balance or sends become
+   available.
+ - **BREAKING** **FEAT**(gasfree): configure the documented
+   `tron_gasless_provider` and per-token `gasless` fields during ordinary TRON
+   activation. Remove runtime `gasless::configure`, its restart fallback, and
+   the legacy V0/V1/bound compatibility contracts.
+ - **BREAKING** **FEAT**(gasfree): adopt the required four-state account status
+   contract (`available`, `pending_transfer`, `token_unsupported`, and
+   `provider_unreachable`) with endpoint-typed provider, custody-address, and
+   token-decimal errors.
+ - **SECURITY**(gasfree): persist a wallet-scoped local `journalId` before
+   submission, never serialize it to KDF, retain unknown outcomes without
+   resubmitting, and migrate accepted records with a trace ID into trace
+   recovery.
+ - **FEAT**(gasfree): subscribe to `GASLESS_TRACE:<coin>` before submission,
+   persist KDF's accepted `trace_id`, reconcile it once immediately, and follow
+   matching success/error stream events. Restart and disconnect recovery use a
+   one-shot `gasless::trace_status` request.
+ - **BREAKING** **FIX**(gasfree): serialize only KDF's documented withdrawal and
+   relay fields, report the actual Standard/GasFree submission rail, and obtain
+   final fee and finality from trace status rather than preview metadata.
+ - **FIX**(gasfree): treat account-status `max_withdrawable` as an advisory
+   status value and delegate maximum sends to KDF with `max: true` and no
+   amount.
+ - **FIX**(gasfree): retain custody/recovery access during provider outages,
+   distinguish Iguana and canonical HD identities, preserve cross-page address
+   perspectives, and expose final fee plus confirmation metadata without
+   enabling resubmission.
  - **FIX**(pubkeys): migrate legacy address metadata conservatively so funded
    and previously used Standard addresses remain visible.
- - **FIX**(gasfree): require explicit account-status provenance and retain
-   provider-independent mainnet/Nile custody balance recovery after restart or
-   kill-switch disablement.
- - **BUILD**(android): hardened arm64/armv7 KDF artifacts remain unavailable;
-   builds stay pinned to the last fetchable full KDF SHA pending promotion.
+ - **FIX**(gasfree): keep KDF's fresh custody total distinct from provider
+   spendability and Standard balances; remove external custody-balance and
+   finality readers.
+ - **BUILD**(kdf): publish and pin all seven native/WASM targets from
+   `bd413dcfea73c9de2e85903323946a378b180fa7`, including Android arm64/armv7.
 
 ## 0.6.0
 

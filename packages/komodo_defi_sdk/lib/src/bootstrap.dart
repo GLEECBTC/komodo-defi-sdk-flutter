@@ -2,7 +2,6 @@
 
 import 'dart:developer';
 
-import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
@@ -46,18 +45,12 @@ Future<void> bootstrap({
   log('Bootstrap: Starting dependency injection setup...', name: 'Bootstrap');
   final stopwatch = Stopwatch()..start();
 
-  config.tronGaslessProvider?.validate(
-    allowInsecureTransport: !kReleaseMode,
-    allowDirectCredentials: !kReleaseMode,
-    allowProviderDiscovery: !kReleaseMode,
-  );
+  config.tronGaslessProvider?.validate();
 
   container.registerSingleton(
     GaslessCapabilityRegistry(
       configuredAssetIds: config.tronGaslessAssetIds,
       pinnedProviderAddress: config.tronGaslessProvider?.serviceProvider,
-      allowProviderDiscovery:
-          config.tronGaslessProvider?.allowServiceProviderDiscovery ?? false,
     ),
   );
   container.registerSingleton<PendingGaslessTransferRepository>(
@@ -152,34 +145,23 @@ Future<void> bootstrap({
   }, dependsOn: [ApiClient, KomodoDefiLocalAuth, AssetManager]);
 
   // Register BalanceManager BEFORE ActivationManager to avoid circular dependency
-  container.registerSingletonAsync<BalanceManager>(
-    () async {
-      final assets = await container.getAsync<AssetManager>();
-      final auth = await container.getAsync<KomodoDefiLocalAuth>();
-      final eventStreamingManager = await container
-          .getAsync<EventStreamingManager>();
-      final client = await container.getAsync<ApiClient>();
+  container.registerSingletonAsync<BalanceManager>(() async {
+    final assets = await container.getAsync<AssetManager>();
+    final auth = await container.getAsync<KomodoDefiLocalAuth>();
+    final eventStreamingManager = await container
+        .getAsync<EventStreamingManager>();
 
-      // Create BalanceManager without its dependencies on SharedActivationCoordinator and PubkeyManager initially
-      return BalanceManager(
-        activationCoordinator:
-            null, // Will be set after SharedActivationCoordinator is created
-        assetLookup: assets,
-        pubkeyManager: null, // Will be set after PubkeyManager is created
-        auth: auth,
-        eventStreamingManager: eventStreamingManager,
-        assetHistoryStorage: container<AssetHistoryStorage>(),
-        client: client,
-        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
-      );
-    },
-    dependsOn: [
-      AssetManager,
-      KomodoDefiLocalAuth,
-      EventStreamingManager,
-      ApiClient,
-    ],
-  );
+    // Create BalanceManager without its dependencies on SharedActivationCoordinator and PubkeyManager initially
+    return BalanceManager(
+      activationCoordinator:
+          null, // Will be set after SharedActivationCoordinator is created
+      assetLookup: assets,
+      pubkeyManager: null, // Will be set after PubkeyManager is created
+      auth: auth,
+      eventStreamingManager: eventStreamingManager,
+      assetHistoryStorage: container<AssetHistoryStorage>(),
+    );
+  }, dependsOn: [AssetManager, KomodoDefiLocalAuth, EventStreamingManager]);
 
   // Register activation manager with asset manager dependency
   container.registerSingletonAsync<ActivationManager>(
@@ -354,9 +336,8 @@ Future<void> bootstrap({
       final feeManager = await container.getAsync<FeeManager>();
       final legacyManager = await container.getAsync<LegacyWithdrawalManager>();
       final auth = await container.getAsync<KomodoDefiLocalAuth>();
-      final transactionHistory = await container
-          .getAsync<TransactionHistoryManager>();
-
+      final eventStreamingManager = await container
+          .getAsync<EventStreamingManager>();
       final activationCoordinator = await container
           .getAsync<SharedActivationCoordinator>();
       return WithdrawalManager(
@@ -367,13 +348,9 @@ Future<void> bootstrap({
         legacyManager,
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
         pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
-        transactionHistoryManager: transactionHistory,
+        eventStreamingManager: eventStreamingManager,
         walletIdResolver: () async => (await auth.currentUser)?.walletId,
         authStateChanges: auth.watchCurrentUser(),
-        gaslessPollInterval: Duration(
-          milliseconds:
-              config.tronGaslessProvider?.statusPollIntervalMs ?? 3000,
-        ),
       );
     },
     dependsOn: [
@@ -383,7 +360,7 @@ Future<void> bootstrap({
       FeeManager,
       LegacyWithdrawalManager,
       KomodoDefiLocalAuth,
-      TransactionHistoryManager,
+      EventStreamingManager,
     ],
   );
 

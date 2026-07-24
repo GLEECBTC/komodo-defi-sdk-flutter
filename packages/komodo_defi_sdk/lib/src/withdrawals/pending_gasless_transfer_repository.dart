@@ -45,12 +45,12 @@ abstract interface class PendingGaslessTransferRepository {
 
   Stream<List<PendingGaslessTransfer>> watch(WalletId walletId);
 
-  /// Finds a transfer by either its required request ID or accepted trace ID.
+  /// Finds a transfer by either its local journal ID or accepted trace ID.
   Future<PendingGaslessTransfer?> find(WalletId walletId, String identity);
 
-  Future<PendingGaslessTransfer?> findByRequestId(
+  Future<PendingGaslessTransfer?> findByJournalId(
     WalletId walletId,
-    String requestId,
+    String journalId,
   );
 
   Future<PendingGaslessTransfer?> findByTraceId(
@@ -81,7 +81,9 @@ class SecurePendingGaslessTransferRepository
   }) : _storage = storage ?? SecureGaslessTransferStorage();
 
   static const _prefix = 'gasless_pending_transfers_';
-  static const _schemaVersion = 2;
+  static const _schemaVersion = 3;
+  static const _legacyAliasSchemaVersion = 1;
+  static const _maxLegacyAliasesPerWallet = 16;
 
   final GaslessTransferKeyValueStorage _storage;
   final Mutex _mutex = Mutex();
@@ -95,9 +97,21 @@ class SecurePendingGaslessTransferRepository
   @override
   Stream<List<PendingGaslessTransfer>> watch(WalletId walletId) async* {
     final scope = _walletScope(walletId);
-    yield await list(walletId);
-    await for (final changedScope in _changes.stream) {
-      if (changedScope == scope) yield await list(walletId);
+    // Subscribe before reading the initial snapshot. A mutation concurrent
+    // with that read is buffered instead of disappearing between the initial
+    // yield and the broadcast-stream subscription.
+    final changes = StreamController<void>();
+    final subscription = _changes.stream
+        .where((changedScope) => changedScope == scope)
+        .listen((_) => changes.add(null));
+    try {
+      yield await list(walletId);
+      await for (final _ in changes.stream) {
+        yield await list(walletId);
+      }
+    } finally {
+      await subscription.cancel();
+      await changes.close();
     }
   }
 
@@ -110,19 +124,19 @@ class SecurePendingGaslessTransferRepository
     return transfers
         .where(
           (transfer) =>
-              transfer.requestId == identity || transfer.traceId == identity,
+              transfer.journalId == identity || transfer.traceId == identity,
         )
         .firstOrNull;
   }
 
   @override
-  Future<PendingGaslessTransfer?> findByRequestId(
+  Future<PendingGaslessTransfer?> findByJournalId(
     WalletId walletId,
-    String requestId,
+    String journalId,
   ) async {
     final transfers = await list(walletId);
     return transfers
-        .where((transfer) => transfer.requestId == requestId)
+        .where((transfer) => transfer.journalId == journalId)
         .firstOrNull;
   }
 
@@ -143,20 +157,20 @@ class SecurePendingGaslessTransferRepository
       if (transfer.state.isTerminal) {
         await _removeCorrelatedUnlocked(
           walletId,
-          requestId: transfer.requestId,
+          journalId: transfer.journalId,
           traceId: transfer.traceId,
         );
         return;
       }
 
       final transfers = await _readUnlocked(walletId);
-      // Replace the entire request/trace correlation set in one encrypted
+      // Replace the entire journal/trace correlation set in one encrypted
       // write. Replacing only the first match can leave the original
-      // request-only reservation beside the accepted trace record, locking the
+      // journal-only reservation beside the accepted trace record, locking the
       // custody source forever after a crash or migration.
       transfers.removeWhere(
         (item) =>
-            item.requestId == transfer.requestId ||
+            item.journalId == transfer.journalId ||
             (transfer.traceId != null && item.traceId == transfer.traceId),
       );
       transfers.add(transfer);
@@ -171,7 +185,7 @@ class SecurePendingGaslessTransferRepository
       final transfers = await _readUnlocked(walletId);
       final conflicts = transfers.any(
         (item) =>
-            item.requestId == transfer.requestId ||
+            item.journalId == transfer.journalId ||
             (item.assetId == transfer.assetId &&
                 item.custodyAddress == transfer.custodyAddress),
       );
@@ -192,18 +206,18 @@ class SecurePendingGaslessTransferRepository
     final transfers = await _readUnlocked(walletId);
     final correlated = transfers.where(
       (transfer) =>
-          transfer.requestId == identity || transfer.traceId == identity,
+          transfer.journalId == identity || transfer.traceId == identity,
     );
-    final requestIds = correlated.map((transfer) => transfer.requestId).toSet();
+    final journalIds = correlated.map((transfer) => transfer.journalId).toSet();
     final traceIds = correlated
         .map((transfer) => transfer.traceId)
         .whereType<String>()
         .toSet();
     transfers.removeWhere(
       (transfer) =>
-          transfer.requestId == identity ||
+          transfer.journalId == identity ||
           transfer.traceId == identity ||
-          requestIds.contains(transfer.requestId) ||
+          journalIds.contains(transfer.journalId) ||
           (transfer.traceId != null && traceIds.contains(transfer.traceId)),
     );
     await _writeUnlocked(walletId, transfers);
@@ -212,13 +226,13 @@ class SecurePendingGaslessTransferRepository
 
   Future<void> _removeCorrelatedUnlocked(
     WalletId walletId, {
-    required String requestId,
+    required String journalId,
     String? traceId,
   }) async {
     final transfers = await _readUnlocked(walletId)
       ..removeWhere(
         (transfer) =>
-            transfer.requestId == requestId ||
+            transfer.journalId == journalId ||
             (traceId != null && transfer.traceId == traceId),
       );
     await _writeUnlocked(walletId, transfers);
@@ -230,28 +244,130 @@ class SecurePendingGaslessTransferRepository
 
   Future<List<PendingGaslessTransfer>> _readUnlocked(WalletId walletId) async {
     final key = _keyFor(walletId);
-    final legacyKey = _legacyKeyFor(walletId);
+    final currentLegacyKey = _legacyKeyFor(walletId);
+    final registeredLegacyKeys = await _readLegacyAliases(walletId);
+    final legacyKeys = <String>{...registeredLegacyKeys, currentLegacyKey};
     final encoded = await _storage.read(key);
-    final legacyEncoded = legacyKey == key
-        ? null
-        : await _storage.read(legacyKey);
     final current = _decodeTransfers(encoded);
-    final legacy = _decodeTransfers(legacyEncoded);
-    if (current == null && legacy == null) return <PendingGaslessTransfer>[];
+    final legacy = <(String, _DecodedPendingTransfers)>[];
+    for (final legacyKey in legacyKeys) {
+      final decoded = _decodeTransfers(await _storage.read(legacyKey));
+      if (decoded != null) legacy.add((legacyKey, decoded));
+    }
+
+    if (legacy.isNotEmpty) {
+      // Register ownership before rewriting the journal. If stable-key
+      // migration is interrupted and the wallet is subsequently renamed, the
+      // old compound-ID key remains discoverable without enumerating another
+      // wallet's secure-storage records.
+      await _writeLegacyAliases(
+        walletId,
+        legacy.map((entry) => entry.$1).toSet(),
+      );
+    }
+
+    if (current == null && legacy.isEmpty) {
+      if (registeredLegacyKeys.isNotEmpty) {
+        await _deleteLegacyAliases(walletId);
+      }
+      return <PendingGaslessTransfer>[];
+    }
     final transfers = _mergeCorrelatedTransfers([
       ...?current?.transfers,
-      ...?legacy?.transfers,
+      for (final entry in legacy) ...entry.$2.transfers,
     ]);
-    final needsMigration =
-        current?.needsMigration == true ||
-        legacy != null ||
-        legacy?.needsMigration == true;
+    final needsMigration = current?.needsMigration == true || legacy.isNotEmpty;
     if (needsMigration) {
       await _writeUnlocked(walletId, transfers);
-      if (legacyKey != key) await _storage.delete(legacyKey);
+      for (final entry in legacy) {
+        await _storage.delete(entry.$1);
+      }
+    }
+    if (registeredLegacyKeys.isNotEmpty || legacy.isNotEmpty) {
+      await _deleteLegacyAliases(walletId);
     }
     return transfers;
   }
+
+  Future<Set<String>> _readLegacyAliases(WalletId walletId) async {
+    final encoded = await _storage.read(_legacyAliasKeyFor(walletId));
+    if (encoded == null || encoded.isEmpty) return <String>{};
+
+    final decoded = jsonDecode(encoded);
+    if (decoded is! Map) {
+      throw const FormatException(
+        'Pending GasFree legacy alias storage is not an object',
+      );
+    }
+    final json = convertToJsonMap(decoded);
+    final unknownKeys = json.keys.toSet()
+      ..removeAll(const {'version', 'wallet_fingerprint', 'legacy_keys'});
+    if (unknownKeys.isNotEmpty) {
+      throw FormatException(
+        'Pending GasFree legacy alias storage contains unknown fields: '
+        '${unknownKeys.join(', ')}',
+      );
+    }
+    if (json.valueOrNull<int>('version') != _legacyAliasSchemaVersion) {
+      throw StateError(
+        'Pending GasFree legacy alias storage requires a newer schema',
+      );
+    }
+    if (json.valueOrNull<String>('wallet_fingerprint') !=
+        _walletFingerprint(walletId)) {
+      throw StateError(
+        'Pending GasFree legacy alias storage has the wrong wallet owner',
+      );
+    }
+    final rawKeys = json['legacy_keys'];
+    if (rawKeys is! List ||
+        rawKeys.length > _maxLegacyAliasesPerWallet ||
+        rawKeys.any((key) => key is! String)) {
+      throw const FormatException(
+        'Pending GasFree legacy alias storage has invalid keys',
+      );
+    }
+    final keys = rawKeys.cast<String>().toSet();
+    if (keys.length != rawKeys.length ||
+        keys.any((key) => !_isLegacyStorageKey(key))) {
+      throw const FormatException(
+        'Pending GasFree legacy alias storage has invalid keys',
+      );
+    }
+    return keys;
+  }
+
+  Future<void> _writeLegacyAliases(
+    WalletId walletId,
+    Set<String> legacyKeys,
+  ) async {
+    if (legacyKeys.isEmpty) return;
+    final current = await _readLegacyAliases(walletId);
+    final aliases = <String>{...current, ...legacyKeys};
+    if (aliases.length > _maxLegacyAliasesPerWallet) {
+      throw StateError(
+        'Pending GasFree legacy alias storage exceeds '
+        '$_maxLegacyAliasesPerWallet keys',
+      );
+    }
+    if (aliases.any((key) => !_isLegacyStorageKey(key))) {
+      throw const FormatException(
+        'Pending GasFree legacy alias storage has invalid keys',
+      );
+    }
+    final sortedAliases = aliases.toList()..sort();
+    await _storage.write(
+      _legacyAliasKeyFor(walletId),
+      jsonEncode({
+        'version': _legacyAliasSchemaVersion,
+        'wallet_fingerprint': _walletFingerprint(walletId),
+        'legacy_keys': sortedAliases,
+      }),
+    );
+  }
+
+  Future<void> _deleteLegacyAliases(WalletId walletId) =>
+      _storage.delete(_legacyAliasKeyFor(walletId));
 
   _DecodedPendingTransfers? _decodeTransfers(String? encoded) {
     if (encoded == null || encoded.isEmpty) return null;
@@ -318,15 +434,15 @@ class SecurePendingGaslessTransferRepository
             existing.traceId != null &&
             candidate.traceId != null &&
             existing.traceId == candidate.traceId;
-        final sameRequest = existing.requestId == candidate.requestId;
-        if (sameRequest) {
+        final sameJournal = existing.journalId == candidate.journalId;
+        if (sameJournal) {
           return existing.traceId == candidate.traceId ||
               existing.traceId == null ||
               candidate.traceId == null;
         }
         return sameTrace &&
-            (existing.requestId.startsWith('legacy:') ||
-                candidate.requestId.startsWith('legacy:'));
+            (existing.journalId.startsWith('legacy:') ||
+                candidate.journalId.startsWith('legacy:'));
       });
       if (index < 0) {
         merged.add(candidate);
@@ -351,24 +467,14 @@ class SecurePendingGaslessTransferRepository
                 right.updatedAt.isAfter(left.updatedAt))
         ? right
         : left;
-    final requestId = metadata.requestId.startsWith('legacy:')
-        ? (left.requestId.startsWith('legacy:')
-              ? right.requestId
-              : left.requestId)
-        : metadata.requestId;
+    final journalId = metadata.journalId.startsWith('legacy:')
+        ? (left.journalId.startsWith('legacy:')
+              ? right.journalId
+              : left.journalId)
+        : metadata.journalId;
     return PendingGaslessTransfer(
       traceId: metadata.traceId ?? lifecycle.traceId,
-      requestId: requestId,
-      provider: metadata.provider ?? lifecycle.provider,
-      tokenContract: metadata.tokenContract ?? lifecycle.tokenContract,
-      authorizationNonce:
-          metadata.authorizationNonce ?? lifecycle.authorizationNonce,
-      authorizationVersion:
-          metadata.authorizationVersion ?? lifecycle.authorizationVersion,
-      authorizationAmount:
-          metadata.authorizationAmount ?? lifecycle.authorizationAmount,
-      authorizationMaxFee:
-          metadata.authorizationMaxFee ?? lifecycle.authorizationMaxFee,
+      journalId: journalId,
       assetId: metadata.assetId,
       network: metadata.network,
       sourceAddress: metadata.sourceAddress,
@@ -377,7 +483,6 @@ class SecurePendingGaslessTransferRepository
       requestedAmount: metadata.requestedAmount,
       signedMaxFee: metadata.signedMaxFee,
       authorizationDeadline: metadata.authorizationDeadline,
-      authorizationFingerprint: metadata.authorizationFingerprint,
       balanceChanges: metadata.balanceChanges,
       fee: lifecycle.fee,
       acceptedAt: left.acceptedAt.isBefore(right.acceptedAt)
@@ -387,26 +492,24 @@ class SecurePendingGaslessTransferRepository
           ? left.updatedAt
           : right.updatedAt,
       state: lifecycle.state,
-      verificationMode: metadata.verificationMode,
     );
   }
 
   int _transferRichness(PendingGaslessTransfer transfer) {
     var score = transfer.traceId == null ? 0 : 100;
     if (transfer.state != GaslessTransferState.preparing) score += 20;
-    if (transfer.provider?.isNotEmpty == true) score++;
-    if (transfer.tokenContract?.isNotEmpty == true) score++;
-    if (transfer.authorizationAmount?.isNotEmpty == true) score++;
-    if (transfer.authorizationMaxFee?.isNotEmpty == true) score++;
     return score;
   }
 
   int _stateRank(GaslessTransferState state) => switch (state) {
     GaslessTransferState.preparing ||
     GaslessTransferState.rejectedBeforeRelay => 0,
-    GaslessTransferState.submittedPending => 1,
-    GaslessTransferState.confirming => 2,
-    GaslessTransferState.submittedUnknown => 3,
+    // Unknown is a no-resubmit safety state, not authoritative relay
+    // progression. It supersedes a pre-submit reservation, but an accepted
+    // trace state recovered from KDF supersedes it.
+    GaslessTransferState.submittedUnknown => 1,
+    GaslessTransferState.submittedPending => 2,
+    GaslessTransferState.confirming => 3,
     GaslessTransferState.confirmed || GaslessTransferState.failedFinal => 4,
   };
 
@@ -429,14 +532,7 @@ class SecurePendingGaslessTransferRepository
   }
 
   String _keyFor(WalletId walletId) {
-    final stableIdentity = walletId.pubkeyHash?.trim();
-    if (stableIdentity == null || stableIdentity.isEmpty) {
-      throw StateError(
-        'GasFree pending storage requires an authenticated wallet identity',
-      );
-    }
-    final walletHash = sha256.convert(utf8.encode(stableIdentity));
-    return '${_prefix}v2_$walletHash';
+    return '${_prefix}v2_${_walletFingerprint(walletId)}';
   }
 
   String _walletScope(WalletId walletId) =>
@@ -445,5 +541,25 @@ class SecurePendingGaslessTransferRepository
   String _legacyKeyFor(WalletId walletId) {
     final walletHash = sha256.convert(utf8.encode(walletId.compoundId));
     return '${_prefix}v1_$walletHash';
+  }
+
+  String _legacyAliasKeyFor(WalletId walletId) =>
+      '${_prefix}legacy_aliases_v1_${_walletFingerprint(walletId)}';
+
+  String _walletFingerprint(WalletId walletId) {
+    final stableIdentity = walletId.pubkeyHash?.trim();
+    if (stableIdentity == null || stableIdentity.isEmpty) {
+      throw StateError(
+        'GasFree pending storage requires an authenticated wallet identity',
+      );
+    }
+    return sha256.convert(utf8.encode(stableIdentity)).toString();
+  }
+
+  bool _isLegacyStorageKey(String key) {
+    const prefix = '${_prefix}v1_';
+    if (!key.startsWith(prefix)) return false;
+    final digest = key.substring(prefix.length);
+    return RegExp(r'^[0-9a-f]{64}$').hasMatch(digest);
   }
 }

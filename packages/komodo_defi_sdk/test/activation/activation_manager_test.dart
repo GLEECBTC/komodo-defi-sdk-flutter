@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
@@ -30,6 +31,10 @@ class _MockAssetsUpdateManager extends Mock
 
 class _MockActivatedAssetsCache extends Mock implements ActivatedAssetsCache {}
 
+const _provider = 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E';
+const _custody = 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF';
+const _contract = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+
 Map<String, dynamic> _trxConfig() => {
   'coin': 'TRX',
   'type': 'TRX',
@@ -47,7 +52,7 @@ Map<String, dynamic> _trxConfig() => {
   'nodes': <Map<String, dynamic>>[],
 };
 
-Map<String, dynamic> _trc20Config() => {
+Map<String, dynamic> _trc20Config({bool gaslessEnabled = true}) => {
   'coin': 'USDT-TRC20',
   'type': 'TRC-20',
   'name': 'Tether',
@@ -56,20 +61,47 @@ Map<String, dynamic> _trc20Config() => {
   'mm2': 1,
   'decimals': 6,
   'derivation_path': "m/44'/195'",
+  'gasless': {'enabled': gaslessEnabled, 'transfer_max_fee': '5'},
   'protocol': {
     'type': 'TRC20',
-    'protocol_data': {
-      'platform': 'TRX',
-      'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-    },
+    'protocol_data': {'platform': 'TRX', 'contract_address': _contract},
   },
-  'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+  'contract_address': _contract,
   'parent_coin': 'TRX',
   'nodes': <Map<String, dynamic>>[],
 };
 
+Map<String, dynamic> _availableStatus({bool active = true}) => {
+  'mmrpc': '2.0',
+  'result': {
+    'gasfree_address': _custody,
+    'service_provider': _provider,
+    'availability': 'available',
+    'active': active,
+    'on_chain_balance': '25',
+    'frozen_balance': '0',
+    'spendable_balance': '25',
+    'transfer_fee': '1',
+    'max_withdrawable': '24',
+  },
+};
+
+Map<String, dynamic> _pendingStatus() => {
+  'mmrpc': '2.0',
+  'result': {
+    'gasfree_address': _custody,
+    'service_provider': _provider,
+    'availability': 'pending_transfer',
+    'active': true,
+    'on_chain_balance': '25',
+    'frozen_balance': '5',
+    'spendable_balance': '20',
+    'transfer_fee': '1',
+  },
+};
+
 void main() {
-  group('ActivationManager gas-free activation lifecycle', () {
+  group('ActivationManager final GasFree activation contract', () {
     late _MockApiClient client;
     late _MockAuth auth;
     late _MockAssetHistory assetHistory;
@@ -78,19 +110,20 @@ void main() {
     late _MockConfigService configService;
     late _MockAssetsUpdateManager assetsUpdateManager;
     late _MockActivatedAssetsCache cache;
-    late GaslessCapabilityRegistry gaslessCapabilities;
+    late GaslessCapabilityRegistry capabilities;
     late KdfUser currentUser;
+    late List<String> calledMethods;
 
     final parent = Asset.fromJson(_trxConfig(), knownIds: const {});
     final child = Asset.fromJson(_trc20Config(), knownIds: {parent.id});
 
-    const provider = TronGaslessProviderConfig(
+    const providerConfig = TronGaslessProviderConfig(
       baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
       service: GaslessServiceKomodoProxy(),
-      serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+      serviceProvider: _provider,
     );
 
-    ActivationManager build() => ActivationManager(
+    ActivationManager buildManager() => ActivationManager(
       client,
       auth,
       assetHistory,
@@ -99,19 +132,30 @@ void main() {
       configService,
       assetsUpdateManager,
       cache,
-      tronGaslessProvider: provider,
-      gaslessCapabilities: gaslessCapabilities,
+      tronGaslessProvider: providerConfig,
+      gaslessCapabilities: capabilities,
     );
+
+    void stubAlreadyActive() {
+      when(
+        () => cache.getActivatedAssetIds(),
+      ).thenAnswer((_) async => {parent.id, child.id});
+      when(
+        () => cache.getActivatedAssetIds(
+          forceRefresh: any(named: 'forceRefresh'),
+        ),
+      ).thenAnswer((_) async => {parent.id, child.id});
+    }
 
     setUpAll(() {
       registerFallbackValue(<String, dynamic>{});
+      registerFallbackValue(child);
       registerFallbackValue(
         const WalletId(
           name: 'fallback',
           authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
         ),
       );
-      registerFallbackValue(child);
     });
 
     setUp(() {
@@ -123,11 +167,11 @@ void main() {
       configService = _MockConfigService();
       assetsUpdateManager = _MockAssetsUpdateManager();
       cache = _MockActivatedAssetsCache();
-      gaslessCapabilities = GaslessCapabilityRegistry(
+      capabilities = GaslessCapabilityRegistry(
         configuredAssetIds: const {'USDT-TRC20'},
-        pinnedProviderAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        pinnedProviderAddress: _provider,
       );
-
+      calledMethods = [];
       currentUser = const KdfUser(
         walletId: WalletId(
           name: 'wallet',
@@ -136,7 +180,9 @@ void main() {
         ),
         isBip39Seed: true,
       );
+
       when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(() => assetLookup.fromId(parent.id)).thenReturn(parent);
       when(
         () => assetHistory.addAssetToWallet(any(), any()),
       ).thenAnswer((_) async {});
@@ -144,592 +190,67 @@ void main() {
         () => balanceManager.precacheBalance(any()),
       ).thenAnswer((_) async {});
       when(() => cache.invalidate()).thenReturn(null);
-      // `_groupByPrimary` resolves a token's parent via the lookup; return TRX
-      // so [TRX, USDT-TRC20] groups as one platform+child group.
-      when(() => assetLookup.fromId(parent.id)).thenReturn(parent);
     });
 
     test(
-      'already-active capability succeeds only after account status',
+      'already-active token probes status without runtime configure',
       () async {
-        // Both TRX and USDT-TRC20 are already active in KDF. With a gasless
-        // provider configured and the per-session refresh not yet attempted,
-        // `activateAssets` does NOT short-circuit; it runs the strategy, which
-        // skips the already-active child and yields no terminal event. The
-        // manager must synthesise a terminal completion so the coordinator's
-        // Future resolves instead of hanging forever.
-        // Stub both the no-arg form (used by SmartAssetActivator._isAssetActive)
-        // and the forceRefresh form (used by _checkActivationStatus).
-        when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => {parent.id, child.id});
-        when(
-          () => cache.getActivatedAssetIds(
-            forceRefresh: any(named: 'forceRefresh'),
-          ),
-        ).thenAnswer((_) async => {parent.id, child.id});
+        stubAlreadyActive();
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'gasless::configure') {
-            return {
-              'mmrpc': '2.0',
-              'result': {
-                'platform_coin': 'TRX',
-                'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-                'tokens': [
-                  {
-                    'coin': 'USDT-TRC20',
-                    'account_status': {
-                      'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                      'active': true,
-                      'on_chain_balance': '0',
-                      'transfer_fee': '1',
-                      'max_withdrawable': '0',
-                      'availability': 'available',
-                    },
-                  },
-                ],
-              },
-            };
-          }
-          expect(request['method'], 'gasless::account_status');
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-              'active': true,
-              'on_chain_balance': '0',
-              'frozen_balance': '0',
-              'spendable_balance': '0',
-              'transfer_fee': '1',
-              'max_withdrawable': '0',
-              'availability': 'available',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-            },
-          };
+          calledMethods.add(request['method'] as String);
+          return _availableStatus(active: false);
         });
 
-        final manager = build();
-
-        // Precondition: a refresh is pending for the token.
-        expect(manager.shouldRefreshTronGaslessActivation(child), isTrue);
-
+        final manager = buildManager();
         final progress = await manager
             .activateAssets([parent, child])
             .toList()
             .timeout(const Duration(seconds: 5));
 
-        // The stream MUST emit a terminal success event.
-        expect(
-          progress.where((p) => p.isComplete && p.isSuccess),
-          isNotEmpty,
-          reason: 'must emit a terminal success so the coordinator never hangs',
-        );
-        // And the refresh flag must be cleared so we never re-enter this path
-        // (which would otherwise loop / re-hang) for the rest of the session.
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, ['gasless::account_status']);
+        expect(capabilities.isReady(child.id), isTrue);
+        expect(capabilities.statusFor(child.id)?.active, isFalse);
         expect(manager.shouldRefreshTronGaslessActivation(child), isFalse);
       },
     );
 
-    for (final activationFee in <String?>[null, '2']) {
-      final hasActivationFee = activationFee != null;
-      test(
-        'inactive available status ${hasActivationFee ? 'accepts' : 'rejects'} '
-        '${hasActivationFee ? 'present' : 'missing'} activation fee',
-        () async {
-          when(
-            () => cache.getActivatedAssetIds(),
-          ).thenAnswer((_) async => {parent.id, child.id});
-          when(
-            () => cache.getActivatedAssetIds(
-              forceRefresh: any(named: 'forceRefresh'),
-            ),
-          ).thenAnswer((_) async => {parent.id, child.id});
-          when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-            final request =
-                invocation.positionalArguments.first as Map<String, dynamic>;
-            if (request['method'] == 'gasless::configure') {
-              return {
-                'mmrpc': '2.0',
-                'result': {
-                  'platform_coin': 'TRX',
-                  'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-                  'tokens': [
-                    {
-                      'coin': 'USDT-TRC20',
-                      'account_status': {
-                        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                        'active': false,
-                        'on_chain_balance': '0',
-                        'transfer_fee': '1',
-                        'max_withdrawable': '0',
-                        'availability': 'available',
-                      },
-                    },
-                  ],
-                },
-              };
-            }
-            return {
-              'mmrpc': '2.0',
-              'result': {
-                'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                'active': false,
-                'on_chain_balance': '0',
-                'frozen_balance': '0',
-                'spendable_balance': '0',
-                'transfer_fee': '1',
-                if (activationFee != null) 'activation_fee': activationFee,
-                'max_withdrawable': '0',
-                'availability': 'available',
-                'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-              },
-            };
-          });
-
-          final manager = build();
-          final progress = await manager.activateAssets([
-            parent,
-            child,
-          ]).toList();
-
-          expect(progress.last.isSuccess, hasActivationFee);
-          expect(
-            gaslessCapabilities.canReceiveGasless(child.id),
-            hasActivationFee,
-          );
-          if (!hasActivationFee) {
-            expect(
-              gaslessCapabilities.capabilityFor(child).reasonCode,
-              'invalid_account_status',
-            );
-          }
-        },
-      );
-    }
-
-    for (final statusProvider in <String?>[null, 'TDifferentProvider']) {
-      test(
-        'bound account status rejects ${statusProvider ?? 'missing'} provider',
-        () async {
-          when(
-            () => cache.getActivatedAssetIds(),
-          ).thenAnswer((_) async => {parent.id, child.id});
-          when(
-            () => cache.getActivatedAssetIds(
-              forceRefresh: any(named: 'forceRefresh'),
-            ),
-          ).thenAnswer((_) async => {parent.id, child.id});
-          when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-            final request =
-                invocation.positionalArguments.first as Map<String, dynamic>;
-            if (request['method'] == 'gasless::configure') {
-              return {
-                'mmrpc': '2.0',
-                'result': {
-                  'platform_coin': 'TRX',
-                  'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-                  'tokens': [
-                    {
-                      'coin': 'USDT-TRC20',
-                      'account_status': {
-                        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                        'active': true,
-                        'on_chain_balance': '0',
-                        'transfer_fee': '1',
-                        'max_withdrawable': '0',
-                        'availability': 'available',
-                      },
-                    },
-                  ],
-                },
-              };
-            }
-            return {
-              'mmrpc': '2.0',
-              'result': {
-                'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                'active': true,
-                'on_chain_balance': '0',
-                'frozen_balance': '0',
-                'spendable_balance': '0',
-                'transfer_fee': '1',
-                'max_withdrawable': '0',
-                'availability': 'available',
-                if (statusProvider != null) 'service_provider': statusProvider,
-              },
-            };
-          });
-
-          final manager = build();
-          final progress = await manager.activateAssets([
-            parent,
-            child,
-          ]).toList();
-
-          expect(progress.last.isError, isTrue);
-          expect(gaslessCapabilities.canReceiveGasless(child.id), isFalse);
-          expect(
-            gaslessCapabilities.capabilityFor(child).reasonCode,
-            'provider_identity_mismatch',
-          );
-        },
-      );
-    }
-
-    test('in-flight account status cannot cross a wallet reset', () async {
-      final statusStarted = Completer<void>();
-      final statusResponse = Completer<Map<String, dynamic>>();
-      when(
-        () => cache.getActivatedAssetIds(),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(
-        () => cache.getActivatedAssetIds(
-          forceRefresh: any(named: 'forceRefresh'),
-        ),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        if (request['method'] == 'gasless::configure') {
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'platform_coin': 'TRX',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-              'tokens': [
-                {
-                  'coin': 'USDT-TRC20',
-                  'account_status': {
-                    'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                    'active': true,
-                    'on_chain_balance': '0',
-                    'transfer_fee': '1',
-                    'max_withdrawable': '0',
-                    'availability': 'available',
-                  },
-                },
-              ],
-            },
-          };
-        }
-        statusStarted.complete();
-        return statusResponse.future;
-      });
-
-      final manager = build();
-      final pending = manager.activateAssets([parent, child]).toList();
-      await statusStarted.future;
-      manager.resetActivationSessionState();
-      currentUser = const KdfUser(
-        walletId: WalletId(
-          name: 'wallet-b',
-          pubkeyHash: 'wallet-b-pubkey',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
-        ),
-        isBip39Seed: true,
-      );
-      statusResponse.complete({
-        'mmrpc': '2.0',
-        'result': {
-          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-          'active': true,
-          'on_chain_balance': '0',
-          'frozen_balance': '0',
-          'spendable_balance': '0',
-          'transfer_fee': '1',
-          'max_withdrawable': '0',
-          'availability': 'available',
-          'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-        },
-      });
-
-      final progress = await pending;
-      expect(progress.last.isError, isTrue);
-      expect(
-        gaslessCapabilities.capabilityFor(child).state,
-        GaslessCapabilityState.initial,
-      );
-      expect(gaslessCapabilities.canReceiveGasless(child.id), isFalse);
-    });
-
-    test('in-flight account-status error cannot mutate a new wallet', () async {
-      final statusStarted = Completer<void>();
-      final statusResponse = Completer<Map<String, dynamic>>();
-      when(
-        () => cache.getActivatedAssetIds(),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(
-        () => cache.getActivatedAssetIds(
-          forceRefresh: any(named: 'forceRefresh'),
-        ),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        if (request['method'] == 'gasless::configure') {
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'platform_coin': 'TRX',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-              'tokens': [
-                {
-                  'coin': 'USDT-TRC20',
-                  'account_status': {
-                    'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                    'active': true,
-                    'on_chain_balance': '0',
-                    'transfer_fee': '1',
-                    'max_withdrawable': '0',
-                    'availability': 'available',
-                  },
-                },
-              ],
-            },
-          };
-        }
-        statusStarted.complete();
-        return statusResponse.future;
-      });
-
-      final manager = build();
-      final pending = manager.activateAssets([parent, child]).toList();
-      await statusStarted.future;
-      manager.resetActivationSessionState();
-      currentUser = const KdfUser(
-        walletId: WalletId(
-          name: 'wallet-b',
-          pubkeyHash: 'wallet-b-pubkey',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
-        ),
-        isBip39Seed: true,
-      );
-      statusResponse.complete({
-        'mmrpc': '2.0',
-        'error': 'redacted',
-        'error_type': 'CustodyAddressMismatch',
-      });
-
-      final progress = await pending;
-      expect(progress.last.isError, isTrue);
-      expect(
-        gaslessCapabilities.capabilityFor(child).state,
-        GaslessCapabilityState.initial,
-      );
-      expect(gaslessCapabilities.canReceiveGasless(child.id), isFalse);
-    });
-
     test(
-      'wallet reset after verification blocks completion side effects',
+      'Trezor activation keeps the configured token on Standard TRON',
       () async {
-        when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => {parent.id, child.id});
-        when(
-          () => cache.getActivatedAssetIds(
-            forceRefresh: any(named: 'forceRefresh'),
-          ),
-        ).thenAnswer((_) async => {parent.id, child.id});
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'gasless::configure') {
-            return {
-              'mmrpc': '2.0',
-              'result': {
-                'platform_coin': 'TRX',
-                'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-                'tokens': [
-                  {
-                    'coin': 'USDT-TRC20',
-                    'account_status': {
-                      'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                      'active': true,
-                      'on_chain_balance': '0',
-                      'transfer_fee': '1',
-                      'max_withdrawable': '0',
-                      'availability': 'available',
-                    },
-                  },
-                ],
-              },
-            };
-          }
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-              'active': true,
-              'on_chain_balance': '0',
-              'frozen_balance': '0',
-              'spendable_balance': '0',
-              'transfer_fee': '1',
-              'max_withdrawable': '0',
-              'availability': 'available',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-            },
-          };
-        });
-
-        final manager = build();
-        var resetAfterVerification = false;
-        final progress = <ActivationProgress>[];
-
-        await manager.activateAssets([parent, child]).forEach((event) {
-          progress.add(event);
-          if (!resetAfterVerification && event.isComplete && event.isSuccess) {
-            resetAfterVerification = true;
-            currentUser = const KdfUser(
-              walletId: WalletId(
-                name: 'wallet-b',
-                pubkeyHash: 'wallet-b-pubkey',
-                authOptions: AuthOptions(
-                  derivationMethod: DerivationMethod.hdWallet,
-                ),
-              ),
-              isBip39Seed: true,
-            );
-            manager.resetActivationSessionState();
-          }
-        });
-
-        expect(resetAfterVerification, isTrue);
-        expect(progress.last.isError, isTrue);
-        verifyNever(() => assetHistory.addAssetToWallet(any(), any()));
-        verifyNever(() => balanceManager.precacheBalance(any()));
-        verifyNever(() => cache.invalidate());
-      },
-    );
-
-    test(
-      'reset unblocks old joiners without stale cleanup removing new attempt',
-      () async {
-        var activationStatusChecks = 0;
-        final oldJoinerCheckedStatus = Completer<void>();
-        when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => {parent.id, child.id});
-        when(
-          () => cache.getActivatedAssetIds(
-            forceRefresh: any(named: 'forceRefresh'),
-          ),
-        ).thenAnswer((_) async {
-          activationStatusChecks++;
-          if (activationStatusChecks == 2) {
-            oldJoinerCheckedStatus.complete();
-          }
-          return {parent.id, child.id};
-        });
-
-        final oldConfigureStarted = Completer<void>();
-        final newConfigureStarted = Completer<void>();
-        final oldConfigureResponse = Completer<Map<String, dynamic>>();
-        final newConfigureResponse = Completer<Map<String, dynamic>>();
-        var configureCalls = 0;
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'gasless::configure') {
-            configureCalls++;
-            if (configureCalls == 1) {
-              oldConfigureStarted.complete();
-              return oldConfigureResponse.future;
-            }
-            if (configureCalls == 2) {
-              newConfigureStarted.complete();
-              return newConfigureResponse.future;
-            }
-            throw StateError('Unexpected third configure call');
-          }
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-              'active': true,
-              'on_chain_balance': '0',
-              'frozen_balance': '0',
-              'spendable_balance': '0',
-              'transfer_fee': '1',
-              'max_withdrawable': '0',
-              'availability': 'available',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-            },
-          };
-        });
-
-        Map<String, dynamic> configureResponse() => {
-          'mmrpc': '2.0',
-          'result': {
-            'platform_coin': 'TRX',
-            'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-            'tokens': [
-              {
-                'coin': 'USDT-TRC20',
-                'account_status': {
-                  'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                  'active': true,
-                  'on_chain_balance': '0',
-                  'transfer_fee': '1',
-                  'max_withdrawable': '0',
-                  'availability': 'available',
-                },
-              },
-            ],
-          },
-        };
-
-        final manager = build();
-        final oldOwner = manager.activateAssets([parent, child]).toList();
-        await oldConfigureStarted.future;
-        final oldJoiner = manager.activateAssets([parent, child]).toList();
-        await oldJoinerCheckedStatus.future;
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
-
+        stubAlreadyActive();
         currentUser = const KdfUser(
           walletId: WalletId(
-            name: 'wallet-b',
-            pubkeyHash: 'wallet-b-pubkey',
+            name: 'trezor-wallet',
+            pubkeyHash: 'trezor-pubkey',
             authOptions: AuthOptions(
               derivationMethod: DerivationMethod.hdWallet,
+              privKeyPolicy: PrivateKeyPolicy.trezor(),
             ),
           ),
           isBip39Seed: true,
         );
-        manager.resetActivationSessionState();
 
-        final oldJoinerProgress = await oldJoiner.timeout(
-          const Duration(seconds: 1),
-        );
-        expect(oldJoinerProgress.last.isError, isTrue);
+        final progress = await buildManager().activateAssets([
+          parent,
+          child,
+        ]).toList();
 
-        final newOwner = manager.activateAssets([parent, child]).toList();
-        await newConfigureStarted.future;
-        oldConfigureResponse.complete(configureResponse());
-        final oldOwnerProgress = await oldOwner;
-        expect(oldOwnerProgress.last.isError, isTrue);
-
-        final newJoiner = manager.activateAssets([parent, child]).toList();
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
-        expect(configureCalls, 2);
-
-        newConfigureResponse.complete(configureResponse());
-        final newProgress = await Future.wait([newOwner, newJoiner]);
-        expect(newProgress[0].last.isSuccess, isTrue);
-        expect(newProgress[1].last.isSuccess, isTrue);
-        expect(configureCalls, 2);
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, isEmpty);
+        expect(capabilities.isReady(child.id), isFalse);
       },
     );
 
     test(
-      'legacy KDF falls back only when configure method is unavailable',
+      'first activation serializes only the documented GasFree fields',
       () async {
+        Map<String, dynamic>? activationRequest;
         when(
           () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => {parent.id, child.id});
+        ).thenAnswer((_) async => <AssetId>{});
         when(
           () => cache.getActivatedAssetIds(
             forceRefresh: any(named: 'forceRefresh'),
@@ -738,133 +259,250 @@ void main() {
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'gasless::configure') {
+          calledMethods.add(request['method'] as String);
+          if (request['method'] == 'enable_eth_with_tokens') {
+            activationRequest = request;
             return {
               'mmrpc': '2.0',
-              'error': 'No such method',
-              'error_type': 'NoSuchMethod',
+              'result': {
+                'current_block': 1,
+                'wallet_balance': {
+                  'wallet_type': 'iguana',
+                  'accounts': <Map<String, dynamic>>[],
+                },
+                'nfts_infos': <String, dynamic>{},
+              },
             };
           }
-          expect(request['method'], 'gasless::account_status');
+          return _availableStatus();
+        });
+
+        final progress = await buildManager().activateAssets([
+          parent,
+          child,
+        ]).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, [
+          'enable_eth_with_tokens',
+          'gasless::account_status',
+        ]);
+        final params = activationRequest!['params'] as Map<String, dynamic>;
+        final provider =
+            params['tron_gasless_provider'] as Map<String, dynamic>;
+        expect(
+          provider.keys,
+          unorderedEquals({
+            'base_url',
+            'service',
+            'service_provider',
+            'request_timeout_ms',
+            'status_poll_interval_ms',
+          }),
+        );
+        expect(provider, {
+          'base_url': 'https://quicknode.gleec.com/gasfree/tron',
+          'service': 'komodo_proxy',
+          'service_provider': _provider,
+          'request_timeout_ms': 15000,
+          'status_poll_interval_ms': 3000,
+        });
+        final tokens =
+            params['erc20_tokens_requests'] as List<Map<String, dynamic>>;
+        expect(tokens.single['gasless'], {
+          'enabled': true,
+          'transfer_max_fee': '5',
+        });
+      },
+    );
+
+    test(
+      'TRX-only activation installs the provider before any token',
+      () async {
+        Map<String, dynamic>? activationRequest;
+        when(
+          () => cache.getActivatedAssetIds(),
+        ).thenAnswer((_) async => <AssetId>{});
+        when(
+          () => cache.getActivatedAssetIds(
+            forceRefresh: any(named: 'forceRefresh'),
+          ),
+        ).thenAnswer((_) async => {parent.id});
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          calledMethods.add(request['method'] as String);
+          activationRequest = request;
           return {
             'mmrpc': '2.0',
             'result': {
-              'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-              'active': true,
-              'on_chain_balance': '0',
-              'frozen_balance': '0',
-              'spendable_balance': '0',
-              'transfer_fee': '1',
-              'max_withdrawable': '0',
-              'availability': 'available',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+              'current_block': 1,
+              'wallet_balance': {
+                'wallet_type': 'iguana',
+                'accounts': <Map<String, dynamic>>[],
+              },
+              'nfts_infos': <String, dynamic>{},
             },
           };
         });
 
-        final manager = build();
-        final progress = await manager.activateAssets([parent, child]).toList();
+        final progress = await buildManager().activateAsset(parent).toList();
 
         expect(progress.last.isSuccess, isTrue);
-        expect(manager.shouldRefreshTronGaslessActivation(child), isFalse);
-        verify(
-          () => client.executeRpc(
-            any(
-              that: predicate<Map<String, dynamic>>(
-                (request) => request['method'] == 'gasless::configure',
-              ),
-            ),
-          ),
-        ).called(1);
+        expect(calledMethods, ['enable_eth_with_tokens']);
+        final params = activationRequest!['params'] as Map<String, dynamic>;
+        expect(params['tron_gasless_provider'], {
+          'base_url': 'https://quicknode.gleec.com/gasfree/tron',
+          'service': 'komodo_proxy',
+          'service_provider': _provider,
+          'request_timeout_ms': 15000,
+          'status_poll_interval_ms': 3000,
+        });
+        expect(params['erc20_tokens_requests'], isEmpty);
       },
     );
 
-    test('legacy fallback rejects every non-method-missing error', () async {
-      when(
-        () => cache.getActivatedAssetIds(),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(
-        () => cache.getActivatedAssetIds(
-          forceRefresh: any(named: 'forceRefresh'),
-        ),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(() => client.executeRpc(any())).thenAnswer(
-        (_) async => {
-          'mmrpc': '2.0',
-          'error': 'Provider authentication rejected',
-          'error_type': 'Unauthorized',
-        },
-      );
-
-      final manager = build();
-      final progress = await manager.activateAssets([parent, child]).toList();
-
-      expect(progress.last.isError, isTrue);
-      expect(manager.shouldRefreshTronGaslessActivation(child), isTrue);
-      verify(() => client.executeRpc(any())).called(1);
-    });
-
-    test('already-active runtime performs real reconfiguration and remains '
-        'unconfirmed when account status is unavailable', () async {
-      when(
-        () => cache.getActivatedAssetIds(),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(
-        () => cache.getActivatedAssetIds(
-          forceRefresh: any(named: 'forceRefresh'),
-        ),
-      ).thenAnswer((_) async => {parent.id, child.id});
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        if (request['method'] == 'gasless::account_status') {
-          throw StateError('GaslessNotConfigured');
-        }
-        if (request['method'] == 'gasless::configure') {
+    test(
+      'an explicit disabled token config cannot be overridden by rollout IDs',
+      () async {
+        final disabledChild = Asset.fromJson(
+          _trc20Config(gaslessEnabled: false),
+          knownIds: {parent.id},
+        );
+        Map<String, dynamic>? activationRequest;
+        when(
+          () => cache.getActivatedAssetIds(),
+        ).thenAnswer((_) async => <AssetId>{});
+        when(
+          () => cache.getActivatedAssetIds(
+            forceRefresh: any(named: 'forceRefresh'),
+          ),
+        ).thenAnswer((_) async => {parent.id, disabledChild.id});
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          calledMethods.add(request['method'] as String);
+          activationRequest = request;
           return {
             'mmrpc': '2.0',
             'result': {
-              'platform_coin': 'TRX',
-              'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-              'tokens': [
-                {
-                  'coin': 'USDT-TRC20',
-                  'account_status': {
-                    'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-                    'on_chain_balance': '0',
-                    'availability': 'available',
-                  },
-                },
-              ],
+              'current_block': 1,
+              'wallet_balance': {
+                'wallet_type': 'iguana',
+                'accounts': <Map<String, dynamic>>[],
+              },
+              'nfts_infos': <String, dynamic>{},
             },
           };
-        }
-        throw StateError('Unexpected method: ${request['method']}');
+        });
+
+        final progress = await buildManager().activateAssets([
+          parent,
+          disabledChild,
+        ]).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, ['enable_eth_with_tokens']);
+        final params = activationRequest!['params'] as Map<String, dynamic>;
+        final tokens =
+            params['erc20_tokens_requests'] as List<Map<String, dynamic>>;
+        expect(tokens.single, isNot(contains('gasless')));
+        expect(capabilities.isConfigured(disabledChild), isFalse);
+      },
+    );
+
+    test(
+      'GaslessNotConfigured requires reactivation but preserves Standard TRON',
+      () async {
+        stubAlreadyActive();
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          calledMethods.add(request['method'] as String);
+          return {
+            'mmrpc': '2.0',
+            'error': 'redacted',
+            'error_type': 'GaslessNotConfigured',
+            'error_data': null,
+          };
+        });
+
+        final progress = await buildManager().activateAssets([
+          parent,
+          child,
+        ]).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, ['gasless::account_status']);
+        expect(
+          capabilities.capabilityFor(child).state,
+          GaslessCapabilityState.disabled,
+        );
+        expect(
+          buildManager().shouldRefreshTronGaslessActivation(child),
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'pending transfer retains the typed status and blocks GasFree',
+      () async {
+        stubAlreadyActive();
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          calledMethods.add(request['method'] as String);
+          return _pendingStatus();
+        });
+
+        final progress = await buildManager().activateAssets([
+          parent,
+          child,
+        ]).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        expect(calledMethods, ['gasless::account_status']);
+        expect(
+          capabilities.capabilityFor(child).state,
+          GaslessCapabilityState.temporarilyUnavailable,
+        );
+        expect(
+          capabilities.statusFor(child.id)?.availability,
+          GaslessAccountAvailability.pendingTransfer,
+        );
+        expect(capabilities.statusFor(child.id)?.frozenBalance.toString(), '5');
+        expect(capabilities.canSendGasless(child.id), isFalse);
+      },
+    );
+
+    test('in-flight status cannot cross a wallet reset', () async {
+      final statusStarted = Completer<void>();
+      final statusResponse = Completer<Map<String, dynamic>>();
+      stubAlreadyActive();
+      when(() => client.executeRpc(any())).thenAnswer((_) async {
+        statusStarted.complete();
+        return statusResponse.future;
       });
 
-      final manager = build();
-      final progress = await manager.activateAssets([parent, child]).toList();
-
-      expect(progress.last.isError, isTrue);
-      expect(manager.shouldRefreshTronGaslessActivation(child), isTrue);
-      verify(
-        () => client.executeRpc(
-          any(
-            that: predicate<Map<String, dynamic>>(
-              (request) => request['method'] == 'gasless::configure',
-            ),
-          ),
+      final manager = buildManager();
+      final pending = manager.activateAssets([parent, child]).toList();
+      await statusStarted.future;
+      manager.resetActivationSessionState();
+      currentUser = const KdfUser(
+        walletId: WalletId(
+          name: 'wallet-b',
+          pubkeyHash: 'wallet-b-pubkey',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
         ),
-      ).called(1);
-      verifyNever(
-        () => client.executeRpc(
-          any(
-            that: predicate<Map<String, dynamic>>(
-              (request) => request['method'] == 'enable_eth_with_tokens',
-            ),
-          ),
-        ),
+        isBip39Seed: true,
       );
+      statusResponse.complete(_availableStatus());
+
+      final progress = await pending;
+      expect(progress.last.isError, isTrue);
+      expect(capabilities.statusFor(child.id), isNull);
+      expect(capabilities.isReady(child.id), isFalse);
     });
   });
 }

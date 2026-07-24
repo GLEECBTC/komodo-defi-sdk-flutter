@@ -1,71 +1,112 @@
 # GasFree SDK 1.0 migration
 
-GasFree is disabled unless both `tronGaslessProvider` and an explicit
-`tronGaslessAssetIds` allowlist are configured. Only built-in TRC-20 assets in
-that set can become eligible, and eligibility becomes ready only after KDF
-confirms the custody account at runtime.
+SDK 1.0 implements the GasFree contract from KDF
+`bd413dcfea73c9de2e85903323946a378b180fa7`. Runtime configuration,
+legacy V0/V1 relay modes, locally invented request/fingerprint fields, and
+external TRONGrid finality or custody readers are no longer supported.
 
-Production provider configuration must use `GaslessServiceKomodoProxy`, HTTPS,
-and a pinned `serviceProvider`. Provider discovery, direct HMAC credentials,
-and plain HTTP each require their explicit unsafe flag and are rejected by a
-release build.
+## Activation
 
-Withdrawal callers must inspect `WithdrawalProgress.submission`:
+Supply `tronGaslessProvider` before TRX activation. The SDK serializes only
+`base_url`, `service`, optional `service_provider`, `request_timeout_ms`, and
+`status_poll_interval_ms`. Generic SDK clients may omit `service_provider` for
+KDF discovery; production applications should provide and verify a pin.
 
-- `WithdrawalSubmission.onChain` has an immediate `txHash`.
-- `WithdrawalSubmission.gaslessRelay` has a `requestId` and `traceId`; the
-  on-chain hash is not available until confirmation.
-- A submitted/unknown GasFree state is not a retry signal. Keep it in activity
-  and call `resumePendingGaslessTransfer` or
-  `reconcilePendingGaslessTransfers` after connectivity or login returns.
+GasFree token enrollment comes from the activated TRC20 configuration:
 
-The SDK stores unresolved GasFree transfers in encrypted, wallet-scoped,
-versioned storage. Wallet login starts status-only reconciliation; logout and
-wallet switching stop polling but never delete these records or resubmit a
-payload. Legacy pubkey caches are migrated conservatively: every retained
-address is considered previously used so empty historical addresses are not
-silently hidden. Secondary addresses are always Standard/recovery sources;
-only the canonical primary may advertise the GasFree custody receive address.
+```json
+{
+  "gasless": {
+    "enabled": true,
+    "transfer_max_fee": "5"
+  }
+}
+```
 
-Pending storage now records `GaslessVerificationMode`. Bound KDF responses use
-`boundRelay`. KDF PR #9 previews and relay responses use `legacyOnChain`: the
-SDK first keeps capability provisional, then proves the configured provider and
-wallet identity from the signed preview without changing or persisting that
-preview. Legacy mode is limited to sending/recovering funds already held in
-custody; `KomodoDefiSdk.canReceiveGasless` remains false. New custody receives
-do not unlock bound-only integrations. At execution the SDK keeps PR #9's
-strict `tx_json` unchanged, creates a local UUID and deterministic payload
-fingerprint before submission, and does not confirm or delete the journal
-record until a raw
-TRONGrid event matches the hash, enrolled token, custody source, recipient,
-signed base-unit amount, and fee ceiling. Existing records without a mode
-migrate to `legacyOnChain` and are never silently discarded.
+An explicit `tronGaslessAssetIds` set may still opt in assets whose
+configuration does not yet contain a `gasless` object. It is an application
+rollout gate, not an SDK-owned token registry, and cannot override an explicit
+`gasless.enabled: false`. The provider is installed during ordinary TRX
+activation even when TRX is activated before an enrolled token. An
+already-active platform that was started without the provider must be
+reactivated under application control; there is no runtime configure RPC.
 
-The wallet Receive screen may separately use `statusAttestedV1`. This evidence
-is minted only by a fresh account-status response that repeats the explicit
-production provider pin and exactly matches the canonical custody address
-locally returned for the primary software-wallet key. It never makes
-`canReceiveGasless` true, so refunds, consolidation, and other bound-only
-integrations remain unavailable. Wallet switches and capability resets revoke
-the evidence and invalidate every in-flight status response. Per-asset request
-epochs also prevent an older success or error from overwriting a newer status
-decision, and mixed current/legacy availability fields are rejected.
+Trezor remains excluded. Application network, contract, token, derivation,
+provider-pin, build-switch, and remote-switch policies remain additional
+requirements above the generic SDK.
 
-`WithdrawalResult.txHash` is nullable until relay finality. Receipts should use
-`FeeInfoTronGasless.finalFee` for the authoritative charged fee while retaining
-`totalTokenFee` (preview) and `signedMaxFee` (authorization ceiling), plus
-`confirmationBlockHeight` and `confirmedAt` when available.
+## Account status and balances
 
-Use `BalanceManager.getGaslessBalanceSnapshot` when a surface needs portfolio
-ownership across both rails. Its custody totals, Standard balances, freshness,
-and provenance must remain distinct; do not substitute an EOA balance when a
-custody lookup fails.
+`gaslessAccountStatus` returns a typed `GaslessAccountStatusResponse` whose
+`availability` is required:
 
-GasFree account status now requires explicit custody-balance and provider-
-availability provenance. After a restart or kill switch, retained canonical
-custody metadata uses a provider-independent mainnet/Nile TRONGrid balance read
-for recovery; it never enables spendability or substitutes an EOA balance.
+- `available`: provider identity, activity, balances, transfer fee, and maximum
+  are present; the optional activation fee may be absent.
+- `pending_transfer`: provider, balances, locks, and fee remain visible, but a
+  new GasFree send is blocked.
+- `token_unsupported`: provider identity remains visible while provider balance
+  and fee fields are absent.
+- `provider_unreachable`: the fresh KDF on-chain custody total remains visible;
+  provider identity, spendability, and fee fields are absent.
 
-Android arm64 and armv7 KDF artifacts for the pending hardened KDF commit are
-not published. Keep builds pinned to the last fetchable full KDF SHA until
-immutable native/WASM artifacts and checksums are promoted.
+Provider identity must continue to equal the activation/session identity after
+discovery. `ProviderIdentityMismatch`, `GasfreeAddressMismatch`, and
+`TokenDecimalMismatch` are exposed as typed GasFree errors. Do not parse error
+messages or infer availability from missing legacy fields.
+
+`GaslessAccountStatusResponse` is the custody source; `BalanceManager` continues
+to report ordinary Standard-address balances. Product rail view models may show
+both, but must keep the fresh custody total, provider-backed spendability, and
+Standard balances separate. Provider failure must never turn an EOA balance
+into a custody balance.
+
+## Withdrawal and rail selection
+
+A GasFree withdrawal uses `fee_method: "gasless"` with `max_fee`,
+`deadline_seconds`, and `fallback_to_native`. A maximum withdrawal sets
+`max: true` and omits `amount`.
+
+Generic clients may request native fallback and must inspect
+`WithdrawalProgress.submission` for the actual rail:
+
+- `WithdrawalSubmission.onChain` contains an immediate transaction hash.
+- `WithdrawalSubmission.gaslessRelay` contains KDF's accepted `traceId` and the
+  local `journalId`.
+- `WithdrawalSubmission.gaslessUnknown` contains only the local `journalId` and
+  must not be resubmitted blindly.
+
+The Gleec production application requests `fallback_to_native: false` and treats
+an unexpected Standard result as a rail mismatch. The signed relay payload and
+submission response contain only KDF's documented fields. `journalId` is a
+local reservation identity and is never serialized to KDF.
+
+`FeeInfoTronGasless` contains preview data only. Receipts obtain the
+authoritative final fee, transaction hash, block height, and finality from
+GasFree trace status.
+
+## Trace tracking and persistence
+
+Before submitting a relay, the SDK enables the coin-level GasFree trace stream.
+After KDF accepts the relay, the SDK persists its `trace_id`, immediately calls
+`gasless::trace_status` once, and then follows `GASLESS_TRACE:<coin>` and
+`ERROR:GASLESS_TRACE:<coin>` events filtered by coin and trace ID.
+
+The encrypted journal remains wallet-scoped and is reserved before submission.
+Restart or stream-disconnection recovery performs one authoritative trace-status
+reconciliation; it does not start arbitrary client polling or resubmit a relay.
+Accepted legacy records that contain a trace ID migrate into trace recovery.
+Records without a trace ID remain `submissionOutcomeUnknown`, stay
+non-resubmittable, and never retain signed authorization material.
+
+Wallet switching invalidates in-flight probes, stream observations, and cached
+capability state. Recovery, consolidation, Standard TRON withdrawals, custody
+history refresh, and duplicate-send protection remain available under their
+existing product policies.
+
+## KDF artifacts
+
+All seven native/WASM targets are available for commit
+`bd413dcfea73c9de2e85903323946a378b180fa7`, including Android arm64 and armv7.
+Build markers and configured archive hashes must identify that full commit and
+a non-empty extracted-core digest. The aggregate mirror `SHA256SUMS` is stale;
+use updater-computed hashes and the individual sidecars.

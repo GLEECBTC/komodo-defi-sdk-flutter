@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
-import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_manager.dart';
+import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
@@ -26,11 +28,8 @@ class _MockActivationCoordinator extends Mock
 class _MockLegacyWithdrawalManager extends Mock
     implements LegacyWithdrawalManager {}
 
-class _MockTransactionHistoryManager extends Mock
-    implements TransactionHistoryManager {}
-
-class _FakePendingGaslessTransfer extends Fake
-    implements PendingGaslessTransfer {}
+class _MockEventStreamingManager extends Mock
+    implements EventStreamingManager {}
 
 class _MemoryStorage implements GaslessTransferKeyValueStorage {
   final values = <String, String>{};
@@ -45,15 +44,74 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
   Future<void> write(String key, String value) async => values[key] = value;
 }
 
-class _RejectAcceptedTraceStorage extends _MemoryStorage {
+class _RecordingPendingGaslessTransferRepository
+    implements PendingGaslessTransferRepository {
+  _RecordingPendingGaslessTransferRepository(this.delegate);
+
+  final PendingGaslessTransferRepository delegate;
+  final upsertedStates = <GaslessTransferState>[];
+
   @override
-  Future<void> write(String key, String value) async {
-    if (value.contains('trace-storage-failure')) {
-      throw StateError('secure storage contention');
-    }
-    await super.write(key, value);
+  Future<PendingGaslessTransfer?> find(WalletId walletId, String identity) =>
+      delegate.find(walletId, identity);
+
+  @override
+  Future<PendingGaslessTransfer?> findByJournalId(
+    WalletId walletId,
+    String journalId,
+  ) => delegate.findByJournalId(walletId, journalId);
+
+  @override
+  Future<PendingGaslessTransfer?> findByTraceId(
+    WalletId walletId,
+    String traceId,
+  ) => delegate.findByTraceId(walletId, traceId);
+
+  @override
+  Future<List<PendingGaslessTransfer>> list(WalletId walletId) =>
+      delegate.list(walletId);
+
+  @override
+  Future<void> remove(WalletId walletId, String identity) =>
+      delegate.remove(walletId, identity);
+
+  @override
+  Future<bool> reserve(WalletId walletId, PendingGaslessTransfer transfer) =>
+      delegate.reserve(walletId, transfer);
+
+  @override
+  Future<void> upsert(WalletId walletId, PendingGaslessTransfer transfer) {
+    upsertedStates.add(transfer.state);
+    return delegate.upsert(walletId, transfer);
   }
+
+  @override
+  Stream<List<PendingGaslessTransfer>> watch(WalletId walletId) =>
+      delegate.watch(walletId);
 }
+
+const _coin = 'USDT-TRC20';
+const _chainId = '728126428';
+const _tokenContract = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const _providerAddress = 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E';
+const _sourceAddress = 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC';
+const _custodyAddress = 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF';
+const _destinationAddress = 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC';
+const _verifyingContract = 'TFFAMQLZybALaLb4uxHA9RBE7pxhUAjF3U';
+const _signature =
+    '1111111111111111111111111111111111111111111111111111111111111111'
+    '111111111111111111111111111111111111111111111111111111111111111111';
+
+const _wallet = WalletId(
+  name: 'wallet',
+  pubkeyHash: 'wallet-hash',
+  authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+);
+const _otherWallet = WalletId(
+  name: 'other-wallet',
+  pubkeyHash: 'other-wallet-hash',
+  authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+);
 
 Map<String, dynamic> _trxConfig() => {
   'coin': 'TRX',
@@ -73,7 +131,7 @@ Map<String, dynamic> _trxConfig() => {
 };
 
 Map<String, dynamic> _trc20Config() => {
-  'coin': 'USDT-TRC20',
+  'coin': _coin,
   'type': 'TRC-20',
   'name': 'Tether',
   'fname': 'Tether',
@@ -83,161 +141,176 @@ Map<String, dynamic> _trc20Config() => {
   'derivation_path': "m/44'/195'",
   'protocol': {
     'type': 'TRC20',
-    'protocol_data': {
-      'platform': 'TRX',
-      'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-    },
+    'protocol_data': {'platform': 'TRX', 'contract_address': _tokenContract},
   },
-  'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+  'contract_address': _tokenContract,
   'parent_coin': 'TRX',
   'nodes': <Map<String, dynamic>>[],
 };
 
-const _requestId = '123e4567-e89b-42d3-a456-426614174000';
-const _tokenContract = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-const _providerAddress = 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E';
-const _authorizationSignature =
-    '1111111111111111111111111111111111111111111111111111111111111111'
-    '111111111111111111111111111111111111111111111111111111111111111111';
-const _authorizationFingerprint =
-    '0d9b716d06b54e026b6f5050ec9f70cdd2dab72f818af4616e8a2b2182eea5c9';
+GaslessAccountStatusResponse _availableStatus() =>
+    GaslessAccountStatusResponse.parse({
+      'mmrpc': '2.0',
+      'result': {
+        'gasfree_address': _custodyAddress,
+        'service_provider': _providerAddress,
+        'availability': 'available',
+        'active': true,
+        'on_chain_balance': '10',
+        'frozen_balance': '0',
+        'spendable_balance': '10',
+        'transfer_fee': '2',
+        'activation_fee': null,
+        'max_withdrawable': '8',
+      },
+    });
 
 WithdrawalPreview _gaslessPreview({
-  String deadline = '1999999999',
-  String requestId = _requestId,
-  String chainId = '728126428',
-  String authorizationValue = '5000000',
-  String authorizationMaxFee = '5000000',
-  String authorizationToken = _tokenContract,
-  String authorizationProvider = _providerAddress,
-  String authorizationSignature = _authorizationSignature,
-  String feeSignedMaxFee = '5',
-  String feeRequestId = _requestId,
-  String feeProviderAddress = _providerAddress,
-  String feeAuthorizationFingerprint = _authorizationFingerprint,
-  String? feeAuthorizationDeadline,
+  String chainId = _chainId,
+  String verifyingContract = _verifyingContract,
 }) {
+  final amount = Decimal.parse('5');
   return WithdrawResult(
     txJson: {
-      'relay_type': 'tron_gasfree',
-      'request_id': requestId,
+      'relay_type': TronGasfreeRelayPayload.relayTypeValue,
       'chain_id': chainId,
-      'coin': 'USDT-TRC20',
-      'from_address': 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
-      'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-      'verifying_contract': 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
-      'signed_authorization': <String, dynamic>{
-        'token': authorizationToken,
-        'service_provider': authorizationProvider,
-        'user': 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
-        'receiver': 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
-        'value': authorizationValue,
-        'max_fee': authorizationMaxFee,
-        'deadline': deadline,
+      'coin': _coin,
+      'from_address': _sourceAddress,
+      'gasfree_address': _custodyAddress,
+      'verifying_contract': verifyingContract,
+      'signed_authorization': {
+        'token': _tokenContract,
+        'service_provider': _providerAddress,
+        'user': _sourceAddress,
+        'receiver': _destinationAddress,
+        'value': '5000000',
+        'max_fee': '5000000',
+        'deadline': '1999999999',
         'version': '1',
         'nonce': '9',
-        'sig': authorizationSignature,
+        'sig': _signature,
       },
-      'authorization_fingerprint': _authorizationFingerprint,
-      'created_at': '2026-04-23T20:47:34Z',
+      'created_at': '2026-07-24T12:00:00Z',
     },
-    txHash: '',
-    from: const ['TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC'],
-    to: const ['TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC'],
+    txHash: null,
+    from: const [_sourceAddress],
+    to: const [_destinationAddress],
     balanceChanges: BalanceChanges(
-      netChange: Decimal.parse('-5'),
+      netChange: Decimal.parse('-7'),
       receivedByMe: Decimal.zero,
-      spentByMe: Decimal.parse('5'),
-      totalAmount: Decimal.parse('5'),
+      spentByMe: Decimal.parse('7'),
+      totalAmount: amount,
     ),
     blockHeight: 0,
     timestamp: 0,
     fee: FeeInfo.tronGasless(
-      coin: 'USDT-TRC20',
+      coin: _coin,
       feeMethod: 'gasless',
       providerName: 'gasfree',
-      gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+      gasfreeAddress: _custodyAddress,
       transferFee: Decimal.parse('2'),
       totalTokenFee: Decimal.parse('2'),
-      signedMaxFee: Decimal.parse(feeSignedMaxFee),
-      providerAddress: feeProviderAddress,
-      authorizationDeadline: int.parse(feeAuthorizationDeadline ?? deadline),
-      requestId: feeRequestId,
-      authorizationFingerprint: feeAuthorizationFingerprint,
+      signedMaxFee: Decimal.parse('5'),
     ),
-    coin: 'USDT-TRC20',
+    coin: _coin,
   );
 }
 
-WithdrawalPreview _legacyGaslessPreview() {
-  final bound = _gaslessPreview();
-  final txJson = Map<String, dynamic>.from(bound.txJson!)
-    ..remove('request_id')
-    ..remove('authorization_fingerprint');
-  final fee = bound.fee as FeeInfoTronGasless;
-  return WithdrawResult(
-    txJson: txJson,
-    txHash: bound.txHash,
-    from: bound.from,
-    to: bound.to,
-    balanceChanges: bound.balanceChanges,
-    blockHeight: bound.blockHeight,
-    timestamp: bound.timestamp,
-    fee: FeeInfo.tronGasless(
-      coin: fee.coin,
-      feeMethod: fee.feeMethod,
-      providerName: fee.providerName,
-      gasfreeAddress: fee.gasfreeAddress,
-      transferFee: fee.transferFee,
-      totalTokenFee: fee.totalTokenFee,
-      activationFee: fee.activationFee,
-      signedMaxFee: fee.signedMaxFee,
-    ),
-    coin: bound.coin,
+WithdrawalPreview _standardPreview() => WithdrawResult(
+  txHex: 'deadbeef',
+  txHash: '',
+  from: const [_sourceAddress],
+  to: const [_destinationAddress],
+  balanceChanges: BalanceChanges(
+    netChange: Decimal.parse('-5.1'),
+    receivedByMe: Decimal.zero,
+    spentByMe: Decimal.parse('5.1'),
+    totalAmount: Decimal.parse('5'),
+  ),
+  blockHeight: 0,
+  timestamp: 0,
+  fee: FeeInfo.tron(
+    coin: 'TRX',
+    bandwidthUsed: 1,
+    energyUsed: 1,
+    bandwidthFee: Decimal.parse('0.05'),
+    energyFee: Decimal.parse('0.05'),
+    totalFeeAmount: Decimal.parse('0.1'),
+  ),
+  coin: _coin,
+);
+
+PendingGaslessTransfer _pending({
+  String journalId = '123e4567-e89b-42d3-a456-426614174000',
+  String? traceId = 'trace-recovery',
+  GaslessTransferState state = GaslessTransferState.submittedPending,
+}) {
+  final timestamp = DateTime.utc(2026, 7, 24, 12);
+  return PendingGaslessTransfer(
+    journalId: journalId,
+    traceId: traceId,
+    assetId: _coin,
+    network: _chainId,
+    sourceAddress: _sourceAddress,
+    custodyAddress: _custodyAddress,
+    destinationAddress: _destinationAddress,
+    requestedAmount: Decimal.parse('5'),
+    signedMaxFee: Decimal.parse('5'),
+    authorizationDeadline: 1999999999,
+    balanceChanges: _gaslessPreview().balanceChanges,
+    fee: _gaslessPreview().fee,
+    acceptedAt: timestamp,
+    updatedAt: timestamp,
+    state: state,
   );
 }
 
-Map<String, dynamic> _expectedAuthorizationJson({
-  String requestId = _requestId,
+Map<String, dynamic> _traceStatus({
+  String state = 'submitted',
+  String? txHash,
+  int? blockHeight,
+  int? confirmedAt,
+  String? finalFee,
+  String? failureReason,
 }) => {
-  'request_id': requestId,
-  'account': 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
-  'custody_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-  'provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-  'receiver': 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
-  'token': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-  'amount': '5000000',
-  'max_fee': '5000000',
-  'deadline': '1999999999',
-  'version': '1',
-  'nonce': '9',
-  'signature_fingerprint': _authorizationFingerprint,
+  'mmrpc': '2.0',
+  'result': {
+    'state': state,
+    'tx_hash_on_chain': txHash,
+    'block_height': blockHeight,
+    'confirmed_at': confirmedAt,
+    'final_fee': finalFee,
+    'failure_reason': failureReason,
+  },
+};
+
+Map<String, dynamic> _errorEnvelope(String errorType) => {
+  'mmrpc': '2.0',
+  'result': {
+    'status': 'Error',
+    'details': {
+      'error': 'GasFree endpoint error',
+      'error_type': errorType,
+      'error_data': _coin,
+    },
+  },
 };
 
 void main() {
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
-    registerFallbackValue(_FakePendingGaslessTransfer());
   });
 
-  group('WithdrawalManager gasless flow', () {
+  group('WithdrawalManager final GasFree contract', () {
     late _MockApiClient client;
     late _MockAssetProvider assetProvider;
     late _MockFeeManager feeManager;
     late _MockActivationCoordinator activationCoordinator;
     late _MockLegacyWithdrawalManager legacyManager;
-    late _MockTransactionHistoryManager transactionHistoryManager;
-    late WithdrawalManager manager;
-    late Asset trc20Asset;
+    late _MockEventStreamingManager eventStreamingManager;
     late SecurePendingGaslessTransferRepository pendingRepository;
-    late _MemoryStorage pendingStorage;
+    late Asset trc20Asset;
     late GaslessCapabilityRegistry gaslessCapabilities;
-
-    const walletId = WalletId(
-      name: 'wallet',
-      pubkeyHash: 'wallet-hash',
-      authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-    );
 
     setUp(() {
       client = _MockApiClient();
@@ -245,417 +318,794 @@ void main() {
       feeManager = _MockFeeManager();
       activationCoordinator = _MockActivationCoordinator();
       legacyManager = _MockLegacyWithdrawalManager();
-      transactionHistoryManager = _MockTransactionHistoryManager();
-      pendingStorage = _MemoryStorage();
+      eventStreamingManager = _MockEventStreamingManager();
       pendingRepository = SecurePendingGaslessTransferRepository(
-        storage: pendingStorage,
+        storage: _MemoryStorage(),
       );
+
       final trxParent = Asset.fromJson(_trxConfig(), knownIds: const {});
       trc20Asset = Asset.fromJson(_trc20Config(), knownIds: {trxParent.id});
-      gaslessCapabilities =
-          GaslessCapabilityRegistry(
-            configuredAssetIds: const {'USDT-TRC20'},
-            pinnedProviderAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-          )..markReadyFor(
-            trc20Asset,
-            GaslessCapabilityIdentity(
-              assetId: trc20Asset.id,
-              platform: 'TRX',
-              contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-              providerAddress: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
-              walletPubkeyHash: walletId.pubkeyHash!,
-              walletType: GaslessWalletType.softwareIguana,
-              derivationPath: '',
-            ),
-          );
-      manager = WithdrawalManager(
-        client,
-        assetProvider,
-        feeManager,
-        activationCoordinator,
-        legacyManager,
-        gaslessCapabilities: gaslessCapabilities,
-        pendingGaslessTransfers: pendingRepository,
-        transactionHistoryManager: transactionHistoryManager,
-        walletIdResolver: () async => walletId,
-        gaslessPollInterval: Duration.zero,
+      gaslessCapabilities = GaslessCapabilityRegistry(
+        configuredAssetIds: const {_coin},
+        pinnedProviderAddress: _providerAddress,
       );
-      when(
-        () => assetProvider.findAssetsByConfigId('USDT-TRC20'),
-      ).thenReturn({trc20Asset});
-      registerFallbackValue(trc20Asset);
-      when(
-        () => activationCoordinator.activateAsset(any()),
-      ).thenAnswer((_) async => ActivationResult.success(trc20Asset.id));
-      when(
-        () => transactionHistoryManager.verifyGaslessTransferOnChain(
-          any(),
-          any(),
-          any(),
-        ),
-      ).thenAnswer((_) async => GaslessOnChainVerification.verified);
-    });
-
-    void enableLegacyRecovery() {
-      final identity = GaslessCapabilityIdentity(
-        assetId: trc20Asset.id,
-        platform: 'TRX',
-        contractAddress: _tokenContract,
-        providerAddress: _providerAddress,
-        walletPubkeyHash: walletId.pubkeyHash!,
-        walletType: GaslessWalletType.softwareIguana,
-        derivationPath: '',
-      );
-      expect(
-        gaslessCapabilities.markProvisionalFor(trc20Asset, identity),
-        isTrue,
-      );
-      expect(
-        gaslessCapabilities.proveLegacyReadyFromSignedPreview(
-          trc20Asset.id,
-          chainId: '728126428',
-          tokenContract: _tokenContract,
-          providerAddress: _providerAddress,
-          walletPubkeyHash: walletId.pubkeyHash!,
-        ),
-        isTrue,
-      );
-    }
-
-    GaslessCapabilityIdentity legacyIdentity() => GaslessCapabilityIdentity(
-      assetId: trc20Asset.id,
-      platform: 'TRX',
-      contractAddress: _tokenContract,
-      providerAddress: _providerAddress,
-      walletPubkeyHash: walletId.pubkeyHash!,
-      walletType: GaslessWalletType.softwareIguana,
-      derivationPath: '',
-    );
-
-    GaslessAccountStatusResponse receiveStatus({String? address}) =>
-        GaslessAccountStatusResponse.parse({
-          'mmrpc': '2.0',
-          'result': {
-            'gasfree_address': address ?? 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-            'on_chain_balance': '10',
-            'availability': 'available',
-            'service_provider': _providerAddress,
-            'active': true,
-            'frozen_balance': '0',
-            'spendable_balance': '10',
-            'transfer_fee': '1',
-            'max_withdrawable': '9',
-          },
-        });
-
-    test(
-      'receive status probe revalidates V1 without bound readiness',
-      () async {
-        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
-        expect(
-          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
-          isFalse,
-        );
-        when(
-          () => client.executeRpc(any()),
-        ).thenAnswer((_) async => receiveStatus().toJson());
-
-        final status = await manager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-
-        expect(status.serviceProvider, _providerAddress);
-        expect(
-          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
-          isTrue,
-        );
-        expect(gaslessCapabilities.canReceiveGasless(trc20Asset.id), isFalse);
-      },
-    );
-
-    test(
-      'receive status probe revokes V1 evidence on address mismatch',
-      () async {
-        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
-        when(() => client.executeRpc(any())).thenAnswer(
-          (_) async => receiveStatus(address: 'TDifferentCustody').toJson(),
-        );
-
-        await manager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-
-        expect(
-          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
-          isFalse,
-        );
-        expect(
-          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
-          'custody_address_mismatch',
-        );
-      },
-    );
-
-    test('bound receive status requires the caller custody address', () async {
-      when(
-        () => client.executeRpc(any()),
-      ).thenAnswer((_) async => receiveStatus().toJson());
-
-      await expectLater(
-        manager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TDifferentCustody',
-        ),
-        throwsA(isA<GaslessTransferException>()),
-      );
-      expect(
-        gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
-        'custody_address_mismatch',
-      );
-    });
-
-    test(
-      'older available status cannot overwrite a newer hard error',
-      () async {
-        final olderStarted = Completer<void>();
-        final newerStarted = Completer<void>();
-        final older = Completer<Map<String, dynamic>>();
-        final newer = Completer<Map<String, dynamic>>();
-        var callCount = 0;
-        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
-        when(() => client.executeRpc(any())).thenAnswer((_) {
-          callCount++;
-          if (callCount == 1) {
-            olderStarted.complete();
-            return older.future;
-          }
-          newerStarted.complete();
-          return newer.future;
-        });
-
-        final olderRequest = manager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-        await olderStarted.future;
-        final newerRequest = manager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-        await newerStarted.future;
-        newer.complete({
-          'mmrpc': '2.0',
-          'error': 'redacted',
-          'error_type': 'CustodyAddressMismatch',
-        });
-
-        await expectLater(newerRequest, throwsA(isA<GeneralErrorResponse>()));
-        expect(
-          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
-          'custody_address_mismatch',
-        );
-
-        older.complete(receiveStatus().toJson());
-        await expectLater(
-          olderRequest,
-          throwsA(isA<GaslessTransferException>()),
-        );
-        expect(
-          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
-          'custody_address_mismatch',
-        );
-        expect(
-          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
-          isFalse,
-        );
-      },
-    );
-
-    test(
-      'receive status ignores an in-flight response after wallet switch',
-      () async {
-        const walletB = WalletId(
-          name: 'wallet-b',
-          pubkeyHash: 'wallet-b-hash',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-        );
-        var currentWallet = walletId;
-        final responseStarted = Completer<void>();
-        final response = Completer<Map<String, dynamic>>();
-        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
-        final raceManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: pendingRepository,
-          transactionHistoryManager: transactionHistoryManager,
-          walletIdResolver: () async => currentWallet,
-          gaslessPollInterval: Duration.zero,
-        );
-        when(() => client.executeRpc(any())).thenAnswer((_) {
-          responseStarted.complete();
-          return response.future;
-        });
-
-        final pending = raceManager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-        await responseStarted.future;
-        gaslessCapabilities.resetSession();
-        currentWallet = walletB;
-        gaslessCapabilities.markProvisionalFor(
-          trc20Asset,
-          GaslessCapabilityIdentity(
-            assetId: trc20Asset.id,
-            platform: 'TRX',
-            contractAddress: _tokenContract,
-            providerAddress: _providerAddress,
-            walletPubkeyHash: walletB.pubkeyHash!,
-            walletType: GaslessWalletType.softwareIguana,
-            derivationPath: '',
-          ),
-        );
-        response.complete(receiveStatus().toJson());
-
-        await expectLater(
-          pending,
-          throwsA(isA<WalletChangedDisconnectException>()),
-        );
-        expect(
-          gaslessCapabilities.canReceiveGaslessFromStatus(trc20Asset.id),
-          isFalse,
-        );
-        await raceManager.dispose();
-      },
-    );
-
-    test(
-      'receive status ignores an in-flight error after wallet switch',
-      () async {
-        const walletB = WalletId(
-          name: 'wallet-b',
-          pubkeyHash: 'wallet-b-hash',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-        );
-        var currentWallet = walletId;
-        final responseStarted = Completer<void>();
-        final response = Completer<Map<String, dynamic>>();
-        gaslessCapabilities.markProvisionalFor(trc20Asset, legacyIdentity());
-        final raceManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: pendingRepository,
-          transactionHistoryManager: transactionHistoryManager,
-          walletIdResolver: () async => currentWallet,
-          gaslessPollInterval: Duration.zero,
-        );
-        when(() => client.executeRpc(any())).thenAnswer((_) {
-          responseStarted.complete();
-          return response.future;
-        });
-
-        final pending = raceManager.gaslessAccountStatusForReceive(
-          trc20Asset.id,
-          expectedGasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-        );
-        await responseStarted.future;
-        gaslessCapabilities.resetSession();
-        currentWallet = walletB;
-        gaslessCapabilities.markProvisionalFor(
-          trc20Asset,
-          GaslessCapabilityIdentity(
-            assetId: trc20Asset.id,
-            platform: 'TRX',
-            contractAddress: _tokenContract,
-            providerAddress: _providerAddress,
-            walletPubkeyHash: walletB.pubkeyHash!,
-            walletType: GaslessWalletType.softwareIguana,
-            derivationPath: '',
-          ),
-        );
-        response.complete({
-          'mmrpc': '2.0',
-          'error': 'redacted',
-          'error_type': 'CustodyAddressMismatch',
-        });
-
-        await expectLater(
-          pending,
-          throwsA(isA<WalletChangedDisconnectException>()),
-        );
-        expect(
-          gaslessCapabilities.capabilityFor(trc20Asset).reasonCode,
-          'awaiting_account_status',
-        );
-        await raceManager.dispose();
-      },
-    );
-
-    test(
-      'wallet capture invalidates old capability before delayed auth event',
-      () async {
-        const walletB = WalletId(
-          name: 'wallet-b',
-          pubkeyHash: 'wallet-b-hash',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-        );
-        var currentWallet = walletId;
-        final raceManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: pendingRepository,
-          transactionHistoryManager: transactionHistoryManager,
-          walletIdResolver: () async => currentWallet,
-          gaslessPollInterval: Duration.zero,
-        );
-        when(
-          () => client.executeRpc(any()),
-        ).thenAnswer((_) async => receiveStatus().toJson());
-        await raceManager.gaslessAccountStatus(trc20Asset.id);
-        clearInteractions(client);
-
-        currentWallet = walletB;
-
-        await expectLater(
-          raceManager.gaslessAccountStatus(trc20Asset.id),
-          throwsA(isA<GaslessTransferException>()),
-        );
-        expect(gaslessCapabilities.isReady(trc20Asset.id), isFalse);
-        verifyNever(() => client.executeRpc(any()));
-        await raceManager.dispose();
-      },
-    );
-
-    test(
-      'literal PR #9 preview proves recovery without enabling receive',
-      () async {
-        final identity = GaslessCapabilityIdentity(
+      final recorded = gaslessCapabilities.recordAccountStatus(
+        trc20Asset,
+        GaslessCapabilityIdentity(
           assetId: trc20Asset.id,
           platform: 'TRX',
           contractAddress: _tokenContract,
           providerAddress: _providerAddress,
-          walletPubkeyHash: walletId.pubkeyHash!,
+          walletPubkeyHash: _wallet.pubkeyHash!,
           walletType: GaslessWalletType.softwareIguana,
           derivationPath: '',
+        ),
+        _availableStatus(),
+      );
+      expect(recorded, isTrue);
+
+      when(
+        () => assetProvider.findAssetsByConfigId(_coin),
+      ).thenReturn({trc20Asset});
+      when(() => assetProvider.fromId(trxParent.id)).thenReturn(trxParent);
+      when(
+        () => activationCoordinator.activateAsset(trc20Asset),
+      ).thenAnswer((_) async => ActivationResult.success(trc20Asset.id));
+    });
+
+    WithdrawalManager makeManager({
+      EventStreamingManager? streams,
+      PendingGaslessTransferRepository? repository,
+      Future<WalletId?> Function()? walletResolver,
+      Stream<KdfUser?>? authStateChanges,
+    }) => WithdrawalManager(
+      client,
+      assetProvider,
+      feeManager,
+      activationCoordinator,
+      legacyManager,
+      gaslessCapabilities: gaslessCapabilities,
+      pendingGaslessTransfers: repository ?? pendingRepository,
+      eventStreamingManager: streams,
+      walletIdResolver: walletResolver ?? () async => _wallet,
+      authStateChanges: authStateChanges,
+    );
+
+    test(
+      'rejects a relay chain mismatch before reservation or submission',
+      () async {
+        final manager = makeManager(streams: eventStreamingManager);
+
+        await expectLater(
+          manager
+              .executeWithdrawal(_gaslessPreview(chainId: '3448148188'), _coin)
+              .toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.source,
+              'source',
+              isA<GaslessTransferException>()
+                  .having(
+                    (error) => error.code,
+                    'code',
+                    GaslessTransferErrorCode.chainIdMismatch,
+                  )
+                  .having(
+                    (error) => error.stage,
+                    'stage',
+                    GaslessTransferStage.preview,
+                  ),
+            ),
+          ),
         );
-        gaslessCapabilities.markProvisionalFor(trc20Asset, identity);
+        verifyNever(() => client.executeRpc(any()));
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      },
+    );
+
+    test(
+      'rejects a relay verifier mismatch before reservation or submission',
+      () async {
+        final manager = makeManager(streams: eventStreamingManager);
+
+        await expectLater(
+          manager
+              .executeWithdrawal(
+                _gaslessPreview(
+                  verifyingContract: 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
+                ),
+                _coin,
+              )
+              .toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.source,
+              'source',
+              isA<GaslessTransferException>()
+                  .having(
+                    (error) => error.code,
+                    'code',
+                    GaslessTransferErrorCode.verifyingContractMismatch,
+                  )
+                  .having(
+                    (error) => error.stage,
+                    'stage',
+                    GaslessTransferStage.preview,
+                  ),
+            ),
+          ),
+        );
+        verifyNever(() => client.executeRpc(any()));
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      },
+    );
+
+    test(
+      'attaches stream before relay, submits exact payload, then follows trace',
+      () async {
+        final events = StreamController<KdfEvent>();
+        final traceQuerySeen = Completer<void>();
+        final timeline = <String>[];
+        final requests = <Map<String, dynamic>>[];
+
+        when(
+          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
+        ).thenAnswer((_) async {
+          timeline.add('stream');
+          return events.stream.listen(null);
+        });
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          requests.add(request);
+          switch (request['method']) {
+            case 'send_raw_transaction':
+              timeline.add('relay');
+              return {
+                'relay_type': TronGasfreeRelayPayload.relayTypeValue,
+                'trace_id': 'trace-accepted',
+                'state': 'WAITING',
+              };
+            case 'gasless::trace_status':
+              if (!traceQuerySeen.isCompleted) traceQuerySeen.complete();
+              return _traceStatus();
+            default:
+              throw StateError('Unexpected RPC ${request['method']}');
+          }
+        });
+
+        final preview = _gaslessPreview();
+        final progressFuture = makeManager(
+          streams: eventStreamingManager,
+        ).executeWithdrawal(preview, _coin).toList();
+
+        await traceQuerySeen.future;
+        events
+          ..add(
+            const GaslessTraceErrorEvent(
+              coin: _coin,
+              traceId: 'trace-accepted',
+              error: 'provider temporarily unreachable',
+            ),
+          )
+          ..add(
+            const GaslessTraceEvent(
+              coin: _coin,
+              traceId: 'trace-other',
+              state: GaslessTraceEventState.confirmed,
+              txHashOnChain: 'wrong-hash',
+              blockHeight: 1,
+              confirmedAt: 1,
+              finalFee: '1',
+            ),
+          )
+          ..add(
+            const GaslessTraceEvent(
+              coin: _coin,
+              traceId: 'trace-accepted',
+              state: GaslessTraceEventState.confirmed,
+              txHashOnChain: 'on-chain-hash',
+              blockHeight: 123,
+              confirmedAt: 1784894400,
+              finalFee: '1.5',
+            ),
+          );
+
+        final progress = await progressFuture.timeout(
+          const Duration(seconds: 2),
+        );
+        await events.close();
+
+        expect(timeline.take(2), ['stream', 'relay']);
+        final sendRequest = requests.singleWhere(
+          (request) => request['method'] == 'send_raw_transaction',
+        );
+        final sentPayload = sendRequest['tx_json'] as Map<String, dynamic>;
+        expect(sentPayload, preview.gaslessRelayPayload!.toJson());
+        expect(sentPayload, isNot(contains('journal_id')));
+        expect(sentPayload, isNot(contains('request_id')));
+        expect(
+          requests.where(
+            (request) => request['method'] == 'gasless::trace_status',
+          ),
+          hasLength(1),
+        );
+        expect(
+          progress.any(
+            (item) =>
+                item.sdkError?.source is GaslessTransferException &&
+                item.gaslessTransferState ==
+                    GaslessTransferState.submittedPending,
+          ),
+          isTrue,
+        );
+
+        final accepted = progress.firstWhere(
+          (item) =>
+              item.submission?.traceId == 'trace-accepted' &&
+              item.gaslessState == null,
+        );
+        expect(accepted.submission?.journalId, isNotEmpty);
+        final result = progress.last;
+        expect(result.status, WithdrawalStatus.complete);
+        expect(result.withdrawalResult?.txHash, 'on-chain-hash');
+        expect(result.withdrawalResult?.gaslessFinalFee, Decimal.parse('1.5'));
+        expect(result.withdrawalResult?.gaslessTraceId, 'trace-accepted');
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      },
+    );
+
+    test(
+      'buffered error and older trace cannot regress one-shot on-chain state',
+      () async {
+        final events = StreamController<KdfEvent>();
+        final recordingRepository = _RecordingPendingGaslessTransferRepository(
+          pendingRepository,
+        );
+        when(
+          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
+        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          return switch (request['method']) {
+            'send_raw_transaction' => () {
+              events
+                ..add(
+                  const GaslessTraceErrorEvent(
+                    coin: _coin,
+                    traceId: 'trace-monotonic',
+                    error: 'provider temporarily unreachable',
+                  ),
+                )
+                ..add(
+                  const GaslessTraceEvent(
+                    coin: _coin,
+                    traceId: 'trace-monotonic',
+                    state: GaslessTraceEventState.pending,
+                  ),
+                )
+                ..add(
+                  const GaslessTraceEvent(
+                    coin: _coin,
+                    traceId: 'trace-monotonic',
+                    state: GaslessTraceEventState.confirmed,
+                    txHashOnChain: 'monotonic-hash',
+                    blockHeight: 321,
+                    confirmedAt: 1784894400,
+                    finalFee: '1.25',
+                  ),
+                );
+              return {
+                'relay_type': TronGasfreeRelayPayload.relayTypeValue,
+                'trace_id': 'trace-monotonic',
+                'state': 'WAITING',
+              };
+            }(),
+            'gasless::trace_status' => _traceStatus(
+              state: 'on_chain',
+              txHash: 'monotonic-hash',
+            ),
+            _ => throw StateError('Unexpected RPC ${request['method']}'),
+          };
+        });
+
+        final progress = await makeManager(
+          streams: eventStreamingManager,
+          repository: recordingRepository,
+        ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+        await events.close();
+
+        expect(recordingRepository.upsertedStates, [
+          GaslessTransferState.submittedPending,
+          GaslessTransferState.confirming,
+        ]);
+        final onChainIndex = progress.indexWhere(
+          (item) => item.gaslessState == GaslessTraceState.onChain,
+        );
+        expect(onChainIndex, greaterThanOrEqualTo(0));
+        expect(
+          progress
+              .skip(onChainIndex + 1)
+              .any(
+                (item) =>
+                    item.sdkError?.source is GaslessTransferException &&
+                    item.gaslessTransferState ==
+                        GaslessTransferState.confirming,
+              ),
+          isTrue,
+        );
+        expect(
+          progress
+              .skip(onChainIndex + 1)
+              .map((item) => item.gaslessState)
+              .whereType<GaslessTraceState>(),
+          isNot(contains(GaslessTraceState.pending)),
+        );
+        expect(progress.last.status, WithdrawalStatus.complete);
+        expect(progress.last.withdrawalResult?.txHash, 'monotonic-hash');
+      },
+    );
+
+    test(
+      'plain-string relay failure becomes durable unknown without guessing',
+      () async {
+        final events = StreamController<KdfEvent>();
+        when(
+          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
+        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          if (request['method'] == 'send_raw_transaction') {
+            throw Exception('FAILED retry terminal');
+          }
+          throw StateError('Unexpected RPC ${request['method']}');
+        });
+
+        final progress = await makeManager(
+          streams: eventStreamingManager,
+        ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+        await events.close();
+
+        final unknown = progress.last;
+        expect(
+          unknown.gaslessTransferState,
+          GaslessTransferState.submittedUnknown,
+        );
+        expect(unknown.submission?.traceId, isNull);
+        expect(unknown.submission?.journalId, isNotEmpty);
+        expect(
+          (unknown.sdkError?.source as GaslessTransferException).code,
+          GaslessTransferErrorCode.submissionOutcomeUnknown,
+        );
+        final persisted = await pendingRepository.list(_wallet);
+        expect(persisted, hasLength(1));
+        expect(persisted.single.traceId, isNull);
+        expect(persisted.single.state, GaslessTransferState.submittedUnknown);
+        verify(() => client.executeRpc(any())).called(1);
+      },
+    );
+
+    test('missing trace manager fails before relay and clears reservation', () {
+      final manager = makeManager();
+
+      expectLater(
+        manager.executeWithdrawal(_gaslessPreview(), _coin).toList(),
+        throwsA(isA<SdkError>()),
+      ).then((_) async {
+        verifyNever(() => client.executeRpc(any()));
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      });
+    });
+
+    test(
+      'stream disconnect before relay aborts submission and clears reservation',
+      () async {
+        final events = StreamController<KdfEvent>();
+        var streamAttached = false;
+        when(
+          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
+        ).thenAnswer((_) async {
+          streamAttached = true;
+          return events.stream.listen(null);
+        });
+
+        Future<WalletId?> walletResolver() async {
+          if (streamAttached && !events.isClosed) {
+            await events.close();
+          }
+          return _wallet;
+        }
+
+        await expectLater(
+          makeManager(
+            streams: eventStreamingManager,
+            walletResolver: walletResolver,
+          ).executeWithdrawal(_gaslessPreview(), _coin).toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.source,
+              'source',
+              isA<GaslessTransferException>()
+                  .having(
+                    (source) => source.code,
+                    'code',
+                    GaslessTransferErrorCode.traceUnavailable,
+                  )
+                  .having(
+                    (source) => source.stage,
+                    'stage',
+                    GaslessTransferStage.submission,
+                  ),
+            ),
+          ),
+        );
+
+        verifyNever(() => client.executeRpc(any()));
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      },
+    );
+
+    test('terminal trace reason never enters SDK errors or progress', () async {
+      const sensitiveReason =
+          'authorization=secret-material recipient=$_destinationAddress';
+      final events = StreamController<KdfEvent>();
+      when(
+        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
+      ).thenAnswer((_) async => events.stream.listen(null));
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.single as Map<String, dynamic>;
+        return switch (request['method']) {
+          'send_raw_transaction' => {
+            'relay_type': TronGasfreeRelayPayload.relayTypeValue,
+            'trace_id': 'trace-failed',
+            'state': 'WAITING',
+          },
+          'gasless::trace_status' => _traceStatus(
+            state: 'failed',
+            failureReason: sensitiveReason,
+          ),
+          _ => throw StateError('Unexpected RPC ${request['method']}'),
+        };
+      });
+
+      final progress = await makeManager(
+        streams: eventStreamingManager,
+      ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+      await events.close();
+
+      final failure = progress.last;
+      expect(failure.status, WithdrawalStatus.error);
+      expect(
+        failure.sdkError?.fallbackMessage,
+        isNot(contains(sensitiveReason)),
+      );
+      expect(
+        failure.sdkError?.source.toString(),
+        isNot(contains(sensitiveReason)),
+      );
+      expect(failure.toString(), isNot(contains(sensitiveReason)));
+      expect(failure.toString(), isNot(contains(_destinationAddress)));
+      expect(await pendingRepository.list(_wallet), isEmpty);
+    });
+
+    test(
+      'restart recovery reconciles an accepted trace exactly once',
+      () async {
+        await pendingRepository.upsert(_wallet, _pending());
+        final requests = <Map<String, dynamic>>[];
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          requests.add(request);
+          return _traceStatus(
+            state: 'confirmed',
+            txHash: 'recovered-hash',
+            blockHeight: 456,
+            confirmedAt: 1784894400,
+            finalFee: '1.25',
+          );
+        });
+
+        final progress = await makeManager()
+            .resumePendingGaslessTransfer('trace-recovery')
+            .toList();
+
+        expect(requests, hasLength(1));
+        expect(requests.single['method'], 'gasless::trace_status');
+        expect(progress.last.status, WithdrawalStatus.complete);
+        expect(progress.last.withdrawalResult?.txHash, 'recovered-hash');
+        expect(
+          progress.last.withdrawalResult?.gaslessTraceId,
+          'trace-recovery',
+        );
+        expect(
+          progress.last.withdrawalResult?.gaslessFinalFee,
+          Decimal.parse('1.25'),
+        );
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      },
+    );
+
+    test(
+      'recovery status outage preserves an established on-chain state',
+      () async {
+        await pendingRepository.upsert(
+          _wallet,
+          _pending(state: GaslessTransferState.confirming),
+        );
+        when(
+          () => client.executeRpc(any()),
+        ).thenThrow(Exception('trace status temporarily unavailable'));
+
+        final progress = await makeManager()
+            .resumePendingGaslessTransfer('trace-recovery')
+            .toList();
+
+        expect(
+          progress.last.gaslessTransferState,
+          GaslessTransferState.confirming,
+        );
+        expect(
+          progress.last.sdkError?.source,
+          isA<GaslessTransferException>().having(
+            (error) => error.code,
+            'code',
+            GaslessTransferErrorCode.traceUnavailable,
+          ),
+        );
+        final retained = await pendingRepository.findByTraceId(
+          _wallet,
+          'trace-recovery',
+        );
+        expect(retained?.state, GaslessTransferState.confirming);
+      },
+    );
+
+    test('journal without trace stays unknown and never invokes KDF', () async {
+      final pending = _pending(
+        traceId: null,
+        state: GaslessTransferState.submittedUnknown,
+      );
+      await pendingRepository.upsert(_wallet, pending);
+
+      final progress = await makeManager()
+          .resumePendingGaslessTransfer(pending.journalId)
+          .toList();
+
+      expect(progress, hasLength(1));
+      expect(
+        progress.single.gaslessTransferState,
+        GaslessTransferState.submittedUnknown,
+      );
+      expect(progress.single.submission?.traceId, isNull);
+      expect(progress.single.submission?.journalId, pending.journalId);
+      verifyNever(() => client.executeRpc(any()));
+      expect(await pendingRepository.list(_wallet), [pending]);
+    });
+
+    test(
+      'wallet switch during recovery cannot update another journal',
+      () async {
+        await pendingRepository.upsert(_wallet, _pending());
+        var currentWallet = _wallet;
+        final requestSeen = Completer<void>();
+        final response = Completer<Map<String, dynamic>>();
+        when(() => client.executeRpc(any())).thenAnswer((_) {
+          requestSeen.complete();
+          return response.future;
+        });
+        final manager = makeManager(walletResolver: () async => currentWallet);
+
+        final recovery = manager
+            .resumePendingGaslessTransfer('trace-recovery')
+            .toList();
+        await requestSeen.future;
+        currentWallet = _otherWallet;
+        response.complete(_traceStatus());
+
+        await expectLater(
+          recovery,
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        expect(await pendingRepository.list(_wallet), hasLength(1));
+        expect(await pendingRepository.list(_otherWallet), isEmpty);
+      },
+    );
+
+    test(
+      'pending watch clears and terminates immediately on wallet switch',
+      () async {
+        await pendingRepository.upsert(_wallet, _pending());
+        var currentWallet = _wallet;
+        final authChanges = StreamController<KdfUser?>();
+        final manager = makeManager(
+          walletResolver: () async => currentWallet,
+          authStateChanges: authChanges.stream,
+        );
+        final firstSnapshot = Completer<void>();
+        final done = Completer<void>();
+        final snapshots = <List<PendingGaslessTransfer>>[];
+        manager.watchPendingGaslessTransfers().listen(
+          (transfers) {
+            snapshots.add(transfers);
+            if (!firstSnapshot.isCompleted) firstSnapshot.complete();
+          },
+          onError: done.completeError,
+          onDone: done.complete,
+        );
+        await firstSnapshot.future;
+
+        currentWallet = _otherWallet;
+        authChanges.add(
+          const KdfUser(walletId: _otherWallet, isBip39Seed: false),
+        );
+
+        await done.future.timeout(const Duration(seconds: 2));
+        expect(snapshots.first, hasLength(1));
+        expect(snapshots.last, isEmpty);
+        await authChanges.close();
+        await manager.dispose();
+      },
+    );
+
+    test(
+      'pending watch also clears when the resolver detects the wallet switch',
+      () async {
+        await pendingRepository.upsert(_wallet, _pending());
+        var currentWallet = _wallet;
+        final manager = makeManager(walletResolver: () async => currentWallet);
+        final firstSnapshot = Completer<void>();
+        final done = Completer<void>();
+        final snapshots = <List<PendingGaslessTransfer>>[];
+        manager.watchPendingGaslessTransfers().listen(
+          (transfers) {
+            snapshots.add(transfers);
+            if (!firstSnapshot.isCompleted) firstSnapshot.complete();
+          },
+          onError: done.completeError,
+          onDone: done.complete,
+        );
+        await firstSnapshot.future;
+
+        currentWallet = _otherWallet;
+        // Any subsequent wallet-scoped operation observes the stable wallet
+        // change and invalidates the existing journal watch even when an auth
+        // stream is not available to the embedding application.
+        expect(await manager.listPendingGaslessTransfers(), isEmpty);
+
+        await done.future.timeout(const Duration(seconds: 2));
+        expect(snapshots.first, hasLength(1));
+        expect(snapshots.last, isEmpty);
+        await manager.dispose();
+      },
+    );
+
+    for (final entry in const {
+      'ProviderIdentityMismatch':
+          GaslessTransferErrorCode.serviceProviderMismatch,
+      'GasfreeAddressMismatch': GaslessTransferErrorCode.custodyAddressMismatch,
+      'TokenDecimalMismatch': GaslessTransferErrorCode.tokenMismatch,
+    }.entries) {
+      test('maps exact account-status error ${entry.key}', () async {
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) async => _errorEnvelope(entry.key));
+
+        await expectLater(
+          makeManager().gaslessAccountStatus(trc20Asset.id),
+          throwsA(
+            isA<GaslessTransferException>().having(
+              (error) => error.code,
+              'code',
+              entry.value,
+            ),
+          ),
+        );
+      });
+    }
+
+    test(
+      'malformed account-status shape is a hard response mismatch',
+      () async {
+        when(() => client.executeRpc(any())).thenAnswer(
+          (_) async => {
+            'mmrpc': '2.0',
+            'result': {
+              'gasfree_address': _custodyAddress,
+              'availability': 'available',
+              'on_chain_balance': '10',
+            },
+          },
+        );
+
+        await expectLater(
+          makeManager().gaslessAccountStatus(trc20Asset.id),
+          throwsA(
+            isA<GaslessTransferException>()
+                .having(
+                  (error) => error.code,
+                  'code',
+                  GaslessTransferErrorCode.responseMismatch,
+                )
+                .having((error) => error.retryable, 'retryable', isFalse)
+                .having((error) => error.terminal, 'terminal', isTrue),
+          ),
+        );
+      },
+    );
+
+    test('maps task-boundary GasFree errors by endpoint enum', () async {
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.single as Map<String, dynamic>;
+        return switch (request['method']) {
+          'task::withdraw::init' => {
+            'mmrpc': '2.0',
+            'result': {'task_id': 9},
+          },
+          'task::withdraw::status' => {
+            'mmrpc': '2.0',
+            'result': {
+              'status': 'Error',
+              'details': jsonEncode({
+                'error': 'A GasFree transfer is already pending',
+                'error_type': 'Gasless',
+                'error_data': {
+                  'error_type': 'PendingTransfer',
+                  'error_data': null,
+                },
+              }),
+            },
+          },
+          _ => throw StateError('Unexpected RPC ${request['method']}'),
+        };
+      });
+
+      await expectLater(
+        makeManager().previewWithdrawal(
+          WithdrawParameters(
+            asset: _coin,
+            toAddress: _destinationAddress,
+            amount: Decimal.parse('5'),
+            feeMethod: WithdrawalFeeMethod.gasless,
+            gaslessOptions: const GaslessWithdrawalOptions(
+              fallbackToNative: false,
+            ),
+          ),
+        ),
+        throwsA(
+          isA<SdkError>()
+              .having(
+                (error) => error.context?.extra['gaslessCode'],
+                'gaslessCode',
+                GaslessTransferErrorCode.pendingTransfer.name,
+              )
+              .having((error) => error.retryable, 'retryable', isTrue)
+              .having(
+                (error) => error.source,
+                'source',
+                isA<GaslessTransferException>().having(
+                  (source) => source.code,
+                  'code',
+                  GaslessTransferErrorCode.pendingTransfer,
+                ),
+              ),
+        ),
+      );
+    });
+
+    test(
+      'generic native fallback returns and executes the actual rail',
+      () async {
+        gaslessCapabilities.markTemporarilyUnavailable(trc20Asset.id);
+        final requests = <Map<String, dynamic>>[];
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          requests.add(request);
           return switch (request['method']) {
             'task::withdraw::init' => {
               'mmrpc': '2.0',
@@ -665,817 +1115,231 @@ void main() {
               'mmrpc': '2.0',
               'result': {
                 'status': 'Ok',
-                'details': _legacyGaslessPreview().toJson(),
+                'details': _standardPreview().toJson(),
               },
             },
-            _ => throw StateError('Unexpected method: ${request['method']}'),
+            'send_raw_transaction' => {'tx_hash': 'fallback-hash'},
+            _ => throw StateError('Unexpected RPC ${request['method']}'),
           };
         });
+        final manager = makeManager();
+        const options = GaslessWithdrawalOptions(
+          maxFee: null,
+          deadlineSeconds: 300,
+          fallbackToNative: true,
+        );
 
         final preview = await manager.previewWithdrawal(
           WithdrawParameters(
-            asset: 'USDT-TRC20',
-            toAddress: 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
+            asset: _coin,
+            toAddress: _destinationAddress,
             amount: Decimal.parse('5'),
             feeMethod: WithdrawalFeeMethod.gasless,
+            gaslessOptions: options,
           ),
         );
+        final progress = await manager
+            .executeWithdrawal(preview, _coin)
+            .toList();
 
-        expect(preview.txJson, isNot(contains('request_id')));
-        expect(preview.txJson, isNot(contains('authorization_fingerprint')));
-        expect(gaslessCapabilities.isReady(trc20Asset.id), isTrue);
-        expect(gaslessCapabilities.canReceiveGasless(trc20Asset.id), isFalse);
-        expect(await manager.listPendingGaslessTransfers(), isEmpty);
+        expect(preview.gaslessRelayPayload, isNull);
+        expect(preview.txHex, 'deadbeef');
+        final init = requests.firstWhere(
+          (request) => request['method'] == 'task::withdraw::init',
+        );
+        expect(init['params'], containsPair('fee_method', 'gasless'));
+        expect((init['params'] as Map<String, dynamic>)['gasless'], {
+          'deadline_seconds': 300,
+          'fallback_to_native': true,
+        });
+        expect(
+          progress.last.submission,
+          const WithdrawalSubmission.onChain(txHash: 'fallback-hash'),
+        );
       },
     );
 
-    test('relays and completes with the on-chain hash and final fee', () async {
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        switch (request['method']) {
-          case 'send_raw_transaction':
-            expect(pendingStorage.values, isNotEmpty);
-            return {
-              'relay_type': 'tron_gasfree',
-              'request_id': '123e4567-e89b-42d3-a456-426614174000',
-              'trace_id': 'trace-xyz',
-              'state': 'WAITING',
-              'expected_authorization': _expectedAuthorizationJson(),
-            };
-          case 'gasless::trace_status':
-            return {
+    test(
+      'deprecated one-call withdrawal preserves generic native fallback',
+      () async {
+        gaslessCapabilities.markTemporarilyUnavailable(trc20Asset.id);
+        final requests = <Map<String, dynamic>>[];
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          requests.add(request);
+          return switch (request['method']) {
+            'task::withdraw::init' => {
+              'mmrpc': '2.0',
+              'result': {'task_id': 17},
+            },
+            'task::withdraw::status' => {
               'mmrpc': '2.0',
               'result': {
-                'state': 'confirmed',
-                'tx_hash_on_chain': 'onchainhash',
-                'block_height': 100,
-                'confirmed_at': 123,
-                'final_fee': '1.5',
+                'status': 'Ok',
+                'details': _standardPreview().toJson(),
               },
-            };
-          default:
-            throw StateError('Unexpected method: ${request['method']}');
-        }
-      });
-
-      final progress = await manager
-          .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(progress.last.status, WithdrawalStatus.complete);
-      expect(progress.last.withdrawalResult?.txHash, 'onchainhash');
-
-      final fee = progress.last.withdrawalResult?.fee;
-      expect(fee, isA<FeeInfoTronGasless>());
-      final gaslessFee = fee! as FeeInfoTronGasless;
-      expect(gaslessFee.totalTokenFee, Decimal.parse('2'));
-      expect(gaslessFee.finalFee, Decimal.parse('1.5'));
-      expect(gaslessFee.totalFee, Decimal.parse('1.5'));
-      expect(gaslessFee.traceId, 'trace-xyz');
-      expect(progress.last.withdrawalResult?.confirmationBlockHeight, 100);
-      expect(
-        progress.last.withdrawalResult?.confirmedAt,
-        DateTime.fromMillisecondsSinceEpoch(123000, isUtc: true),
-      );
-      expect(
-        progress.any(
-          (event) =>
-              event.taskId == 'trace-xyz' &&
-              event.submission?.type == WithdrawalSubmissionType.gaslessRelay,
-        ),
-        isTrue,
-      );
-      expect(await manager.listPendingGaslessTransfers(), isEmpty);
-    });
-
-    test('confirmation waits for an authoritative final fee', () async {
-      var traceCalls = 0;
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        if (request['method'] == 'send_raw_transaction') {
-          return {
-            'relay_type': 'tron_gasfree',
-            'request_id': _requestId,
-            'trace_id': 'trace-fee-pending',
-            'state': 'WAITING',
-            'expected_authorization': _expectedAuthorizationJson(),
-          };
-        }
-        traceCalls++;
-        return {
-          'mmrpc': '2.0',
-          'result': {
-            'state': 'confirmed',
-            'tx_hash_on_chain': 'onchainhash',
-            if (traceCalls > 1) 'final_fee': '1.5',
-          },
-        };
-      });
-
-      final progress = await manager
-          .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(traceCalls, 2);
-      expect(
-        progress.any(
-          (event) =>
-              event.gaslessTransferState == GaslessTransferState.confirming &&
-              event.message.contains('final gas-free fee'),
-        ),
-        isTrue,
-      );
-      expect(progress.last.status, WithdrawalStatus.complete);
-    });
-
-    test(
-      'legacy relay keeps tx_json strict and confirms only after history match',
-      () async {
-        enableLegacyRecovery();
-        Map<String, dynamic>? sentPayload;
-        Map<String, dynamic>? traceParams;
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          switch (request['method']) {
-            case 'send_raw_transaction':
-              sentPayload = Map<String, dynamic>.from(
-                request['tx_json'] as Map<String, dynamic>,
-              );
-              return {
-                'relay_type': 'tron_gasfree',
-                'trace_id': 'legacy-trace',
-                'state': 'WAITING',
-              };
-            case 'gasless::trace_status':
-              traceParams = Map<String, dynamic>.from(
-                request['params'] as Map<String, dynamic>,
-              );
-              return {
-                'mmrpc': '2.0',
-                'result': {
-                  'state': 'confirmed',
-                  'tx_hash_on_chain': 'legacy-onchain-hash',
-                  'final_fee': '1.5',
-                },
-              };
-            default:
-              throw StateError('Unexpected method: ${request['method']}');
-          }
-        });
-
-        final progress = await manager
-            .executeWithdrawal(_legacyGaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(sentPayload, isNot(contains('request_id')));
-        expect(sentPayload, isNot(contains('authorization_fingerprint')));
-        expect(traceParams, isNot(contains('expected_authorization')));
-        expect(progress.last.status, WithdrawalStatus.complete);
-        verify(
-          () => transactionHistoryManager.verifyGaslessTransferOnChain(
-            trc20Asset,
-            any(),
-            'legacy-onchain-hash',
-          ),
-        ).called(1);
-        expect(await manager.listPendingGaslessTransfers(), isEmpty);
-      },
-    );
-
-    test('legacy relay failure remains non-retryable and durable', () async {
-      enableLegacyRecovery();
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        if (request['method'] == 'send_raw_transaction') {
-          return {
-            'relay_type': 'tron_gasfree',
-            'trace_id': 'legacy-failed',
-            'state': 'WAITING',
-          };
-        }
-        return {
-          'mmrpc': '2.0',
-          'result': {'state': 'failed', 'failure_reason': 'provider text'},
-        };
-      });
-
-      final progress = await manager
-          .executeWithdrawal(_legacyGaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(progress.last.status, WithdrawalStatus.inProgress);
-      expect(
-        progress.last.gaslessTransferState,
-        GaslessTransferState.submittedUnknown,
-      );
-      expect(progress.last.sdkError?.retryable, isFalse);
-      final pending = await manager.listPendingGaslessTransfers();
-      expect(pending.single.traceId, 'legacy-failed');
-      expect(
-        pending.single.verificationMode,
-        GaslessVerificationMode.legacyOnChain,
-      );
-      expect(pending.single.requestId, isNot('legacy-failed'));
-      expect(
-        pending.single.requestId,
-        matches(
-          RegExp(
-            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-          ),
-        ),
-      );
-      expect(
-        pending.single.authorizationFingerprint,
-        matches(RegExp(r'^[0-9a-f]{64}$')),
-      );
-    });
-
-    test(
-      'legacy on-chain mismatch remains durable for support review',
-      () async {
-        enableLegacyRecovery();
-        when(
-          () => transactionHistoryManager.verifyGaslessTransferOnChain(
-            any(),
-            any(),
-            any(),
-          ),
-        ).thenAnswer((_) async => GaslessOnChainVerification.mismatch);
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'send_raw_transaction') {
-            return {
-              'relay_type': 'tron_gasfree',
-              'trace_id': 'legacy-mismatch',
-              'state': 'WAITING',
-            };
-          }
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'state': 'confirmed',
-              'tx_hash_on_chain': 'mismatched-hash',
-              'final_fee': '1.5',
             },
+            'send_raw_transaction' => {'tx_hash': 'one-call-fallback-hash'},
+            _ => throw StateError('Unexpected RPC ${request['method']}'),
           };
         });
 
-        final progress = await manager
-            .executeWithdrawal(_legacyGaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.submittedUnknown,
-        );
-        expect(progress.last.sdkError?.retryable, isFalse);
-        expect(await manager.listPendingGaslessTransfers(), hasLength(1));
-      },
-    );
-
-    test('preview maps the nested GasFree shortfall task error to a structured '
-        'SdkError', () async {
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        switch (request['method']) {
-          case 'task::withdraw::init':
-            return {
-              'mmrpc': '2.0',
-              'result': {'task_id': 7},
-            };
-          case 'task::withdraw::status':
-            // The canonical KDF wire shape: WithdrawError::Gasless(...)
-            // adjacently tagged on both levels, no gasfree_address, and
-            // the details object is JSON-stringified by the response
-            // parser before _typedTaskError re-parses it.
-            return {
-              'mmrpc': '2.0',
-              'result': {
-                'status': 'Error',
-                'details': {
-                  'error':
-                      'Not enough USDT-TRC20 in your GasFree deposit '
-                      'address: available 0, required 8. Deposit '
-                      'USDT-TRC20 into your GasFree address.',
-                  'error_path': 'eth_withdraw.withdraw',
-                  'error_trace': 'eth_withdraw:348]',
-                  'error_type': 'Gasless',
-                  'error_data': {
-                    'error_type': 'InsufficientGasFreeBalance',
-                    'error_data': {
-                      'coin': 'USDT-TRC20',
-                      'available': '0',
-                      'required': '8',
-                    },
-                  },
-                },
-              },
-            };
-          default:
-            throw StateError('Unexpected method: ${request['method']}');
-        }
-      });
-
-      await expectLater(
-        manager.previewWithdrawal(
-          WithdrawParameters(
-            asset: 'USDT-TRC20',
-            toAddress: 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
-            amount: Decimal.parse('5'),
-            fee: FeeInfo.utxoFixed(coin: 'USDT-TRC20', amount: Decimal.one),
-          ),
-        ),
-        throwsA(
-          isA<SdkError>()
-              .having(
-                (e) => e.messageKey,
-                'messageKey',
-                'withdrawGaslessInsufficientGasFreeBalance',
-              )
-              .having((e) => e.code, 'code', SdkErrorCode.insufficientFunds)
-              .having((e) => e.messageArgs, 'messageArgs', [
-                '',
-                '0',
-                'USDT-TRC20',
-                '8',
-                'USDT-TRC20',
-                'USDT-TRC20',
-              ]),
-        ),
-      );
-    });
-
-    test(
-      'surfaces an authoritative terminal failure without raw reason',
-      () async {
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          switch (request['method']) {
-            case 'send_raw_transaction':
-              return {
-                'relay_type': 'tron_gasfree',
-                'request_id': '123e4567-e89b-42d3-a456-426614174000',
-                'trace_id': 'trace-xyz',
-                'state': 'WAITING',
-                'expected_authorization': _expectedAuthorizationJson(),
-              };
-            case 'gasless::trace_status':
-              return {
-                'mmrpc': '2.0',
-                'result': {'state': 'failed', 'failure_reason': 'rejected'},
-              };
-            default:
-              throw StateError('Unexpected method: ${request['method']}');
-          }
-        });
-
-        final progress = await manager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(progress.last.status, WithdrawalStatus.error);
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.failedFinal,
-        );
-        expect(
-          progress.last.sdkError?.fallbackMessage,
-          isNot(contains('rejected')),
-        );
-        expect(await manager.listPendingGaslessTransfers(), isEmpty);
-      },
-    );
-
-    test('deterministic trace failure remains durable and unknown', () async {
-      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-        final request =
-            invocation.positionalArguments.first as Map<String, dynamic>;
-        switch (request['method']) {
-          case 'send_raw_transaction':
-            return {
-              'relay_type': 'tron_gasfree',
-              'request_id': '123e4567-e89b-42d3-a456-426614174000',
-              'trace_id': 'trace-unknown',
-              'state': 'WAITING',
-              'expected_authorization': _expectedAuthorizationJson(),
-            };
-          case 'gasless::trace_status':
-            return {
-              'mmrpc': '2.0',
-              'error': 'GasFree runtime is not configured',
-              'error_type': 'GaslessNotConfigured',
-              'error_data': 'USDT-TRC20',
-            };
-          default:
-            throw StateError('Unexpected method: ${request['method']}');
-        }
-      });
-
-      final progress = await manager
-          .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(progress.last.status, WithdrawalStatus.inProgress);
-      expect(
-        progress.last.gaslessTransferState,
-        GaslessTransferState.submittedUnknown,
-      );
-      expect(progress.last.taskId, 'trace-unknown');
-      final pending = await manager.listPendingGaslessTransfers();
-      expect(pending.single.traceId, 'trace-unknown');
-      expect(pending.single.state, GaslessTransferState.submittedUnknown);
-    });
-
-    test(
-      'submit transport ambiguity remains durable and cannot be retried',
-      () async {
-        when(() => client.executeRpc(any())).thenThrow(
-          StateError('connection closed after request body was sent'),
-        );
-
-        final progress = await manager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(progress.last.status, WithdrawalStatus.inProgress);
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.submittedUnknown,
-        );
-        expect(progress.last.sdkError?.retryable, isFalse);
-        final pending = await manager.listPendingGaslessTransfers();
-        expect(
-          pending.single.requestId,
-          '123e4567-e89b-42d3-a456-426614174000',
-        );
-        expect(pending.single.traceId, isNull);
-      },
-    );
-
-    test(
-      'typed KDF pre-relay rejection maps without display-text parsing',
-      () async {
-        when(() => client.executeRpc(any())).thenAnswer(
-          (_) async => {
-            'error': 'GasFree relay submission failed',
-            'error_type': 'GaslessRelaySubmission',
-            'error_data': {
-              'code': 'authorization_expired',
-              'stage': 'submission',
-              'retryable': true,
-              'terminal': true,
-              'relay_accepted': false,
-            },
-          },
-        );
-
-        final progress = await manager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.rejectedBeforeRelay,
-        );
-        expect(progress.last.sdkError?.retryable, isTrue);
-        expect(
-          (progress.last.sdkError!.source as GaslessTransferException?)?.code,
-          GaslessTransferErrorCode.authorizationExpired,
-        );
-        expect(await manager.listPendingGaslessTransfers(), isEmpty);
-      },
-    );
-
-    test(
-      'typed KDF ambiguous submission keeps the request-only lock',
-      () async {
-        when(() => client.executeRpc(any())).thenAnswer(
-          (_) async => {
-            'error': 'GasFree relay submission failed',
-            'error_type': 'GaslessRelaySubmission',
-            'error_data': {
-              'code': 'submission_outcome_unknown',
-              'stage': 'submission',
-              'retryable': false,
-              'terminal': false,
-            },
-          },
-        );
-
-        final progress = await manager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.submittedUnknown,
-        );
-        final pending = await manager.listPendingGaslessTransfers();
-        expect(
-          pending.single.requestId,
-          _gaslessPreview().txJson!['request_id'],
-        );
-        expect(pending.single.traceId, isNull);
-      },
-    );
-
-    test('typed accepted mismatch persists the correlated trace', () async {
-      when(() => client.executeRpc(any())).thenAnswer(
-        (_) async => {
-          'error': 'GasFree relay submission failed',
-          'error_type': 'GaslessRelaySubmission',
-          'error_data': {
-            'code': 'accepted_response_mismatch',
-            'stage': 'submission',
-            'retryable': false,
-            'terminal': false,
-            'relay_accepted': true,
-            'request_id': '123e4567-e89b-42d3-a456-426614174000',
-            'trace_id': 'trace-typed-mismatch',
-            'field': 'targetAddress',
-          },
-        },
-      );
-
-      final progress = await manager
-          .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(progress.last.submission?.traceId, 'trace-typed-mismatch');
-      final pending = await manager.listPendingGaslessTransfers();
-      expect(pending.single.traceId, 'trace-typed-mismatch');
-    });
-
-    test(
-      'accepted trace storage failure stops before status polling',
-      () async {
-        final storage = _RejectAcceptedTraceStorage();
-        final repository = SecurePendingGaslessTransferRepository(
-          storage: storage,
-        );
-        final durabilityManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: repository,
-          walletIdResolver: () async => walletId,
-          gaslessPollInterval: Duration.zero,
-        );
-        when(() => client.executeRpc(any())).thenAnswer(
-          (_) async => {
-            'relay_type': 'tron_gasfree',
-            'request_id': _requestId,
-            'trace_id': 'trace-storage-failure',
-            'state': 'WAITING',
-            'expected_authorization': _expectedAuthorizationJson(),
-          },
-        );
-
-        final progress = await durabilityManager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(progress.last.submission?.traceId, 'trace-storage-failure');
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.submittedUnknown,
-        );
-        verify(() => client.executeRpc(any())).called(1);
-        expect((await repository.list(walletId)).single.traceId, isNull);
-        await durabilityManager.dispose();
-      },
-    );
-
-    test(
-      'relay request-id mismatch is retained as a security unknown',
-      () async {
-        when(() => client.executeRpc(any())).thenAnswer(
-          (_) async => {
-            'relay_type': 'tron_gasfree',
-            'request_id': '123e4567-e89b-42d3-b456-426614174999',
-            'trace_id': 'trace-mismatch',
-            'state': 'WAITING',
-            'expected_authorization': _expectedAuthorizationJson(
-              requestId: '123e4567-e89b-42d3-b456-426614174999',
-            ),
-          },
-        );
-
-        final progress = await manager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(
-          progress.last.gaslessTransferState,
-          GaslessTransferState.submittedUnknown,
-        );
-        expect(progress.last.sdkError?.code, SdkErrorCode.invalidResponse);
-        final pending = await manager.listPendingGaslessTransfers();
-        expect(pending.single.traceId, 'trace-mismatch');
-        verify(() => client.executeRpc(any())).called(1);
-      },
-    );
-
-    test('accepted response mismatch persists its correlated trace', () async {
-      when(() => client.executeRpc(any())).thenThrow(
-        StateError(
-          'GASFREE_RELAY_ACCEPTED_RESPONSE_MISMATCH '
-          'request_id=123e4567-e89b-42d3-a456-426614174000 '
-          'trace_id=trace-accepted-mismatch field=amount',
-        ),
-      );
-
-      final progress = await manager
-          .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-          .toList();
-
-      expect(
-        progress.last.gaslessTransferState,
-        GaslessTransferState.submittedUnknown,
-      );
-      expect(progress.last.sdkError?.retryable, isFalse);
-      expect(progress.last.submission?.traceId, 'trace-accepted-mismatch');
-      final pending = await manager.listPendingGaslessTransfers();
-      expect(pending.single.traceId, 'trace-accepted-mismatch');
-    });
-
-    for (final testCase in <({String name, WithdrawalPreview preview})>[
-      (
-        name: 'signed maximum fee',
-        preview: _gaslessPreview(authorizationMaxFee: '6000000'),
-      ),
-      (
-        name: 'signed recipient amount',
-        preview: _gaslessPreview(authorizationValue: '6000000'),
-      ),
-      (
-        name: 'token contract',
-        preview: _gaslessPreview(
-          authorizationToken: 'TInvalidTokenContract1111111111111111',
-        ),
-      ),
-      (
-        name: 'provider identity',
-        preview: _gaslessPreview(
-          authorizationProvider: 'TInvalidProvider11111111111111111111',
-          feeProviderAddress: 'TInvalidProvider11111111111111111111',
-        ),
-      ),
-      (name: 'network chain', preview: _gaslessPreview(chainId: '3448148188')),
-      (
-        name: 'fee request ID',
-        preview: _gaslessPreview(
-          feeRequestId: '123e4567-e89b-42d3-b456-426614174999',
-        ),
-      ),
-      (
-        name: 'fee authorization deadline',
-        preview: _gaslessPreview(feeAuthorizationDeadline: '1999999998'),
-      ),
-      (
-        name: 'signature fingerprint',
-        preview: _gaslessPreview(
-          authorizationSignature:
-              '${_authorizationSignature.substring(0, 128)}10',
-        ),
-      ),
-    ]) {
-      test(
-        'rejects a preview with mismatched ${testCase.name} before relay',
-        () async {
-          await expectLater(
-            manager.executeWithdrawal(testCase.preview, 'USDT-TRC20').toList(),
-            throwsA(
-              isA<SdkError>().having(
-                (error) => error.messageKey,
-                'messageKey',
-                'sdk_errors.gasless_preview_invalid',
+        // This regression intentionally exercises the compatibility API.
+        // ignore: deprecated_member_use_from_same_package
+        final progress = await makeManager()
+            .withdraw(
+              WithdrawParameters(
+                asset: _coin,
+                toAddress: _destinationAddress,
+                amount: Decimal.parse('5'),
+                feeMethod: WithdrawalFeeMethod.gasless,
+                gaslessOptions: const GaslessWithdrawalOptions(
+                  deadlineSeconds: 300,
+                  fallbackToNative: true,
+                ),
               ),
-            ),
-          );
-          verifyNever(() => client.executeRpc(any()));
-          expect(await manager.listPendingGaslessTransfers(), isEmpty);
-        },
-      );
-    }
-
-    test('expired authorization is rejected before relay submission', () async {
-      await expectLater(
-        manager
-            .executeWithdrawal(
-              _gaslessPreview(deadline: '1000000000'),
-              'USDT-TRC20',
             )
-            .toList(),
-        throwsA(
-          isA<SdkError>().having(
-            (error) => error.messageKey,
-            'messageKey',
-            'sdk_errors.gasless_authorization_expired',
+            .toList();
+
+        final init = requests.firstWhere(
+          (request) => request['method'] == 'task::withdraw::init',
+        );
+        expect((init['params'] as Map<String, dynamic>)['gasless'], {
+          'deadline_seconds': 300,
+          'fallback_to_native': true,
+        });
+        expect(
+          progress.last.submission,
+          const WithdrawalSubmission.onChain(txHash: 'one-call-fallback-hash'),
+        );
+        expect(
+          requests.where(
+            (request) => request['method'] == 'send_raw_transaction',
           ),
-        ),
-      );
-      verifyNever(() => client.executeRpc(any()));
-    });
+          hasLength(1),
+        );
+      },
+    );
 
     test(
-      'wallet switch stops polling and retains the original journal',
+      'deprecated one-call withdrawal requires readiness without fallback',
       () async {
-        const switchedWallet = WalletId(
-          name: 'switched',
-          pubkeyHash: 'switched-wallet-hash',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        gaslessCapabilities.markTemporarilyUnavailable(trc20Asset.id);
+
+        // This regression intentionally exercises the compatibility API.
+        // ignore: deprecated_member_use_from_same_package
+        await expectLater(
+          makeManager()
+              .withdraw(
+                WithdrawParameters(
+                  asset: _coin,
+                  toAddress: _destinationAddress,
+                  amount: Decimal.parse('5'),
+                  feeMethod: WithdrawalFeeMethod.gasless,
+                  gaslessOptions: const GaslessWithdrawalOptions(
+                    fallbackToNative: false,
+                  ),
+                ),
+              )
+              .toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.context?.extra['gaslessCode'],
+              'gaslessCode',
+              GaslessTransferErrorCode.capabilityNotReady.name,
+            ),
+          ),
         );
-        WalletId? currentWallet = walletId;
-        final switchingManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: pendingRepository,
-          walletIdResolver: () async => currentWallet,
-          gaslessPollInterval: Duration.zero,
-        );
+        verifyNever(() => client.executeRpc(any()));
+      },
+    );
+
+    test(
+      'deprecated one-call withdrawal rejects an unexpected native rail',
+      () async {
+        final requests = <Map<String, dynamic>>[];
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          if (request['method'] == 'send_raw_transaction') {
-            return {
-              'relay_type': 'tron_gasfree',
-              'request_id': '123e4567-e89b-42d3-a456-426614174000',
-              'trace_id': 'trace-wallet-switch',
-              'state': 'WAITING',
-              'expected_authorization': _expectedAuthorizationJson(),
-            };
-          }
-          currentWallet = switchedWallet;
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'state': 'confirmed',
-              'tx_hash_on_chain': 'must-not-be-surfaced',
-              'final_fee': '1.5',
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          requests.add(request);
+          return switch (request['method']) {
+            'task::withdraw::init' => {
+              'mmrpc': '2.0',
+              'result': {'task_id': 18},
             },
+            'task::withdraw::status' => {
+              'mmrpc': '2.0',
+              'result': {
+                'status': 'Ok',
+                'details': _standardPreview().toJson(),
+              },
+            },
+            _ => throw StateError('Unexpected RPC ${request['method']}'),
           };
         });
 
-        final progress = await switchingManager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
-
-        expect(progress.last.status, WithdrawalStatus.inProgress);
-        final original = await pendingRepository.list(walletId);
-        expect(original.single.traceId, 'trace-wallet-switch');
-        expect(await pendingRepository.list(switchedWallet), isEmpty);
-        await switchingManager.dispose();
+        // This regression intentionally exercises the compatibility API.
+        // ignore: deprecated_member_use_from_same_package
+        await expectLater(
+          makeManager()
+              .withdraw(
+                WithdrawParameters(
+                  asset: _coin,
+                  toAddress: _destinationAddress,
+                  amount: Decimal.parse('5'),
+                  feeMethod: WithdrawalFeeMethod.gasless,
+                  gaslessOptions: const GaslessWithdrawalOptions(
+                    fallbackToNative: false,
+                  ),
+                ),
+              )
+              .toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.context?.extra['gaslessCode'],
+              'gaslessCode',
+              GaslessTransferErrorCode.responseMismatch.name,
+            ),
+          ),
+        );
+        expect(
+          requests.where(
+            (request) => request['method'] == 'task::withdraw::status',
+          ),
+          hasLength(1),
+        );
+        expect(
+          requests.where(
+            (request) => request['method'] == 'send_raw_transaction',
+          ),
+          isEmpty,
+        );
       },
     );
 
-    test(
-      'wallet switch before relay clears the preparing reservation',
-      () async {
-        const switchedWallet = WalletId(
-          name: 'switched-before-submit',
-          pubkeyHash: 'switched-before-submit-hash',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-        );
-        var resolveCalls = 0;
-        final switchingManager = WithdrawalManager(
-          client,
-          assetProvider,
-          feeManager,
-          activationCoordinator,
-          legacyManager,
-          gaslessCapabilities: gaslessCapabilities,
-          pendingGaslessTransfers: pendingRepository,
-          walletIdResolver: () async {
-            resolveCalls++;
-            return resolveCalls >= 4 ? switchedWallet : walletId;
-          },
-        );
+    test('standard withdrawal remains on the native broadcast rail', () async {
+      Map<String, dynamic>? request;
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        request = invocation.positionalArguments.single as Map<String, dynamic>;
+        return {'tx_hash': 'standard-hash'};
+      });
 
-        final progress = await switchingManager
-            .executeWithdrawal(_gaslessPreview(), 'USDT-TRC20')
-            .toList();
+      final progress = await makeManager()
+          .executeWithdrawal(_standardPreview(), _coin)
+          .toList();
 
-        expect(progress, hasLength(1));
-        verifyNever(() => client.executeRpc(any()));
-        expect(await pendingRepository.list(walletId), isEmpty);
-        expect(await pendingRepository.list(switchedWallet), isEmpty);
-        await switchingManager.dispose();
-      },
-    );
+      expect(request?['method'], 'send_raw_transaction');
+      expect(request?['tx_hex'], 'deadbeef');
+      expect(request, isNot(contains('tx_json')));
+      expect(progress.last.status, WithdrawalStatus.complete);
+      expect(
+        progress.last.submission,
+        const WithdrawalSubmission.onChain(txHash: 'standard-hash'),
+      );
+      expect(progress.last.withdrawalResult?.txHash, 'standard-hash');
+      expect(progress.last.withdrawalResult?.gaslessTraceId, isNull);
+      expect(await pendingRepository.list(_wallet), isEmpty);
+    });
   });
 }

@@ -21,10 +21,6 @@ const _custody2 = 'TSSMHYeV2uE9qYH95DqyoCuNCzEL1NvU3S';
 const _external = 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8';
 const _recipient = 'TVj7RNVHy6thbM7BWdSe9G6gXwKhjhdNZS';
 const _provider = 'TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb';
-const _finalityHash =
-    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const _mismatchHash =
-    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 Asset _createTrxAsset() {
   return Asset.fromJson({
@@ -188,79 +184,6 @@ void main() {
   }
 
   group('TronGridTransactionStrategy GasFree custody history', () {
-    for (final nile in [false, true]) {
-      test(
-        'verifies exact ${nile ? 'Nile' : 'mainnet'} recipient event',
-        () async {
-          final asset = _createUsdtTrc20Asset(nile: nile);
-          final contract = nile
-              ? 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'
-              : 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-          stubResponses({
-            _custody: (_) => _gridResponse([
-              _makeTrc20Row(
-                txId: _finalityHash,
-                from: _custody,
-                to: _recipient,
-                value: '10000000',
-                tokenAddress: contract,
-              ),
-              _makeTrc20Row(
-                txId: _finalityHash,
-                from: _custody,
-                to: _provider,
-                value: '1500000',
-                tokenAddress: contract,
-              ),
-            ]),
-          });
-
-          final result = await createStrategy().verifyGaslessTransferEvent(
-            asset: asset,
-            transactionHash: _finalityHash,
-            custodyAddress: _custody,
-            recipientAddress: _recipient,
-            authorizationValue: '10000000',
-          );
-
-          expect(result, GaslessOnChainVerification.verified);
-        },
-      );
-    }
-
-    test(
-      'does not accept the provider-fee aggregate as recipient amount',
-      () async {
-        final usdt = _createUsdtTrc20Asset();
-        stubResponses({
-          _custody: (_) => _gridResponse([
-            _makeTrc20Row(
-              txId: _mismatchHash,
-              from: _custody,
-              to: _recipient,
-              value: '10000000',
-            ),
-            _makeTrc20Row(
-              txId: _mismatchHash,
-              from: _custody,
-              to: _provider,
-              value: '1500000',
-            ),
-          ]),
-        });
-
-        final result = await createStrategy().verifyGaslessTransferEvent(
-          asset: usdt,
-          transactionHash: _mismatchHash,
-          custodyAddress: _custody,
-          recipientAddress: _recipient,
-          authorizationValue: '11500000',
-        );
-
-        expect(result, GaslessOnChainVerification.mismatch);
-      },
-    );
-
     test('queries EOA and custody address in a single call', () async {
       final usdt = _createUsdtTrc20Asset();
       when(() => pubkeyManager.getPubkeys(usdt)).thenAnswer(

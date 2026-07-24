@@ -10,8 +10,12 @@ export 'package:komodo_cex_market_data/komodo_cex_market_data.dart'
 export 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show
         BalanceEvent,
+        GaslessTraceErrorEvent,
+        GaslessTraceEvent,
+        GaslessTraceEventState,
         HeartbeatEvent,
         IKdfHostConfig,
+        KdfEvent,
         LocalConfig,
         NetworkEvent,
         OrderStatusEvent,
@@ -42,20 +46,13 @@ export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
 export 'package:komodo_defi_types/komodo_defi_types.dart'
     show
-        GaslessAuthorization,
-        GaslessBalanceProvenance,
-        GaslessBalanceSnapshot,
         GaslessCapability,
         GaslessCapabilityState,
-        GaslessOnChainVerification,
-        GaslessReceiveEvidence,
-        GaslessStandardBalance,
         GaslessTransferErrorCode,
         GaslessTransferErrorKind,
         GaslessTransferException,
         GaslessTransferStage,
         GaslessTransferState,
-        GaslessVerificationMode,
         PendingGaslessTransfer,
         WithdrawalSubmission,
         WithdrawalSubmissionType;

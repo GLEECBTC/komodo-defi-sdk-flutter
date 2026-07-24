@@ -14,21 +14,12 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   @override
-  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) {
-    // Gasless is a TRON-only (task-based) feature; the legacy manager only
-    // serves protocols without gasless support, but delegate for completeness.
-    return _client.rpc.withdraw.gaslessAccountStatus(coin: assetId.id);
-  }
-
-  @override
-  Future<GaslessAccountStatusResponse> gaslessAccountStatusForReceive(
-    AssetId assetId, {
-    required String expectedGasfreeAddress,
-  }) {
-    throw UnsupportedError(
-      'Legacy withdrawal manager cannot attest GasFree receive addresses',
-    );
-  }
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) =>
+      Future.error(
+        UnsupportedError(
+          'Legacy withdrawals do not expose unvalidated GasFree status',
+        ),
+      );
 
   @override
   Future<List<PendingGaslessTransfer>> listPendingGaslessTransfers() async =>

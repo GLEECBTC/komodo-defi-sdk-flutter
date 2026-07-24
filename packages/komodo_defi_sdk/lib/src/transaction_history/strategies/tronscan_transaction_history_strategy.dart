@@ -58,8 +58,6 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   /// up to this many TRONGrid pages per [fetchTransactionHistory] call so a
   /// single invocation still returns a meaningful batch.
   static const int _maxInternalPages = 3;
-  static const int _maxVerificationPages = 5;
-
   static const int _maxHttpAttempts = 6;
 
   /// Minimum gap between HTTP requests to stay within 3 RPS.
@@ -98,79 +96,6 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     Trc20Protocol(:final platform) => platform == 'TRX' || platform == 'TRXT',
     _ => false,
   };
-
-  /// Verifies one exact recipient transfer event without relying on merged
-  /// wallet history. GasFree transactions commonly include a second transfer
-  /// to the provider under the same hash, so aggregate amounts are unsafe for
-  /// relay finality.
-  Future<GaslessOnChainVerification> verifyGaslessTransferEvent({
-    required Asset asset,
-    required String transactionHash,
-    required String custodyAddress,
-    required String recipientAddress,
-    required String authorizationValue,
-  }) async {
-    final contract = _trc20ContractAddress(asset);
-    if (!supportsAsset(asset) ||
-        asset.protocol is! Trc20Protocol ||
-        contract == null ||
-        contract.isEmpty ||
-        !isValidTronAddress(contract) ||
-        !isValidTronAddress(custodyAddress) ||
-        !isValidTronAddress(recipientAddress) ||
-        !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(transactionHash) ||
-        !RegExp(r'^[1-9]\d*$').hasMatch(authorizationValue)) {
-      return GaslessOnChainVerification.mismatch;
-    }
-
-    final host = _apiHostOverride ?? _defaultApiHost(asset.protocol);
-    String? fingerprint;
-    var sawHash = false;
-    for (var page = 0; page < _maxVerificationPages; page++) {
-      await _throttle();
-      final params = <String, String>{
-        'only_confirmed': 'true',
-        'limit': '$_gridPageSize',
-        'contract_address': contract,
-        if (fingerprint != null) 'fingerprint': fingerprint,
-      };
-      final uri = Uri.https(
-        host,
-        '/v1/accounts/$custodyAddress/transactions/trc20',
-        params,
-      );
-      final json = await _getJson(uri);
-      final rows = json.valueOrNull<JsonList>('data') ?? const [];
-      for (final row in rows) {
-        if (row.valueOrNull<String>('transaction_id')?.toLowerCase() !=
-            transactionHash.toLowerCase()) {
-          continue;
-        }
-        sawHash = true;
-        final tokenAddress = row
-            .valueOrNull<JsonMap>('token_info')
-            ?.valueOrNull<String>('address');
-        if (tokenAddress != null &&
-            tronAddressesEqual(tokenAddress, contract) &&
-            tronAddressesEqual(
-              row.valueOrNull<String>('from') ?? '',
-              custodyAddress,
-            ) &&
-            tronAddressesEqual(
-              row.valueOrNull<String>('to') ?? '',
-              recipientAddress,
-            ) &&
-            row.valueOrNull<String>('value') == authorizationValue) {
-          return GaslessOnChainVerification.verified;
-        }
-      }
-      fingerprint = _nextTronGridPageFingerprint(json);
-      if (fingerprint == null) break;
-    }
-    return sawHash
-        ? GaslessOnChainVerification.mismatch
-        : GaslessOnChainVerification.pending;
-  }
 
   @override
   bool requiresKdfTransactionHistory(Asset asset) => false;

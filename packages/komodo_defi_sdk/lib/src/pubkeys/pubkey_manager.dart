@@ -179,9 +179,6 @@ class PubkeyManager implements IPubkeyManager {
     if (existing != null) return existing;
 
     final future = () async {
-      final retained =
-          _pubkeysCache[asset.id] ??
-          await _hydrateFromStorageForWallet(walletId, asset);
       await retry(() => _activationCoordinator.activateAsset(asset));
       final strategy = await _resolvePubkeyStrategy(asset);
       await _scanForNewHdAddressesIfNeeded(
@@ -191,10 +188,10 @@ class PubkeyManager implements IPubkeyManager {
       );
       final raw = await strategy.getPubkeys(asset.id, _client);
       final everFunded = _observeFundedAddresses(asset.id, raw.keys);
-      final pubkeys = _retainPrimaryGasfreeAddress(
+      final pubkeys = filterGaslessPhantomAddresses(
         asset,
-        filterGaslessPhantomAddresses(asset, raw, everFunded: everFunded),
-        retained,
+        raw,
+        everFunded: everFunded,
       );
       _pubkeysCache[asset.id] = pubkeys;
       // `savePubkeys` replaces the record wholesale, so persisting the
@@ -209,65 +206,6 @@ class PubkeyManager implements IPubkeyManager {
     } finally {
       _inFlightPubkeyRequests.remove(asset.id);
     }
-  }
-
-  AssetPubkeys _retainPrimaryGasfreeAddress(
-    Asset asset,
-    AssetPubkeys fresh,
-    AssetPubkeys? retained,
-  ) {
-    if (asset.protocol is! Trc20Protocol ||
-        fresh.keys.isEmpty ||
-        retained == null ||
-        retained.keys.isEmpty) {
-      return fresh;
-    }
-    final freshPrimary = _canonicalGasfreePrimary(fresh.keys);
-    final retainedPrimary = _canonicalGasfreePrimary(retained.keys);
-    if (freshPrimary == null || retainedPrimary == null) return fresh;
-    final custody = retainedPrimary.gasfreeAddress?.trim();
-    if (custody == null ||
-        custody.isEmpty ||
-        freshPrimary.address != retainedPrimary.address ||
-        (freshPrimary.gasfreeAddress?.isNotEmpty ?? false)) {
-      return fresh;
-    }
-    return AssetPubkeys(
-      assetId: fresh.assetId,
-      keys: [
-        for (final key in fresh.keys)
-          PubkeyInfo(
-            address: key.address,
-            derivationPath: key.derivationPath,
-            chain: key.chain,
-            balance: key.balance,
-            coinTicker: asset.id.id,
-            gasfreeAddress: key.address == freshPrimary.address
-                ? custody
-                : null,
-            name: key.name,
-          ),
-      ],
-      availableAddressesCount: fresh.availableAddressesCount,
-      syncStatus: fresh.syncStatus,
-    );
-  }
-
-  PubkeyInfo? _canonicalGasfreePrimary(List<PubkeyInfo> keys) {
-    final hdPrimary = keys
-        .where(
-          (key) =>
-              key.derivationPath ==
-              GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
-        )
-        .toList(growable: false);
-    if (hdPrimary.length == 1) return hdPrimary.single;
-    if (keys.length == 1 &&
-        (keys.single.derivationPath == null ||
-            keys.single.derivationPath!.isEmpty)) {
-      return keys.single;
-    }
-    return null;
   }
 
   /// Stream of pubkeys per asset. Polls pubkeys (not balances) and emits updates.

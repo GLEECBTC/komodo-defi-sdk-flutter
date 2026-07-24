@@ -42,13 +42,6 @@ abstract interface class _TransactionHistoryManager {
     Asset asset, {
     Transaction Function(Transaction transaction)? transform,
   });
-
-  /// Independently binds a legacy GasFree trace to its TRC-20 transaction.
-  Future<GaslessOnChainVerification> verifyGaslessTransferOnChain(
-    Asset asset,
-    PendingGaslessTransfer pending,
-    String transactionHash,
-  );
 }
 
 class TransactionHistoryManager implements _TransactionHistoryManager {
@@ -121,51 +114,6 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   bool _supportsTxHistoryStreaming(Asset asset) =>
       asset.supportsTxHistoryStreaming;
-
-  @override
-  Future<GaslessOnChainVerification> verifyGaslessTransferOnChain(
-    Asset asset,
-    PendingGaslessTransfer pending,
-    String transactionHash,
-  ) async {
-    final protocol = asset.protocol;
-    if (protocol is! Trc20Protocol ||
-        _gaslessCapabilities?.isConfigured(asset) != true) {
-      return GaslessOnChainVerification.mismatch;
-    }
-    final topLevelContract = protocol.config['contract_address'];
-    final protocolJson = protocol.config['protocol'];
-    final protocolData = protocolJson is Map
-        ? protocolJson['protocol_data']
-        : null;
-    final nestedContract = protocolData is Map
-        ? protocolData['contract_address']
-        : null;
-    final contract = topLevelContract is String
-        ? topLevelContract
-        : nestedContract is String
-        ? nestedContract
-        : null;
-    if (contract == null || contract != pending.tokenContract) {
-      return GaslessOnChainVerification.mismatch;
-    }
-
-    final strategy = _strategyFactory.forAsset(asset);
-    if (strategy is! TronGridTransactionStrategy) {
-      return GaslessOnChainVerification.pending;
-    }
-    final authorizationAmount = pending.authorizationAmount;
-    if (authorizationAmount == null) {
-      return GaslessOnChainVerification.mismatch;
-    }
-    return strategy.verifyGaslessTransferEvent(
-      asset: asset,
-      transactionHash: transactionHash,
-      custodyAddress: pending.custodyAddress,
-      recipientAddress: pending.destinationAddress,
-      authorizationValue: authorizationAmount,
-    );
-  }
 
   void _handleAuthStateChanged(KdfUser? user) {
     if (_isDisposed) return;
@@ -980,15 +928,21 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     WalletOperationContext walletContext,
   ) async {
     if (!await _isGaslessTrc20(asset, walletContext)) return false;
+    final capabilities = _gaslessCapabilities;
+    if (capabilities == null || !capabilities.canRefreshAccountStatus(asset)) {
+      return false;
+    }
     try {
       final status = await _client.rpc.withdraw.gaslessAccountStatus(
         coin: asset.id.id,
       );
       if (!await _isWalletContextCurrent(walletContext)) return false;
+      if (!capabilities.refreshAccountStatus(asset, status)) return false;
       final previous = _lastCustodyBalanceForPolling[asset.id];
       _lastCustodyBalanceForPolling[asset.id] = status.onChainBalance;
       return previous == null || previous != status.onChainBalance;
-    } catch (_) {
+    } catch (error) {
+      capabilities.markAccountStatusError(asset.id, error);
       return false;
     }
   }

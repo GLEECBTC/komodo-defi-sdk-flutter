@@ -45,8 +45,6 @@ class ActivationManager {
   /// activations to enable gas-free TRC20 transfers. Held in memory only.
   final TronGaslessProviderConfig? _tronGaslessProvider;
   final GaslessCapabilityRegistry _gaslessCapabilities;
-  final Map<AssetId, String> _resolvedGaslessProviders = {};
-  final Map<AssetId, _GaslessRuntimeContract> _gaslessRuntimeContracts = {};
   final _activationMutex = Mutex();
   static const _operationTimeout = Duration(seconds: 30);
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
@@ -83,13 +81,15 @@ class ActivationManager {
     return activateAssets([asset]);
   }
 
-  /// Whether an active TRC20 token still needs a provider-aware activation
-  /// attempt in this SDK session.
+  /// Whether an active TRC20 token may refresh its provider-backed status.
+  ///
+  /// Disabled activations and hard security mismatches require a controlled
+  /// reactivation/session reset instead of another in-place status attempt.
   bool shouldRefreshTronGaslessActivation(Asset asset) =>
       _tronGaslessProvider != null &&
       _gaslessCapabilities.isConfigured(asset) &&
       !_gaslessCapabilities.isReady(asset.id) &&
-      !_gaslessCapabilities.canAttemptStatusReceiveAttestation(asset.id);
+      _gaslessCapabilities.canRefreshAccountStatus(asset);
 
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
@@ -98,8 +98,6 @@ class ActivationManager {
     _activationCompleters.clear();
     _cancelledActivations.clear();
     _gaslessCapabilities.resetSession();
-    _resolvedGaslessProviders.clear();
-    _gaslessRuntimeContracts.clear();
 
     for (final completer in staleCompleters) {
       if (!completer.isCompleted) {
@@ -115,7 +113,9 @@ class ActivationManager {
   Future<_GaslessActivationContext> _captureGaslessContext() async {
     final generation = _gaslessCapabilities.sessionGeneration;
     final user = await _auth.currentUser;
-    if (user == null || generation != _gaslessCapabilities.sessionGeneration) {
+    if (user == null ||
+        !_gaslessCapabilities.ensureWalletSession(user.walletId.pubkeyHash) ||
+        generation != _gaslessCapabilities.sessionGeneration) {
       throw const WalletChangedDisconnectException(
         'Wallet changed during GasFree activation',
       );
@@ -136,6 +136,7 @@ class ActivationManager {
     }
     final user = await _auth.currentUser;
     if (user == null ||
+        !_gaslessCapabilities.ensureWalletSession(user.walletId.pubkeyHash) ||
         context.sessionGeneration != _gaslessCapabilities.sessionGeneration ||
         !isSameStableWallet(context.walletId, user.walletId)) {
       throw const WalletChangedDisconnectException(
@@ -201,10 +202,18 @@ class ActivationManager {
         continue;
       }
 
-      final shouldRefreshTronGaslessActivation =
-          _shouldRefreshTronGaslessActivation(group);
-      final gaslessContext = shouldRefreshTronGaslessActivation
+      final gaslessRefreshCandidate = _shouldRefreshTronGaslessActivation(
+        group,
+      );
+      final candidateGaslessContext = gaslessRefreshCandidate
           ? await _captureGaslessContext()
+          : null;
+      final shouldRefreshTronGaslessActivation =
+          candidateGaslessContext != null &&
+          candidateGaslessContext.walletId.authOptions.privKeyPolicy !=
+              const PrivateKeyPolicy.trezor();
+      final gaslessContext = shouldRefreshTronGaslessActivation
+          ? candidateGaslessContext
           : null;
 
       // Check activation status atomically
@@ -214,9 +223,9 @@ class ActivationManager {
           yield activationStatus;
           continue;
         }
-        // Always bind an already-active runtime to the configured provider and
-        // token set through gasless::configure. A successful status probe alone
-        // cannot prove that the live provider matches the current security pin.
+        // An already-active token cannot be reconfigured in place. Probe its
+        // activation-scoped GasFree status; `GaslessNotConfigured` is retained
+        // as `reactivation_required` while Standard TRON remains available.
       }
 
       // Register activation attempt.
@@ -309,11 +318,10 @@ class ActivationManager {
             activationStatus.isComplete &&
                 shouldRefreshTronGaslessActivation &&
                 gaslessProvider != null
-            ? _reconfigureGaslessRuntime(
-                group,
-                gaslessProvider,
-                gaslessContext!,
-              )
+            // The standard asset is already active. Feed that successful
+            // status through the capability verifier, whose GasFree-only
+            // failures are deliberately non-terminal for Standard TRON.
+            ? Stream<ActivationProgress>.value(activationStatus)
             : activator.activate(group.primary, group.children.toList());
         await for (final rawProgress in activationStream) {
           final cancellation = _cancellationFor(group.primary.id, registration);
@@ -691,129 +699,13 @@ class ActivationManager {
   }
 
   TronGaslessProviderConfig? _gaslessProviderFor(_AssetGroup group) {
-    if (_tronGaslessProvider == null) return null;
-    return _gaslessAssets(group).isEmpty ? null : _tronGaslessProvider;
-  }
-
-  Stream<ActivationProgress> _reconfigureGaslessRuntime(
-    _AssetGroup group,
-    TronGaslessProviderConfig provider,
-    _GaslessActivationContext context,
-  ) async* {
-    final tokens = _gaslessAssets(group)
-        .where((asset) => asset.protocol is Trc20Protocol)
-        .map((asset) => GaslessConfigureToken(coin: asset.id.id))
-        .toList();
-    if (tokens.isEmpty) {
-      throw StateError(
-        'GasFree runtime reconfiguration requires a TRC20 token',
-      );
-    }
-
-    yield const ActivationProgress(
-      status: 'Configuring gas-free runtime...',
-      progressDetails: ActivationProgressDetails(
-        currentStep: ActivationStep.processing,
-        stepCount: 2,
-      ),
-    );
-
-    final contract = await _configureGaslessRuntime(
-      group,
-      provider,
-      tokens,
-      context,
-    );
-
-    yield ActivationProgress.success(
-      details: ActivationProgressDetails(
-        currentStep: ActivationStep.complete,
-        stepCount: 2,
-        additionalInfo: {
-          'method': contract == _GaslessRuntimeContract.boundConfigure
-              ? 'gasless::configure'
-              : 'gasless::account_status',
-          'tokenCount': tokens.length,
-        },
-      ),
-    );
-  }
-
-  Future<_GaslessRuntimeContract> _configureGaslessRuntime(
-    _AssetGroup group,
-    TronGaslessProviderConfig provider,
-    List<GaslessConfigureToken> tokens,
-    _GaslessActivationContext context,
-  ) async {
-    await _requireGaslessContextCurrent(context);
-    final GaslessConfigureResponse response;
-    try {
-      response = await _client.rpc.withdraw.configureGasless(
-        platformCoin: group.primary.id.id,
-        provider: provider,
-        tokens: tokens,
-      );
-    } catch (error) {
-      await _requireGaslessContextCurrent(context);
-      final isMethodMissing =
-          error is DispatcherErrorNoSuchMethodException ||
-          error is GeneralErrorResponse && error.errorType == 'NoSuchMethod';
-      if (!isMethodMissing) rethrow;
-
-      // KDF PR #9 has no runtime configure RPC. Its activation request still
-      // installs the provider, so retain the explicit local pin and require an
-      // authoritative account-status probe before the capability can be ready.
-      final pinnedProvider = provider.serviceProvider?.trim();
-      if (pinnedProvider == null || pinnedProvider.isEmpty) {
-        throw const _GaslessSecurityMismatch(
-          reasonCode: 'legacy_provider_pin_missing',
-        );
-      }
-      final configuredCoins = tokens.map((token) => token.coin).toSet();
-      for (final asset in _gaslessAssets(group)) {
-        if (configuredCoins.contains(asset.id.id)) {
-          _resolvedGaslessProviders[asset.id] = pinnedProvider;
-          _gaslessRuntimeContracts[asset.id] =
-              _GaslessRuntimeContract.legacyAccountStatus;
-        }
-      }
-      return _GaslessRuntimeContract.legacyAccountStatus;
-    }
-    await _requireGaslessContextCurrent(context);
-    if (response.platformCoin != group.primary.id.id) {
-      throw const _GaslessSecurityMismatch(
-        reasonCode: 'configure_platform_mismatch',
-      );
-    }
-    final configuredCoins = response.tokens.map((token) => token.coin).toSet();
-    final expectedCoins = tokens.map((token) => token.coin).toSet();
-    if (!configuredCoins.containsAll(expectedCoins) ||
-        configuredCoins.length != expectedCoins.length) {
-      throw const _GaslessSecurityMismatch(
-        reasonCode: 'configure_token_mismatch',
-      );
-    }
-    final pinnedProvider = provider.serviceProvider?.trim();
-    if (pinnedProvider != null &&
-        pinnedProvider.isNotEmpty &&
-        response.serviceProvider != pinnedProvider) {
-      throw const _GaslessSecurityMismatch(
-        reasonCode: 'configure_provider_mismatch',
-      );
-    }
-    if (response.serviceProvider.trim().isEmpty) {
-      throw const _GaslessSecurityMismatch(
-        reasonCode: 'configure_provider_missing',
-      );
-    }
-    for (final asset in _gaslessAssets(group)) {
-      if (expectedCoins.contains(asset.id.id)) {
-        _resolvedGaslessProviders[asset.id] = response.serviceProvider;
-        _gaslessRuntimeContracts[asset.id] =
-            _GaslessRuntimeContract.boundConfigure;
-      }
-    }
-    return _GaslessRuntimeContract.boundConfigure;
+    final provider = _tronGaslessProvider;
+    if (provider == null) return null;
+    // Provider configuration is activation-scoped on the TRX platform. Attach
+    // it even when TRX is activated before any enrolled token; KDF has no
+    // supported runtime mutation RPC for an already-active platform.
+    if (group.primary.protocol is TrxProtocol) return provider;
+    return _gaslessAssets(group).isEmpty ? null : provider;
   }
 
   Iterable<Asset> _gaslessAssets(_AssetGroup group) sync* {
@@ -830,7 +722,6 @@ class ActivationManager {
     ActivationProgress success,
     _GaslessActivationContext context,
   ) async {
-    final statusEpochs = <AssetId, int>{};
     try {
       await _requireGaslessContextCurrent(context);
       final assets = _gaslessAssets(group).toList();
@@ -843,19 +734,6 @@ class ActivationManager {
       }
       if (_tronGaslessProvider == null) {
         throw StateError('GasFree provider configuration is unavailable');
-      }
-      if (assets.any(
-        (asset) => !_resolvedGaslessProviders.containsKey(asset.id),
-      )) {
-        final tokens = assets
-            .map((asset) => GaslessConfigureToken(coin: asset.id.id))
-            .toList();
-        await _configureGaslessRuntime(
-          group,
-          _tronGaslessProvider,
-          tokens,
-          context,
-        );
       }
       for (final asset in assets) {
         final requestedPath = asset.id.derivationPath;
@@ -878,84 +756,8 @@ class ActivationManager {
             requestedPath == null || requestedPath == "m/44'/195'",
         };
         if (!sourceIsCanonical) {
-          throw StateError('GasFree requires the canonical TRON derivation');
-        }
-        final runtimeContract = _gaslessRuntimeContracts[asset.id];
-        if (runtimeContract == null) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'runtime_contract_missing',
-          );
-        }
-        final providerAddress = _resolvedGaslessProviders[asset.id];
-        if (providerAddress == null || providerAddress.isEmpty) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'capability_identity_mismatch',
-          );
-        }
-        final statusEpoch = _gaslessCapabilities.beginAccountStatusProbe(
-          asset.id,
-        );
-        statusEpochs[asset.id] = statusEpoch;
-        _gaslessCapabilities.markChecking(asset.id);
-        final status = await _client.rpc.withdraw.gaslessAccountStatus(
-          coin: asset.id.id,
-        );
-        await _requireGaslessContextCurrent(context);
-        if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
-          asset.id,
-          statusEpoch,
-        )) {
-          throw const _GaslessStatusSuperseded();
-        }
-        if (!status.hasExplicitAvailability) {
-          throw const _GaslessTemporarilyUnavailable(
-            reasonCode: 'availability_unattested',
-          );
-        }
-        if (status.reasonCode != null) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'invalid_account_status',
-          );
-        }
-        if (status.availability != GaslessAccountAvailability.available &&
-            status.serviceProvider != null) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'degraded_provider_identity_present',
-          );
-        }
-        if (!_gaslessCapabilities.hasValidDegradedAccountStatusShape(status)) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'invalid_account_status',
-          );
-        }
-        switch (status.availability) {
-          case GaslessAccountAvailability.available:
-            break;
-          case GaslessAccountAvailability.pendingTransfer:
-            throw const _GaslessTemporarilyUnavailable(
-              reasonCode: 'pending_transfer',
-            );
-          case GaslessAccountAvailability.tokenUnsupported:
-            throw const _GaslessUnsupported(reasonCode: 'token_unsupported');
-          case GaslessAccountAvailability.providerUnreachable:
-            throw const _GaslessTemporarilyUnavailable(
-              reasonCode: 'provider_unreachable',
-            );
-        }
-        if (status.serviceProvider != providerAddress) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'provider_identity_mismatch',
-          );
-        }
-        if (status.gasfreeAddress.isEmpty ||
-            status.active == null ||
-            (status.active == false && status.activationFee == null) ||
-            status.frozenBalance == null ||
-            status.spendableBalance == null ||
-            status.transferFee == null) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'invalid_account_status',
-          );
+          _gaslessCapabilities.markSecurityMismatch(asset.id);
+          continue;
         }
         final protocol = asset.protocol as Trc20Protocol;
         final topLevelContract = protocol.config['contract_address'];
@@ -973,29 +775,51 @@ class ActivationManager {
             : null;
         final walletPubkeyHash = context.walletId.pubkeyHash;
         if (contractAddress == null || walletPubkeyHash == null) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'capability_identity_mismatch',
-          );
+          _gaslessCapabilities.markSecurityMismatch(asset.id);
+          continue;
         }
-        final identity = GaslessCapabilityIdentity(
+        final activatedIdentity = GaslessCapabilityIdentity(
           assetId: asset.id,
           platform: protocol.platform,
           contractAddress: contractAddress,
-          providerAddress: providerAddress,
+          providerAddress: _tronGaslessProvider.serviceProvider?.trim() ?? '',
           walletPubkeyHash: walletPubkeyHash,
           walletType: walletType,
           derivationPath: capabilityPath,
         );
-        final accepted = switch (runtimeContract) {
-          _GaslessRuntimeContract.legacyAccountStatus =>
-            _gaslessCapabilities.markProvisionalFor(asset, identity),
-          _GaslessRuntimeContract.boundConfigure =>
-            _gaslessCapabilities.markReadyFor(asset, identity),
-        };
-        if (!accepted) {
-          throw const _GaslessSecurityMismatch(
-            reasonCode: 'capability_identity_mismatch',
+        if (!_gaslessCapabilities.bindActivatedIdentity(
+          asset,
+          activatedIdentity,
+        )) {
+          continue;
+        }
+        final statusEpoch = _gaslessCapabilities.beginAccountStatusProbe(
+          asset.id,
+        );
+        _gaslessCapabilities.markChecking(asset.id);
+        try {
+          final status = await _client.rpc.withdraw.gaslessAccountStatus(
+            coin: asset.id.id,
           );
+          await _requireGaslessContextCurrent(context);
+          if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
+            asset.id,
+            statusEpoch,
+          )) {
+            continue;
+          }
+          _gaslessCapabilities.refreshAccountStatus(asset, status);
+        } catch (error) {
+          await _requireGaslessContextCurrent(context);
+          if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
+            asset.id,
+            statusEpoch,
+          )) {
+            continue;
+          }
+          if (!_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
+            _gaslessCapabilities.markUnconfirmed(asset.id);
+          }
         }
       }
       return success;
@@ -1014,52 +838,17 @@ class ActivationManager {
           stackTrace: stackTrace,
         );
       }
-      if (effectiveError is _GaslessStatusSuperseded ||
-          statusEpochs.entries.any(
-            (entry) => !_gaslessCapabilities.isCurrentAccountStatusProbe(
-              entry.key,
-              entry.value,
-            ),
-          )) {
-        final mappedError = _mapError(
-          const _GaslessStatusSuperseded(),
-          group.primary.id,
-        );
-        return ActivationProgress.error(
-          message: mappedError.fallbackMessage,
-          sdkError: mappedError,
-          stackTrace: stackTrace,
-        );
-      }
       for (final asset in _gaslessAssets(group)) {
         if (_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
           continue;
-        } else if (error case _GaslessSecurityMismatch(:final reasonCode)) {
-          _gaslessCapabilities.markSecurityMismatch(
-            asset.id,
-            reasonCode: reasonCode,
-          );
-        } else if (error case _GaslessUnsupported(:final reasonCode)) {
-          _gaslessCapabilities.markUnsupported(
-            asset.id,
-            reasonCode: reasonCode,
-          );
-        } else if (error case _GaslessTemporarilyUnavailable(
-          :final reasonCode,
-        )) {
-          _gaslessCapabilities.markStale(asset.id, reasonCode: reasonCode);
-        } else if (error case _GaslessDisabled(:final reasonCode)) {
-          _gaslessCapabilities.markDisabled(asset.id, reasonCode: reasonCode);
         } else {
           _gaslessCapabilities.markUnconfirmed(asset.id);
         }
       }
-      final mappedError = _mapError(error, group.primary.id);
-      return ActivationProgress.error(
-        message: mappedError.fallbackMessage,
-        sdkError: mappedError,
-        stackTrace: stackTrace,
-      );
+      // GasFree readiness is an optional rail layered on a successful KDF
+      // activation. The typed account status and capability state gate the
+      // optional rail while Standard TRON remains usable.
+      return success;
     }
   }
 
@@ -1138,51 +927,6 @@ class ActivationManager {
     });
   }
 }
-
-class _GaslessSecurityMismatch implements Exception {
-  const _GaslessSecurityMismatch({required this.reasonCode});
-
-  final String reasonCode;
-
-  @override
-  String toString() => 'GasFree security validation failed';
-}
-
-class _GaslessUnsupported implements Exception {
-  const _GaslessUnsupported({required this.reasonCode});
-
-  final String reasonCode;
-
-  @override
-  String toString() => 'GasFree is unsupported for this token';
-}
-
-class _GaslessTemporarilyUnavailable implements Exception {
-  const _GaslessTemporarilyUnavailable({required this.reasonCode});
-
-  final String reasonCode;
-
-  @override
-  String toString() => 'GasFree is temporarily unavailable';
-}
-
-class _GaslessDisabled implements Exception {
-  const _GaslessDisabled({required this.reasonCode});
-
-  final String reasonCode;
-
-  @override
-  String toString() => 'GasFree provider authentication is unavailable';
-}
-
-class _GaslessStatusSuperseded implements Exception {
-  const _GaslessStatusSuperseded();
-
-  @override
-  String toString() => 'GasFree account status was superseded';
-}
-
-enum _GaslessRuntimeContract { legacyAccountStatus, boundConfigure }
 
 class _GaslessActivationContext {
   const _GaslessActivationContext({

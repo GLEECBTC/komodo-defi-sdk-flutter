@@ -51,8 +51,12 @@ class KomodoDefiSdkConfig {
   /// token. Held in memory only — never persisted.
   final TronGaslessProviderConfig? tronGaslessProvider;
 
-  /// Explicit asset IDs allowed to use GasFree. The default is empty so
-  /// configuring a provider alone never enables every TRC-20 token.
+  /// Optional application rollout IDs for TRC20 assets whose configuration
+  /// does not yet carry a `gasless` object. An explicit
+  /// `gasless.enabled: false` remains authoritative.
+  ///
+  /// The default adds no rollout overrides; the SDK does not maintain its own
+  /// hard-coded GasFree token registry.
   final Set<String> tronGaslessAssetIds;
 
   KomodoDefiSdkConfig copyWith({

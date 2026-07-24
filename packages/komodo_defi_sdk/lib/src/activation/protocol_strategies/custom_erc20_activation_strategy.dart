@@ -74,12 +74,19 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
         final Erc20Protocol _ => Erc20ActivationParams.fromJsonConfig(
           asset.protocol.config,
         ),
-        final Trc20Protocol _ =>
-          Trc20ActivationParams.fromJsonConfig(asset.protocol.config).copyWith(
+        final Trc20Protocol _ => () {
+          final configured = Trc20ActivationParams.fromJsonConfig(
+            asset.protocol.config,
+          );
+          return Trc20ActivationParams(
+            nodes: configured.nodes,
+            privKeyPolicy: configured.privKeyPolicy,
             gasless: tronGaslessProvider == null
                 ? null
-                : const TronGaslessTokenActivationConfig(enabled: true),
-          ),
+                : configured.gasless ??
+                      const TronGaslessTokenActivationConfig(enabled: true),
+          );
+        }(),
         _ => throw UnsupportedError(
           'Unsupported custom token protocol: ${asset.protocol.runtimeType}',
         ),

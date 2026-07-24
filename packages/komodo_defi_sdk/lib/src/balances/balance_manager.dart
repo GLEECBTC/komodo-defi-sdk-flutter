@@ -1,125 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
-import 'package:http/http.dart' as http;
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
-import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_exceptions.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
-import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
-import 'package:komodo_defi_sdk/src/transaction_history/strategies/tron_grid_address_codec.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
-
-/// Provider-independent custody balance lookup used for recovery-only access.
-abstract interface class GaslessCustodyBalanceReader {
-  /// Reads the exact enrolled token balance at [custodyAddress].
-  Future<Decimal> readBalance(Asset asset, String custodyAddress);
-
-  /// Releases resources owned by the reader.
-  void dispose();
-}
-
-/// Strict TRONGrid implementation for mainnet and Nile TRC-20 balances.
-final class TronGridGaslessCustodyBalanceReader
-    implements GaslessCustodyBalanceReader {
-  /// Creates a reader, optionally using a caller-owned HTTP [client].
-  TronGridGaslessCustodyBalanceReader({http.Client? client})
-    : _client = client ?? http.Client(),
-      _ownsClient = client == null;
-
-  final http.Client _client;
-  final bool _ownsClient;
-
-  @override
-  /// Reads a confirmed, exact-contract token balance in human units.
-  Future<Decimal> readBalance(Asset asset, String custodyAddress) async {
-    final protocol = asset.protocol;
-    if (protocol is! Trc20Protocol || !isValidTronAddress(custodyAddress)) {
-      throw StateError('Invalid GasFree custody balance request');
-    }
-    final contract =
-        protocol.config['contract_address']?.toString() ??
-        ((protocol.config['protocol'] as Map?)?['protocol_data']
-                as Map?)?['contract_address']
-            ?.toString();
-    final decimals = asset.id.chainId.decimals;
-    if (contract == null ||
-        !isValidTronAddress(contract) ||
-        decimals == null ||
-        decimals < 0 ||
-        decimals > 255) {
-      throw StateError('Invalid GasFree token balance configuration');
-    }
-    final host = protocol.isTestnet ? 'nile.trongrid.io' : 'api.trongrid.io';
-    final uri = Uri.https(host, '/v1/accounts/$custodyAddress', {
-      'only_confirmed': 'true',
-      'visible': 'true',
-    });
-    final response = await _client
-        .get(uri)
-        .timeout(const Duration(seconds: 15));
-    if (response.statusCode != 200) {
-      throw StateError('GasFree custody balance service is unavailable');
-    }
-    // Account payloads are small; cap at 256 KiB before decoding untrusted JSON.
-    if (response.bodyBytes.length > 256 * 1024) {
-      throw const FormatException('Custody balance response is too large');
-    }
-    final decoded = jsonDecode(
-      utf8.decode(response.bodyBytes, allowMalformed: false),
-    );
-    if (decoded is! Map || decoded['data'] is! List) {
-      throw const FormatException('Invalid custody balance response');
-    }
-    if (decoded.containsKey('success') && decoded['success'] != true) {
-      throw const FormatException('Custody balance response was unsuccessful');
-    }
-    final data = decoded['data'] as List;
-    if (data.isEmpty) return Decimal.zero;
-    if (data.length != 1 || data.single is! Map) {
-      throw const FormatException('Custody account provenance is unavailable');
-    }
-    final trc20 = (data.single as Map)['trc20'];
-    if (trc20 == null) return Decimal.zero;
-    if (trc20 is! List) {
-      throw const FormatException('Custody token provenance is unavailable');
-    }
-    final values = <String>[];
-    for (final item in trc20) {
-      if (item is! Map) {
-        throw const FormatException('Invalid custody token balance');
-      }
-      final value = item[contract];
-      if (value != null) values.add(value.toString());
-    }
-    if (values.isEmpty) return Decimal.zero;
-    if (values.length != 1 ||
-        !RegExp(r'^(0|[1-9]\d*)$').hasMatch(values.single)) {
-      throw const FormatException('Ambiguous custody token balance');
-    }
-    final digits = values.single.padLeft(decimals + 1, '0');
-    final split = digits.length - decimals;
-    return Decimal.parse(
-      decimals == 0
-          ? digits
-          : '${digits.substring(0, split)}.${digits.substring(split)}',
-    );
-  }
-
-  @override
-  /// Closes the internally owned HTTP client, if any.
-  void dispose() {
-    if (_ownsClient) _client.close();
-  }
-}
 
 /// Interface defining the contract for balance management operations
 abstract class IBalanceManager {
@@ -134,13 +26,6 @@ abstract class IBalanceManager {
   /// Throws [ArgumentError] if asset is not found.
   /// May throw [TimeoutException] if balance fetch times out.
   Future<BalanceInfo> getBalance(AssetId assetId);
-
-  /// Returns custody and every Standard address balance without substituting
-  /// one rail for another when provider status is unavailable.
-  Future<GaslessBalanceSnapshot> getGaslessBalanceSnapshot(AssetId assetId);
-
-  /// Returns the retained rail-aware snapshot without triggering I/O.
-  GaslessBalanceSnapshot? lastKnownGaslessBalanceSnapshot(AssetId assetId);
 
   /// Gets a stream of balance updates for an asset.
   /// The stream will emit the current balance immediately if available,
@@ -191,18 +76,11 @@ class BalanceManager implements IBalanceManager {
     required SharedActivationCoordinator? activationCoordinator,
     required EventStreamingManager eventStreamingManager,
     AssetHistoryStorage? assetHistoryStorage,
-    ApiClient? client,
-    GaslessCapabilityRegistry? gaslessCapabilities,
-    GaslessCustodyBalanceReader? gaslessCustodyBalanceReader,
   }) : _activationCoordinator = activationCoordinator,
        _pubkeyManager = pubkeyManager,
        _assetLookup = assetLookup,
        _auth = auth,
        _eventStreamingManager = eventStreamingManager,
-       _client = client,
-       _gaslessCapabilities = gaslessCapabilities,
-       _gaslessCustodyBalanceReader =
-           gaslessCustodyBalanceReader ?? TronGridGaslessCustodyBalanceReader(),
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
     // Listen for auth state changes
     _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
@@ -217,12 +95,6 @@ class BalanceManager implements IBalanceManager {
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
 
-  /// RPC client, used to fetch the GasFree custody balance for gasless TRC-20
-  /// assets. Null in contexts (e.g. some tests) where gasless substitution is
-  /// not needed; when null, all assets use their standard (EOA) balance.
-  final ApiClient? _client;
-  final GaslessCapabilityRegistry? _gaslessCapabilities;
-  final GaslessCustodyBalanceReader _gaslessCustodyBalanceReader;
   StreamSubscription<KdfUser?>? _authSubscription;
   final Duration _defaultPollingInterval = const Duration(seconds: 30);
 
@@ -231,14 +103,6 @@ class BalanceManager implements IBalanceManager {
 
   /// Cache of the latest known balances for each asset
   final Map<AssetId, BalanceInfo> _balanceCache = {};
-
-  /// Assets whose public balance was built from a rail-aware GasFree snapshot.
-  /// A transient refresh must never replace this total-owned value with EOA-only
-  /// funds, which would understate portfolio ownership.
-  final Set<AssetId> _gaslessSnapshotSourcedBalances = {};
-  final Map<AssetId, GaslessBalanceSnapshot> _gaslessSnapshotCache = {};
-  final Map<AssetId, int> _activeGaslessSnapshotEpochs = {};
-  int _nextGaslessSnapshotEpoch = 0;
 
   /// Track active balance watch streams by asset ID
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
@@ -303,7 +167,6 @@ class BalanceManager implements IBalanceManager {
   Future<void> _handleAuthStateChanged(KdfUser? user) async {
     if (_isDisposed) return;
     final newWalletId = user?.walletId;
-    _gaslessCapabilities?.ensureWalletSession(newWalletId?.pubkeyHash);
     // If the wallet ID has changed, reset all state
     _logger.fine(
       'Auth state changed. wallet: $_currentWalletId -> $newWalletId',
@@ -325,7 +188,6 @@ class BalanceManager implements IBalanceManager {
   Future<WalletOperationContext> _captureWalletContext() async {
     final user = await _auth.currentUser;
     if (user == null) throw AuthException.notSignedIn();
-    _gaslessCapabilities?.ensureWalletSession(user.walletId.pubkeyHash);
 
     if (_currentWalletId == null) {
       _currentWalletId = user.walletId;
@@ -368,28 +230,6 @@ class BalanceManager implements IBalanceManager {
     );
   }
 
-  int _beginGaslessSnapshot(AssetId assetId) {
-    final epoch = ++_nextGaslessSnapshotEpoch;
-    _activeGaslessSnapshotEpochs[assetId] = epoch;
-    return epoch;
-  }
-
-  void _requireGaslessSnapshotCurrent(AssetId assetId, int epoch) {
-    if (_activeGaslessSnapshotEpochs[assetId] == epoch) return;
-    throw StateError('GasFree balance snapshot was superseded');
-  }
-
-  void _requireCapabilityGenerationCurrent(int? generation) {
-    final capabilities = _gaslessCapabilities;
-    if (generation == null && capabilities == null) return;
-    if (capabilities != null && generation == capabilities.sessionGeneration) {
-      return;
-    }
-    throw const WalletChangedDisconnectException(
-      'Wallet changed during GasFree balance status',
-    );
-  }
-
   /// Reset all internal state when wallet changes
   Future<void> _resetState() async {
     _logger.fine('Resetting state');
@@ -398,9 +238,6 @@ class BalanceManager implements IBalanceManager {
     // Clear wallet-owned values before awaiting cancellation. This prevents a
     // newly signed-in caller from observing the previous wallet during cleanup.
     _balanceCache.clear();
-    _gaslessSnapshotSourcedBalances.clear();
-    _gaslessSnapshotCache.clear();
-    _activeGaslessSnapshotEpochs.clear();
     _pendingFastRefresh.clear();
 
     final List<Future<void>> cleanupFutures = <Future<void>>[];
@@ -474,253 +311,16 @@ class BalanceManager implements IBalanceManager {
     }
 
     try {
-      // GasFree portfolio balance is total wallet ownership across custody and
-      // every retained Standard address. Rail-specific send limits must use the
-      // snapshot/source selection instead of this aggregate.
-      if (_client != null && _isTrc20(asset)) {
-        try {
-          final owned = await _maybeGaslessTotalOwnedBalance(asset);
-          if (owned != null) {
-            await _requireWalletContextCurrent(walletContext);
-            _balanceCache[assetId] = owned;
-            _gaslessSnapshotSourcedBalances.add(assetId);
-            return owned;
-          }
-        } catch (_) {
-          await _requireWalletContextCurrent(walletContext);
-          // Never silently substitute an EOA balance for a confirmed GasFree
-          // wallet snapshot. A cached owned-funds snapshot is preferable;
-          // surface the availability error so callers can render it explicitly.
-          final cached = _balanceCache[assetId];
-          if (cached != null &&
-              _gaslessSnapshotSourcedBalances.contains(assetId)) {
-            return cached;
-          }
-          rethrow;
-        }
-      }
-
       final balance = await _pubkeyManager!
           .getPubkeys(asset)
           .then((pubkeys) => pubkeys.balance);
       await _requireWalletContextCurrent(walletContext);
-      // A concurrent GasFree snapshot may have landed while awaiting the EOA
-      // balance; don't clobber the total-owned cache with the EOA number.
-      if (_isTrc20(asset) &&
-          _gaslessSnapshotSourcedBalances.contains(assetId)) {
-        final custodyCached = _balanceCache[assetId];
-        if (custodyCached != null) return custodyCached;
-      }
       // Update cache with the latest balance
       _balanceCache[assetId] = balance;
       return balance;
     } catch (e) {
       // Rethrow with more context
       throw StateError('Failed to get balance for ${assetId.name}: $e');
-    }
-  }
-
-  @override
-  Future<GaslessBalanceSnapshot> getGaslessBalanceSnapshot(
-    AssetId assetId,
-  ) async {
-    final walletContext = await _captureWalletContext();
-    final capabilityGeneration = _gaslessCapabilities?.sessionGeneration;
-    final snapshotEpoch = _beginGaslessSnapshot(assetId);
-    int? statusEpoch;
-    final asset = _assetLookup.fromId(assetId);
-    final client = _client;
-    final pubkeyManager = _pubkeyManager;
-    if (asset == null) {
-      throw ArgumentError('Asset not found for balance check: $assetId');
-    }
-    final recoveryOnly = !_isGaslessReady(asset);
-    if (!recoveryOnly && client == null) {
-      throw StateError('GasFree client is not available for ${asset.id.id}');
-    }
-    final retained = _gaslessSnapshotCache[assetId];
-    if (pubkeyManager == null) {
-      throw StateError('PubkeyManager is not initialized');
-    }
-
-    try {
-      final pubkeys = await pubkeyManager.getPubkeys(asset);
-      await _requireWalletContextCurrent(walletContext);
-      _requireCapabilityGenerationCurrent(capabilityGeneration);
-      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
-      final retainedCustody = _canonicalGasfreePrimary(
-        pubkeys.keys,
-      )?.gasfreeAddress?.trim();
-      if (recoveryOnly &&
-          (retainedCustody == null || retainedCustody.isEmpty)) {
-        if (retained != null) return retained.asStale();
-        throw StateError(
-          'No retained GasFree custody identity for ${asset.id.id}',
-        );
-      }
-      final GaslessAccountStatusResponse? status;
-      final String custodyAddress;
-      final Decimal custodyTotal;
-      if (recoveryOnly) {
-        custodyAddress = retainedCustody!;
-        custodyTotal = await _gaslessCustodyBalanceReader.readBalance(
-          asset,
-          custodyAddress,
-        );
-        await _requireWalletContextCurrent(walletContext);
-        _requireCapabilityGenerationCurrent(capabilityGeneration);
-        _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
-        status = null;
-      } else {
-        final capabilities = _gaslessCapabilities;
-        if (capabilities == null) {
-          throw StateError('GasFree capability registry is not available');
-        }
-        if (capabilityGeneration != capabilities.sessionGeneration) {
-          throw const WalletChangedDisconnectException(
-            'Wallet changed during GasFree balance status',
-          );
-        }
-        statusEpoch = capabilities.beginAccountStatusProbe(assetId);
-        status = await client!.rpc.withdraw.gaslessAccountStatus(
-          coin: asset.id.id,
-        );
-        await _requireWalletContextCurrent(walletContext);
-        _requireCapabilityGenerationCurrent(capabilityGeneration);
-        _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
-        if (!capabilities.isCurrentAccountStatusProbe(assetId, statusEpoch)) {
-          throw StateError('GasFree balance status was superseded');
-        }
-        if (!capabilities.validateBoundAccountStatus(assetId, status)) {
-          if (retained != null) return retained.asStale();
-          throw StateError('Invalid GasFree account status');
-        }
-        custodyAddress = status.gasfreeAddress;
-        custodyTotal = status.onChainBalance;
-        final expectedCustody = retainedCustody ?? retained?.custodyAddress;
-        if (expectedCustody != null &&
-            expectedCustody.isNotEmpty &&
-            custodyAddress != expectedCustody) {
-          _gaslessCapabilities?.markSecurityMismatch(
-            assetId,
-            reasonCode: 'custody_address_mismatch',
-          );
-          if (retained != null) return retained.asStale();
-          throw StateError('GasFree custody address does not match retention');
-        }
-      }
-      await _requireWalletContextCurrent(walletContext);
-      _requireCapabilityGenerationCurrent(capabilityGeneration);
-      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
-      final isAvailable =
-          status?.hasExplicitAvailability == true &&
-          status?.availability == GaslessAccountAvailability.available;
-      final standardBalances = [
-        for (final key in pubkeys.keys)
-          GaslessStandardBalance(
-            address: key.address,
-            derivationPath: key.derivationPath,
-            balance: key.balance,
-          ),
-      ];
-      final standardTotal = standardBalances.fold(
-        Decimal.zero,
-        (total, item) => total + item.balance.total,
-      );
-      final snapshot = GaslessBalanceSnapshot(
-        custodyAddress: custodyAddress,
-        custodyTotal: custodyTotal,
-        custodySpendable: isAvailable ? status?.spendableBalance : null,
-        frozenAmount: isAvailable ? status?.frozenBalance : null,
-        standardBalances: standardBalances,
-        totalWalletOwned: custodyTotal + standardTotal,
-        capturedAt: DateTime.now().toUtc(),
-        provenance: isAvailable
-            ? GaslessBalanceProvenance.authoritativeProvider
-            : GaslessBalanceProvenance.onChainOnly,
-        isFresh: isAvailable,
-      );
-      _gaslessSnapshotCache[assetId] = snapshot;
-      return snapshot;
-    } on WalletChangedDisconnectException {
-      rethrow;
-    } catch (error) {
-      await _requireWalletContextCurrent(walletContext);
-      _requireCapabilityGenerationCurrent(capabilityGeneration);
-      _requireGaslessSnapshotCurrent(assetId, snapshotEpoch);
-      final capabilities = _gaslessCapabilities;
-      if (statusEpoch != null) {
-        if (capabilities == null ||
-            capabilityGeneration != capabilities.sessionGeneration) {
-          throw const WalletChangedDisconnectException(
-            'Wallet changed during GasFree balance status',
-          );
-        }
-        if (!capabilities.isCurrentAccountStatusProbe(assetId, statusEpoch)) {
-          throw StateError('GasFree balance status was superseded');
-        }
-      }
-      _gaslessCapabilities?.markAccountStatusError(assetId, error);
-      if (retained != null) return retained.asStale();
-      rethrow;
-    }
-  }
-
-  @override
-  GaslessBalanceSnapshot? lastKnownGaslessBalanceSnapshot(AssetId assetId) =>
-      _gaslessSnapshotCache[assetId];
-
-  /// Whether [asset] is a TRON TRC-20 token, whose gaslessly-spendable balance
-  /// lives at the GasFree custody address rather than the EOA.
-  bool _isTrc20(Asset asset) => asset.protocol is Trc20Protocol;
-
-  bool _isGaslessReady(Asset asset) =>
-      _gaslessCapabilities?.isReady(asset.id) ?? false;
-
-  PubkeyInfo? _canonicalGasfreePrimary(List<PubkeyInfo> keys) {
-    final hdPrimary = keys
-        .where(
-          (key) =>
-              key.derivationPath ==
-              GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
-        )
-        .toList(growable: false);
-    if (hdPrimary.length == 1) return hdPrimary.single;
-    if (keys.length == 1 &&
-        (keys.single.derivationPath == null ||
-            keys.single.derivationPath!.isEmpty)) {
-      return keys.single;
-    }
-    return null;
-  }
-
-  /// Returns total wallet-owned GasFree and Standard funds for [asset].
-  /// Null means the asset has never had a ready GasFree capability and should
-  /// stay on the normal Standard rail.
-  Future<BalanceInfo?> _maybeGaslessTotalOwnedBalance(Asset asset) async {
-    if (_client == null && _isGaslessReady(asset)) {
-      return null;
-    }
-    if (!_isGaslessReady(asset) &&
-        !_gaslessSnapshotCache.containsKey(asset.id)) {
-      final pubkeys =
-          _pubkeyManager?.lastKnown(asset.id) ??
-          await _pubkeyManager?.getPubkeys(asset);
-      if (pubkeys == null ||
-          (_canonicalGasfreePrimary(pubkeys.keys)?.gasfreeAddress ?? '')
-              .isEmpty) {
-        return null;
-      }
-    }
-    try {
-      final snapshot = await getGaslessBalanceSnapshot(asset.id);
-      return snapshot.walletBalance;
-    } catch (e) {
-      _logger.fine(
-        'GasFree wallet snapshot unavailable for ${asset.id.name}; '
-        'preserving balance provenance: $e',
-      );
-      rethrow;
     }
   }
 
@@ -927,25 +527,14 @@ class BalanceManager implements IBalanceManager {
       }
 
       // Subscribe to balance event stream for real-time updates.
-      //
-      // TRC-20 assets are polled instead: their displayed balance is the GasFree
-      // custody balance (fetched via `getBalance`), which the EOA balance event
-      // stream and the pubkey-derived hint would not reflect. The pubkey hint is
-      // skipped for them to avoid briefly flashing the EOA balance.
-      final isGaslessAsset =
-          _client != null &&
-          (_isGaslessReady(asset) ||
-              _gaslessSnapshotCache.containsKey(assetId));
-      if (!_supportsBalanceStreaming(asset) || isGaslessAsset) {
-        if (!isGaslessAsset) {
-          _attachPubkeyHintListener(
-            asset: asset,
-            assetId: assetId,
-            controller: controller,
-            activateIfNeeded: activateIfNeeded,
-            walletContext: walletContext,
-          );
-        }
+      if (!_supportsBalanceStreaming(asset)) {
+        _attachPubkeyHintListener(
+          asset: asset,
+          assetId: assetId,
+          controller: controller,
+          activateIfNeeded: activateIfNeeded,
+          walletContext: walletContext,
+        );
         await _startBalancePolling(
           asset: asset,
           assetId: assetId,
@@ -1439,10 +1028,7 @@ class BalanceManager implements IBalanceManager {
 
     // Clear all other resources
     _balanceCache.clear();
-    _gaslessSnapshotSourcedBalances.clear();
-    _gaslessSnapshotCache.clear();
     _currentWalletId = null;
-    _gaslessCustodyBalanceReader.dispose();
     _logger.fine('Disposed');
 
     // Cancel any remaining stale-guard timers
@@ -1475,37 +1061,9 @@ class BalanceManager implements IBalanceManager {
 
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        BalanceInfo? owned;
-        if (_client != null && _isTrc20(asset)) {
-          owned = await _maybeGaslessTotalOwnedBalance(asset);
-          if (!await _isWalletContextCurrent(walletContext)) return;
-          if (owned != null) {
-            _gaslessSnapshotSourcedBalances.add(asset.id);
-          } else {
-            // Keep a snapshot-sourced total instead of overwriting it with the
-            // EOA-only balance; re-emit it so watchers settle (see getBalance).
-            //
-            // With no snapshot yet (first activation), fall through to the EOA
-            // precache: custody errors are swallowed above, so the
-            // coin-not-found retry below never fires for them and the first
-            // number may briefly be the EOA balance — the watcher's own
-            // getBalance / first poll corrects it within one interval.
-            final cached = _balanceCache[asset.id];
-            if (cached != null &&
-                _gaslessSnapshotSourcedBalances.contains(asset.id)) {
-              final controller = _balanceControllers[asset.id];
-              if (controller != null && !controller.isClosed) {
-                controller.add(cached);
-              }
-              return;
-            }
-          }
-        }
-        final balance =
-            owned ??
-            await _pubkeyManager!
-                .getPubkeys(asset)
-                .then<BalanceInfo>((pubkeys) => pubkeys.balance);
+        final balance = await _pubkeyManager!
+            .getPubkeys(asset)
+            .then<BalanceInfo>((pubkeys) => pubkeys.balance);
         if (!await _isWalletContextCurrent(walletContext)) return;
         _balanceCache[asset.id] = balance;
 

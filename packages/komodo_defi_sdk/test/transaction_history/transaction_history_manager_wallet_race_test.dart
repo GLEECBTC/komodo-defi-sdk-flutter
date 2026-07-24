@@ -1,12 +1,10 @@
 import 'dart:async';
 
-import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
-import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_manager.dart';
@@ -45,25 +43,6 @@ class _BlockingStrategy extends TransactionHistoryStrategy {
     Asset asset,
     TransactionPagination pagination,
   ) => response.future;
-
-  @override
-  bool supportsAsset(Asset asset) => true;
-}
-
-class _ImmediateStrategy extends TransactionHistoryStrategy {
-  _ImmediateStrategy(this.response);
-
-  final MyTxHistoryResponse response;
-
-  @override
-  Set<Type> get supportedPaginationModes => const {PagePagination};
-
-  @override
-  Future<MyTxHistoryResponse> fetchTransactionHistory(
-    ApiClient client,
-    Asset asset,
-    TransactionPagination pagination,
-  ) async => response;
 
   @override
   bool supportsAsset(Asset asset) => true;
@@ -168,112 +147,6 @@ MyTxHistoryResponse _historyResponse() => MyTxHistoryResponse(
   ],
 );
 
-Asset _gaslessAsset({required bool nile}) {
-  final platformId = nile ? 'TRXT' : 'TRX';
-  final tokenId = nile ? 'TESTUSDT-TRC20' : 'USDT-TRC20';
-  final contract = nile
-      ? 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'
-      : 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-  final parent = Asset.fromJson({
-    'coin': platformId,
-    'type': 'TRX',
-    'name': platformId,
-    'fname': platformId,
-    'wallet_only': true,
-    'mm2': 1,
-    'decimals': 6,
-    'protocol': {
-      'type': 'TRX',
-      'protocol_data': {'network': nile ? 'Nile' : 'Mainnet'},
-    },
-    'nodes': <Map<String, dynamic>>[],
-  }, knownIds: const {});
-  return Asset.fromJson(
-    {
-      'coin': tokenId,
-      'type': 'TRC-20',
-      'name': tokenId,
-      'fname': tokenId,
-      'wallet_only': true,
-      'mm2': 1,
-      'decimals': 6,
-      'protocol': {
-        'type': 'TRC20',
-        'protocol_data': {'platform': platformId, 'contract_address': contract},
-      },
-      'contract_address': contract,
-      'parent_coin': platformId,
-      'nodes': <Map<String, dynamic>>[],
-    },
-    knownIds: {parent.id},
-  );
-}
-
-PendingGaslessTransfer _pendingFor(Asset asset) {
-  final protocol = asset.protocol as Trc20Protocol;
-  return PendingGaslessTransfer(
-    traceId: 'trace',
-    requestId: '123e4567-e89b-42d3-a456-426614174000',
-    assetId: asset.id.id,
-    network: 'network',
-    sourceAddress: 'TSource',
-    custodyAddress: 'TCustody',
-    destinationAddress: 'TDestination',
-    requestedAmount: Decimal.parse('5'),
-    signedMaxFee: Decimal.parse('2'),
-    authorizationDeadline: 1999999999,
-    authorizationFingerprint: 'fingerprint',
-    balanceChanges: BalanceChanges(
-      netChange: Decimal.parse('-5'),
-      receivedByMe: Decimal.zero,
-      spentByMe: Decimal.parse('5'),
-      totalAmount: Decimal.parse('5'),
-    ),
-    fee: FeeInfo.tronGasless(
-      coin: asset.id.id,
-      feeMethod: 'gasless',
-      providerName: 'gasfree',
-      gasfreeAddress: 'TCustody',
-      transferFee: Decimal.one,
-      totalTokenFee: Decimal.one,
-    ),
-    acceptedAt: DateTime.utc(2026, 7, 12),
-    updatedAt: DateTime.utc(2026, 7, 12),
-    state: GaslessTransferState.confirming,
-    verificationMode: GaslessVerificationMode.legacyOnChain,
-    provider: 'TProvider',
-    tokenContract: protocol.config['contract_address'] as String,
-  );
-}
-
-MyTxHistoryResponse _gaslessHistory(Asset asset) => MyTxHistoryResponse(
-  mmrpc: RpcVersion.v2_0,
-  currentBlock: 100,
-  fromId: null,
-  limit: 50,
-  skipped: 0,
-  syncStatus: SyncStatusResponse(state: TransactionSyncStatusEnum.finished),
-  total: 1,
-  totalPages: 1,
-  pageNumber: 1,
-  pagingOptions: null,
-  transactions: [
-    TransactionInfo(
-      txHash: 'legacy-hash',
-      from: const ['TCustody'],
-      to: const ['TDestination'],
-      myBalanceChange: '-5',
-      blockHeight: 99,
-      confirmations: 1,
-      timestamp: 1,
-      feeDetails: null,
-      coin: asset.id.id,
-      internalId: 'legacy-hash',
-      memo: null,
-    ),
-  ],
-);
-
 void main() {
   const walletA = KdfUser(
     walletId: WalletId(
@@ -347,60 +220,4 @@ void main() {
     );
     expect(storage.storedWallets, isEmpty);
   });
-
-  for (final nile in [false, true]) {
-    test('legacy GasFree finality refuses aggregate '
-        '${nile ? 'Nile' : 'mainnet'} history', () async {
-      final client = _MockApiClient();
-      final auth = _MockAuth();
-      final assetProvider = _MockAssetProvider();
-      final activation = _MockActivationCoordinator();
-      final pubkeys = _MockPubkeyManager();
-      final streaming = _MockEventStreamingManager();
-      final assetHistory = _MockAssetHistoryStorage();
-      final storage = _RecordingStorage();
-      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
-      final asset = _gaslessAsset(nile: nile);
-      final pending = _pendingFor(asset);
-
-      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
-      when(() => auth.currentUser).thenAnswer((_) async => walletA);
-      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
-      when(
-        () => assetHistory.getWalletAssets(walletA.walletId),
-      ).thenAnswer((_) async => {asset.id.id});
-      when(
-        () => activation.activateAsset(asset),
-      ).thenAnswer((_) async => ActivationResult.success(asset.id));
-
-      final manager = TransactionHistoryManager(
-        client,
-        auth,
-        assetProvider,
-        activation,
-        pubkeyManager: pubkeys,
-        eventStreamingManager: streaming,
-        storage: storage,
-        assetHistoryStorage: assetHistory,
-        gaslessCapabilities: GaslessCapabilityRegistry(
-          configuredAssetIds: {asset.id.id},
-        ),
-        transactionHistoryStrategies: [
-          _ImmediateStrategy(_gaslessHistory(asset)),
-        ],
-      );
-      addTearDown(() async {
-        await manager.dispose();
-        await authChanges.close();
-      });
-
-      final result = await manager.verifyGaslessTransferOnChain(
-        asset,
-        pending,
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      );
-
-      expect(result, GaslessOnChainVerification.pending);
-    });
-  }
 }

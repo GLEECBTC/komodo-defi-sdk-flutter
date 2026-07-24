@@ -328,13 +328,13 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Current fail-closed GasFree availability for [asset].
   ///
   /// A ready result is wallet/session specific and is granted only after KDF
-  /// runtime configuration plus an authoritative provider status check.
+  /// activation configuration plus an authoritative provider status check.
   GaslessCapability gaslessCapability(Asset asset) => _assertSdkInitialized(
     _container<GaslessCapabilityRegistry>().capabilityFor(asset),
   );
 
-  /// Whether a previously verified stale capability may request a fresh,
-  /// read-only GasFree preview. Relay submission still requires `ready`.
+  /// Whether the current typed KDF status permits an authoritative GasFree
+  /// preview. This is true only for a ready, `available` capability.
   bool canAttemptGaslessPreview(Asset asset) => _assertSdkInitialized(
     _container<GaslessCapabilityRegistry>().canAttemptAuthoritativePreview(
       asset.id,
@@ -342,25 +342,8 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   );
 
   /// Whether this wallet may expose a new GasFree custody receive address.
-  /// Legacy KDF contracts are recovery/send-only and always return false.
   bool canReceiveGasless(Asset asset) => _assertSdkInitialized(
     _container<GaslessCapabilityRegistry>().canReceiveGasless(asset.id),
-  );
-
-  /// Receive-address evidence for the current wallet session.
-  GaslessReceiveEvidence gaslessReceiveEvidence(Asset asset) =>
-      _assertSdkInitialized(
-        _container<GaslessCapabilityRegistry>().receiveEvidenceFor(asset.id),
-      );
-
-  /// Whether the core wallet Receive UI may use V1 status attestation.
-  ///
-  /// This deliberately does not satisfy [canReceiveGasless], which remains the
-  /// bound-relay predicate for integrations such as refunds and consolidation.
-  bool canReceiveGaslessFromStatus(Asset asset) => _assertSdkInitialized(
-    _container<GaslessCapabilityRegistry>().canReceiveGaslessFromStatus(
-      asset.id,
-    ),
   );
 
   /// The event streaming service instance.
@@ -368,13 +351,25 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Provides access to SSE (Server-Sent Events) connection lifecycle management
   /// for real-time balance and transaction history updates.
   ///
-  /// Use [KdfEventStreamingService.connectIfNeeded] to establish SSE connection
-  /// after authentication, and [KdfEventStreamingService.disconnect] to clean up
-  /// on sign-out.
+  /// Use [connectStreaming] after authentication and [disconnectStreaming] on
+  /// sign-out so managed KDF registrations are disabled before the transport
+  /// is closed.
   ///
   /// Throws [StateError] if accessed before initialization.
   KdfEventStreamingService get streaming =>
       _assertSdkInitialized(_container<KomodoDefiFramework>().streaming);
+
+  /// Connects the authenticated KDF event session.
+  void connectStreaming() => streaming.connectIfNeeded();
+
+  /// Disconnects the KDF event session and invalidates every managed streamer.
+  ///
+  /// Subsequent subscriptions reconnect and issue fresh `stream::*::enable`
+  /// requests; no registration from the signed-out session is reused.
+  Future<void> disconnectStreaming() {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.disconnect();
+  }
 
   /// Subscribes to a managed orderbook stream for a trading pair.
   ///
@@ -403,6 +398,18 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   Future<StreamSubscription<OrderStatusEvent>> subscribeToOrderStatus() {
     final manager = _assertSdkInitialized(_container<EventStreamingManager>());
     return manager.subscribeToOrderStatus();
+  }
+
+  /// Subscribes to GasFree lifecycle and provider-error events for [coin].
+  ///
+  /// Most applications should consume withdrawal progress instead. This
+  /// lower-level stream is exposed for recovery and diagnostics that already
+  /// own a KDF trace identifier.
+  Future<StreamSubscription<KdfEvent>> subscribeToGaslessTrace({
+    required String coin,
+  }) {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.subscribeToGaslessTrace(coin: coin);
   }
 
   /// Public stream of framework logs.
