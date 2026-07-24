@@ -3,6 +3,7 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 part 'balance_event.dart';
+part 'gasless_trace_event.dart';
 part 'heartbeat_event.dart';
 part 'network_event.dart';
 part 'order_status_event.dart';
@@ -16,6 +17,8 @@ part 'unknown_event.dart';
 /// Private enum for internal event type string mapping
 enum EventTypeString {
   balance('BALANCE'),
+  gaslessTrace('GASLESS_TRACE'),
+  gaslessTraceError('ERROR:GASLESS_TRACE'),
   orderbook('ORDERBOOK'),
   network('NETWORK'),
   heartbeat('HEARTBEAT'),
@@ -87,6 +90,19 @@ sealed class KdfEvent {
       }
     }
 
+    // GasFree trace errors use `ERROR:GASLESS_TRACE:<coin>`, while successful
+    // snapshots use `GASLESS_TRACE:<coin>`. Handle the error prefix before the
+    // generic first-segment normalization below so it is not reduced to
+    // `ERROR` and silently exposed as an unknown event.
+    if (typeString.startsWith('ERROR:GASLESS_TRACE:')) {
+      return [
+        GaslessTraceErrorEvent.fromJson(
+          _asJsonMap(message),
+          coinFromType: _gaslessCoinSuffix(typeString, isError: true),
+        ),
+      ];
+    }
+
     // Some event types include contextual suffixes (e.g. "TX_HISTORY:COIN",
     // "ORDERBOOK:BASE:REL"). Normalize by stripping everything after the first
     // ':' so the base type can be matched, while keeping message payload for
@@ -97,6 +113,12 @@ sealed class KdfEvent {
 
     return switch (normalizedType) {
       'BALANCE' => _parseBalanceEvents(typeString, message),
+      'GASLESS_TRACE' => [
+        GaslessTraceEvent.fromJson(
+          _asJsonMap(message),
+          coinFromType: _gaslessCoinSuffix(typeString),
+        ),
+      ],
       'ORDERBOOK' => [OrderbookEvent.fromJson(_asJsonMap(message))],
       'NETWORK' => [NetworkEvent.fromJson(_asJsonMap(message))],
       'HEARTBEAT' => [HeartbeatEvent.fromJson(_asJsonMap(message))],
@@ -190,6 +212,14 @@ sealed class KdfEvent {
     return nextColon == -1
         ? typeString.substring(firstColon + 1)
         : typeString.substring(firstColon + 1, nextColon);
+  }
+
+  static String? _gaslessCoinSuffix(String typeString, {bool isError = false}) {
+    final prefix = isError ? 'ERROR:GASLESS_TRACE:' : 'GASLESS_TRACE:';
+    if (!typeString.startsWith(prefix) || typeString.length == prefix.length) {
+      return null;
+    }
+    return typeString.substring(prefix.length);
   }
 
   /// Handles unknown event types by logging and returning an UnknownEvent

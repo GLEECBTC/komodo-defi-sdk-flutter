@@ -522,6 +522,9 @@ class KomodoDefiFramework implements ApiClient {
   ///
   /// NB! This does not stop the KDF operations or the KDF process.
   Future<void> dispose() async {
+    await _streamingService?.dispose();
+    _streamingService = null;
+
     // Cancel subscription first before closing the stream
     await _loggerSub?.cancel();
     _loggerSub = null;

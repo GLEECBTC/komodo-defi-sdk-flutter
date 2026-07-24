@@ -100,4 +100,103 @@ void main() {
       expect(events.single.balance.spendable.toString(), '3');
     });
   });
+
+  group('KdfEvent.parseAll - GASLESS_TRACE', () {
+    test('parses the exact success event shape', () {
+      final event = KdfEvent.parseAll(<String, dynamic>{
+        '_type': 'GASLESS_TRACE:USDT-TRC20',
+        'message': {
+          'coin': 'USDT-TRC20',
+          'trace_id': 'trace-1',
+          'state': 'on_chain',
+          'tx_hash_on_chain': 'on-chain-hash',
+          'block_height': 57175988,
+          'confirmed_at': 1747909638,
+          'final_fee': '2.000000',
+          'failure_reason': null,
+        },
+      }).single;
+
+      expect(event, isA<GaslessTraceEvent>());
+      final trace = event as GaslessTraceEvent;
+      expect(trace.coin, 'USDT-TRC20');
+      expect(trace.traceId, 'trace-1');
+      expect(trace.state, GaslessTraceEventState.onChain);
+      expect(trace.txHashOnChain, 'on-chain-hash');
+      expect(trace.blockHeight, 57175988);
+      expect(trace.confirmedAt, 1747909638);
+      expect(trace.finalFee, '2.000000');
+    });
+
+    test('parses the runtime ERROR prefix as a typed error', () {
+      final event = KdfEvent.parseAll(<String, dynamic>{
+        '_type': 'ERROR:GASLESS_TRACE:USDT-TRC20',
+        'message': {
+          'coin': 'USDT-TRC20',
+          'trace_id': 'trace-2',
+          'error': 'Request to GasFree provider timed out',
+        },
+      }).single;
+
+      expect(event, isA<GaslessTraceErrorEvent>());
+      final traceError = event as GaslessTraceErrorEvent;
+      expect(traceError.coin, 'USDT-TRC20');
+      expect(traceError.traceId, 'trace-2');
+      expect(traceError.error, 'Request to GasFree provider timed out');
+    });
+
+    test('rejects unknown lifecycle states', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': {
+            'coin': 'USDT-TRC20',
+            'trace_id': 'trace-3',
+            'state': 'WAITING',
+          },
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects a message coin that differs from the stream suffix', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': {
+            'coin': 'USDC-TRC20',
+            'trace_id': 'trace-4',
+            'state': 'submitted',
+          },
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects mixed failure shapes', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': {
+            'coin': 'USDT-TRC20',
+            'trace_id': 'trace-5',
+            'state': 'failed',
+          },
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': {
+            'coin': 'USDT-TRC20',
+            'trace_id': 'trace-6',
+            'state': 'confirmed',
+            'failure_reason': 'must not be present',
+          },
+        }),
+        throwsFormatException,
+      );
+    });
+  });
 }
