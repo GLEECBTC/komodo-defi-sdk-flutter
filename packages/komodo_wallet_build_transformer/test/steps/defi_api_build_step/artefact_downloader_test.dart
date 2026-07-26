@@ -1,4 +1,7 @@
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader.dart';
+import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader_factory.dart';
+import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/github_artefact_downloader.dart';
+import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_build_config.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -50,5 +53,24 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  test('GitHub fallback uses its own configured source URL', () {
+    const mirror = 'https://devbuilds.gleec.com';
+    const github =
+        'https://api.github.com/repos/GLEECBTC/komodo-defi-framework';
+    final config = ApiBuildConfig(
+      apiCommitHash: commit,
+      branch: 'feat/tron-gasfree',
+      fetchAtBuildEnabled: true,
+      concurrentDownloadsEnabled: true,
+      sourceUrls: const [mirror, github],
+      platforms: const {},
+    );
+
+    final downloaders = ArtefactDownloaderFactory.fromBuildConfig(config);
+
+    expect(downloaders[github], isA<GithubArtefactDownloader>());
+    expect(downloaders[github]?.sourceUrl, github);
   });
 }

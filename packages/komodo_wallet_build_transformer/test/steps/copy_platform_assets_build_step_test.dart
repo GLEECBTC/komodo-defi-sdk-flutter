@@ -110,6 +110,16 @@ void main() {
         ..setLastModifiedSync(now.add(const Duration(seconds: 1)));
 
       expect(await step.canSkip(), isTrue);
+
+      destinationResource
+        ..writeAsStringSync('tampered bootstrapper')
+        ..setLastModifiedSync(now.add(const Duration(seconds: 2)));
+
+      expect(
+        await step.canSkip(),
+        isFalse,
+        reason: 'newer destination timestamps cannot hide modified bytes',
+      );
     });
   });
 }

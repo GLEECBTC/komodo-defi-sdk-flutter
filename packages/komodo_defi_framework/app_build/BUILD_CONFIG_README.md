@@ -55,16 +55,11 @@ Paths in the config are relative to that package directory.
 3. Synchronize this directory's reference YAML with the canonical JSON.
 4. Run the build transformer (via Flutter asset transformers or CLI). It writes
    an `.api_last_updated_<platform>` marker containing the exact archive name,
-   accepted archive SHA-256, manifest checksums, and extracted core-artifact
-   SHA-256 for every platform.
+   accepted archive SHA-256, manifest checksums, extracted core-artifact
+   SHA-256, and complete runtime-set SHA-256 for every platform.
 5. Confirm the marker's commit and checksum match the manifest before packaging.
-   Future builds recompute the extracted digest; legacy, incomplete, missing,
+   Future builds recompute both extracted digests; legacy, incomplete, missing,
    or tampered markers are stale and cannot be bypassed by disabling downloads.
-
-An all-zero checksum is an intentional release blocker, never a valid
-artifact. It keeps a declared platform fail-closed while the artifact for the
-pinned commit is still unpublished. Replace it only with the independently
-calculated SHA-256 of that commit's downloaded zip.
 
 `OVERRIDE_DEFI_API_DOWNLOAD=false` disables downloading only. It cannot bypass
 provenance validation: a missing, malformed, stale-commit, or checksum-mismatched

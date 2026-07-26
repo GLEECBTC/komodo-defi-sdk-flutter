@@ -1,8 +1,8 @@
 /// Provenance written next to an extracted KDF artifact.
 ///
 /// A marker is authoritative only when it identifies the pinned commit, the
-/// exact downloaded archive, and the digest of the complete extracted platform
-/// runtime set. Legacy partial markers deliberately fail closed.
+/// exact downloaded archive, the extracted core artifact, and the complete
+/// platform runtime set. Legacy partial markers deliberately fail closed.
 class ApiArtifactProvenance {
   const ApiArtifactProvenance._({
     required this.apiCommitHash,
@@ -10,6 +10,7 @@ class ApiArtifactProvenance {
     required this.archiveFilename,
     required this.archiveSha256,
     required this.artifactSha256,
+    required this.runtimeSetSha256,
   });
 
   factory ApiArtifactProvenance.fromJson(Map<String, dynamic> json) {
@@ -18,6 +19,7 @@ class ApiArtifactProvenance {
     final archiveFilename = _requiredNonEmptyString(json, 'archive_filename');
     final archiveSha256 = _requiredSha256(json, 'archive_sha256');
     final artifactSha256 = _requiredSha256(json, 'artifact_sha256');
+    final runtimeSetSha256 = _requiredSha256(json, 'runtime_set_sha256');
 
     validateApiArtifactProvenanceCommitHash(apiCommitHash);
 
@@ -49,6 +51,7 @@ class ApiArtifactProvenance {
       archiveFilename: archiveFilename,
       archiveSha256: archiveSha256,
       artifactSha256: artifactSha256,
+      runtimeSetSha256: runtimeSetSha256,
     );
   }
 
@@ -57,6 +60,7 @@ class ApiArtifactProvenance {
   final String archiveFilename;
   final String archiveSha256;
   final String artifactSha256;
+  final String runtimeSetSha256;
 
   /// Whether this marker proves parity with the pinned manifest entry and the
   /// bytes currently present in the extracted artifact directory.
@@ -64,6 +68,7 @@ class ApiArtifactProvenance {
     required String expectedCommitHash,
     required List<String> expectedChecksums,
     required String observedArtifactSha256,
+    required String observedRuntimeSetSha256,
   }) {
     if (!_isFullCommitHash(expectedCommitHash) ||
         expectedChecksums.isEmpty ||
@@ -71,7 +76,9 @@ class ApiArtifactProvenance {
         expectedChecksums.toSet().length != expectedChecksums.length ||
         apiCommitHash != expectedCommitHash ||
         !_isSha256(observedArtifactSha256) ||
-        artifactSha256 != observedArtifactSha256) {
+        artifactSha256 != observedArtifactSha256 ||
+        !_isSha256(observedRuntimeSetSha256) ||
+        runtimeSetSha256 != observedRuntimeSetSha256) {
       return false;
     }
 

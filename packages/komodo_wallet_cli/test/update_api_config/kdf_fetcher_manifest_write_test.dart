@@ -8,6 +8,53 @@ import '../../bin/update_api_config.dart' as update_cli;
 void main() {
   const previousCommit = '997332e5d6b0c5ca471aa7dc9727a7be96938ae2';
   const nextCommit = 'bd413dcfea73c9de2e85903323946a378b180fa7';
+  const trustedChecksum =
+      '9242cbba06eda6e82fc057897781cea2adf85f67f0cf5710f4feaf0a5e6d844c';
+  const untrustedChecksum =
+      '1242cbba06eda6e82fc057897781cea2adf85f67f0cf5710f4feaf0a5e6d844c';
+
+  group('strict artifact checksum provenance', () {
+    test('keeps the exact independently trusted set unchanged', () {
+      final configured = <String>[trustedChecksum];
+
+      final resolved = update_cli.resolvePlatformArtifactChecksums(
+        configuredChecksums: configured,
+        calculatedChecksum: trustedChecksum,
+        previousCommitHash: nextCommit,
+        nextCommitHash: nextCommit,
+        strict: true,
+      );
+
+      expect(resolved, configured);
+      expect(identical(resolved, configured), isFalse);
+    });
+
+    test('rejects an untrusted mirror artifact for the same commit', () {
+      expect(
+        () => update_cli.resolvePlatformArtifactChecksums(
+          configuredChecksums: const <String>[trustedChecksum],
+          calculatedChecksum: untrustedChecksum,
+          previousCommitHash: nextCommit,
+          nextCommitHash: nextCommit,
+          strict: true,
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('changed commits retain manifest update compatibility', () {
+      expect(
+        update_cli.resolvePlatformArtifactChecksums(
+          configuredChecksums: const <String>[trustedChecksum],
+          calculatedChecksum: untrustedChecksum,
+          previousCommitHash: previousCommit,
+          nextCommitHash: nextCommit,
+          strict: true,
+        ),
+        const <String>[untrustedChecksum],
+      );
+    });
+  });
 
   test(
     'write boundary cannot advance a global commit after no target updates',

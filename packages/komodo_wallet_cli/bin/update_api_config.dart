@@ -487,30 +487,17 @@ class KdfFetcher {
       final checksum = await calculateChecksum(zipFilePath);
       log.info('Calculated checksum: $checksum');
 
-      // Replace existing checksums when the commit changes; otherwise, accumulate
       final previousCommit = (apiConfig['api_commit_hash'] as String?);
-      final isCommitChanged =
-          previousCommit == null || previousCommit != commitHash;
-
-      if (isCommitChanged) {
-        platformConfig['valid_zip_sha256_checksums'] = <String>[checksum];
-        log.info(
-          'API commit changed from ${previousCommit ?? 'undefined'} to $commitHash; '
-          'replaced existing checksums for platform $platform',
-        );
-      } else {
-        // Update platform config with new checksum (accumulate unique)
-        final checksums =
-            (platformConfig['valid_zip_sha256_checksums'] as List<dynamic>)
-                .map((e) => e.toString())
-                .toSet();
-        if (!checksums.contains(checksum)) {
-          checksums.add(checksum);
-          platformConfig['valid_zip_sha256_checksums'] = checksums.toList();
-          log.info('Added new checksum to platform config: $checksum');
-        } else {
-          log.info('Checksum already exists in platform config');
-        }
+      final checksums = resolvePlatformArtifactChecksums(
+        configuredChecksums:
+            platformConfig['valid_zip_sha256_checksums'] as Object?,
+        calculatedChecksum: checksum,
+        previousCommitHash: previousCommit,
+        nextCommitHash: commitHash,
+        strict: strict,
+      );
+      if (!strict || previousCommit != commitHash) {
+        platformConfig['valid_zip_sha256_checksums'] = checksums;
       }
       _updatedPlatformCommits[platform] = commitHash;
     } catch (e) {
@@ -877,6 +864,61 @@ class KdfFetcher {
       'Updated build config with commit hash: $commitHash${currentBranch != branch ? ' and branch: $branch' : ''}',
     );
   }
+}
+
+/// Resolves the checksums a platform manifest may retain after a download.
+///
+/// For a commit already pinned by the manifest, strict mode is a verification
+/// boundary: a checksum calculated from downloaded bytes cannot establish or
+/// extend trust in those same bytes. A changed commit retains the updater's
+/// existing manifest-maintenance behavior; release workflows must independently
+/// approve that newly calculated set before consuming it.
+List<String> resolvePlatformArtifactChecksums({
+  required Object? configuredChecksums,
+  required String calculatedChecksum,
+  required String? previousCommitHash,
+  required String nextCommitHash,
+  required bool strict,
+}) {
+  final checksumPattern = RegExp(r'^[0-9a-f]{64}$');
+  if (!checksumPattern.hasMatch(calculatedChecksum)) {
+    throw FormatException(
+      'Calculated artifact checksum must be a lowercase SHA-256 digest.',
+      calculatedChecksum,
+    );
+  }
+
+  if (configuredChecksums is! List ||
+      configuredChecksums.any(
+        (checksum) =>
+            checksum is! String || !checksumPattern.hasMatch(checksum),
+      )) {
+    throw StateError(
+      'valid_zip_sha256_checksums must contain lowercase SHA-256 digests.',
+    );
+  }
+
+  final trustedChecksums = List<String>.unmodifiable(
+    configuredChecksums.cast<String>(),
+  );
+  if (strict && previousCommitHash == nextCommitHash) {
+    if (!trustedChecksums.contains(calculatedChecksum)) {
+      throw StateError(
+        'Downloaded artifact checksum is not in the independently configured '
+        'allowlist for KDF commit $nextCommitHash.',
+      );
+    }
+    return trustedChecksums;
+  }
+
+  if (previousCommitHash != nextCommitHash) {
+    return <String>[calculatedChecksum];
+  }
+
+  return <String>{
+    ...trustedChecksums,
+    calculatedChecksum,
+  }.toList(growable: false);
 }
 
 // ================ Credit to Flutter team: ================

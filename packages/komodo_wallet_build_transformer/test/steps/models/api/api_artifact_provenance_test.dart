@@ -7,6 +7,8 @@ void main() {
       '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
   const artifactChecksum =
       'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+  const runtimeSetChecksum =
+      '0abcdef1234567890abcdef1234567890abcdef1234567890abcdef123456789';
   const otherChecksum =
       'fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321';
 
@@ -15,18 +17,21 @@ void main() {
     String archiveFilename = 'kdf_997332e-android-aarch64.zip',
     String archiveSha256 = checksum,
     String extractedSha256 = artifactChecksum,
+    String runtimeSha256 = runtimeSetChecksum,
   }) => {
     'api_commit_hash': commit,
     'checksums': [checksum],
     'archive_filename': archiveFilename,
     'archive_sha256': archiveSha256,
     'artifact_sha256': extractedSha256,
+    'runtime_set_sha256': runtimeSha256,
   };
 
   bool matchesPinned(ApiArtifactProvenance marker) => marker.matches(
     expectedCommitHash: pinnedCommit,
     expectedChecksums: const [checksum],
     observedArtifactSha256: artifactChecksum,
+    observedRuntimeSetSha256: runtimeSetChecksum,
   );
 
   group('ApiArtifactProvenance', () {
@@ -98,6 +103,21 @@ void main() {
           expectedCommitHash: pinnedCommit,
           expectedChecksums: const [checksum],
           observedArtifactSha256: otherChecksum,
+          observedRuntimeSetSha256: runtimeSetChecksum,
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects a tampered extracted runtime-set digest', () {
+      final marker = ApiArtifactProvenance.fromJson(markerJson());
+
+      expect(
+        marker.matches(
+          expectedCommitHash: pinnedCommit,
+          expectedChecksums: const [checksum],
+          observedArtifactSha256: artifactChecksum,
+          observedRuntimeSetSha256: otherChecksum,
         ),
         isFalse,
       );
@@ -114,6 +134,12 @@ void main() {
       expect(
         () => ApiArtifactProvenance.fromJson({
           ...(markerJson()..remove('archive_sha256')),
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ApiArtifactProvenance.fromJson({
+          ...(markerJson()..remove('runtime_set_sha256')),
         }),
         throwsFormatException,
       );
@@ -153,6 +179,11 @@ void main() {
         () => ApiArtifactProvenance.fromJson(
           markerJson(extractedSha256: allZero),
         ),
+        throwsFormatException,
+      );
+      expect(
+        () =>
+            ApiArtifactProvenance.fromJson(markerJson(runtimeSha256: allZero)),
         throwsFormatException,
       );
     });

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:komodo_wallet_build_transformer/src/build_step.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/build_config.dart';
 import 'package:logging/logging.dart';
@@ -222,7 +223,7 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
         return false;
       }
 
-      if (sourceFile.lastModifiedSync().isAfter(destFile.lastModifiedSync())) {
+      if (!_filesHaveSameContent(sourceFile, destFile)) {
         return false;
       }
     }
@@ -243,9 +244,7 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
       final correspondingDestFile = File(path.join(destDir.path, relativePath));
 
       if (!correspondingDestFile.existsSync() ||
-          sourceFile.lastModifiedSync().isAfter(
-            correspondingDestFile.lastModifiedSync(),
-          )) {
+          !_filesHaveSameContent(sourceFile, correspondingDestFile)) {
         return true;
       }
 
@@ -257,6 +256,12 @@ class CopyPlatformAssetsBuildStep extends BuildStep {
     }
 
     return false;
+  }
+
+  bool _filesHaveSameContent(File source, File destination) {
+    if (source.lengthSync() != destination.lengthSync()) return false;
+    return sha256.convert(source.readAsBytesSync()) ==
+        sha256.convert(destination.readAsBytesSync());
   }
 
   String _getAppName() {
