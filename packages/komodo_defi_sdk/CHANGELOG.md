@@ -2,10 +2,11 @@
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.
 
- - **BREAKING** **FEAT**(gasfree): derive token enrollment from activated TRC20
-   configuration (plus optional application rollout IDs) and require an
-   authoritative account-status check before custody balance or sends become
-   available.
+ - **BREAKING** **FEAT**(gasfree): derive token enrollment only from activated
+   TRC20 `gasless.enabled` configuration and require an authoritative
+   account-status check before custody balance or sends become available.
+   Applications may amend normalized asset configuration before SDK parsing
+   through `assetConfigTransform`.
  - **BREAKING** **FEAT**(gasfree): configure the documented
    `tron_gasless_provider` and per-token `gasless` fields during ordinary TRON
    activation. Remove runtime `gasless::configure`, its restart fallback, and
@@ -29,9 +30,9 @@
    status value and delegate maximum sends to KDF with `max: true` and no
    amount.
  - **FIX**(gasfree): retain custody/recovery access during provider outages,
-   distinguish Iguana and canonical HD identities, preserve cross-page address
-   perspectives, and expose final fee plus confirmation metadata without
-   enabling resubmission.
+   preserve KDF-compatible Iguana, software-HD, and hardware-HD activation
+   identities, preserve cross-page address perspectives, and expose final fee
+   plus confirmation metadata without enabling resubmission.
  - **FIX**(pubkeys): migrate legacy address metadata conservatively so funded
    and previously used Standard addresses remain visible.
  - **FIX**(gasfree): keep KDF's fresh custody total distinct from provider

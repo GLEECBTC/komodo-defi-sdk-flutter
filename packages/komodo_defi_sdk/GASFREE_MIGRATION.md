@@ -23,17 +23,21 @@ GasFree token enrollment comes from the activated TRC20 configuration:
 }
 ```
 
-An explicit `tronGaslessAssetIds` set may still opt in assets whose
-configuration does not yet contain a `gasless` object. It is an application
-rollout gate, not an SDK-owned token registry, and cannot override an explicit
-`gasless.enabled: false`. The provider is installed during ordinary TRX
+The activated asset's `gasless.enabled` value is the only SDK enrollment
+source. Applications that own a rollout allowlist can use
+`assetConfigTransform` to amend normalized asset configuration before SDK
+parsing; this application view is transient and is not persisted over the
+upstream asset configuration. An explicit upstream `gasless` value should
+remain authoritative. The provider is installed during ordinary TRX
 activation even when TRX is activated before an enrolled token. An
 already-active platform that was started without the provider must be
 reactivated under application control; there is no runtime configure RPC.
 
-Trezor remains excluded. Application network, contract, token, derivation,
-provider-pin, build-switch, and remote-switch policies remain additional
-requirements above the generic SDK.
+The generic SDK preserves KDF activation and account-status behavior for
+Trezor. Product restrictions for hardware signing, network, contract, token,
+derivation, provider pinning, build switches, and remote switches belong above
+the SDK boundary. In particular, an application may exclude Trezor GasFree
+sends even though activation and read-only account status remain available.
 
 ## Account status and balances
 
