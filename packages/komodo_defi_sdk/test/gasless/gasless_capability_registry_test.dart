@@ -93,23 +93,22 @@ void main() {
   );
 
   GaslessCapabilityRegistry registry({String? provider = _provider}) =>
-      GaslessCapabilityRegistry(
-        configuredAssetIds: const {},
-        pinnedProviderAddress: provider,
-      );
+      GaslessCapabilityRegistry(pinnedProviderAddress: provider);
 
   GaslessCapabilityIdentity identity(
     Asset asset, {
     String provider = _provider,
     String walletPubkeyHash = 'wallet-pubkey',
+    GaslessWalletType walletType = GaslessWalletType.softwareHd,
+    String derivationPath = "m/44'/195'",
   }) => GaslessCapabilityIdentity(
     assetId: asset.id,
     platform: 'TRX',
     contractAddress: _contract,
     providerAddress: provider,
     walletPubkeyHash: walletPubkeyHash,
-    walletType: GaslessWalletType.softwareHd,
-    derivationPath: GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
+    walletType: walletType,
+    derivationPath: derivationPath,
   );
 
   test('derives generic TRC20 eligibility from the activated asset config', () {
@@ -118,20 +117,17 @@ void main() {
     expect(capabilities.isConfigured(token()), isTrue);
     expect(capabilities.isConfigured(token(gaslessEnabled: false)), isFalse);
 
-    final explicitRollout = GaslessCapabilityRegistry(
-      configuredAssetIds: const {'ROLLOUT-TRC20'},
-    );
     expect(
-      explicitRollout.isConfigured(
+      capabilities.isConfigured(
         token(ticker: 'ROLLOUT-TRC20', gaslessEnabled: false),
       ),
       isFalse,
     );
     expect(
-      explicitRollout.isConfigured(
+      capabilities.isConfigured(
         token(ticker: 'ROLLOUT-TRC20', includeGaslessConfig: false),
       ),
-      isTrue,
+      isFalse,
     );
   });
 
@@ -190,6 +186,44 @@ void main() {
       capabilities.capabilityFor(asset).state,
       GaslessCapabilityState.securityMismatch,
     );
+  });
+
+  test('generic SDK accepts a non-primary KDF HD source identity', () {
+    final asset = token();
+    final capabilities = registry();
+    final secondaryIdentity = identity(
+      asset,
+      derivationPath: "m/44'/195'/3'/1/7",
+    );
+
+    expect(
+      capabilities.recordAccountStatus(
+        asset,
+        secondaryIdentity,
+        _status(GaslessAccountAvailability.available),
+      ),
+      isTrue,
+    );
+    expect(capabilities.isReadyFor(secondaryIdentity), isTrue);
+  });
+
+  test('generic SDK does not reject a hardware HD status identity', () {
+    final asset = token();
+    final capabilities = registry();
+    final hardwareIdentity = identity(
+      asset,
+      walletType: GaslessWalletType.hardwareHd,
+    );
+
+    expect(
+      capabilities.recordAccountStatus(
+        asset,
+        hardwareIdentity,
+        _status(GaslessAccountAvailability.available),
+      ),
+      isTrue,
+    );
+    expect(capabilities.isReadyFor(hardwareIdentity), isTrue);
   });
 
   test('an activation-bound identity can recover after a provider outage', () {
@@ -362,6 +396,29 @@ void main() {
         GaslessCapabilityState.securityMismatch,
       );
     }
+  });
+
+  test('ignores exact-looking error types from generic RPC envelopes', () {
+    final asset = token();
+    final capabilities = registry();
+    final generic = GeneralErrorResponse.parse({
+      'error': 'generic error',
+      'error_type': 'ProviderIdentityMismatch',
+      'error_data': null,
+    });
+
+    expect(capabilities.markAccountStatusError(asset.id, generic), isFalse);
+    expect(
+      capabilities.markAccountStatusError(
+        asset.id,
+        const GetFeeEstimationRequestErrorCoinNotFoundException(),
+      ),
+      isFalse,
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.initial,
+    );
   });
 
   test('wallet reset removes all capability and custody state', () {

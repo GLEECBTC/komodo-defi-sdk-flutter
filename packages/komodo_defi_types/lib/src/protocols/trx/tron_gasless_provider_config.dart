@@ -161,11 +161,6 @@ class TronGaslessProviderConfig extends Equatable {
     if (statusPollIntervalMs < 0) {
       throw RangeError.value(statusPollIntervalMs, 'statusPollIntervalMs');
     }
-    if (service case final GaslessServiceGasFree direct) {
-      if (direct.apiKey.trim().isEmpty || direct.apiSecret.trim().isEmpty) {
-        throw ArgumentError('Direct GasFree credentials must be non-empty');
-      }
-    }
   }
 
   @override

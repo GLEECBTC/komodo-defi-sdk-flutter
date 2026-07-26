@@ -26,11 +26,11 @@ Map<String, dynamic> _record({
     'spent_by_me': '7',
     'total_amount': '5',
   },
-  'fee': {
+  'fee': <String, dynamic>{
     'type': 'TronGasless',
     'coin': 'USDT-TRC20',
     'fee_method': 'gasless',
-    'provider_name': 'GasFree',
+    'provider_name': 'gasfree',
     'gasfree_address': 'TCustody',
     'transfer_fee': '2',
     'total_token_fee': '2',
@@ -69,6 +69,18 @@ void main() {
 
     expect(transfer.journalId, 'legacy:trace-123');
     expect(transfer.traceId, 'trace-123');
+  });
+
+  test('recovers a trace-bearing legacy fee without its nested cap', () {
+    final legacy = _record();
+    (legacy['fee']! as Map<String, dynamic>).remove('signed_max_fee');
+
+    final transfer = PendingGaslessTransfer.fromJson(legacy);
+    final fee = transfer.fee as FeeInfoTronGasless;
+
+    expect(transfer.traceId, 'trace-123');
+    expect(fee.signedMaxFee.toString(), '2');
+    expect(transfer.toJson()['fee'], containsPair('signed_max_fee', '2'));
   });
 
   test('trace-less legacy reservations remain outcome-unknown', () {

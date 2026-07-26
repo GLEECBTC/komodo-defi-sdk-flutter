@@ -17,8 +17,10 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
 
-  /// Optional Tron GasFree provider config. When present, standalone TRC20
-  /// activations opt in to KDF's gasless token activation contract.
+  /// Optional Tron GasFree provider config for standalone TRC20 activation.
+  ///
+  /// Provider presence does not enroll an asset. GasFree settings are emitted
+  /// only when the asset config enables them.
   final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
@@ -85,13 +87,13 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
           final configured = Trc20ActivationParams.fromJsonConfig(
             asset.protocol.config,
           );
+          final isGaslessEnrolled =
+              tronGaslessProvider != null &&
+              configured.gasless?.enabled == true;
           return Trc20ActivationParams(
             nodes: configured.nodes,
             privKeyPolicy: privKeyPolicy,
-            gasless: tronGaslessProvider == null
-                ? null
-                : configured.gasless ??
-                      const TronGaslessTokenActivationConfig(enabled: true),
+            gasless: isGaslessEnrolled ? configured.gasless : null,
           );
         }(),
         _ => throw UnsupportedError(

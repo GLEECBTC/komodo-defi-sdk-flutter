@@ -29,8 +29,7 @@ class ActivationManager {
     GaslessCapabilityRegistry? gaslessCapabilities,
   }) : _tronGaslessProvider = tronGaslessProvider,
        _gaslessCapabilities =
-           gaslessCapabilities ??
-           GaslessCapabilityRegistry(configuredAssetIds: const <String>[]);
+           gaslessCapabilities ?? GaslessCapabilityRegistry();
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
@@ -209,12 +208,8 @@ class ActivationManager {
           ? await _captureGaslessContext()
           : null;
       final shouldRefreshTronGaslessActivation =
-          candidateGaslessContext != null &&
-          candidateGaslessContext.walletId.authOptions.privKeyPolicy !=
-              const PrivateKeyPolicy.trezor();
-      final gaslessContext = shouldRefreshTronGaslessActivation
-          ? candidateGaslessContext
-          : null;
+          candidateGaslessContext != null;
+      final gaslessContext = candidateGaslessContext;
 
       // Check activation status atomically
       final activationStatus = await _checkActivationStatus(group);
@@ -299,9 +294,7 @@ class ActivationManager {
             currentUser?.walletId.authOptions.privKeyPolicy ??
             const PrivateKeyPolicy.contextPrivKey();
 
-        final gaslessProvider = privKeyPolicy == const PrivateKeyPolicy.trezor()
-            ? null
-            : _gaslessProviderFor(group);
+        final gaslessProvider = _gaslessProviderFor(group);
 
         // Create activator with the user's privKeyPolicy
         final activator = ActivationStrategyFactory.createStrategy(
@@ -310,7 +303,6 @@ class ActivationManager {
           _configService,
           _activatedAssetsCache,
           tronGaslessProvider: gaslessProvider,
-          tronGaslessAssetIds: _gaslessCapabilities.configuredAssetIds,
         );
 
         var completionHandled = false;
@@ -351,46 +343,29 @@ class ActivationManager {
             );
           }
 
-          // Complete the join completer BEFORE yielding the terminal progress.
-          // The coordinator breaks out of its `await for` as soon as it
-          // receives a terminal progress, which cancels this async* generator
-          // at the `yield` suspension point below. Concurrent activations that
-          // joined this batch await `primaryCompleter.future` (for example, a
-          // standalone platform activation racing a `[platform, token]` group);
-          // completing
-          // it only inside `_handleActivationComplete` (which runs after the
-          // yield) would never fire once the stream is cancelled, leaving the
-          // joined activation — and therefore the platform coin — hung forever.
-          if (progress.isComplete && !completionHandled) {
-            if (progress.isSuccess) {
-              if (!primaryCompleter.isCompleted) {
-                primaryCompleter.complete();
-              }
-            } else if (!primaryCompleter.isCompleted) {
-              primaryCompleter.completeError(
-                progress.errorMessage ?? 'Unknown error',
-              );
-            }
-          }
-
-          yield progress;
-
           if (progress.isComplete) {
             if (completionHandled) {
               debugPrint(
                 'Ignoring duplicate completion event for '
                 '${group.primary.id.name}',
               );
-              continue;
+            } else {
+              completionHandled = true;
+              // Finalize before exposing the terminal event. The shared
+              // coordinator stops listening at that event, which cancels this
+              // async* generator at the yield suspension point. Completing the
+              // join future and all successful activation side effects here
+              // keeps joined callers live and makes terminal success truthful.
+              await _handleActivationComplete(
+                group,
+                progress,
+                primaryCompleter,
+                gaslessContext: gaslessContext,
+              );
             }
-            completionHandled = true;
-            await _handleActivationComplete(
-              group,
-              progress,
-              primaryCompleter,
-              gaslessContext: gaslessContext,
-            );
           }
+
+          yield progress;
         }
 
         // The strategy can finish WITHOUT emitting a terminal completion event
@@ -726,39 +701,25 @@ class ActivationManager {
       await _requireGaslessContextCurrent(context);
       final assets = _gaslessAssets(group).toList();
       if (assets.isEmpty) return success;
-      final softwareWallet =
-          context.walletId.authOptions.privKeyPolicy ==
-          const PrivateKeyPolicy.contextPrivKey();
-      if (!softwareWallet) {
-        throw StateError('GasFree requires a primary software wallet');
-      }
       if (_tronGaslessProvider == null) {
         throw StateError('GasFree provider configuration is unavailable');
       }
       for (final asset in assets) {
-        final requestedPath = asset.id.derivationPath;
-        final walletType =
-            switch (context.walletId.authOptions.derivationMethod) {
-              DerivationMethod.hdWallet => GaslessWalletType.softwareHd,
-              DerivationMethod.iguana => GaslessWalletType.softwareIguana,
-            };
+        final requestedPath = asset.id.derivationPath?.trim();
+        final walletType = switch ((
+          context.walletId.authOptions.derivationMethod,
+          context.walletId.authOptions.privKeyPolicy,
+        )) {
+          (DerivationMethod.hdWallet, const PrivateKeyPolicy.trezor()) =>
+            GaslessWalletType.hardwareHd,
+          (DerivationMethod.hdWallet, _) => GaslessWalletType.softwareHd,
+          (DerivationMethod.iguana, _) => GaslessWalletType.softwareIguana,
+        };
         final capabilityPath = switch (walletType) {
-          GaslessWalletType.softwareHd =>
-            GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
+          GaslessWalletType.softwareHd ||
+          GaslessWalletType.hardwareHd => requestedPath ?? '',
           GaslessWalletType.softwareIguana => '',
         };
-        final sourceIsCanonical = switch (walletType) {
-          GaslessWalletType.softwareHd =>
-            requestedPath == null ||
-                requestedPath == "m/44'/195'" ||
-                requestedPath == capabilityPath,
-          GaslessWalletType.softwareIguana =>
-            requestedPath == null || requestedPath == "m/44'/195'",
-        };
-        if (!sourceIsCanonical) {
-          _gaslessCapabilities.markSecurityMismatch(asset.id);
-          continue;
-        }
         final protocol = asset.protocol as Trc20Protocol;
         final topLevelContract = protocol.config['contract_address'];
         final protocolJson = protocol.config['protocol'];

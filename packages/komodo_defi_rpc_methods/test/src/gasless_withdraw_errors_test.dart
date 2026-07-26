@@ -180,6 +180,37 @@ void main() {
       );
     });
 
+    for (final entry in <String, Map<String, dynamic>>{
+      'result.details': {
+        'mmrpc': '2.0',
+        'result': {
+          'status': 'Error',
+          'details': _nestedGaslessError(
+            type: GaslessWithdrawErrorType.pendingTransfer,
+          ),
+        },
+      },
+      'message': {
+        'mmrpc': '2.0',
+        'message': _nestedGaslessError(
+          type: GaslessWithdrawErrorType.pendingTransfer,
+        ),
+      },
+    }.entries) {
+      test('rejects undocumented ${entry.key} withdraw error wrapper', () {
+        expect(request.parseCustomErrorResponse(entry.value), isNull);
+      });
+    }
+
+    test('rejects a direct withdraw error with only message metadata', () {
+      final directMessageOnly =
+          _nestedGaslessError(type: GaslessWithdrawErrorType.pendingTransfer)
+            ..remove('error')
+            ..['message'] = 'Undocumented GasFree withdrawal error';
+
+      expect(request.parseCustomErrorResponse(directMessageOnly), isNull);
+    });
+
     test('does not claim standard withdrawal errors', () {
       expect(
         request.parseCustomErrorResponse({

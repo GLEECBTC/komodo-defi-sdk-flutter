@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/foundation.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -94,6 +95,14 @@ sealed class KdfEvent {
     // snapshots use `GASLESS_TRACE:<coin>`. Handle the error prefix before the
     // generic first-segment normalization below so it is not reduced to
     // `ERROR` and silently exposed as an unknown event.
+    if (typeString == 'GASLESS_TRACE' ||
+        typeString == 'GASLESS_TRACE:' ||
+        typeString == 'ERROR:GASLESS_TRACE' ||
+        typeString == 'ERROR:GASLESS_TRACE:') {
+      throw const FormatException(
+        'GasFree trace event type requires a non-empty coin suffix',
+      );
+    }
     if (typeString.startsWith('ERROR:GASLESS_TRACE:')) {
       return [
         GaslessTraceErrorEvent.fromJson(
@@ -214,12 +223,20 @@ sealed class KdfEvent {
         : typeString.substring(firstColon + 1, nextColon);
   }
 
-  static String? _gaslessCoinSuffix(String typeString, {bool isError = false}) {
+  static String _gaslessCoinSuffix(String typeString, {bool isError = false}) {
     final prefix = isError ? 'ERROR:GASLESS_TRACE:' : 'GASLESS_TRACE:';
     if (!typeString.startsWith(prefix) || typeString.length == prefix.length) {
-      return null;
+      throw const FormatException(
+        'GasFree trace event type requires a non-empty coin suffix',
+      );
     }
-    return typeString.substring(prefix.length);
+    final suffix = typeString.substring(prefix.length);
+    if (suffix.trim().isEmpty) {
+      throw const FormatException(
+        'GasFree trace event type requires a non-empty coin suffix',
+      );
+    }
+    return suffix;
   }
 
   /// Handles unknown event types by logging and returning an UnknownEvent

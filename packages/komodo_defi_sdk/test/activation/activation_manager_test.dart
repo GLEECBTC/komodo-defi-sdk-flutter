@@ -82,6 +82,7 @@ Map<String, dynamic> _availableStatus({bool active = true}) => {
     'frozen_balance': '0',
     'spendable_balance': '25',
     'transfer_fee': '1',
+    'activation_fee': null,
     'max_withdrawable': '24',
   },
 };
@@ -97,6 +98,8 @@ Map<String, dynamic> _pendingStatus() => {
     'frozen_balance': '5',
     'spendable_balance': '20',
     'transfer_fee': '1',
+    'activation_fee': null,
+    'max_withdrawable': null,
   },
 };
 
@@ -168,7 +171,6 @@ void main() {
       assetsUpdateManager = _MockAssetsUpdateManager();
       cache = _MockActivatedAssetsCache();
       capabilities = GaslessCapabilityRegistry(
-        configuredAssetIds: const {'USDT-TRC20'},
         pinnedProviderAddress: _provider,
       );
       calledMethods = [];
@@ -217,8 +219,63 @@ void main() {
       },
     );
 
+    test('activation retains the configured HD base path without synthesizing '
+        'an address selector', () async {
+      stubAlreadyActive();
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as Map<String, dynamic>;
+        calledMethods.add(request['method'] as String);
+        return _availableStatus();
+      });
+
+      final progress = await buildManager().activateAssets([
+        parent,
+        child,
+      ]).toList();
+
+      expect(progress.last.isSuccess, isTrue);
+      expect(calledMethods, ['gasless::account_status']);
+      expect(
+        capabilities.isReadyFor(
+          GaslessCapabilityIdentity(
+            assetId: child.id,
+            platform: 'TRX',
+            contractAddress: _contract,
+            providerAddress: _provider,
+            walletPubkeyHash: 'wallet-pubkey',
+            walletType: GaslessWalletType.softwareHd,
+            derivationPath: child.id.derivationPath!,
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('already-active token accepts a non-primary KDF HD source', () async {
+      final secondaryChild = child.copyWith(
+        id: child.id.copyWith(derivationPath: "m/44'/195'/3'/1/7"),
+      );
+      stubAlreadyActive();
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as Map<String, dynamic>;
+        calledMethods.add(request['method'] as String);
+        return _availableStatus();
+      });
+
+      final progress = await buildManager().activateAssets([
+        parent,
+        secondaryChild,
+      ]).toList();
+
+      expect(progress.last.isSuccess, isTrue);
+      expect(calledMethods, ['gasless::account_status']);
+      expect(capabilities.isReady(secondaryChild.id), isTrue);
+    });
+
     test(
-      'Trezor activation keeps the configured token on Standard TRON',
+      'already-active Trezor token retains KDF account-status capability',
       () async {
         stubAlreadyActive();
         currentUser = const KdfUser(
@@ -232,6 +289,12 @@ void main() {
           ),
           isBip39Seed: true,
         );
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as Map<String, dynamic>;
+          calledMethods.add(request['method'] as String);
+          return _availableStatus();
+        });
 
         final progress = await buildManager().activateAssets([
           parent,
@@ -239,8 +302,8 @@ void main() {
         ]).toList();
 
         expect(progress.last.isSuccess, isTrue);
-        expect(calledMethods, isEmpty);
-        expect(capabilities.isReady(child.id), isFalse);
+        expect(calledMethods, ['gasless::account_status']);
+        expect(capabilities.isReady(child.id), isTrue);
       },
     );
 
@@ -249,13 +312,14 @@ void main() {
       () async {
         Map<String, dynamic>? activationRequest;
         when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => <AssetId>{});
-        when(
           () => cache.getActivatedAssetIds(
             forceRefresh: any(named: 'forceRefresh'),
           ),
-        ).thenAnswer((_) async => {parent.id, child.id});
+        ).thenAnswer((invocation) async {
+          final forceRefresh =
+              invocation.namedArguments[#forceRefresh] as bool? ?? false;
+          return forceRefresh ? {parent.id, child.id} : <AssetId>{};
+        });
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.first as Map<String, dynamic>;
@@ -321,13 +385,14 @@ void main() {
       () async {
         Map<String, dynamic>? activationRequest;
         when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => <AssetId>{});
-        when(
           () => cache.getActivatedAssetIds(
             forceRefresh: any(named: 'forceRefresh'),
           ),
-        ).thenAnswer((_) async => {parent.id});
+        ).thenAnswer((invocation) async {
+          final forceRefresh =
+              invocation.namedArguments[#forceRefresh] as bool? ?? false;
+          return forceRefresh ? {parent.id} : <AssetId>{};
+        });
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.first as Map<String, dynamic>;
@@ -362,54 +427,52 @@ void main() {
       },
     );
 
-    test(
-      'an explicit disabled token config cannot be overridden by rollout IDs',
-      () async {
-        final disabledChild = Asset.fromJson(
-          _trc20Config(gaslessEnabled: false),
-          knownIds: {parent.id},
-        );
-        Map<String, dynamic>? activationRequest;
-        when(
-          () => cache.getActivatedAssetIds(),
-        ).thenAnswer((_) async => <AssetId>{});
-        when(
-          () => cache.getActivatedAssetIds(
-            forceRefresh: any(named: 'forceRefresh'),
-          ),
-        ).thenAnswer((_) async => {parent.id, disabledChild.id});
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final request =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          calledMethods.add(request['method'] as String);
-          activationRequest = request;
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'current_block': 1,
-              'wallet_balance': {
-                'wallet_type': 'iguana',
-                'accounts': <Map<String, dynamic>>[],
-              },
-              'nfts_infos': <String, dynamic>{},
+    test('an explicit disabled token config keeps GasFree omitted', () async {
+      final disabledChild = Asset.fromJson(
+        _trc20Config(gaslessEnabled: false),
+        knownIds: {parent.id},
+      );
+      Map<String, dynamic>? activationRequest;
+      when(
+        () => cache.getActivatedAssetIds(
+          forceRefresh: any(named: 'forceRefresh'),
+        ),
+      ).thenAnswer((invocation) async {
+        final forceRefresh =
+            invocation.namedArguments[#forceRefresh] as bool? ?? false;
+        return forceRefresh ? {parent.id, disabledChild.id} : <AssetId>{};
+      });
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as Map<String, dynamic>;
+        calledMethods.add(request['method'] as String);
+        activationRequest = request;
+        return {
+          'mmrpc': '2.0',
+          'result': {
+            'current_block': 1,
+            'wallet_balance': {
+              'wallet_type': 'iguana',
+              'accounts': <Map<String, dynamic>>[],
             },
-          };
-        });
+            'nfts_infos': <String, dynamic>{},
+          },
+        };
+      });
 
-        final progress = await buildManager().activateAssets([
-          parent,
-          disabledChild,
-        ]).toList();
+      final progress = await buildManager().activateAssets([
+        parent,
+        disabledChild,
+      ]).toList();
 
-        expect(progress.last.isSuccess, isTrue);
-        expect(calledMethods, ['enable_eth_with_tokens']);
-        final params = activationRequest!['params'] as Map<String, dynamic>;
-        final tokens =
-            params['erc20_tokens_requests'] as List<Map<String, dynamic>>;
-        expect(tokens.single, isNot(contains('gasless')));
-        expect(capabilities.isConfigured(disabledChild), isFalse);
-      },
-    );
+      expect(progress.last.isSuccess, isTrue);
+      expect(calledMethods, ['enable_eth_with_tokens']);
+      final params = activationRequest!['params'] as Map<String, dynamic>;
+      final tokens =
+          params['erc20_tokens_requests'] as List<Map<String, dynamic>>;
+      expect(tokens.single, isNot(contains('gasless')));
+      expect(capabilities.isConfigured(disabledChild), isFalse);
+    });
 
     test(
       'GaslessNotConfigured requires reactivation but preserves Standard TRON',

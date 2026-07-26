@@ -12,8 +12,10 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
   const CustomErc20ActivationStrategy(super.client, {this.tronGaslessProvider});
 
-  /// Optional Tron GasFree provider config. When present, custom TRC20 token
-  /// activation opts in to KDF's gasless token activation contract.
+  /// Optional Tron GasFree provider config for custom TRC20 activation.
+  ///
+  /// Provider presence does not enroll an asset. GasFree settings are emitted
+  /// only when the asset config enables them.
   final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
@@ -78,13 +80,13 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
           final configured = Trc20ActivationParams.fromJsonConfig(
             asset.protocol.config,
           );
+          final isGaslessEnrolled =
+              tronGaslessProvider != null &&
+              configured.gasless?.enabled == true;
           return Trc20ActivationParams(
             nodes: configured.nodes,
             privKeyPolicy: configured.privKeyPolicy,
-            gasless: tronGaslessProvider == null
-                ? null
-                : configured.gasless ??
-                      const TronGaslessTokenActivationConfig(enabled: true),
+            gasless: isGaslessEnrolled ? configured.gasless : null,
           );
         }(),
         _ => throw UnsupportedError(

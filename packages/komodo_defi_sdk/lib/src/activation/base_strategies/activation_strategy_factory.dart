@@ -19,7 +19,6 @@ class ActivationStrategyFactory {
     ActivationConfigService configService,
     ActivatedAssetsCache activatedAssetsCache, {
     TronGaslessProviderConfig? tronGaslessProvider,
-    Set<String> tronGaslessAssetIds = const <String>{},
   }) {
     return SmartAssetActivator(
       client,
@@ -27,12 +26,15 @@ class ActivationStrategyFactory {
         // BCH strategy needs to be before UTXO strategy to handle the special case
         // BchActivationStrategy(client),
         UtxoActivationStrategy(client, privKeyPolicy),
-        EthTaskActivationStrategy(client, privKeyPolicy),
+        EthTaskActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
         EthWithTokensActivationStrategy(
           client,
           privKeyPolicy,
           tronGaslessProvider: tronGaslessProvider,
-          tronGaslessAssetIds: tronGaslessAssetIds,
         ),
         Erc20ActivationStrategy(
           client,

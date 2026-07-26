@@ -147,7 +147,7 @@ final class GaslessWithdrawException
   });
 
   static GaslessWithdrawException? tryParse(JsonMap json) {
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null || outer['error_type'] != 'Gasless') {
       return null;
     }
@@ -160,9 +160,7 @@ final class GaslessWithdrawException
     return GaslessWithdrawException(
       type: type,
       errorData: error['error_data'],
-      message: outer['error'] is String
-          ? outer['error'] as String
-          : outer['message'] as String?,
+      message: outer['error'] as String,
       path: outer['error_path'] as String?,
       trace: outer['error_trace'] as String?,
     );
@@ -189,7 +187,7 @@ final class GaslessAccountStatusException
   });
 
   static GaslessAccountStatusException? tryParse(JsonMap json) {
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null) return null;
     final error = outer;
     final wireType = error['error_type'];
@@ -199,9 +197,7 @@ final class GaslessAccountStatusException
     return GaslessAccountStatusException(
       type: type,
       errorData: error['error_data'],
-      message: outer['error'] is String
-          ? outer['error'] as String
-          : outer['message'] as String?,
+      message: outer['error'] as String,
       path: outer['error_path'] as String?,
       trace: outer['error_trace'] as String?,
     );
@@ -219,7 +215,7 @@ final class GaslessTraceStatusException
   });
 
   static GaslessTraceStatusException? tryParse(JsonMap json) {
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null) return null;
     final error = outer;
     final wireType = error['error_type'];
@@ -229,9 +225,7 @@ final class GaslessTraceStatusException
     return GaslessTraceStatusException(
       type: type,
       errorData: error['error_data'],
-      message: outer['error'] is String
-          ? outer['error'] as String
-          : outer['message'] as String?,
+      message: outer['error'] as String,
       path: outer['error_path'] as String?,
       trace: outer['error_trace'] as String?,
     );
@@ -249,7 +243,7 @@ final class GaslessTraceStreamingRequestException
   });
 
   static GaslessTraceStreamingRequestException? tryParse(JsonMap json) {
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null) return null;
     final error = outer;
     final wireType = error['error_type'];
@@ -259,28 +253,15 @@ final class GaslessTraceStreamingRequestException
     return GaslessTraceStreamingRequestException(
       type: type,
       errorData: error['error_data'],
-      message: outer['error'] is String
-          ? outer['error'] as String
-          : outer['message'] as String?,
+      message: outer['error'] as String,
       path: outer['error_path'] as String?,
       trace: outer['error_trace'] as String?,
     );
   }
 }
 
-JsonMap? _gaslessErrorEnvelope(JsonMap json) {
-  final result = _asJsonMap(json['result']);
-  final rawDetails = result?['details'];
-  final details =
-      _asJsonMap(rawDetails) ??
-      (rawDetails is String ? tryParseJson(rawDetails) : null);
-  if (details != null) return details;
-
-  final message = _asJsonMap(json['message']);
-  if (message != null) return message;
-
-  return json['error_type'] is String ? json : null;
-}
+JsonMap? _directGaslessError(JsonMap json) =>
+    json['error_type'] is String && json['error'] is String ? json : null;
 
 JsonMap? _asJsonMap(Object? value) =>
     value is Map<String, dynamic> ? value : null;

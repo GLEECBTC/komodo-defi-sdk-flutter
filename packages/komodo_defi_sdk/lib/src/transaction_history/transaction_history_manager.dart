@@ -118,7 +118,16 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   void _handleAuthStateChanged(KdfUser? user) {
     if (_isDisposed) return;
     final nextWallet = user?.walletId;
-    if (_sameOptionalWallet(_currentWalletId, nextWallet)) return;
+    final currentWalletId = _currentWalletId;
+    if (_sameOptionalWallet(currentWalletId, nextWallet)) {
+      if (currentWalletId != null && nextWallet != null) {
+        _currentWalletId = preferEnrichedWalletIdentity(
+          currentWalletId,
+          nextWallet,
+        );
+      }
+      return;
+    }
 
     // Invalidate first: cancellation is best-effort and queued callbacks may
     // still complete after a wallet switch.
@@ -130,22 +139,32 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _stopAllStreaming();
   }
 
-  bool _sameOptionalWallet(WalletId? left, WalletId? right) {
-    if (left == null || right == null) return left == right;
-    return isSameStableWallet(left, right);
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
   }
 
   Future<WalletOperationContext> _captureWalletContext() async {
     final user = await _auth.currentUser;
     if (user == null) throw StateError('User is not logged in');
 
-    if (_currentWalletId == null) {
+    final currentWalletId = _currentWalletId;
+    late final WalletId operationWalletId;
+    if (currentWalletId == null) {
       _currentWalletId = user.walletId;
-    } else if (!isSameStableWallet(_currentWalletId!, user.walletId)) {
+      operationWalletId = user.walletId;
+    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      operationWalletId = preferEnrichedWalletIdentity(
+        currentWalletId,
+        user.walletId,
+      );
+      _currentWalletId = operationWalletId;
+    } else {
       // Do not wait for the auth stream to deliver before isolating the old
       // wallet's subscriptions and in-flight operations.
       _walletGeneration++;
       _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
       _lastBalanceForPolling.clear();
       _lastCustodyBalanceForPolling.clear();
       _syncInProgress.clear();
@@ -153,7 +172,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     return WalletOperationContext(
-      walletId: user.walletId,
+      walletId: operationWalletId,
       generation: _walletGeneration,
     );
   }
@@ -237,7 +256,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // Optimization: Check if this is a newly created wallet (not imported)
       final user = await _auth.currentUser;
       if (user != null &&
-          isSameStableWallet(user.walletId, walletContext.walletId) &&
+          isSameStableWallet(walletContext.walletId, user.walletId) &&
           pagination is PagePagination &&
           pagination.pageNumber == 1) {
         final previouslyEnabledAssets = await _assetHistoryStorage
@@ -250,7 +269,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         // Check metadata to determine if this was an imported wallet
         // Only optimize for genuinely new wallets, not imported ones
         final isImported = user.metadata['isImported'] == true;
-        final isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+        var isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+        if (isNewWallet) {
+          final hasAmbiguousLegacyHistory = await _assetHistoryStorage
+              .hasAmbiguousLegacyHistory(walletContext.walletId);
+          await _requireWalletContextCurrent(walletContext);
+          isNewWallet = !hasAmbiguousLegacyHistory;
+        }
 
         // For newly created wallets (not imported) on first-time asset enablement,
         // assume empty transaction history to reduce RPC spam
@@ -900,7 +925,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     if (capabilities?.canAccessExistingCustody(asset.id) == true) return true;
     try {
       final pubkeys =
-          _pubkeyManager.lastKnown(asset.id) ??
+          _pubkeyManager.lastKnownForWallet(asset.id, walletContext.walletId) ??
           await _pubkeyManager.getPubkeys(asset);
       if (!await _isWalletContextCurrent(walletContext)) return false;
       return pubkeys.keys.any((key) => (key.gasfreeAddress ?? '').isNotEmpty);
@@ -932,16 +957,24 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     if (capabilities == null || !capabilities.canRefreshAccountStatus(asset)) {
       return false;
     }
+    final capabilitySession = capabilities.sessionGeneration;
     try {
       final status = await _client.rpc.withdraw.gaslessAccountStatus(
         coin: asset.id.id,
       );
-      if (!await _isWalletContextCurrent(walletContext)) return false;
+      if (!await _isWalletContextCurrent(walletContext) ||
+          capabilities.sessionGeneration != capabilitySession) {
+        return false;
+      }
       if (!capabilities.refreshAccountStatus(asset, status)) return false;
       final previous = _lastCustodyBalanceForPolling[asset.id];
       _lastCustodyBalanceForPolling[asset.id] = status.onChainBalance;
       return previous == null || previous != status.onChainBalance;
     } catch (error) {
+      if (!_isWalletContextCurrentSync(walletContext) ||
+          capabilities.sessionGeneration != capabilitySession) {
+        return false;
+      }
       capabilities.markAccountStatusError(asset.id, error);
       return false;
     }

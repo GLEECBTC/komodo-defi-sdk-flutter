@@ -166,10 +166,10 @@ class HiveStoredPubkey {
   final String spendable;
   final String unspendable;
 
-  /// Whether this address has ever been observed holding funds. Used by the
-  /// TRON gasless phantom-address filter to distinguish never-used addresses
-  /// (safe to hide) from used-then-emptied ones (kept so their transaction
-  /// history stays reachable).
+  /// Whether this address has ever been observed holding funds.
+  ///
+  /// Retained for backward compatibility with the wallet-scoped pubkey cache
+  /// schema; it does not alter which typed KDF addresses the SDK exposes.
   final bool everFunded;
 
   PubkeyInfo toDomain(String coinTicker) => PubkeyInfo(

@@ -30,6 +30,8 @@ final RegExp _rfc3339Timestamp = RegExp(
   r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}'
   r'(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$',
 );
+final RegExp _unsignedDecimal = RegExp(r'^[0-9]+$');
+final RegExp _tronSignature = RegExp(r'^[0-9a-fA-F]{130}$');
 
 void _rejectUnknownKeys(
   JsonMap json,
@@ -48,6 +50,17 @@ String _requiredString(JsonMap json, String key) {
   final value = json.value<String>(key);
   if (value.trim().isEmpty) {
     throw FormatException('$key must not be empty');
+  }
+  return value;
+}
+
+String _requiredUnsigned256String(JsonMap json, String key) {
+  final value = _requiredString(json, key);
+  final parsed = _unsignedDecimal.hasMatch(value)
+      ? BigInt.tryParse(value)
+      : null;
+  if (parsed == null || parsed > _maximumUnsigned256) {
+    throw FormatException('$key must be an unsigned U256 decimal string');
   }
   return value;
 }
@@ -96,10 +109,34 @@ JsonMap _copyJsonMap(JsonMap value) => _copyJsonValue(value)! as JsonMap;
 /// Exact signed TIP-712 authorization returned in a GasFree withdraw preview.
 ///
 /// Numeric authorization fields are strings on the KDF wire. [deadline] is
-/// exposed as an integer because callers must enforce preview expiry without
-/// parsing `tx_json`.
+/// exposed as a [BigInt] because KDF represents it as an unsigned 256-bit
+/// integer and Dart Web cannot exactly represent that domain with [int].
 class GaslessSignedAuthorization extends Equatable {
-  const GaslessSignedAuthorization({
+  factory GaslessSignedAuthorization({
+    required String token,
+    required String serviceProvider,
+    required String user,
+    required String receiver,
+    required String value,
+    required String maxFee,
+    required BigInt deadline,
+    required String version,
+    required String nonce,
+    required String signature,
+  }) => GaslessSignedAuthorization.fromJson({
+    'token': token,
+    'service_provider': serviceProvider,
+    'user': user,
+    'receiver': receiver,
+    'value': value,
+    'max_fee': maxFee,
+    'deadline': deadline.toString(),
+    'version': version,
+    'nonce': nonce,
+    'sig': signature,
+  });
+
+  const GaslessSignedAuthorization._({
     required this.token,
     required this.serviceProvider,
     required this.user,
@@ -118,10 +155,10 @@ class GaslessSignedAuthorization extends Equatable {
       _signedAuthorizationKeys,
       context: 'GasFree signed authorization',
     );
-    final deadline = int.tryParse(_requiredString(json, 'deadline'));
-    if (deadline == null || deadline <= 0) {
+    final deadline = BigInt.parse(_requiredUnsigned256String(json, 'deadline'));
+    if (deadline <= BigInt.zero) {
       throw const FormatException(
-        'GasFree authorization deadline must be a positive integer',
+        'GasFree authorization deadline must be a positive U256 integer',
       );
     }
     final version = _requiredString(json, 'version');
@@ -130,17 +167,23 @@ class GaslessSignedAuthorization extends Equatable {
         'GasFree authorization version must be exactly 1',
       );
     }
-    return GaslessSignedAuthorization(
+    final signature = _requiredString(json, 'sig');
+    if (!_tronSignature.hasMatch(signature)) {
+      throw const FormatException(
+        'GasFree authorization signature must be 65-byte unprefixed hex',
+      );
+    }
+    return GaslessSignedAuthorization._(
       token: _requiredString(json, 'token'),
       serviceProvider: _requiredString(json, 'service_provider'),
       user: _requiredString(json, 'user'),
       receiver: _requiredString(json, 'receiver'),
-      value: _requiredString(json, 'value'),
-      maxFee: _requiredString(json, 'max_fee'),
+      value: _requiredUnsigned256String(json, 'value'),
+      maxFee: _requiredUnsigned256String(json, 'max_fee'),
       deadline: deadline,
       version: version,
-      nonce: _requiredString(json, 'nonce'),
-      signature: _requiredString(json, 'sig'),
+      nonce: _requiredUnsigned256String(json, 'nonce'),
+      signature: signature,
     );
   }
 
@@ -156,18 +199,28 @@ class GaslessSignedAuthorization extends Equatable {
   final String maxFee;
 
   /// Unix timestamp in seconds.
-  final int deadline;
+  final BigInt deadline;
 
   /// TIP-712 permit version. KDF currently requires exactly `1`.
   final String version;
   final String nonce;
   final String signature;
 
-  DateTime get expiresAt =>
-      DateTime.fromMillisecondsSinceEpoch(deadline * 1000, isUtc: true);
+  /// Expiry as a UTC [DateTime], or `null` when outside Dart's date range.
+  DateTime? get expiresAt {
+    if (deadline > _maximumDateTimeEpochSeconds) return null;
+    return DateTime.fromMillisecondsSinceEpoch(
+      deadline.toInt() * Duration.millisecondsPerSecond,
+      isUtc: true,
+    );
+  }
 
   bool isExpiredAt(DateTime instant) =>
-      deadline <= instant.toUtc().millisecondsSinceEpoch ~/ 1000;
+      deadline <=
+      BigInt.from(
+        instant.toUtc().millisecondsSinceEpoch ~/
+            Duration.millisecondsPerSecond,
+      );
 
   JsonMap toJson() => {
     'token': token,
@@ -204,6 +257,9 @@ class GaslessSignedAuthorization extends Equatable {
       'deadline: $deadline, version: $version, nonce: $nonce, '
       'signature: <redacted>)';
 }
+
+final BigInt _maximumUnsigned256 = (BigInt.one << 256) - BigInt.one;
+final BigInt _maximumDateTimeEpochSeconds = BigInt.from(8640000000000);
 
 /// Exact KDF relay payload passed verbatim to `send_raw_transaction`.
 class TronGasfreeRelayPayload extends Equatable {

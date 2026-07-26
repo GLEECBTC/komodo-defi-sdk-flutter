@@ -78,8 +78,10 @@ class SendRawTransactionResponse extends BaseResponse {
   }) {
     final isRelay = relayType != null;
     if (isRelay) {
+      final acceptedTraceId = traceId;
       if (relayType != TronGasfreeRelayPayload.relayTypeValue ||
-          traceId == null ||
+          acceptedTraceId == null ||
+          acceptedTraceId.trim().isEmpty ||
           state == null ||
           txHash != null) {
         throw const FormatException(
@@ -95,14 +97,18 @@ class SendRawTransactionResponse extends BaseResponse {
 
   factory SendRawTransactionResponse.parse(Map<String, dynamic> json) {
     // A gas-free (gasless) relay broadcast returns a trace handle instead of a
-    // signed-tx hash: `{relay_type, trace_id, state}` (optionally wrapped in a
-    // `result` envelope for mmrpc:null responses).
-    final relayType =
-        json.valueOrNull<String>('result', 'relay_type') ??
-        json.valueOrNull<String>('relay_type');
+    // signed-tx hash: `{relay_type, trace_id, state}` at the response's top
+    // level. The pinned KDF legacy endpoint does not wrap this relay response.
+    final nestedResult = json.valueOrNull<JsonMap>('result');
+    if (nestedResult?.containsKey('relay_type') ?? false) {
+      throw const FormatException(
+        'GasFree send_raw_transaction response must not be result-wrapped',
+      );
+    }
+    final relayType = json.valueOrNull<String>('relay_type');
 
     if (relayType != null) {
-      final result = json.valueOrNull<JsonMap>('result') ?? json;
+      final result = json;
       const allowedKeys = {'relay_type', 'trace_id', 'state'};
       final unknownKeys = result.keys.where(
         (key) => !allowedKeys.contains(key),

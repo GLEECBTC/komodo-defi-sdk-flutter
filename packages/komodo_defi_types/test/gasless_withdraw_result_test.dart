@@ -6,7 +6,7 @@ Map<String, dynamic> _relayPayload() => {
   'relay_type': 'tron_gasfree',
   'chain_id': '728126428',
   'coin': 'USDT-TRC20',
-  'hd_from': {'account_id': 0, 'chain': 'external', 'address_id': 0},
+  'hd_from': {'account_id': 0, 'chain': 'External', 'address_id': 0},
   'from_address': 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
   'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
   'verifying_contract': 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
@@ -20,7 +20,7 @@ Map<String, dynamic> _relayPayload() => {
     'deadline': '1999999999',
     'version': '1',
     'nonce': '9',
-    'sig': 'redacted-in-production-records',
+    'sig': List.filled(65, '11').join(),
   },
   'created_at': '2026-07-10T12:00:00Z',
 };
@@ -30,6 +30,8 @@ Map<String, dynamic> _withdrawJson() {
   return {
     ...payload,
     'coin': 'USDT-TRC20',
+    'from': ['TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC'],
+    'to': ['TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC'],
     'my_balance_change': '-7',
     'received_by_me': '0',
     'spent_by_me': '7',
@@ -48,6 +50,9 @@ Map<String, dynamic> _withdrawJson() {
       'signed_max_fee': '5',
       'trace_id': null,
     },
+    'internal_id': '',
+    'transaction_type': 'StandardTransfer',
+    'memo': null,
   };
 }
 
@@ -67,7 +72,7 @@ void main() {
     expect(relay?.relayType, 'tron_gasfree');
     expect(relay?.signedAuthorization.value, '5000000');
     expect(relay?.signedAuthorization.maxFee, '5000000');
-    expect(relay?.signedAuthorization.deadline, 1999999999);
+    expect(relay?.signedAuthorization.deadline, BigInt.from(1999999999));
     expect(
       relay?.signedAuthorization.serviceProvider,
       'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
@@ -83,6 +88,13 @@ void main() {
     final serialized = result.toJson();
     expect(serialized['relay_type'], 'tron_gasfree');
     expect(serialized, isNot(contains('tx_json')));
+    expect(serialized['from'], ['TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC']);
+    expect(serialized['to'], ['TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC']);
+    expect(serialized['block_height'], 0);
+    expect(serialized['timestamp'], 1783684800);
+    expect(serialized['internal_id'], '');
+    expect(serialized['transaction_type'], 'StandardTransfer');
+    expect(serialized, containsPair('memo', null));
     expect(
       serialized['signed_authorization'],
       _relayPayload()['signed_authorization'],
@@ -105,6 +117,28 @@ void main() {
     expect(() => WithdrawResult.fromJson(json), throwsFormatException);
   });
 
+  test('rejects arbitrary undocumented top-level provider echoes', () {
+    final json = _withdrawJson()..['provider_address'] = 'must-not-be-accepted';
+
+    expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+  });
+
+  for (final field in const [
+    'from',
+    'to',
+    'block_height',
+    'timestamp',
+    'internal_id',
+    'transaction_type',
+    'memo',
+  ]) {
+    test('rejects a GasFree result missing documented $field', () {
+      final json = _withdrawJson()..remove(field);
+
+      expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+    });
+  }
+
   test('rejects undocumented signed authorization keys', () {
     final json = _withdrawJson();
     final authorization = json['signed_authorization']! as Map<String, dynamic>;
@@ -117,6 +151,77 @@ void main() {
     final json = _withdrawJson()..['created_at'] = '2026-07-10';
 
     expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+  });
+
+  test('accepts a signed deadline beyond year 9999', () {
+    final json = _withdrawJson();
+    final authorization = json['signed_authorization']! as Map<String, dynamic>;
+    authorization['deadline'] = '253402300800';
+
+    final result = WithdrawResult.fromJson(json);
+
+    expect(
+      result.gaslessRelayPayload?.signedAuthorization.deadline,
+      BigInt.from(253402300800),
+    );
+    expect(
+      result.gaslessRelayPayload?.signedAuthorization.expiresAt?.year,
+      10000,
+    );
+  });
+
+  test('preserves the full unsigned 256-bit deadline domain exactly', () {
+    final json = _withdrawJson();
+    final authorization = json['signed_authorization']! as Map<String, dynamic>;
+    final maximum = (BigInt.one << 256) - BigInt.one;
+    authorization['deadline'] = maximum.toString();
+
+    final result = WithdrawResult.fromJson(json);
+    final signed = result.gaslessRelayPayload!.signedAuthorization;
+
+    expect(signed.deadline, maximum);
+    expect(signed.toJson()['deadline'], maximum.toString());
+    expect(signed.expiresAt, isNull);
+    expect(signed.isExpiredAt(DateTime.now().toUtc()), isFalse);
+  });
+
+  test('rejects a deadline outside the unsigned 256-bit domain', () {
+    final json = _withdrawJson();
+    final authorization = json['signed_authorization']! as Map<String, dynamic>;
+    authorization['deadline'] = (BigInt.one << 256).toString();
+
+    expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+  });
+
+  test('rejects non-decimal signed deadline strings', () {
+    for (final malformed in ['+1', '0x10']) {
+      final json = _withdrawJson();
+      final authorization =
+          json['signed_authorization']! as Map<String, dynamic>;
+      authorization['deadline'] = malformed;
+
+      expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+    }
+  });
+
+  test('rejects malformed signed U256 values and signatures', () {
+    for (final field in ['value', 'max_fee', 'nonce']) {
+      final json = _withdrawJson();
+      final authorization =
+          json['signed_authorization']! as Map<String, dynamic>;
+      authorization[field] = '0x10';
+
+      expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+    }
+
+    for (final signature in ['0x${List.filled(65, '11').join()}', '11']) {
+      final json = _withdrawJson();
+      final authorization =
+          json['signed_authorization']! as Map<String, dynamic>;
+      authorization['sig'] = signature;
+
+      expect(() => WithdrawResult.fromJson(json), throwsFormatException);
+    }
   });
 
   test('GasFree relay owns an immutable hd_from snapshot', () {
@@ -134,7 +239,7 @@ void main() {
 
     expect(relay.toJson()['hd_from'], {
       'account_id': 0,
-      'chain': 'external',
+      'chain': 'External',
       'address_id': 0,
     });
   });

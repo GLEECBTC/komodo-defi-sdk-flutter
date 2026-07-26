@@ -23,16 +23,11 @@ Map<String, dynamic> _providerStatus({
   'max_withdrawable': maxWithdrawable,
 };
 
-Map<String, dynamic> _errorEnvelope(String type, [Object? data = 'USDT']) => {
+Map<String, dynamic> _directError(String type, [Object? data = 'USDT']) => {
   'mmrpc': '2.0',
-  'result': {
-    'status': 'Error',
-    'details': {
-      'error': 'GasFree endpoint error',
-      'error_type': type,
-      'error_data': data,
-    },
-  },
+  'error': 'GasFree endpoint error',
+  'error_type': type,
+  'error_data': data,
 };
 
 void main() {
@@ -125,12 +120,23 @@ void main() {
         'availability': 'token_unsupported',
         'active': false,
         'on_chain_balance': '7',
+        'frozen_balance': null,
+        'spendable_balance': null,
+        'transfer_fee': null,
+        'activation_fee': null,
+        'max_withdrawable': null,
       },
       {
         'gasfree_address': 'TCustody',
         'service_provider': 'TProvider',
         'availability': 'provider_unreachable',
+        'active': null,
         'on_chain_balance': '7',
+        'frozen_balance': null,
+        'spendable_balance': null,
+        'transfer_fee': null,
+        'activation_fee': null,
+        'max_withdrawable': null,
       },
     ]) {
       test('rejects invalid mixed shape ${invalid['availability']}', () {
@@ -138,11 +144,21 @@ void main() {
       });
     }
 
+    test('rejects an activation fee for an already active account', () {
+      expect(
+        () => _status({
+          ..._providerStatus(availability: 'available'),
+          'active': true,
+        }),
+        throwsFormatException,
+      );
+    });
+
     test('requires the documented availability enum', () {
       final missing = _providerStatus(availability: 'available')
         ..remove('availability');
 
-      expect(() => _status(missing), throwsArgumentError);
+      expect(() => _status(missing), throwsFormatException);
       expect(
         () => _status({
           ..._providerStatus(availability: 'available'),
@@ -206,7 +222,7 @@ void main() {
 
         expect(
           () => accountRequest.parseResponse(
-            jsonEncode(_errorEnvelope(type.wireValue, data)),
+            jsonEncode(_directError(type.wireValue, data)),
           ),
           throwsA(
             isA<GaslessAccountStatusException>().having(
@@ -223,7 +239,7 @@ void main() {
       test('maps trace-status ${type.wireValue}', () {
         expect(
           () => traceRequest.parseResponse(
-            jsonEncode(_errorEnvelope(type.wireValue)),
+            jsonEncode(_directError(type.wireValue)),
           ),
           throwsA(
             isA<GaslessTraceStatusException>().having(
@@ -240,7 +256,7 @@ void main() {
       test('maps trace-stream ${type.wireValue}', () {
         expect(
           () => streamRequest.parseResponse(
-            jsonEncode(_errorEnvelope(type.wireValue)),
+            jsonEncode(_directError(type.wireValue)),
           ),
           throwsA(
             isA<GaslessTraceStreamingRequestException>().having(
@@ -252,6 +268,39 @@ void main() {
         );
       });
     }
+
+    for (final entry in <String, Map<String, dynamic>>{
+      'result.details': {
+        'mmrpc': '2.0',
+        'result': {
+          'status': 'Error',
+          'details': _directError('GaslessNotConfigured'),
+        },
+      },
+      'message': {
+        'mmrpc': '2.0',
+        'message': _directError('GaslessNotConfigured'),
+      },
+    }.entries) {
+      test('rejects undocumented ${entry.key} endpoint error wrappers', () {
+        expect(accountRequest.parseCustomErrorResponse(entry.value), isNull);
+        expect(traceRequest.parseCustomErrorResponse(entry.value), isNull);
+        expect(streamRequest.parseCustomErrorResponse(entry.value), isNull);
+      });
+    }
+
+    test('rejects direct endpoint errors with only message metadata', () {
+      final messageOnly = {
+        'mmrpc': '2.0',
+        'message': 'Undocumented GasFree endpoint error',
+        'error_type': 'GaslessNotConfigured',
+        'error_data': 'USDT-TRC20',
+      };
+
+      expect(accountRequest.parseCustomErrorResponse(messageOnly), isNull);
+      expect(traceRequest.parseCustomErrorResponse(messageOnly), isNull);
+      expect(streamRequest.parseCustomErrorResponse(messageOnly), isNull);
+    });
   });
 
   test('GeneralErrorResponse stringification does not expose error data', () {

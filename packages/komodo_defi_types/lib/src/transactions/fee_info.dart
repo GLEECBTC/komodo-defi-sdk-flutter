@@ -106,6 +106,24 @@ sealed class FeeInfo with _$FeeInfo {
           'signed_max_fee',
           'trace_id',
         };
+        const requiredKeys = {
+          'type',
+          'coin',
+          'fee_method',
+          'provider_name',
+          'gasfree_address',
+          'transfer_fee',
+          'total_token_fee',
+          'signed_max_fee',
+          'trace_id',
+        };
+        final missingKeys = requiredKeys.where((key) => !json.containsKey(key));
+        if (missingKeys.isNotEmpty) {
+          throw FormatException(
+            'TronGasless fee details are missing fields serialized by KDF: '
+            '${missingKeys.join(', ')}',
+          );
+        }
         final unknownKeys = json.keys.where(
           (key) => !allowedKeys.contains(key),
         );
@@ -121,24 +139,55 @@ sealed class FeeInfo with _$FeeInfo {
             'Expected TronGasless fee_method "gasless", got "$feeMethod"',
           );
         }
+        final providerName = json['provider_name'];
+        if (providerName is! String || providerName != 'gasfree') {
+          throw const FormatException(
+            'A TronGasless preview provider_name must be "gasfree"',
+          );
+        }
         if (json['trace_id'] != null) {
           throw const FormatException(
             'A GasFree withdrawal preview must have a null trace_id',
           );
         }
+        Decimal requiredDecimalString(String key) {
+          final value = json[key];
+          if (value is! String) {
+            throw FormatException('TronGasless $key must be a numeric string');
+          }
+          return Decimal.parse(value);
+        }
+
+        final transferFee = requiredDecimalString('transfer_fee');
+        final activationFee = switch (json['activation_fee']) {
+          null when !json.containsKey('activation_fee') => null,
+          final String value => Decimal.parse(value),
+          _ => throw const FormatException(
+            'TronGasless activation_fee must be an omitted or numeric string',
+          ),
+        };
+        final totalTokenFee = requiredDecimalString('total_token_fee');
+        final signedMaxFee = requiredDecimalString('signed_max_fee');
+        final activationFeeOrZero = activationFee ?? Decimal.zero;
+        if (transferFee < Decimal.zero ||
+            (activationFee != null && activationFee <= Decimal.zero) ||
+            totalTokenFee < Decimal.zero ||
+            totalTokenFee != transferFee + activationFeeOrZero ||
+            signedMaxFee < Decimal.zero ||
+            totalTokenFee > signedMaxFee) {
+          throw const FormatException(
+            'TronGasless fee details are inconsistent',
+          );
+        }
         return FeeInfo.tronGasless(
           coin: json['coin'] as String,
           feeMethod: feeMethod,
-          providerName: json['provider_name'] as String,
+          providerName: providerName,
           gasfreeAddress: json['gasfree_address'] as String,
-          transferFee: Decimal.parse(json['transfer_fee'].toString()),
-          totalTokenFee: Decimal.parse(json['total_token_fee'].toString()),
-          activationFee: json['activation_fee'] != null
-              ? Decimal.parse(json['activation_fee'].toString())
-              : null,
-          signedMaxFee: json['signed_max_fee'] != null
-              ? Decimal.parse(json['signed_max_fee'].toString())
-              : null,
+          transferFee: transferFee,
+          totalTokenFee: totalTokenFee,
+          activationFee: activationFee,
+          signedMaxFee: signedMaxFee,
         );
       case 'CosmosGas':
         return FeeInfo.cosmosGas(
@@ -337,8 +386,8 @@ sealed class FeeInfo with _$FeeInfo {
     required String gasfreeAddress,
     required Decimal transferFee,
     required Decimal totalTokenFee,
+    required Decimal signedMaxFee,
     Decimal? activationFee,
-    Decimal? signedMaxFee,
   }) = FeeInfoTronGasless;
 
   /// 10) SIA fee, with fixed `amount` and `policy`.
@@ -497,7 +546,7 @@ sealed class FeeInfo with _$FeeInfo {
         'transfer_fee': transferFee.toString(),
         'total_token_fee': totalTokenFee.toString(),
         if (activationFee != null) 'activation_fee': activationFee.toString(),
-        if (signedMaxFee != null) 'signed_max_fee': signedMaxFee.toString(),
+        'signed_max_fee': signedMaxFee.toString(),
         // KDF only assigns a trace after submission; the preview placeholder
         // is always null by contract.
         'trace_id': null,

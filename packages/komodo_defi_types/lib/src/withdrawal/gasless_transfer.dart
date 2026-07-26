@@ -3,6 +3,8 @@ import 'package:equatable/equatable.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+final RegExp _unsignedDecimalPattern = RegExp(r'^[0-9]+$');
+
 /// Runtime readiness of the GasFree rail for a specific asset.
 enum GaslessCapabilityState {
   initial,
@@ -71,10 +73,9 @@ enum GaslessTransferErrorCode {
   invalidPayload,
   wrongCoinType,
   runtimeMissing,
-  chainIdMismatch,
-  verifyingContractMismatch,
   serviceProviderMismatch,
   tokenMismatch,
+  tokenDecimalMismatch,
   invalidAddress,
   custodyAddressMismatch,
   signatureMismatch,
@@ -91,6 +92,17 @@ enum GaslessTransferErrorCode {
   submissionOutcomeUnknown,
   traceInvalid,
   traceUnavailable,
+  traceStreamEnableError,
+  traceStreamInternal,
+  traceNotFound,
+  invalidTraceId,
+  coinNotFound,
+  notEthCoin,
+  coinNotSupported,
+  gaslessNotConfigured,
+  tronRpcUnavailable,
+  providerError,
+  internalError,
   responseMismatch,
   finalFeeExceeded,
   relayFailedFinal,
@@ -212,12 +224,14 @@ class WithdrawalSubmission extends Equatable {
   List<Object?> get props => [type, txHash, traceId, journalId];
 }
 
-FeeInfo _parsePersistedFee(JsonMap json) {
+FeeInfo _parsePersistedFee(JsonMap json, Decimal signedMaxFee) {
   if (json['type'] != 'TronGasless') return FeeInfo.fromJson(json);
 
   // Older encrypted journal entries copied submission-local echoes into the
   // preview fee. Migrate only the documented preview subset and deliberately
   // discard request ids, fingerprints, provider echoes, and accepted traces.
+  // The old preview model also allowed its nested signed cap to be omitted;
+  // recover that value only from the journal's authoritative top-level cap.
   return FeeInfo.fromJson({
     'type': 'TronGasless',
     'coin': json['coin'],
@@ -228,8 +242,7 @@ FeeInfo _parsePersistedFee(JsonMap json) {
     'total_token_fee': json['total_token_fee'],
     if (json['activation_fee'] != null)
       'activation_fee': json['activation_fee'],
-    if (json['signed_max_fee'] != null)
-      'signed_max_fee': json['signed_max_fee'],
+    'signed_max_fee': json['signed_max_fee'] ?? signedMaxFee.toString(),
     'trace_id': null,
   });
 }
@@ -272,6 +285,7 @@ class PendingGaslessTransfer extends Equatable {
     final persistedState = GaslessTransferState.values.byName(
       json.value<String>('state'),
     );
+    final signedMaxFee = Decimal.parse(json.value<String>('signed_max_fee'));
 
     return PendingGaslessTransfer(
       traceId: traceId,
@@ -282,12 +296,14 @@ class PendingGaslessTransfer extends Equatable {
       custodyAddress: json.value<String>('custody_address'),
       destinationAddress: json.value<String>('destination_address'),
       requestedAmount: Decimal.parse(json.value<String>('requested_amount')),
-      signedMaxFee: Decimal.parse(json.value<String>('signed_max_fee')),
-      authorizationDeadline: json.value<int>('authorization_deadline'),
+      signedMaxFee: signedMaxFee,
+      authorizationDeadline: _parseAuthorizationDeadline(
+        json['authorization_deadline'],
+      ),
       balanceChanges: BalanceChanges.fromJson(
         json.value<JsonMap>('balance_changes'),
       ),
-      fee: _parsePersistedFee(json.value<JsonMap>('fee')),
+      fee: _parsePersistedFee(json.value<JsonMap>('fee'), signedMaxFee),
       acceptedAt: DateTime.parse(json.value<String>('accepted_at')).toUtc(),
       updatedAt: DateTime.parse(json.value<String>('updated_at')).toUtc(),
       // A reservation without a KDF trace cannot be proven unsent after a
@@ -312,7 +328,7 @@ class PendingGaslessTransfer extends Equatable {
   final Decimal signedMaxFee;
 
   /// Signed authorization expiry as seconds since Unix epoch.
-  final int authorizationDeadline;
+  final BigInt authorizationDeadline;
 
   final BalanceChanges balanceChanges;
   final FeeInfo fee;
@@ -355,7 +371,7 @@ class PendingGaslessTransfer extends Equatable {
     'destination_address': destinationAddress,
     'requested_amount': requestedAmount.toString(),
     'signed_max_fee': signedMaxFee.toString(),
-    'authorization_deadline': authorizationDeadline,
+    'authorization_deadline': authorizationDeadline.toString(),
     'balance_changes': balanceChanges.toJson(),
     'fee': fee.toJson(),
     'accepted_at': acceptedAt.toUtc().toIso8601String(),
@@ -382,3 +398,23 @@ class PendingGaslessTransfer extends Equatable {
     state,
   ];
 }
+
+BigInt _parseAuthorizationDeadline(Object? value) {
+  final deadline = switch (value) {
+    final String value when _unsignedDecimalPattern.hasMatch(value) =>
+      BigInt.tryParse(value),
+    final int value => BigInt.from(value),
+    _ => null,
+  };
+  if (deadline == null ||
+      deadline <= BigInt.zero ||
+      deadline > _maximumPendingAuthorizationDeadline) {
+    throw const FormatException(
+      'Pending GasFree authorization deadline must be a positive U256 integer',
+    );
+  }
+  return deadline;
+}
+
+final BigInt _maximumPendingAuthorizationDeadline =
+    (BigInt.one << 256) - BigInt.one;

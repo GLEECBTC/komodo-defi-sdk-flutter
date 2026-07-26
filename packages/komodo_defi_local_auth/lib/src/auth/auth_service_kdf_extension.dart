@@ -4,7 +4,9 @@ extension KdfExtensions on KdfAuthService {
   Future<bool> _walletExists(String walletName) async {
     if (!await _kdfFramework.isRunning()) return false;
 
-    final users = await getUsers();
+    // The caller owns the auth write lock. Avoid re-entering the public
+    // lock-protected API from the registration transaction.
+    final users = await _getUsersWithinAuthLock();
     return users.any((user) => user.walletId.name == walletName);
   }
 
@@ -21,7 +23,107 @@ extension KdfExtensions on KdfAuthService {
       return null;
     }
 
-    return _secureStorage.getUser(activeWallet);
+    final user = await _secureStorage.getUser(activeWallet);
+    if (user == null) return null;
+
+    return _ensureAuthenticatedWalletIdentity(user);
+  }
+
+  Future<KdfUser> _ensureAuthenticatedWalletIdentity(
+    KdfUser user, {
+    bool persist = true,
+  }) async {
+    final GetPublicKeyHashResponse response;
+    try {
+      response = await _runStartupSensitiveRpc(
+        phase: 'authenticated wallet identity read',
+        operation: () => _client.rpc.wallet.getPublicKeyHash(),
+      );
+    } catch (error, stackTrace) {
+      final identityRpcIsUnavailable =
+          error is GeneralErrorResponse ||
+          (error is AuthException &&
+              error.type == AuthExceptionType.apiConnectionError);
+      if (!identityRpcIsUnavailable) {
+        throw AuthException(
+          'KDF returned a malformed authenticated wallet identity response',
+          type: AuthExceptionType.internalError,
+          details: {'causeType': error.runtimeType.toString()},
+        );
+      }
+      // A temporarily unavailable identity RPC must not lock users out of
+      // Standard wallet access. Never retain a previously persisted identity
+      // in the runtime user, though: GasFree may only unlock its wallet-scoped
+      // journal after the active KDF identity has been verified in this
+      // session. The stored user remains untouched so a later successful RPC
+      // can recover the same journal.
+      _logger.warning(
+        'Authenticated wallet identity is unavailable '
+        '(${error.runtimeType})',
+        null,
+        stackTrace,
+      );
+      return user.copyWith(
+        walletId: WalletId.fromName(
+          user.walletId.name,
+          user.walletId.authOptions,
+        ),
+      );
+    }
+    final resolvedIdentity = response.publicKeyHash.trim().toLowerCase();
+    if (!RegExp(r'^[0-9a-f]{40}$').hasMatch(resolvedIdentity)) {
+      throw AuthException(
+        'KDF returned an invalid authenticated wallet identity',
+        type: AuthExceptionType.internalError,
+      );
+    }
+
+    final storedIdentity = user.walletId.pubkeyHash?.trim().toLowerCase();
+    if (storedIdentity != null &&
+        storedIdentity.isNotEmpty &&
+        storedIdentity != resolvedIdentity) {
+      throw AuthException(
+        'Stored wallet identity does not match the active KDF wallet',
+        type: AuthExceptionType.internalError,
+      );
+    }
+    if (storedIdentity == resolvedIdentity &&
+        (user.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
+      // Preserve an already-authenticated identity byte-for-byte. Earlier
+      // preview builds could have stored uppercase hex and used those bytes
+      // when deriving the encrypted journal key; canonicalizing it here would
+      // orphan that journal even though it represents the same H160.
+      return user;
+    }
+
+    final identifiedUser = user.copyWith(
+      walletId: user.walletId.copyWith(pubkeyHash: resolvedIdentity),
+    );
+    if (persist) {
+      try {
+        await _secureStorage.saveUser(identifiedUser);
+        _invalidateUsersCache();
+      } catch (error, stackTrace) {
+        // Identity persistence is required for GasFree journal access, but a
+        // local secure-storage write failure must not stop an otherwise
+        // authenticated KDF session or remove Standard wallet access. Return
+        // a name-only runtime identity so GasFree remains locked until a later
+        // verified call can persist the stable identity.
+        _logger.warning(
+          'Unable to persist the authenticated wallet identity '
+          '(${error.runtimeType})',
+          null,
+          stackTrace,
+        );
+        return user.copyWith(
+          walletId: WalletId.fromName(
+            user.walletId.name,
+            user.walletId.authOptions,
+          ),
+        );
+      }
+    }
+    return identifiedUser;
   }
 
   /// Returns the mnenomic for the active wallet in the requested format, if
@@ -66,9 +168,28 @@ extension KdfExtensions on KdfAuthService {
   }
 
   Future<void> _stopKdf() async {
+    await _shutdownSubscription?.cancel();
+    _shutdownSubscription = null;
     await _kdfFramework.kdfStop();
     _kdfFramework.resetHttpClient();
-    _authStateController.add(null);
+    _emitAuthStateChange(null);
+  }
+
+  Future<void> _clearFailedAuthenticatedKdfWithinWriteLock() async {
+    try {
+      await _stopKdf();
+    } catch (error, stackTrace) {
+      // Authentication must remain cleared even if the native runtime cannot
+      // be stopped cleanly. Managers observe this transition and revoke every
+      // wallet-scoped cache and operation.
+      _emitAuthStateChange(null);
+      _logger.warning(
+        'Failed to stop KDF after authentication failure '
+        '(${error.runtimeType})',
+        null,
+        stackTrace,
+      );
+    }
   }
 
   /// Ensures that KDF is running with a write lock.
@@ -76,6 +197,8 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _ensureKdfRunning() async {
     if (!await _kdfFramework.isRunning()) {
       await _lockWriteOperation(() async {
+        if (await _kdfFramework.isRunning()) return;
+
         final startStopwatch = Stopwatch()..start();
         final kdfResult = await _kdfFramework.startKdf(await _noAuthConfig);
         startStopwatch.stop();
@@ -90,6 +213,7 @@ extension KdfExtensions on KdfAuthService {
 
         _kdfFramework.resetHttpClient();
         await _waitUntilKdfRpcReady();
+        await _subscribeToShutdownSignals();
       });
     }
   }
@@ -119,6 +243,7 @@ extension KdfExtensions on KdfAuthService {
     _kdfFramework.resetHttpClient();
     final readyStopwatch = Stopwatch()..start();
     await _waitUntilKdfRpcReady();
+    await _subscribeToShutdownSignals();
     readyStopwatch.stop();
     _logger.info(
       '[$_sessionId] _restartKdf: readiness verify completed in '

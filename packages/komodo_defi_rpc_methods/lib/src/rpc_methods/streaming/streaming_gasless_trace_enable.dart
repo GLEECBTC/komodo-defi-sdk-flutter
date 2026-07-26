@@ -28,8 +28,18 @@ class StreamGaslessTraceEnableRequest
   };
 
   @override
-  StreamEnableResponse<GaslessTraceEvent> parse(JsonMap json) =>
-      StreamEnableResponse<GaslessTraceEvent>.parse(json);
+  StreamEnableResponse<GaslessTraceEvent> parse(JsonMap json) {
+    final expectedStreamerId = 'GASLESS_TRACE:$coin';
+    final streamerId = json
+        .valueOrNull<JsonMap>('result')
+        ?.valueOrNull<String>('streamer_id');
+    if (streamerId != expectedStreamerId) {
+      throw FormatException(
+        'GasFree trace stream response must identify $expectedStreamerId',
+      );
+    }
+    return StreamEnableResponse<GaslessTraceEvent>.parse(json);
+  }
 
   @override
   GaslessTraceStreamingRequestException? parseCustomErrorResponse(

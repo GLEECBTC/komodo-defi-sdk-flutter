@@ -231,11 +231,10 @@ class FeeInfoDisplay extends StatelessWidget {
                 '${fee.totalTokenFee} ${fee.coin}',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
-              if (fee.signedMaxFee != null)
-                Text(
-                  'Max Fee: ${fee.signedMaxFee} ${fee.coin}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+              Text(
+                'Max Fee: ${fee.signedMaxFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
 
             final FeeInfoSia fee => [

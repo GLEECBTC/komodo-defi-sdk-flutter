@@ -19,7 +19,10 @@ class FlutterLegacySecureStorage implements LegacySecureStorage {
             // The current app/plugin version still needs this option so legacy
             // migration opens the same Android secure-storage backend.
             // ignore: deprecated_member_use
-            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+            aOptions: AndroidOptions(
+              encryptedSharedPreferences: true,
+              resetOnError: false,
+            ),
             iOptions: IOSOptions(
               accessibility: KeychainAccessibility.first_unlock,
             ),

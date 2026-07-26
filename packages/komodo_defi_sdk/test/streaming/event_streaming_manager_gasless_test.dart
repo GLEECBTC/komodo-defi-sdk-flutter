@@ -23,6 +23,7 @@ void main() {
   late int disableCount;
   late List<String> operationLog;
   Completer<void>? disableGate;
+  String? enabledStreamerIdOverride;
 
   setUp(() {
     client = _MockApiClient();
@@ -35,6 +36,7 @@ void main() {
     disableCount = 0;
     operationLog = <String>[];
     disableGate = null;
+    enabledStreamerIdOverride = null;
 
     when(() => service.events).thenAnswer((_) => events.stream);
     when(() => service.disconnections).thenAnswer((_) => disconnections.stream);
@@ -65,8 +67,9 @@ void main() {
           'mmrpc': '2.0',
           'result': {
             'streamer_id':
+                enabledStreamerIdOverride ??
                 'GASLESS_TRACE:'
-                '${(request['params'] as Map<String, dynamic>)['coin']}',
+                    '${(request['params'] as Map<String, dynamic>)['coin']}',
           },
         },
         'stream::disable' => {
@@ -129,6 +132,19 @@ void main() {
 
     await subscription.cancel();
     expect(disableCount, 1);
+  });
+
+  test('wrong streamer id cannot establish a GasFree subscription', () async {
+    enabledStreamerIdOverride = 'GASLESS_TRACE:USDC-TRC20';
+
+    await expectLater(
+      manager.subscribeToGaslessTrace(coin: coin),
+      throwsFormatException,
+    );
+
+    expect(enableCount, 1);
+    expect(manager.isStreamActive('gasless_trace:$coin'), isFalse);
+    expect(disableCount, 0);
   });
 
   test(

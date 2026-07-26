@@ -24,7 +24,7 @@ Map<String, dynamic> _trxConfig() => {
   'nodes': <Map<String, dynamic>>[],
 };
 
-Map<String, dynamic> _trc20Config() => {
+Map<String, dynamic> _trc20Config({bool? gaslessEnabled}) => {
   'coin': 'USDT-TRC20',
   'type': 'TRC-20',
   'name': 'Tether',
@@ -43,6 +43,7 @@ Map<String, dynamic> _trc20Config() => {
   'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
   'parent_coin': 'TRX',
   'nodes': <Map<String, dynamic>>[],
+  if (gaslessEnabled != null) 'gasless': {'enabled': gaslessEnabled},
 };
 
 class _RecordingApiClient implements ApiClient {
@@ -51,6 +52,29 @@ class _RecordingApiClient implements ApiClient {
   @override
   Future<JsonMap> executeRpc(JsonMap request) async {
     requests.add(request);
+    if (request['method'] == 'task::enable_eth::init') {
+      return {
+        'mmrpc': '2.0',
+        'result': {'task_id': 7},
+      };
+    }
+    if (request['method'] == 'task::enable_eth::status') {
+      return {
+        'mmrpc': '2.0',
+        'result': {'status': 'Ok', 'details': ''},
+      };
+    }
+    if (request['method'] == 'enable_erc20') {
+      return {
+        'mmrpc': '2.0',
+        'result': {
+          'balances': <String, dynamic>{},
+          'platform_coin': 'TRX',
+          'token_contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+          'required_confirmations': 3,
+        },
+      };
+    }
     return {
       'mmrpc': '2.0',
       'result': {
@@ -67,6 +91,10 @@ void main() {
     final client = ApiClientMock();
     final parent = Asset.fromJson(_trxConfig(), knownIds: const {});
     final child = Asset.fromJson(_trc20Config(), knownIds: {parent.id});
+    final gaslessChild = Asset.fromJson(
+      _trc20Config(gaslessEnabled: true),
+      knownIds: {parent.id},
+    );
 
     test('non-Trezor platform strategy accepts TRX parent assets', () {
       final strategy = EthWithTokensActivationStrategy(
@@ -123,13 +151,54 @@ void main() {
           tronGaslessProvider: provider,
         );
 
-        await strategy.activate(parent, [child]).drain<void>();
+        await strategy.activate(parent, [gaslessChild]).drain<void>();
 
         final request = recordingClient.requests.singleWhere(
           (request) => request['method'] == 'enable_eth_with_tokens',
         );
         final params = request.value<JsonMap>('params');
         expect(params['ticker'], 'TRX');
+        expect(params['tron_gasless_provider'], {
+          'base_url': 'https://quicknode.gleec.com/gasfree/tron',
+          'service': 'komodo_proxy',
+          'service_provider': 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+          'request_timeout_ms': 15000,
+          'status_poll_interval_ms': 3000,
+        });
+        expect(params['erc20_tokens_requests'], [
+          {
+            'ticker': 'USDT-TRC20',
+            'required_confirmations': 3,
+            'gasless': {'enabled': true},
+          },
+        ]);
+      },
+    );
+
+    test(
+      'task activation preserves documented GasFree fields for Trezor',
+      () async {
+        const provider = TronGaslessProviderConfig(
+          baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+          service: GaslessServiceKomodoProxy(),
+          serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        );
+        final recordingClient = _RecordingApiClient();
+        final strategy = EthTaskActivationStrategy(
+          recordingClient,
+          const PrivateKeyPolicy.trezor(),
+          tronGaslessProvider: provider,
+        );
+
+        final progress = await strategy.activate(parent, [
+          gaslessChild,
+        ]).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        final request = recordingClient.requests.singleWhere(
+          (request) => request['method'] == 'task::enable_eth::init',
+        );
+        final params = request.value<JsonMap>('params');
         expect(params['tron_gasless_provider'], {
           'base_url': 'https://quicknode.gleec.com/gasfree/tron',
           'service': 'komodo_proxy',
@@ -170,8 +239,9 @@ void main() {
           tronGaslessProvider: provider,
         );
 
-        await strategy.activate(child).drain<void>();
+        final progress = await strategy.activate(gaslessChild).toList();
 
+        expect(progress.last.isSuccess, isTrue);
         final request = recordingClient.requests.singleWhere(
           (request) => request['method'] == 'enable_erc20',
         );
@@ -183,16 +253,24 @@ void main() {
     );
 
     test(
-      'standalone TRC20 activation omits gasless when no provider is configured',
+      'standalone TRC20 activation omits gasless when a provider is configured '
+      'but the asset is not enrolled',
       () async {
+        const provider = TronGaslessProviderConfig(
+          baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+          service: GaslessServiceKomodoProxy(),
+          serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        );
         final recordingClient = _RecordingApiClient();
         final strategy = Erc20ActivationStrategy(
           recordingClient,
           const PrivateKeyPolicy.contextPrivKey(),
+          tronGaslessProvider: provider,
         );
 
-        await strategy.activate(child).drain<void>();
+        final progress = await strategy.activate(child).toList();
 
+        expect(progress.last.isSuccess, isTrue);
         final request = recordingClient.requests.singleWhere(
           (request) => request['method'] == 'enable_erc20',
         );
@@ -202,5 +280,154 @@ void main() {
         expect(activationParams.containsKey('gasless'), isFalse);
       },
     );
+
+    test(
+      'standalone TRC20 activation omits gasless when an enrolled asset has no '
+      'provider',
+      () async {
+        final recordingClient = _RecordingApiClient();
+        final strategy = Erc20ActivationStrategy(
+          recordingClient,
+          const PrivateKeyPolicy.contextPrivKey(),
+        );
+
+        final progress = await strategy.activate(gaslessChild).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        final request = recordingClient.requests.singleWhere(
+          (request) => request['method'] == 'enable_erc20',
+        );
+        final activationParams = request
+            .value<JsonMap>('params')
+            .value<JsonMap>('activation_params');
+        expect(activationParams.containsKey('gasless'), isFalse);
+      },
+    );
+
+    test(
+      'standalone TRC20 activation honors explicit asset config enrollment',
+      () async {
+        const provider = TronGaslessProviderConfig(
+          baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+          service: GaslessServiceKomodoProxy(),
+          serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        );
+        final configuredChild = Asset.fromJson(
+          _trc20Config(gaslessEnabled: true),
+          knownIds: {parent.id},
+        );
+        final recordingClient = _RecordingApiClient();
+        final strategy = Erc20ActivationStrategy(
+          recordingClient,
+          const PrivateKeyPolicy.contextPrivKey(),
+          tronGaslessProvider: provider,
+        );
+
+        final progress = await strategy.activate(configuredChild).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        final request = recordingClient.requests.singleWhere(
+          (request) => request['method'] == 'enable_erc20',
+        );
+        final activationParams = request
+            .value<JsonMap>('params')
+            .value<JsonMap>('activation_params');
+        expect(activationParams['gasless'], {'enabled': true});
+      },
+    );
+
+    test(
+      'standalone TRC20 activation honors explicit disabled asset config',
+      () async {
+        const provider = TronGaslessProviderConfig(
+          baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+          service: GaslessServiceKomodoProxy(),
+          serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        );
+        final disabledChild = Asset.fromJson(
+          _trc20Config(gaslessEnabled: false),
+          knownIds: {parent.id},
+        );
+        final recordingClient = _RecordingApiClient();
+        final strategy = Erc20ActivationStrategy(
+          recordingClient,
+          const PrivateKeyPolicy.contextPrivKey(),
+          tronGaslessProvider: provider,
+        );
+
+        final progress = await strategy.activate(disabledChild).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        final request = recordingClient.requests.singleWhere(
+          (request) => request['method'] == 'enable_erc20',
+        );
+        final activationParams = request
+            .value<JsonMap>('params')
+            .value<JsonMap>('activation_params');
+        expect(activationParams.containsKey('gasless'), isFalse);
+      },
+    );
+
+    test(
+      'standalone custom TRC20 activation carries gasless only when enrolled',
+      () async {
+        const provider = TronGaslessProviderConfig(
+          baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+          service: GaslessServiceKomodoProxy(),
+          serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+        );
+        final customChild = gaslessChild.copyWith(
+          protocol: (gaslessChild.protocol as Trc20Protocol).copyWith(
+            isCustomToken: true,
+          ),
+        );
+        final recordingClient = _RecordingApiClient();
+        final strategy = CustomErc20ActivationStrategy(
+          recordingClient,
+          tronGaslessProvider: provider,
+        );
+
+        final progress = await strategy.activate(customChild).toList();
+
+        expect(progress.last.isSuccess, isTrue);
+        final request = recordingClient.requests.singleWhere(
+          (request) => request['method'] == 'enable_erc20',
+        );
+        final activationParams = request
+            .value<JsonMap>('params')
+            .value<JsonMap>('activation_params');
+        expect(activationParams['gasless'], {'enabled': true});
+      },
+    );
+
+    test('standalone custom TRC20 activation omits gasless when a provider is '
+        'configured but the asset is not enrolled', () async {
+      const provider = TronGaslessProviderConfig(
+        baseUrl: 'https://quicknode.gleec.com/gasfree/tron',
+        service: GaslessServiceKomodoProxy(),
+        serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
+      );
+      final customChild = child.copyWith(
+        protocol: (child.protocol as Trc20Protocol).copyWith(
+          isCustomToken: true,
+        ),
+      );
+      final recordingClient = _RecordingApiClient();
+      final strategy = CustomErc20ActivationStrategy(
+        recordingClient,
+        tronGaslessProvider: provider,
+      );
+
+      final progress = await strategy.activate(customChild).toList();
+
+      expect(progress.last.isSuccess, isTrue);
+      final request = recordingClient.requests.singleWhere(
+        (request) => request['method'] == 'enable_erc20',
+      );
+      final activationParams = request
+          .value<JsonMap>('params')
+          .value<JsonMap>('activation_params');
+      expect(activationParams.containsKey('gasless'), isFalse);
+    });
   });
 }

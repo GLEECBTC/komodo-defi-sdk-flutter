@@ -10,6 +10,7 @@ class WithdrawAmountField extends StatefulWidget {
     required this.isMaxAmount,
     required this.onChanged,
     required this.onMaxToggled,
+    this.enabled = true,
     this.amountError,
     this.hasInsufficientBalance = false,
     this.availableBalance,
@@ -38,6 +39,9 @@ class WithdrawAmountField extends StatefulWidget {
 
   /// Callback for when the maximum amount is toggled.
   final ValueChanged<bool> onMaxToggled;
+
+  /// Whether the amount and maximum-selection controls can be changed.
+  final bool enabled;
 
   /// Error message for the amount field.
   final String? amountError;
@@ -154,7 +158,7 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
         const SizedBox(height: 8),
         TextFormField(
           controller: _controller,
-          enabled: !widget.isMaxAmount,
+          enabled: widget.enabled && !widget.isMaxAmount,
           decoration: InputDecoration(
             border: const OutlineInputBorder(),
             errorText: widget.amountError,
@@ -197,7 +201,9 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
             final toggle = MergeSemantics(
               child: CheckboxListTile(
                 value: widget.isMaxAmount,
-                onChanged: (value) => widget.onMaxToggled(value ?? false),
+                onChanged: widget.enabled
+                    ? (value) => widget.onMaxToggled(value ?? false)
+                    : null,
                 title: Text(
                   widget.sendMaximumLabel ?? 'Send maximum available',
                 ),
@@ -206,7 +212,9 @@ class _WithdrawAmountFieldState extends State<WithdrawAmountField> {
               ),
             );
             final maxButton = TextButton(
-              onPressed: () => widget.onMaxToggled(true),
+              onPressed: widget.enabled
+                  ? () => widget.onMaxToggled(true)
+                  : null,
               child: Text(widget.maxButtonLabel ?? 'MAX'),
             );
 

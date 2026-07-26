@@ -6,24 +6,68 @@ import 'package:test/test.dart';
 TronGasfreeRelayPayload _relayPayload() => TronGasfreeRelayPayload(
   chainId: '728126428',
   coin: 'USDT-TRC20',
-  hdFrom: const {'account_id': 0, 'chain': 'external', 'address_id': 0},
+  hdFrom: const {'account_id': 0, 'chain': 'External', 'address_id': 0},
   fromAddress: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
   gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
   verifyingContract: 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
-  signedAuthorization: const GaslessSignedAuthorization(
+  signedAuthorization: GaslessSignedAuthorization(
     token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
     serviceProvider: 'TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E',
     user: 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC',
     receiver: 'TJM1BE5wq1VdHh3gwjUeyaVkvZp9DVYCfC',
     value: '5000000',
     maxFee: '5000000',
-    deadline: 1999999999,
+    deadline: BigInt.from(1999999999),
     version: '1',
     nonce: '9',
-    signature: 'signed-authorization',
+    signature:
+        '1111111111111111111111111111111111111111111111111111111111111111'
+        '111111111111111111111111111111111111111111111111111111111111111111',
   ),
   createdAt: '2026-07-10T12:00:00Z',
 );
+
+Map<String, dynamic> _traceStatusResult({
+  String state = 'submitted',
+  String? txHashOnChain,
+  int? blockHeight,
+  int? confirmedAt,
+  String? finalFee,
+  String? failureReason,
+}) => {
+  'state': state,
+  'tx_hash_on_chain': txHashOnChain,
+  'block_height': blockHeight,
+  'confirmed_at': confirmedAt,
+  'final_fee': finalFee,
+  'failure_reason': failureReason,
+};
+
+Map<String, dynamic> _availableAccountStatusResult() => {
+  'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+  'service_provider': 'TProvider',
+  'availability': 'available',
+  'active': false,
+  'on_chain_balance': '12.5',
+  'frozen_balance': '0',
+  'spendable_balance': '12.5',
+  'transfer_fee': '2',
+  'activation_fee': '1',
+  'max_withdrawable': '9.5',
+};
+
+Map<String, dynamic> _unreachableAccountStatusResult() => {
+  'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+  'service_provider': null,
+  'availability': 'provider_unreachable',
+  'active': null,
+  'on_chain_balance': '7',
+  'frozen_balance': null,
+  'spendable_balance': null,
+  'transfer_fee': null,
+  'activation_fee': null,
+  'max_withdrawable': null,
+};
 
 void main() {
   group('TRON RPC request serialization', () {
@@ -260,6 +304,16 @@ void main() {
       ]);
     });
 
+    test('omitted gasless enabled field defaults to false', () {
+      final parsed = TronGaslessTokenActivationConfig.fromJson({
+        'transfer_max_fee': '10',
+      });
+
+      expect(parsed.enabled, isFalse);
+      expect(parsed.transferMaxFee, Decimal.parse('10'));
+      expect(parsed.toJson(), {'enabled': false, 'transfer_max_fee': '10'});
+    });
+
     test('enable_erc20 emits standalone TRC20 gasless activation', () {
       final request = EnableErc20Request(
         rpcPass: 'rpc-pass',
@@ -438,6 +492,30 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('rejects an accepted relay with an empty trace id', () {
+      expect(
+        () => SendRawTransactionResponse.parse({
+          'relay_type': 'tron_gasfree',
+          'trace_id': '  ',
+          'state': 'WAITING',
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects a locally fabricated result-wrapped relay response', () {
+      expect(
+        () => SendRawTransactionResponse.parse({
+          'result': {
+            'relay_type': 'tron_gasfree',
+            'trace_id': 'trace-1',
+            'state': 'WAITING',
+          },
+        }),
+        throwsFormatException,
+      );
+    });
   });
 
   group('gasless::trace_status', () {
@@ -474,20 +552,125 @@ void main() {
       expect(response.confirmedAt, 1747909638);
     });
 
+    test('does not impose a year-9999 cap on confirmed_at', () {
+      final response = GaslessTraceStatusResponse.parse({
+        'mmrpc': '2.0',
+        'result': _traceStatusResult(
+          state: 'confirmed',
+          confirmedAt: 253402300800,
+        ),
+      });
+
+      expect(response.confirmedAt, 253402300800);
+    });
+
+    test('accepts zero and rejects negative u64 trace fields', () {
+      expect(
+        GaslessTraceStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': _traceStatusResult(
+            state: 'confirmed',
+            blockHeight: 0,
+            confirmedAt: 0,
+          ),
+        }).confirmedAt,
+        0,
+      );
+
+      expect(
+        () => GaslessTraceStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': _traceStatusResult(state: 'confirmed', confirmedAt: -1),
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => GaslessTraceStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': _traceStatusResult(state: 'confirmed', blockHeight: -1),
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects a numeric final_fee instead of KDF numeric string', () {
+      final result = _traceStatusResult()..['final_fee'] = 2;
+
+      expect(
+        () => GaslessTraceStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': result,
+        }),
+        throwsFormatException,
+      );
+
+      for (final finalFee in const ['not-a-number', '-1']) {
+        final invalid = _traceStatusResult()..['final_fee'] = finalFee;
+        expect(
+          () => GaslessTraceStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': invalid,
+          }),
+          throwsFormatException,
+        );
+      }
+    });
+
     test('parses a failed status', () {
       final response = GaslessTraceStatusResponse.parse({
         'mmrpc': '2.0',
-        'result': {'state': 'failed', 'failure_reason': 'provider rejected'},
+        'result': _traceStatusResult(state: 'failed', failureReason: 'unknown'),
       });
 
       expect(response.state.isFailed, isTrue);
-      expect(response.failureReason, 'provider rejected');
+      expect(response.failureReason, 'unknown');
+      expect(
+        () => GaslessTraceStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': _traceStatusResult(
+            state: 'failed',
+            failureReason: 'provider rejected',
+          ),
+        }),
+        throwsFormatException,
+      );
     });
 
     test('GaslessTraceState.parse maps known values and rejects unknown', () {
       expect(GaslessTraceState.parse('on_chain'), GaslessTraceState.onChain);
       expect(() => GaslessTraceState.parse('WAITING'), throwsFormatException);
     });
+
+    test('rejects a naked trace-status result body', () {
+      expect(
+        () => GaslessTraceStatusResponse.parse({
+          'state': 'confirmed',
+          'tx_hash_on_chain': 'hash',
+        }),
+        throwsFormatException,
+      );
+    });
+
+    for (final field in const {
+      'state',
+      'tx_hash_on_chain',
+      'block_height',
+      'confirmed_at',
+      'final_fee',
+      'failure_reason',
+    }) {
+      test('rejects a trace-status result missing $field', () {
+        final result = _traceStatusResult()..remove(field);
+
+        expect(
+          () => GaslessTraceStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': result,
+          }),
+          throwsFormatException,
+        );
+      });
+    }
   });
 
   group('stream::gasless_trace::enable', () {
@@ -512,6 +695,33 @@ void main() {
         'GASLESS_TRACE:USDT-TRC20',
       );
     });
+
+    test('rejects a streamer id for a different coin', () {
+      final request = StreamGaslessTraceEnableRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'USDT-TRC20',
+      );
+
+      expect(
+        () => request.parse({
+          'mmrpc': '2.0',
+          'result': {'streamer_id': 'GASLESS_TRACE:USDC-TRC20'},
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects a response missing the exact streamer id', () {
+      final request = StreamGaslessTraceEnableRequest(
+        rpcPass: 'rpc-pass',
+        coin: 'USDT-TRC20',
+      );
+
+      expect(
+        () => request.parse({'mmrpc': '2.0', 'result': <String, dynamic>{}}),
+        throwsFormatException,
+      );
+    });
   });
 
   group('gasless::account_status', () {
@@ -529,18 +739,7 @@ void main() {
     test('parses a full (provider-available) status', () {
       final response = GaslessAccountStatusResponse.parse({
         'mmrpc': '2.0',
-        'result': {
-          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-          'active': false,
-          'on_chain_balance': '12.5',
-          'frozen_balance': '0',
-          'spendable_balance': '12.5',
-          'transfer_fee': '2',
-          'activation_fee': '1',
-          'max_withdrawable': '9.5',
-          'availability': 'available',
-          'service_provider': 'TProvider',
-        },
+        'result': _availableAccountStatusResult(),
       });
 
       expect(response.gasfreeAddress, 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF');
@@ -562,11 +761,7 @@ void main() {
     test('parses a degraded (provider-unavailable) status', () {
       final response = GaslessAccountStatusResponse.parse({
         'mmrpc': '2.0',
-        'result': {
-          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
-          'on_chain_balance': '7',
-          'availability': 'provider_unreachable',
-        },
+        'result': _unreachableAccountStatusResult(),
       });
 
       expect(
@@ -582,26 +777,101 @@ void main() {
       expect(response.spendableBalance, isNull);
       expect(response.frozenBalance, isNull);
     });
-  });
 
-  test('root submission error remains a safe generic envelope', () {
-    final error = GeneralErrorResponse.parse({
-      'error': 'GasFree relay submission failed',
-      'error_type': 'GaslessRelaySubmission',
-      'error_data': {
-        'code': 'authorization_expired',
-        'stage': 'submission',
-        'retryable': true,
-        'terminal': true,
-        'relay_accepted': false,
-      },
+    test('rejects account-status amounts that are not numeric strings', () {
+      for (final field in const {
+        'on_chain_balance',
+        'frozen_balance',
+        'spendable_balance',
+        'transfer_fee',
+        'activation_fee',
+        'max_withdrawable',
+      }) {
+        final result = _availableAccountStatusResult()..[field] = 1;
+
+        expect(
+          () => GaslessAccountStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': result,
+          }),
+          throwsFormatException,
+          reason: '$field must remain a KDF numeric string',
+        );
+      }
     });
 
-    expect(error.errorType, 'GaslessRelaySubmission');
-    expect(error.error, 'GasFree relay submission failed');
-    expect(
-      (error.errorData as Map<String, dynamic>)['code'],
-      'authorization_expired',
-    );
+    test('rejects malformed or negative account-status numeric strings', () {
+      for (final field in const {
+        'on_chain_balance',
+        'frozen_balance',
+        'spendable_balance',
+        'transfer_fee',
+        'activation_fee',
+        'max_withdrawable',
+      }) {
+        for (final amount in const ['not-a-number', '-1']) {
+          final result = _availableAccountStatusResult()..[field] = amount;
+
+          expect(
+            () => GaslessAccountStatusResponse.parse({
+              'mmrpc': '2.0',
+              'result': result,
+            }),
+            throwsFormatException,
+            reason: '$field must remain a non-negative KDF numeric string',
+          );
+        }
+      }
+    });
+
+    test('rejects a naked account-status result body', () {
+      expect(
+        () => GaslessAccountStatusResponse.parse({
+          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+          'on_chain_balance': '7',
+          'availability': 'provider_unreachable',
+        }),
+        throwsFormatException,
+      );
+    });
+
+    for (final field in const {
+      'gasfree_address',
+      'service_provider',
+      'availability',
+      'active',
+      'on_chain_balance',
+      'frozen_balance',
+      'spendable_balance',
+      'transfer_fee',
+      'activation_fee',
+      'max_withdrawable',
+    }) {
+      test('rejects an account-status result missing $field', () {
+        final result = _availableAccountStatusResult()..remove(field);
+
+        expect(
+          () => GaslessAccountStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': result,
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+  });
+
+  test('plain submission failure carries no invented lifecycle metadata', () {
+    final error = GeneralErrorResponse.parse({
+      'error': 'GasFree authorization expired at deadline 1999999999',
+    });
+
+    expect(error.error, 'GasFree authorization expired at deadline 1999999999');
+    expect(error.errorType, isNull);
+    expect(error.errorData, isNull);
+    expect(error.object, isNot(contains('stage')));
+    expect(error.object, isNot(contains('retryable')));
+    expect(error.object, isNot(contains('terminal')));
+    expect(error.object, isNot(contains('relay_accepted')));
   });
 }

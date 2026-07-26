@@ -51,6 +51,9 @@ class _InMemoryAssetHistoryStorage extends AssetHistoryStorage {
   }
 
   @override
+  Future<bool> hasAmbiguousLegacyHistory(WalletId walletId) async => false;
+
+  @override
   Future<void> clearWalletAssets(WalletId walletId) async {
     _walletAssets.remove(_key(walletId));
   }

@@ -7,7 +7,7 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// Keys that make up the Tron gas-free relay payload, sent verbatim as
 /// `tx_json` to `send_raw_transaction`. Matches KDF's
 /// `TronGasfreeRelayPayload`, which rejects unknown fields.
-const List<String> _tronGasfreeRelayPayloadKeys = [
+const Set<String> _tronGasfreeRelayPayloadKeys = {
   'relay_type',
   'chain_id',
   'coin',
@@ -17,24 +17,76 @@ const List<String> _tronGasfreeRelayPayloadKeys = [
   'verifying_contract',
   'signed_authorization',
   'created_at',
-];
-
-const Set<String> _removedTronGasfreeRelayKeys = {
-  'request_id',
-  'authorization_fingerprint',
-  'expected_authorization',
 };
+
+const Set<String> _tronGasfreeTransactionDetailsKeys = {
+  'from',
+  'to',
+  'total_amount',
+  'spent_by_me',
+  'received_by_me',
+  'my_balance_change',
+  'block_height',
+  'timestamp',
+  'fee_details',
+  'internal_id',
+  'kmd_rewards',
+  'transaction_type',
+  'memo',
+};
+
+const Set<String> _tronGasfreeWithdrawResultKeys = {
+  ..._tronGasfreeRelayPayloadKeys,
+  ..._tronGasfreeTransactionDetailsKeys,
+};
+
+const Set<String> _requiredTronGasfreeWithdrawResultKeys = {
+  'relay_type',
+  'chain_id',
+  'coin',
+  'from_address',
+  'gasfree_address',
+  'verifying_contract',
+  'signed_authorization',
+  'created_at',
+  'from',
+  'to',
+  'total_amount',
+  'spent_by_me',
+  'received_by_me',
+  'my_balance_change',
+  'block_height',
+  'timestamp',
+  'fee_details',
+  'internal_id',
+  'transaction_type',
+  'memo',
+};
+
+void _validateTronGasfreeWithdrawResult(JsonMap json) {
+  final unknownKeys = json.keys.where(
+    (key) => !_tronGasfreeWithdrawResultKeys.contains(key),
+  );
+  if (unknownKeys.isNotEmpty) {
+    throw FormatException(
+      'GasFree withdraw result contains undocumented fields: '
+      '${unknownKeys.join(', ')}',
+    );
+  }
+  final missingKeys = _requiredTronGasfreeWithdrawResultKeys.where(
+    (key) => !json.containsKey(key),
+  );
+  if (missingKeys.isNotEmpty) {
+    throw FormatException(
+      'GasFree withdraw result is missing required fields: '
+      '${missingKeys.join(', ')}',
+    );
+  }
+}
 
 /// Extracts the gas-free relay payload subset from a withdraw result so it can
 /// be broadcast via `send_raw_transaction`.
 TronGasfreeRelayPayload _extractTronGasfreeRelayPayload(JsonMap json) {
-  final removedKeys = json.keys.where(_removedTronGasfreeRelayKeys.contains);
-  if (removedKeys.isNotEmpty) {
-    throw FormatException(
-      'GasFree withdraw result contains removed relay fields: '
-      '${removedKeys.join(', ')}',
-    );
-  }
   final payload = <String, dynamic>{};
   for (final key in _tronGasfreeRelayPayloadKeys) {
     final value = json[key];
@@ -59,6 +111,7 @@ class WithdrawResult {
     this.internalId,
     this.kmdRewards,
     this.memo,
+    this.transactionType = 'StandardTransfer',
   }) {
     if (txHex == null && txJson == null) {
       throw ArgumentError('Either txHex or txJson must be provided');
@@ -87,48 +140,37 @@ class WithdrawResult {
         'GasFree withdrawal result must not also contain tx_json',
       );
     }
+    if (isGaslessRelay) {
+      _validateTronGasfreeWithdrawResult(json);
+    }
     final relayPayload = isGaslessRelay
         ? _extractTronGasfreeRelayPayload(relaySource)
         : null;
     final txJson = relayPayload?.toJson() ?? nestedTxJson;
 
-    // The relaxed (nullable) parsing below only applies to a gasless relay
-    // result, which legitimately has no on-chain tx hash / from / to / block /
-    // timestamp yet. For a standard withdrawal these fields are always present,
-    // so keep strict parsing — otherwise a malformed standard response would
-    // produce a phantom "complete" with an empty hash, or an empty `to` that
-    // later throws a RangeError at the broadcast call sites.
     return WithdrawResult(
       txHex: json.valueOrNull<String>('tx_hex'),
       txJson: txJson,
       txHash: isGaslessRelay
           ? json.valueOrNull<String>('tx_hash')
           : json.value<String>('tx_hash'),
-      from: isGaslessRelay
-          ? List<String>.from(
-              json.valueOrNull('from') ?? [relayPayload!.fromAddress],
-            )
-          : List<String>.from(json.value('from')),
-      to: isGaslessRelay
-          ? List<String>.from(
-              json.valueOrNull('to') ??
-                  [relayPayload!.signedAuthorization.receiver],
-            )
-          : List<String>.from(json.value('to')),
+      from: List<String>.from(json.value('from')),
+      to: List<String>.from(json.value('to')),
       balanceChanges: BalanceChanges.fromJson(json),
-      blockHeight: isGaslessRelay
-          ? (json.valueOrNull<int>('block_height') ?? 0)
-          : json.value<int>('block_height'),
-      timestamp: isGaslessRelay
-          ? (json.valueOrNull<int>('timestamp') ?? 0)
-          : json.value<int>('timestamp'),
+      blockHeight: json.value<int>('block_height'),
+      timestamp: json.value<int>('timestamp'),
       fee: FeeInfo.fromJson(json.value<JsonMap>('fee_details')),
       coin: json.value<String>('coin'),
-      internalId: json.valueOrNull<String>('internal_id'),
+      internalId: isGaslessRelay
+          ? json.value<String>('internal_id')
+          : json.valueOrNull<String>('internal_id'),
       kmdRewards: json.containsKey('kmd_rewards')
           ? KmdRewards.fromJson(json.value<JsonMap>('kmd_rewards'))
           : null,
       memo: json.valueOrNull<String>('memo'),
+      transactionType: isGaslessRelay
+          ? json.value<String>('transaction_type')
+          : json.valueOrNull<String>('transaction_type') ?? 'StandardTransfer',
     );
   }
 
@@ -145,6 +187,7 @@ class WithdrawResult {
   final String? internalId;
   final KmdRewards? kmdRewards;
   final String? memo;
+  final String transactionType;
 
   /// Strictly typed relay payload for a GasFree withdraw preview.
   TronGasfreeRelayPayload? get gaslessRelayPayload {
@@ -172,9 +215,11 @@ class WithdrawResult {
       'timestamp': timestamp,
       'fee_details': fee.toJson(),
       'coin': coin,
-      if (internalId != null) 'internal_id': internalId,
+      if (relayPayload != null || internalId != null)
+        'internal_id': internalId ?? '',
       if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
-      if (memo != null) 'memo': memo,
+      if (relayPayload != null) 'transaction_type': transactionType,
+      if (relayPayload != null || memo != null) 'memo': memo,
     };
   }
 }

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
-import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkeys_storage.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -12,6 +12,12 @@ import 'package:logging/logging.dart';
 abstract class IPubkeyManager {
   /// Get pubkeys for a given asset, handling HD/non-HD differences internally
   Future<AssetPubkeys> getPubkeys(Asset asset);
+
+  /// Fetch pubkeys directly from KDF without reading or updating local caches.
+  ///
+  /// This is intended for security-sensitive ownership checks that must not
+  /// trust a persisted or in-memory address snapshot.
+  Future<AssetPubkeys> getFreshPubkeys(Asset asset);
 
   /// Watch pubkeys for a given asset, emitting the initial state if available
   /// and polling for updates at a fixed interval. Optionally activates asset.
@@ -61,57 +67,64 @@ class PubkeyManager implements IPubkeyManager {
   // Internal state for watching pubkeys per asset
   final Map<AssetId, AssetPubkeys> _pubkeysCache = {};
 
-  /// Addresses ever observed holding funds, per asset. Feeds the TRON gasless
-  /// phantom-address filter (see [filterGaslessPhantomAddresses]) and is
-  /// persisted with the pubkeys so used-then-emptied addresses stay visible
-  /// across restarts.
+  /// Addresses ever observed holding funds, per asset. Persisted for backward
+  /// compatibility with the existing wallet-scoped pubkey cache schema.
   final Map<AssetId, Set<String>> _everFundedAddresses = {};
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
   final Map<AssetId, StreamController<AssetPubkeys>> _pubkeysControllers = {};
   // Track the Asset for each AssetId that has an associated controller so that
   // we can restart watchers after auth changes without requiring new listeners
   final Map<AssetId, Asset> _watchedAssets = {};
-  // Deduplicate concurrent getPubkeys requests per asset
-  final Map<AssetId, Future<AssetPubkeys>> _inFlightPubkeyRequests = {};
+  // Deduplicate concurrent getPubkeys requests within one wallet generation.
+  final Map<(AssetId, int), Future<AssetPubkeys>> _inFlightPubkeyRequests = {};
   final Map<String, DateTime> _hdAddressScanRetryAfter = {};
   static const Duration _hdAddressScanRetryCooldown = Duration(minutes: 2);
 
   StreamSubscription<KdfUser?>? _authSubscription;
   WalletId? _currentWalletId;
+  int _walletGeneration = 0;
   bool _isDisposed = false;
   final Duration _defaultPollingInterval = const Duration(seconds: 30);
 
   /// Get pubkeys for a given asset, handling HD/non-HD differences internally
   @override
   Future<AssetPubkeys> getPubkeys(Asset asset) async {
+    if (_isDisposed) {
+      throw StateError('PubkeyManager has been disposed');
+    }
+
+    // Authenticate before looking at wallet-owned caches. Auth stream delivery
+    // can lag behind currentUser during a wallet switch.
+    final walletContext = await _captureWalletContext();
+
     // Serve from in-memory cache if available
     final cached = _pubkeysCache[asset.id];
     if (cached != null) {
+      await _requireWalletContextCurrent(walletContext);
       return cached;
     }
 
-    // If a network fetch for this asset is already in flight, await it
-    final existing = _inFlightPubkeyRequests[asset.id];
+    // If a network fetch for this asset and wallet generation is already in
+    // flight, await it. A previous wallet's future must never be reused.
+    final inFlightKey = (asset.id, walletContext.generation);
+    final existing = _inFlightPubkeyRequests[inFlightKey];
     if (existing != null) {
-      return existing;
+      final pubkeys = await existing;
+      await _requireWalletContextCurrent(walletContext);
+      return pubkeys;
     }
-
-    // Capture wallet id at start to avoid cross-wallet persistence
-    final currentUser = await _auth.currentUser;
-    if (currentUser == null) {
-      throw AuthException.notSignedIn();
-    }
-    final WalletId walletId = currentUser.walletId;
 
     // Try to hydrate from persisted storage first for instant response
-    final hydrated = await _hydrateFromStorageForWallet(walletId, asset);
+    final hydrated = await _hydrateFromStorageForWallet(walletContext, asset);
+    await _requireWalletContextCurrent(walletContext);
     if (hydrated != null) {
       _pubkeysCache[asset.id] = hydrated;
       // Fire-and-forget fresh refresh; deduped if one is already running
-      final refreshFuture = _fetchFreshPubkeys(asset, walletId)
+      final refreshFuture = _fetchFreshPubkeys(asset, walletContext)
           .then((fresh) {
             final controller = _pubkeysControllers[asset.id];
-            if (controller != null &&
+            if (_isWalletContextCurrentSync(walletContext) &&
+                controller != null &&
                 !controller.isClosed &&
                 fresh != hydrated) {
               controller.add(fresh);
@@ -125,7 +138,86 @@ class PubkeyManager implements IPubkeyManager {
     }
 
     // No hydration available, fetch fresh
-    return _fetchFreshPubkeys(asset, walletId);
+    final pubkeys = await _fetchFreshPubkeys(asset, walletContext);
+    await _requireWalletContextCurrent(walletContext);
+    return pubkeys;
+  }
+
+  @override
+  Future<AssetPubkeys> getFreshPubkeys(Asset asset) async {
+    if (_isDisposed) {
+      throw StateError('PubkeyManager has been disposed');
+    }
+
+    final walletContext = await _captureWalletContext();
+    await _requireWalletContextCurrent(walletContext);
+    await retry(() => _activationCoordinator.activateAsset(asset));
+    await _requireWalletContextCurrent(walletContext);
+    final strategy = await _resolvePubkeyStrategy(asset);
+    await _requireWalletContextCurrent(walletContext);
+    final pubkeys = await strategy.getPubkeys(asset.id, _client);
+    await _requireWalletContextCurrent(walletContext);
+    return pubkeys;
+  }
+
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
+  }
+
+  Future<WalletOperationContext> _captureWalletContext() async {
+    final user = await _auth.currentUser;
+    if (user == null) throw AuthException.notSignedIn();
+
+    final currentWalletId = _currentWalletId;
+    late final WalletId operationWalletId;
+    if (currentWalletId == null) {
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      operationWalletId = preferEnrichedWalletIdentity(
+        currentWalletId,
+        user.walletId,
+      );
+      _currentWalletId = operationWalletId;
+    } else {
+      // Auth streams are asynchronous. Invalidate proactively so a caller
+      // cannot observe the prior wallet's cache before the event arrives.
+      _walletGeneration++;
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+      await _resetState();
+    }
+
+    return WalletOperationContext(
+      walletId: operationWalletId,
+      generation: _walletGeneration,
+    );
+  }
+
+  bool _isWalletContextCurrentSync(WalletOperationContext context) {
+    final current = _currentWalletId;
+    return !_isDisposed &&
+        context.generation == _walletGeneration &&
+        current != null &&
+        isSameStableWallet(context.walletId, current);
+  }
+
+  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
+    if (!_isWalletContextCurrentSync(context)) return false;
+    final currentUser = await _auth.currentUser;
+    return currentUser != null &&
+        _isWalletContextCurrentSync(context) &&
+        isSameStableWallet(context.walletId, currentUser.walletId);
+  }
+
+  Future<void> _requireWalletContextCurrent(
+    WalletOperationContext context,
+  ) async {
+    if (await _isWalletContextCurrent(context)) return;
+    throw const WalletChangedDisconnectException(
+      'Wallet changed while fetching pubkeys',
+    );
   }
 
   /// Create a new pubkey for an asset if supported
@@ -173,38 +265,41 @@ class PubkeyManager implements IPubkeyManager {
   // Perform a fresh network fetch for pubkeys, deduplicated per asset
   Future<AssetPubkeys> _fetchFreshPubkeys(
     Asset asset,
-    WalletId walletId,
+    WalletOperationContext walletContext,
   ) async {
-    final existing = _inFlightPubkeyRequests[asset.id];
+    final inFlightKey = (asset.id, walletContext.generation);
+    final existing = _inFlightPubkeyRequests[inFlightKey];
     if (existing != null) return existing;
 
     final future = () async {
+      await _requireWalletContextCurrent(walletContext);
       await retry(() => _activationCoordinator.activateAsset(asset));
+      await _requireWalletContextCurrent(walletContext);
       final strategy = await _resolvePubkeyStrategy(asset);
+      await _requireWalletContextCurrent(walletContext);
       await _scanForNewHdAddressesIfNeeded(
-        walletId: walletId,
+        walletContext: walletContext,
         asset: asset,
         strategy: strategy,
       );
+      await _requireWalletContextCurrent(walletContext);
       final raw = await strategy.getPubkeys(asset.id, _client);
+      await _requireWalletContextCurrent(walletContext);
       final everFunded = _observeFundedAddresses(asset.id, raw.keys);
-      final pubkeys = filterGaslessPhantomAddresses(
-        asset,
-        raw,
-        everFunded: everFunded,
-      );
-      _pubkeysCache[asset.id] = pubkeys;
-      // `savePubkeys` replaces the record wholesale, so persisting the
-      // filtered list also purges previously-cached phantom addresses.
-      _persistPubkeysForWallet(walletId, asset, pubkeys, everFunded).ignore();
-      return pubkeys;
+      // Preserve KDF's complete typed GasFree-address response in the generic
+      // SDK; products may apply a narrower address policy at their boundary.
+      _pubkeysCache[asset.id] = raw;
+      _persistPubkeysForWallet(walletContext, asset, raw, everFunded).ignore();
+      return raw;
     }();
 
-    _inFlightPubkeyRequests[asset.id] = future;
+    _inFlightPubkeyRequests[inFlightKey] = future;
     try {
       return await future;
     } finally {
-      _inFlightPubkeyRequests.remove(asset.id);
+      if (identical(_inFlightPubkeyRequests[inFlightKey], future)) {
+        _inFlightPubkeyRequests.remove(inFlightKey)?.ignore();
+      }
     }
   }
 
@@ -219,16 +314,25 @@ class PubkeyManager implements IPubkeyManager {
       throw StateError('PubkeyManager has been disposed');
     }
 
-    // Emit last known pubkeys immediately if available
+    final walletContext = await _captureWalletContext();
+
+    // Emit last known pubkeys only after confirming who owns the cache.
     final lastKnown = _pubkeysCache[asset.id];
     if (lastKnown != null) {
+      await _requireWalletContextCurrent(walletContext);
       yield lastKnown;
+      await _requireWalletContextCurrent(walletContext);
     }
 
-    final controller = _pubkeysControllers.putIfAbsent(
-      asset.id,
-      () => StreamController<AssetPubkeys>.broadcast(
+    await _requireWalletContextCurrent(walletContext);
+    final controller = _pubkeysControllers.putIfAbsent(asset.id, () {
+      late final StreamController<AssetPubkeys> createdController;
+      createdController = StreamController<AssetPubkeys>.broadcast(
         onListen: () {
+          if (!_isWalletContextCurrentSync(walletContext) ||
+              !identical(_pubkeysControllers[asset.id], createdController)) {
+            return;
+          }
           _logger.fine(
             'onListen: ${asset.id.name}, activateIfNeeded: $activateIfNeeded',
           );
@@ -236,11 +340,15 @@ class PubkeyManager implements IPubkeyManager {
         },
         onCancel: () {
           _logger.fine('onCancel: ${asset.id.name}');
-          _stopWatchingPubkeys(asset.id);
+          if (!identical(_pubkeysControllers[asset.id], createdController)) {
+            return;
+          }
+          _stopWatchingPubkeys(asset.id, expectedController: createdController);
           _watchedAssets.remove(asset.id);
         },
-      ),
-    );
+      );
+      return createdController;
+    });
     // Remember the Asset so we can restart the watcher after a reset
     _watchedAssets[asset.id] = asset;
 
@@ -251,6 +359,18 @@ class PubkeyManager implements IPubkeyManager {
   AssetPubkeys? lastKnown(AssetId assetId) {
     if (_isDisposed) {
       throw StateError('PubkeyManager has been disposed');
+    }
+    return _pubkeysCache[assetId];
+  }
+
+  /// Returns cached pubkeys only when [walletId] owns the active generation.
+  AssetPubkeys? lastKnownForWallet(AssetId assetId, WalletId walletId) {
+    if (_isDisposed) {
+      throw StateError('PubkeyManager has been disposed');
+    }
+    final current = _currentWalletId;
+    if (current == null || !isSameStableWallet(current, walletId)) {
+      return null;
     }
     return _pubkeysCache[assetId];
   }
@@ -272,14 +392,15 @@ class PubkeyManager implements IPubkeyManager {
 
   // Wallet-stable variants to avoid cross-wallet contamination during async ops
   Future<void> _persistPubkeysForWallet(
-    WalletId walletId,
+    WalletOperationContext walletContext,
     Asset asset,
     AssetPubkeys pubkeys, [
     Set<String> everFundedAddresses = const {},
   ]) async {
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     try {
       await _storage.savePubkeys(
-        walletId,
+        walletContext.walletId,
         asset.id.id,
         pubkeys,
         everFundedAddresses: everFundedAddresses,
@@ -290,11 +411,11 @@ class PubkeyManager implements IPubkeyManager {
   }
 
   Future<AssetPubkeys?> _hydrateFromStorageForWallet(
-    WalletId walletId,
+    WalletOperationContext walletContext,
     Asset asset,
   ) async {
     try {
-      final map = await _storage.listForWallet(walletId);
+      final map = await _storage.listForWallet(walletContext.walletId);
       final raw = map[asset.id.id];
       if (raw == null) return null;
 
@@ -328,20 +449,20 @@ class PubkeyManager implements IPubkeyManager {
       final sync =
           SyncStatusEnum.tryParse(syncString) ?? SyncStatusEnum.success;
 
-      final everFunded = _everFundedAddresses.putIfAbsent(asset.id, () => {})
-        ..addAll(storedEverFunded);
+      await _requireWalletContextCurrent(walletContext);
+      _everFundedAddresses
+          .putIfAbsent(asset.id, () => {})
+          .addAll(storedEverFunded);
       _observeFundedAddresses(asset.id, keys);
 
-      return filterGaslessPhantomAddresses(
-        asset,
-        AssetPubkeys(
-          assetId: asset.id,
-          keys: keys,
-          availableAddressesCount: available,
-          syncStatus: sync,
-        ),
-        everFunded: everFunded,
+      return AssetPubkeys(
+        assetId: asset.id,
+        keys: keys,
+        availableAddressesCount: available,
+        syncStatus: sync,
       );
+    } on WalletChangedDisconnectException {
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -352,43 +473,57 @@ class PubkeyManager implements IPubkeyManager {
     if (controller == null || _isDisposed) return;
 
     // Cancel any existing watcher for this asset
-    await _activeWatchers[asset.id]?.cancel();
-    _activeWatchers.remove(asset.id);
+    final previousWatcher = _activeWatchers.remove(asset.id);
+    await previousWatcher?.cancel();
 
-    // Ensure user is authenticated
-    final user = await _auth.currentUser;
-    if (user == null) {
-      // Do not emit an error; wait for authentication changes
+    final WalletOperationContext walletContext;
+    try {
+      walletContext = await _captureWalletContext();
+    } on AuthException {
       _logger.fine(
         'Delaying watcher start for ${asset.id.name}: unauthenticated',
       );
       return;
     }
-    _currentWalletId = user.walletId;
+    if (controller.isClosed || !_isWalletContextCurrentSync(walletContext)) {
+      return;
+    }
+    if (!identical(_pubkeysControllers[asset.id], controller)) return;
     _logger.fine('Starting watcher for ${asset.id.name}');
 
     try {
       // Ensure activation if requested, otherwise only proceed if already active
       bool isActive = await _activationCoordinator.isAssetActive(asset.id);
+      await _requireWalletContextCurrent(walletContext);
       if (!isActive && activateIfNeeded) {
         final activationResult = await _activationCoordinator.activateAsset(
           asset,
         );
+        await _requireWalletContextCurrent(walletContext);
         isActive = activationResult.isSuccess;
       }
 
       if (isActive) {
-        // Try hydrate from persisted cache first for faster cold start
-        final walletId = _currentWalletId!;
-        final hydrated = await _hydrateFromStorageForWallet(walletId, asset);
+        // Re-emit this wallet's in-memory state to the shared controller, or
+        // hydrate persisted state when the watcher starts cold.
+        final hydrated =
+            _pubkeysCache[asset.id] ??
+            await _hydrateFromStorageForWallet(walletContext, asset);
+        await _requireWalletContextCurrent(walletContext);
         if (hydrated != null) {
           _pubkeysCache[asset.id] = hydrated;
-          if (!controller.isClosed) controller.add(hydrated);
+          if (!controller.isClosed &&
+              _isWalletContextCurrentSync(walletContext)) {
+            controller.add(hydrated);
+          }
         }
 
-        final first = await _fetchFreshPubkeys(asset, walletId);
+        final first = await _fetchFreshPubkeys(asset, walletContext);
+        await _requireWalletContextCurrent(walletContext);
         _pubkeysCache[asset.id] = first;
-        if (!controller.isClosed && (hydrated == null || first != hydrated)) {
+        if (!controller.isClosed &&
+            _isWalletContextCurrentSync(walletContext) &&
+            (hydrated == null || first != hydrated)) {
           controller.add(first);
         }
         _logger.fine('Emitted initial pubkeys for ${asset.id.name}');
@@ -396,14 +531,10 @@ class PubkeyManager implements IPubkeyManager {
 
       // Periodic polling for pubkeys updates
       final periodicStream = Stream<void>.periodic(_defaultPollingInterval);
-      _activeWatchers[asset.id] = periodicStream
+      late final StreamSubscription<dynamic> subscription;
+      subscription = periodicStream
           .asyncMap<AssetPubkeys?>((_) async {
-            if (_isDisposed) return null;
-
-            // Check that user is still authenticated and wallet hasn't changed
-            final currentUser = await _auth.currentUser;
-            if (currentUser == null ||
-                currentUser.walletId != _currentWalletId) {
+            if (!await _isWalletContextCurrent(walletContext)) {
               return null;
             }
 
@@ -411,36 +542,55 @@ class PubkeyManager implements IPubkeyManager {
               bool active = await _activationCoordinator.isAssetActive(
                 asset.id,
               );
+              if (!await _isWalletContextCurrent(walletContext)) return null;
               if (!active && activateIfNeeded) {
                 final activationResult = await _activationCoordinator
                     .activateAsset(asset);
+                if (!await _isWalletContextCurrent(walletContext)) return null;
                 active = activationResult.isSuccess;
               }
               if (active) {
-                final pubkeys = await _fetchFreshPubkeys(
-                  asset,
-                  currentUser.walletId,
-                );
+                final pubkeys = await _fetchFreshPubkeys(asset, walletContext);
+                if (!await _isWalletContextCurrent(walletContext)) return null;
                 _pubkeysCache[asset.id] = pubkeys;
                 return pubkeys;
               }
             } catch (_) {
               // Swallow transient errors; continue with last known state
             }
+            if (!_isWalletContextCurrentSync(walletContext)) return null;
             return _pubkeysCache[asset.id];
           })
           .listen(
             (AssetPubkeys? pubkeys) {
-              if (pubkeys != null && !controller.isClosed) {
+              if (pubkeys != null &&
+                  !controller.isClosed &&
+                  _isWalletContextCurrentSync(walletContext)) {
                 controller.add(pubkeys);
               }
             },
             onError: (Object error) {
-              if (!controller.isClosed) controller.addError(error);
+              if (!controller.isClosed &&
+                  _isWalletContextCurrentSync(walletContext)) {
+                controller.addError(error);
+              }
             },
-            onDone: () => _stopWatchingPubkeys(asset.id),
+            onDone: () =>
+                _stopWatchingPubkeys(asset.id, expected: subscription),
             cancelOnError: false,
           );
+      if (_isWalletContextCurrentSync(walletContext) && !controller.isClosed) {
+        if (identical(_pubkeysControllers[asset.id], controller)) {
+          _activeWatchers[asset.id] = subscription;
+        } else {
+          await subscription.cancel();
+        }
+      } else {
+        await subscription.cancel();
+      }
+    } on WalletChangedDisconnectException {
+      // The auth-change reset owns disconnection and cleanup.
+      return;
     } catch (e) {
       if (!controller.isClosed) {
         if (e is ActivationFailedException) {
@@ -460,8 +610,17 @@ class PubkeyManager implements IPubkeyManager {
     }
   }
 
-  void _stopWatchingPubkeys(AssetId assetId) {
+  void _stopWatchingPubkeys(
+    AssetId assetId, {
+    StreamSubscription<dynamic>? expected,
+    StreamController<AssetPubkeys>? expectedController,
+  }) {
+    if (expectedController != null &&
+        !identical(_pubkeysControllers[assetId], expectedController)) {
+      return;
+    }
     final watcher = _activeWatchers[assetId];
+    if (expected != null && !identical(watcher, expected)) return;
     if (watcher != null) {
       watcher.cancel();
       _activeWatchers.remove(assetId);
@@ -473,15 +632,16 @@ class PubkeyManager implements IPubkeyManager {
   Future<void> precachePubkeys(Asset asset) async {
     if (_isDisposed) return;
 
-    final user = await _auth.currentUser;
-    if (user == null) return;
-
     try {
+      final walletContext = await _captureWalletContext();
       final pubkeys = await getPubkeys(asset);
+      await _requireWalletContextCurrent(walletContext);
       _pubkeysCache[asset.id] = pubkeys;
 
       final controller = _pubkeysControllers[asset.id];
-      if (controller != null && !controller.isClosed) {
+      if (controller != null &&
+          !controller.isClosed &&
+          _isWalletContextCurrentSync(walletContext)) {
         controller.add(pubkeys);
       }
     } catch (_) {
@@ -495,14 +655,26 @@ class PubkeyManager implements IPubkeyManager {
     _logger.fine(
       'Auth state changed. wallet: $_currentWalletId -> $newWalletId',
     );
-    if (_currentWalletId != newWalletId) {
-      await _resetState();
-      _currentWalletId = newWalletId;
+    final currentWalletId = _currentWalletId;
+    if (_sameOptionalWallet(currentWalletId, newWalletId)) {
+      if (currentWalletId != null && newWalletId != null) {
+        _currentWalletId = preferEnrichedWalletIdentity(
+          currentWalletId,
+          newWalletId,
+        );
+      }
+      return;
     }
+
+    // Invalidate before awaiting cleanup so an already-completing RPC cannot
+    // commit into the next wallet's cache during the reset window.
+    _walletGeneration++;
+    _currentWalletId = newWalletId;
+    await _resetState();
   }
 
   Future<void> _scanForNewHdAddressesIfNeeded({
-    required WalletId walletId,
+    required WalletOperationContext walletContext,
     required Asset asset,
     required PubkeyStrategy strategy,
   }) async {
@@ -510,7 +682,7 @@ class PubkeyManager implements IPubkeyManager {
       return;
     }
 
-    final scanKey = '${walletId.name}:${asset.id.id}';
+    final scanKey = '${walletContext.walletId.compoundId}:${asset.id.id}';
     final retryAfter = _hdAddressScanRetryAfter[scanKey];
     if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
       return;
@@ -518,8 +690,14 @@ class PubkeyManager implements IPubkeyManager {
 
     try {
       await strategy.scanForNewAddresses(asset.id, _client);
+      await _requireWalletContextCurrent(walletContext);
       _hdAddressScanRetryAfter.remove(scanKey);
     } catch (error, stackTrace) {
+      if (!await _isWalletContextCurrent(walletContext)) {
+        throw const WalletChangedDisconnectException(
+          'Wallet changed while scanning for pubkeys',
+        );
+      }
       _hdAddressScanRetryAfter[scanKey] = DateTime.now().add(
         _hdAddressScanRetryCooldown,
       );
@@ -543,10 +721,25 @@ class PubkeyManager implements IPubkeyManager {
     _logger.fine('Resetting state');
     final stopwatch = Stopwatch()..start();
 
+    // Clear wallet-owned values before awaiting cancellation. A stale
+    // operation keeps its generation token and cannot repopulate these maps.
+    _pubkeysCache.clear();
+    _everFundedAddresses.clear();
+    _inFlightPubkeyRequests.clear();
+    _hdAddressScanRetryAfter.clear();
+    _watchedAssets.clear();
+
     // Cancel all active watchers concurrently
     final List<StreamSubscription<dynamic>> watcherSubs = _activeWatchers.values
         .toList();
     _activeWatchers.clear();
+
+    // Snapshot controllers before the first await. A newer wallet may create
+    // its own controllers while the old subscriptions are being cancelled.
+    final List<StreamController<AssetPubkeys>> controllers = _pubkeysControllers
+        .values
+        .toList();
+    _pubkeysControllers.clear();
 
     final List<Future<void>> subscriptionCancelFutures = <Future<void>>[];
     for (final subscription in watcherSubs) {
@@ -562,11 +755,6 @@ class PubkeyManager implements IPubkeyManager {
     }
 
     // Close all controllers concurrently
-    final List<StreamController<AssetPubkeys>> controllers = _pubkeysControllers
-        .values
-        .toList();
-    _pubkeysControllers.clear();
-
     final List<Future<void>> controllerCloseFutures = <Future<void>>[];
     for (final controller in controllers) {
       if (!controller.isClosed) {
@@ -589,12 +777,6 @@ class PubkeyManager implements IPubkeyManager {
       await Future.wait(controllerCloseFutures);
     }
 
-    // Clear caches
-    _pubkeysCache.clear();
-    _everFundedAddresses.clear();
-    _inFlightPubkeyRequests.clear();
-    _hdAddressScanRetryAfter.clear();
-
     stopwatch.stop();
     _logger.fine(
       'State reset completed in ${stopwatch.elapsedMilliseconds}ms '
@@ -607,6 +789,12 @@ class PubkeyManager implements IPubkeyManager {
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
+    _walletGeneration++;
+    _currentWalletId = null;
+    _pubkeysCache.clear();
+    _everFundedAddresses.clear();
+    _inFlightPubkeyRequests.clear();
+    _hdAddressScanRetryAfter.clear();
 
     // Collect all async cleanup operations and run them concurrently.
     final List<Future<void>> pending = <Future<void>>[];
@@ -649,113 +837,7 @@ class PubkeyManager implements IPubkeyManager {
       _logger.warning('Error during PubkeyManager disposal', error, stackTrace);
     }
 
-    _pubkeysCache.clear();
-    _everFundedAddresses.clear();
-    _hdAddressScanRetryAfter.clear();
     _watchedAssets.clear();
-    _currentWalletId = null;
     _logger.fine('Disposed');
   }
-}
-
-/// Drops never-used phantom addresses for TRON gasless assets.
-///
-/// Gasless assets are single-address by design: the custody model (headline
-/// balance, `gasless::account_status`, gasless sends) only covers the enabled
-/// (first-derived) address, and KDF's persistent HD storage keeps re-reporting
-/// every address ever created via `get_new_address` — including never-used
-/// ones from before the wallet gated address creation. Filtering at this
-/// choke point keeps every consumer coherent (receive list, withdraw sources,
-/// transaction-history address groups, stranded-funds notice).
-///
-/// Kept: the enabled address (always), any address currently holding funds
-/// (stranded balances stay visible and consolidatable), and any address in
-/// [everFunded] — ever observed funded, persisted with the pubkeys — so a
-/// used-then-emptied address keeps its transaction history reachable. Only
-/// addresses with no observed use are dropped; they are seed-derivable and
-/// reappear on the next fetch if they ever receive funds (KDF keeps
-/// reporting them; the filter re-admits them on balance).
-///
-/// Applied to both fresh fetches and cache hydration; `savePubkeys` replaces
-/// records wholesale, so the persisted cache self-purges on the first
-/// filtered fetch. Note for SDK consumers: an address created via
-/// `get_new_address` for a gasless asset is hidden until funded — this
-/// wallet gates TRON address creation in the UI for exactly that reason.
-AssetPubkeys filterGaslessPhantomAddresses(
-  Asset asset,
-  AssetPubkeys pubkeys, {
-  Set<String> everFunded = const {},
-}) {
-  final protocol = asset.protocol;
-  if (protocol is! TrxProtocol && protocol is! Trc20Protocol) return pubkeys;
-  if (pubkeys.keys.length <= 1) return pubkeys;
-  // gasfreeAddress is only populated when a gasless provider is configured;
-  // without one, TRON multi-address behaves like any other HD asset.
-  final isGasless = pubkeys.keys.any(
-    (key) => (key.gasfreeAddress ?? '').isNotEmpty,
-  );
-  if (!isGasless) return pubkeys;
-
-  final canonical = pubkeys.keys
-      .where(
-        (key) =>
-            key.derivationPath ==
-            GaslessCapabilityRegistry.canonicalPrimaryDerivationPath,
-      )
-      .singleOrNull;
-  if (canonical == null) {
-    // Ambiguous legacy metadata must not expose a custody receive address.
-    return AssetPubkeys(
-      assetId: pubkeys.assetId,
-      keys: [
-        for (final key in pubkeys.keys)
-          PubkeyInfo(
-            address: key.address,
-            derivationPath: key.derivationPath,
-            chain: key.chain,
-            balance: key.balance,
-            coinTicker: asset.id.id,
-            gasfreeAddress: null,
-            name: key.name,
-          ),
-      ],
-      availableAddressesCount: pubkeys.availableAddressesCount,
-      syncStatus: pubkeys.syncStatus,
-    );
-  }
-  final keys = [
-    for (final key in pubkeys.keys)
-      if (key.address == canonical.address ||
-          key.balance.hasValue ||
-          everFunded.contains(key.address))
-        PubkeyInfo(
-          address: key.address,
-          derivationPath: key.derivationPath,
-          chain: key.chain,
-          balance: key.balance,
-          coinTicker: asset.id.id,
-          // Only the canonical primary may advertise a GasFree custody
-          // receive address. Retained secondary keys are Standard/recovery
-          // sources even if a legacy KDF cache attached a derived value.
-          gasfreeAddress: key.address == canonical.address
-              ? key.gasfreeAddress
-              : null,
-          name: key.name,
-        ),
-  ];
-  final secondaryCustodyWasRemoved = pubkeys.keys.any(
-    (key) =>
-        key.address != canonical.address &&
-        (key.gasfreeAddress ?? '').isNotEmpty,
-  );
-  if (keys.length == pubkeys.keys.length && !secondaryCustodyWasRemoved) {
-    return pubkeys;
-  }
-
-  return AssetPubkeys(
-    assetId: pubkeys.assetId,
-    keys: keys,
-    availableAddressesCount: pubkeys.availableAddressesCount,
-    syncStatus: pubkeys.syncStatus,
-  );
 }

@@ -1,12 +1,12 @@
 import 'package:hive_ce/hive.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/hive_pubkeys_adapters.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Storage interface for persisting pubkeys between sessions
 abstract class PubkeysStorage {
-  /// [everFundedAddresses] flags addresses ever observed holding funds, so
-  /// the TRON gasless phantom-address filter can keep used-then-emptied
-  /// addresses across restarts.
+  /// [everFundedAddresses] preserves the historical funded-address metadata
+  /// in the existing wallet-scoped storage schema.
   Future<void> savePubkeys(
     WalletId walletId,
     String assetTicker,
@@ -18,8 +18,11 @@ abstract class PubkeysStorage {
   Future<Map<String, Map<String, dynamic>>> listForWallet(WalletId walletId);
 }
 
+/// Hive-backed pubkey cache isolated by complete wallet authentication context.
 class HivePubkeysStorage implements PubkeysStorage {
-  // v4 uses new adapter ids and migrates every legacy address conservatively.
+  // v4 uses new adapter ids. Authentication-scoped keys coexist with legacy
+  // compound-id keys so legacy funding metadata can be retained only after a
+  // fresh KDF response confirms that an address belongs to this exact context.
   static const _boxName = 'pubkeys_cache_v4';
   Box<HiveAssetPubkeysRecord>? _box;
   bool _migrationComplete = false;
@@ -99,8 +102,49 @@ class HivePubkeysStorage implements PubkeysStorage {
     );
   }
 
+  String _prefixFor(WalletId walletId) =>
+      '${walletStorageNamespace(walletId)}|';
+
   String _keyFor(WalletId walletId, String assetTicker) =>
+      '${_prefixFor(walletId)}$assetTicker';
+
+  String _legacyKeyFor(WalletId walletId, String assetTicker) =>
       '${walletId.compoundId}|$assetTicker';
+
+  HiveAssetPubkeysRecord _retainConfirmedLegacyFunding(
+    HiveAssetPubkeysRecord fresh, {
+    required HiveAssetPubkeysRecord? current,
+    required HiveAssetPubkeysRecord? legacy,
+  }) {
+    final fundedAddresses = <String>{
+      if (current != null)
+        for (final key in current.keys)
+          if (key.everFunded) key.address,
+      if (legacy != null)
+        for (final key in legacy.keys)
+          if (key.everFunded) key.address,
+    };
+    if (fundedAddresses.isEmpty) return fresh;
+
+    return HiveAssetPubkeysRecord(
+      available: fresh.available,
+      sync: fresh.sync,
+      keys: fresh.keys
+          .map(
+            (key) => HiveStoredPubkey(
+              address: key.address,
+              derivationPath: key.derivationPath,
+              chain: key.chain,
+              spendable: key.spendable,
+              unspendable: key.unspendable,
+              gasfreeAddress: key.gasfreeAddress,
+              everFunded:
+                  key.everFunded || fundedAddresses.contains(key.address),
+            ),
+          )
+          .toList(),
+    );
+  }
 
   @override
   Future<void> savePubkeys(
@@ -114,7 +158,13 @@ class HivePubkeysStorage implements PubkeysStorage {
       pubkeys,
       everFundedAddresses: everFundedAddresses,
     );
-    await box.put(_keyFor(walletId, assetTicker), record);
+    final scopedKey = _keyFor(walletId, assetTicker);
+    final scopedRecord = _retainConfirmedLegacyFunding(
+      record,
+      current: box.get(scopedKey),
+      legacy: box.get(_legacyKeyFor(walletId, assetTicker)),
+    );
+    await box.put(scopedKey, scopedRecord);
   }
 
   @override
@@ -122,7 +172,7 @@ class HivePubkeysStorage implements PubkeysStorage {
     WalletId walletId,
   ) async {
     final box = await _openBox();
-    final prefix = '${walletId.compoundId}|';
+    final prefix = _prefixFor(walletId);
     final result = <String, Map<String, dynamic>>{};
     for (final key in box.keys.whereType<String>()) {
       if (!key.startsWith(prefix)) continue;

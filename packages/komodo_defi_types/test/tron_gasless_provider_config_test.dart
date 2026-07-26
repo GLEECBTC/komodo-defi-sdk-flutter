@@ -113,13 +113,16 @@ void main() {
       expect(config.validate, returnsNormally);
     });
 
-    test('requires non-empty direct credentials', () {
+    test('does not add credential constraints beyond KDF strings', () {
       const config = TronGaslessProviderConfig(
         baseUrl: 'https://provider.example',
-        service: GaslessServiceGasFree(apiKey: '', apiSecret: 'secret'),
+        service: GaslessServiceGasFree(apiKey: '', apiSecret: ''),
       );
 
-      expect(config.validate, throwsArgumentError);
+      expect(config.validate, returnsNormally);
+      expect(config.toJson()['service'], {
+        'gas_free': {'api_key': '', 'api_secret': ''},
+      });
     });
   });
 }

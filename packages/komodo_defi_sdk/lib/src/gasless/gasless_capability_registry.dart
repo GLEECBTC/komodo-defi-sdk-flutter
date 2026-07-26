@@ -4,7 +4,7 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
-enum GaslessWalletType { softwareHd, softwareIguana }
+enum GaslessWalletType { softwareHd, softwareIguana, hardwareHd }
 
 /// Wallet and asset identity associated with a KDF GasFree account status.
 ///
@@ -65,15 +65,9 @@ class GaslessCapabilityIdentity {
 /// KDF's account-status enum is authoritative; this class adds wallet-session,
 /// activated-asset, configured-provider, and stale-request guards.
 class GaslessCapabilityRegistry {
-  GaslessCapabilityRegistry({
-    required Iterable<String> configuredAssetIds,
-    String? pinnedProviderAddress,
-  }) : _configuredAssetIds = Set.unmodifiable(configuredAssetIds),
-       _pinnedProviderAddress = _nonEmpty(pinnedProviderAddress);
+  GaslessCapabilityRegistry({String? pinnedProviderAddress})
+    : _pinnedProviderAddress = _nonEmpty(pinnedProviderAddress);
 
-  static const canonicalPrimaryDerivationPath = "m/44'/195'/0'/0/0";
-
-  final Set<String> _configuredAssetIds;
   final String? _pinnedProviderAddress;
   final Map<AssetId, GaslessCapabilityIdentity> _identities = {};
   final Map<AssetId, GaslessAccountStatusResponse> _statuses = {};
@@ -81,8 +75,6 @@ class GaslessCapabilityRegistry {
   final Map<AssetId, GaslessCapability> _states = {};
   String? _boundWalletPubkeyHash;
   int _sessionGeneration = 0;
-
-  Set<String> get configuredAssetIds => _configuredAssetIds;
 
   /// Monotonically changes whenever wallet-scoped capability state is reset.
   int get sessionGeneration => _sessionGeneration;
@@ -98,18 +90,14 @@ class GaslessCapabilityRegistry {
 
   /// Whether this activated asset is opted into KDF's GasFree token config.
   ///
-  /// Eligibility comes from the concrete TRC20 asset configuration (or the
-  /// caller's explicit rollout set), rather than an SDK-owned ticker/contract
-  /// registry. Product-specific network and token allowlists belong above the
-  /// generic SDK boundary.
+  /// Eligibility comes only from the concrete TRC20 asset configuration.
+  /// Product-specific network and token allowlists belong above the generic
+  /// SDK boundary and must amend that configuration before activation.
   bool isConfigured(Asset asset) {
     final protocol = asset.protocol;
     if (protocol is! Trc20Protocol) return false;
     final gasless = protocol.config.valueOrNull<JsonMap>('gasless');
-    if (gasless != null) {
-      return gasless.valueOrNull<bool>('enabled') == true;
-    }
-    return _configuredAssetIds.contains(asset.id.id);
+    return gasless?.valueOrNull<bool>('enabled') == true;
   }
 
   bool isReady(AssetId assetId) =>
@@ -293,35 +281,27 @@ class GaslessCapabilityRegistry {
       markSecurityMismatch(assetId);
       return true;
     }
-    final errorType = switch (error) {
-      GaslessAccountStatusException(:final type) => type.wireValue,
-      GeneralErrorResponse(:final errorType) => errorType,
-      MmRpcException(:final errorType) => errorType,
-      _ => null,
-    };
-    if (errorType == null) return false;
+    if (error is! GaslessAccountStatusException) return false;
 
-    switch (errorType) {
-      case 'ProviderIdentityMismatch':
-      case 'GasfreeAddressMismatch':
-      case 'TokenDecimalMismatch':
+    switch (error.type) {
+      case GaslessAccountStatusErrorType.providerIdentityMismatch:
+      case GaslessAccountStatusErrorType.gasfreeAddressMismatch:
+      case GaslessAccountStatusErrorType.tokenDecimalMismatch:
         markSecurityMismatch(assetId);
         return true;
-      case 'CoinNotSupported':
-      case 'NotEthCoin':
+      case GaslessAccountStatusErrorType.coinNotSupported:
+      case GaslessAccountStatusErrorType.notEthCoin:
         markUnsupported(assetId);
         return true;
-      case 'GaslessNotConfigured':
-      case 'CoinNotFound':
+      case GaslessAccountStatusErrorType.gaslessNotConfigured:
+      case GaslessAccountStatusErrorType.coinNotFound:
         markDisabled(assetId);
         return true;
-      case 'TronRpcUnavailable':
-      case 'ProviderError':
-      case 'InternalError':
+      case GaslessAccountStatusErrorType.tronRpcUnavailable:
+      case GaslessAccountStatusErrorType.providerError:
+      case GaslessAccountStatusErrorType.internalError:
         markTemporarilyUnavailable(assetId);
         return true;
-      default:
-        return false;
     }
   }
 
@@ -421,10 +401,13 @@ class GaslessCapabilityRegistry {
           'protocol_data',
           'contract_address',
         );
-    final canonicalWallet = switch (identity.walletType) {
-      GaslessWalletType.softwareHd =>
-        identity.derivationPath == canonicalPrimaryDerivationPath,
+    final supportedWallet = switch (identity.walletType) {
+      // Retain the activated asset's configured HD base path verbatim. The
+      // concrete withdrawal source is selected later and may use any KDF HD
+      // selector; the generic SDK must not resolve it to an app-specific path.
+      GaslessWalletType.softwareHd => identity.derivationPath.trim().isNotEmpty,
       GaslessWalletType.softwareIguana => identity.derivationPath.isEmpty,
+      GaslessWalletType.hardwareHd => identity.derivationPath.trim().isNotEmpty,
     };
     return identity.assetId == asset.id &&
         identity.platform == protocol.platform &&
@@ -432,7 +415,7 @@ class GaslessCapabilityRegistry {
         identity.walletPubkeyHash.trim().isNotEmpty &&
         (_boundWalletPubkeyHash == null ||
             identity.walletPubkeyHash.trim() == _boundWalletPubkeyHash) &&
-        canonicalWallet;
+        supportedWallet;
   }
 
   bool _hasSameActivationIdentity(

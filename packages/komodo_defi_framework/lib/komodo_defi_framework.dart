@@ -47,18 +47,19 @@ class KomodoDefiFramework implements ApiClient {
     return KomodoDefiFramework._(
       hostConfig: hostConfig,
       externalLogger: externalLogger,
+      kdfOperations: kdfOperations,
       // client: KdfApiClient(this, rpcPassword: hostConfig.rpcPassword),
-    ).._kdfOperations = kdfOperations;
+    );
   }
   KomodoDefiFramework._({
     required IKdfHostConfig hostConfig,
     void Function(String)? externalLogger,
+    IKdfOperations? kdfOperations,
     // required KdfApiClient? client,
   }) : _hostConfig = hostConfig {
-    _kdfOperations = createKdfOperations(
-      hostConfig: hostConfig,
-      logCallback: _log,
-    );
+    _kdfOperations =
+        kdfOperations ??
+        createKdfOperations(hostConfig: hostConfig, logCallback: _log);
 
     if (externalLogger != null) {
       _initLogStream(externalLogger);

@@ -166,6 +166,40 @@ void main() {
     isBip39Seed: false,
     metadata: {'isImported': true},
   );
+  const nameOnlyWallet = KdfUser(
+    walletId: WalletId(
+      name: 'shared-name',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+    ),
+    isBip39Seed: false,
+    metadata: {'isImported': true},
+  );
+  const hashAWallet = KdfUser(
+    walletId: WalletId(
+      name: 'shared-name',
+      pubkeyHash: 'hash-a',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+    ),
+    isBip39Seed: false,
+    metadata: {'isImported': true},
+  );
+  const hashBWallet = KdfUser(
+    walletId: WalletId(
+      name: 'shared-name',
+      pubkeyHash: 'hash-b',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+    ),
+    isBip39Seed: false,
+    metadata: {'isImported': true},
+  );
+  const upgradedWallet = KdfUser(
+    walletId: WalletId(
+      name: 'upgraded-wallet',
+      pubkeyHash: 'upgraded-wallet-hash',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+    ),
+    isBip39Seed: false,
+  );
 
   test('wallet switch cannot store wallet A history under wallet B', () async {
     final client = _MockApiClient();
@@ -220,4 +254,115 @@ void main() {
     );
     expect(storage.storedWallets, isEmpty);
   });
+
+  test(
+    'auth enrichment makes a later same-name hash reject stale history',
+    () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final storage = _RecordingStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+      final strategyResponse = Completer<MyTxHistoryResponse>();
+      KdfUser? currentUser = nameOnlyWallet;
+      final asset = _asset();
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(
+        () => assetHistory.getWalletAssets(nameOnlyWallet.walletId),
+      ).thenAnswer((_) async => {'ATOM'});
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [_BlockingStrategy(strategyResponse)],
+      );
+      addTearDown(() async {
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      final pending = manager.getTransactionHistory(asset);
+      await Future<void>.delayed(Duration.zero);
+
+      currentUser = hashAWallet;
+      authChanges.add(hashAWallet);
+      currentUser = hashBWallet;
+      authChanges.add(hashBWallet);
+      strategyResponse.complete(_historyResponse());
+
+      await expectLater(
+        pending,
+        throwsA(isA<WalletChangedDisconnectException>()),
+      );
+      expect(storage.storedWallets, isEmpty);
+    },
+  );
+
+  test(
+    'ambiguous legacy history disables the new-wallet empty shortcut',
+    () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final storage = _RecordingStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast();
+      final strategyResponse = Completer<MyTxHistoryResponse>()
+        ..complete(_historyResponse());
+      final asset = _asset();
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => upgradedWallet);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(
+        () => assetHistory.getWalletAssets(upgradedWallet.walletId),
+      ).thenAnswer((_) async => {});
+      when(
+        () => assetHistory.hasAmbiguousLegacyHistory(upgradedWallet.walletId),
+      ).thenAnswer((_) async => true);
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [_BlockingStrategy(strategyResponse)],
+      );
+      addTearDown(() async {
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      final page = await manager.getTransactionHistory(asset);
+
+      expect(page.total, 1);
+      expect(storage.storedWallets, [upgradedWallet.walletId]);
+    },
+  );
 }

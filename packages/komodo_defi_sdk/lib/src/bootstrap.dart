@@ -5,6 +5,7 @@ import 'dart:developer';
 import 'package:get_it/get_it.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
@@ -26,6 +27,18 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 var _activationConfigHiveInitialized = false;
+
+final class _SdkAssetConfigTransform implements CoinConfigTransform {
+  const _SdkAssetConfigTransform(this._transform);
+
+  final AssetConfigTransform _transform;
+
+  @override
+  bool needsTransform(JsonMap config) => true;
+
+  @override
+  JsonMap transform(JsonMap config) => _transform(JsonMap.unmodifiable(config));
+}
 
 Future<void> _ensureActivationConfigHiveInitialized() async {
   if (_activationConfigHiveInitialized) return;
@@ -49,7 +62,6 @@ Future<void> bootstrap({
 
   container.registerSingleton(
     GaslessCapabilityRegistry(
-      configuredAssetIds: config.tronGaslessAssetIds,
       pinnedProviderAddress: config.tronGaslessProvider?.serviceProvider,
     ),
   );
@@ -100,8 +112,22 @@ Future<void> bootstrap({
 
   // Asset history storage singletons
   container.registerLazySingleton(AssetHistoryStorage.new);
+  final assetConfigTransform = config.assetConfigTransform;
+  final coinConfigTransformer = assetConfigTransform == null
+      ? const CoinConfigTransformer()
+      : CoinConfigTransformer(
+          additionalTransforms: [
+            _SdkAssetConfigTransform(assetConfigTransform),
+          ],
+        );
   container.registerSingletonAsync<KomodoAssetsUpdateManager>(
-    () async => KomodoAssetsUpdateManager(),
+    () async => KomodoAssetsUpdateManager(
+      transformer: coinConfigTransformer,
+      // Application policy is a transient registry view. Persist only the
+      // normalized upstream config so changing provider/build policy cannot
+      // leave stale token enrollment in Hive.
+      persistenceTransformer: const CoinConfigTransformer(),
+    ),
   );
 
   // Activation configuration service (must be available before ActivationManager)
@@ -340,6 +366,7 @@ Future<void> bootstrap({
           .getAsync<EventStreamingManager>();
       final activationCoordinator = await container
           .getAsync<SharedActivationCoordinator>();
+      final pubkeyManager = await container.getAsync<PubkeyManager>();
       return WithdrawalManager(
         client,
         assetProvider,
@@ -349,6 +376,10 @@ Future<void> bootstrap({
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
         pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
         eventStreamingManager: eventStreamingManager,
+        freshSourceAddressResolver: (asset) async {
+          final pubkeys = await pubkeyManager.getFreshPubkeys(asset);
+          return {for (final key in pubkeys.keys) key.address};
+        },
         walletIdResolver: () async => (await auth.currentUser)?.walletId,
         authStateChanges: auth.watchCurrentUser(),
       );
@@ -361,6 +392,7 @@ Future<void> bootstrap({
       LegacyWithdrawalManager,
       KomodoDefiLocalAuth,
       EventStreamingManager,
+      PubkeyManager,
     ],
   );
 

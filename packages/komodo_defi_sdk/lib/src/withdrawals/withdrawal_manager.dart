@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' show log;
 import 'dart:math' as math;
 
+import 'package:collection/collection.dart';
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show
@@ -130,13 +131,14 @@ class WithdrawalManager {
     GaslessCapabilityRegistry? gaslessCapabilities,
     PendingGaslessTransferRepository? pendingGaslessTransfers,
     EventStreamingManager? eventStreamingManager,
+    Future<Set<String>> Function(Asset asset)? freshSourceAddressResolver,
     Future<WalletId?> Function()? walletIdResolver,
     Stream<KdfUser?>? authStateChanges,
   }) : _gaslessCapabilities =
-           gaslessCapabilities ??
-           GaslessCapabilityRegistry(configuredAssetIds: const <String>[]),
+           gaslessCapabilities ?? GaslessCapabilityRegistry(),
        _pendingGaslessTransfers = pendingGaslessTransfers,
        _eventStreamingManager = eventStreamingManager,
+       _freshSourceAddressResolver = freshSourceAddressResolver,
        _walletIdResolver = walletIdResolver {
     _gaslessAuthSubscription = authStateChanges?.listen(
       _handleGaslessAuthStateChanged,
@@ -156,23 +158,11 @@ class WithdrawalManager {
   /// required.
   static const int _defaultEthGasLimit = 21000;
 
-  /// KDF protocol constants from `tron.rs::Network.chain_id` and
-  /// `tron/gasfree/address.rs::controller_for_network` at bd413dc.
-  static const _canonicalTronGaslessNetworks =
-      <String, ({String chainId, String verifyingContract})>{
-        'mainnet': (
-          chainId: '728126428',
-          verifyingContract: 'TFFAMQLZybALaLb4uxHA9RBE7pxhUAjF3U',
-        ),
-        'nile': (
-          chainId: '3448148188',
-          verifyingContract: 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc',
-        ),
-        'shasta': (
-          chainId: '2494104990',
-          verifyingContract: 'TQghdCeVDA6CnuNVTUhfaAyPfTetqZWNpm',
-        ),
-      };
+  /// KDF defaults GasFree permits to five minutes when the request omits a
+  /// deadline. KDF only requires an explicitly supplied value to be positive;
+  /// the SDK must not invent a smaller provider maximum.
+  static const int _defaultGaslessDeadlineSeconds = 300;
+  static const int _gaslessDeadlineClockSkewSeconds = 5;
 
   final ApiClient _client;
   final IAssetProvider _assetProvider;
@@ -182,6 +172,7 @@ class WithdrawalManager {
   final GaslessCapabilityRegistry _gaslessCapabilities;
   final PendingGaslessTransferRepository? _pendingGaslessTransfers;
   final EventStreamingManager? _eventStreamingManager;
+  final Future<Set<String>> Function(Asset asset)? _freshSourceAddressResolver;
   final Future<WalletId?> Function()? _walletIdResolver;
   final Map<String, WalletId> _pendingGaslessWallets = <String, WalletId>{};
   final math.Random _secureRandom = math.Random.secure();
@@ -278,6 +269,8 @@ class WithdrawalManager {
 
   void _handleGaslessAuthStateChanged(KdfUser? user) {
     final nextWallet = user?.walletId;
+    final hasStableIdentity =
+        nextWallet?.pubkeyHash?.trim().isNotEmpty ?? false;
     _gaslessCapabilities.ensureWalletSession(nextWallet?.pubkeyHash);
     if (!_sameOptionalWallet(_currentWalletId, nextWallet)) {
       _walletGeneration++;
@@ -285,16 +278,24 @@ class WithdrawalManager {
       if (!_walletGenerationChanges.isClosed) {
         _walletGenerationChanges.add(_walletGeneration);
       }
+    } else if (_currentWalletId != null && nextWallet != null) {
+      _currentWalletId = preferEnrichedWalletIdentity(
+        _currentWalletId!,
+        nextWallet,
+      );
     }
     unawaited(() async {
       await stopGaslessReconciliation();
-      if (user != null) await startGaslessReconciliation();
+      // A name-only auth fallback is sufficient for Standard wallet access,
+      // but cannot decrypt or own a GasFree journal. Wait for enrichment
+      // instead of surfacing a storage failure or touching unresolved work.
+      if (hasStableIdentity) await startGaslessReconciliation();
     }());
   }
 
-  bool _sameOptionalWallet(WalletId? left, WalletId? right) {
-    if (left == null || right == null) return left == right;
-    return isSameStableWallet(left, right);
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
   }
 
   Future<WalletOperationContext> _captureWalletContext() async {
@@ -312,10 +313,26 @@ class WithdrawalManager {
       if (!_walletGenerationChanges.isClosed) {
         _walletGenerationChanges.add(_walletGeneration);
       }
+    } else {
+      _currentWalletId = preferEnrichedWalletIdentity(current, wallet);
     }
     return WalletOperationContext(
       walletId: wallet,
       generation: _walletGeneration,
+    );
+  }
+
+  void _requireVerifiedGaslessJournalIdentity(WalletId walletId) {
+    if (walletId.pubkeyHash?.trim().isNotEmpty ?? false) return;
+    throw GaslessTransferException(
+      kind: GaslessTransferErrorKind.capabilityNotReady,
+      code: GaslessTransferErrorCode.capabilityNotReady,
+      stage: GaslessTransferStage.recovery,
+      message:
+          'GasFree journal access requires a verified wallet public-key hash',
+      retryable: true,
+      terminal: false,
+      localizationKey: 'sdk_errors.gasless_capability_not_ready',
     );
   }
 
@@ -773,55 +790,120 @@ class WithdrawalManager {
         localizationKey: 'sdk_errors.gasless_response_invalid',
       );
     }
-    final errorType = switch (error) {
-      GaslessAccountStatusException(:final type) => type.wireValue,
-      GeneralErrorResponse(:final errorType) => errorType,
-      MmRpcException(:final errorType) => errorType,
-      _ => null,
-    };
-    final (GaslessTransferErrorKind, GaslessTransferErrorCode, String, bool)
-    mapping = switch (errorType) {
-      'ProviderIdentityMismatch' => (
-        GaslessTransferErrorKind.providerResponse,
-        GaslessTransferErrorCode.serviceProviderMismatch,
-        'GasFree provider identity does not match the configured pin',
-        false,
-      ),
-      'GasfreeAddressMismatch' => (
-        GaslessTransferErrorKind.providerResponse,
-        GaslessTransferErrorCode.custodyAddressMismatch,
-        'GasFree custody address does not match the wallet',
-        false,
-      ),
-      'TokenDecimalMismatch' => (
-        GaslessTransferErrorKind.providerResponse,
-        GaslessTransferErrorCode.tokenMismatch,
-        'GasFree token decimals do not match the activated asset',
-        false,
-      ),
-      'CoinNotSupported' || 'NotEthCoin' => (
-        GaslessTransferErrorKind.configuration,
-        GaslessTransferErrorCode.unsupportedToken,
-        'GasFree is not supported for this asset',
-        false,
-      ),
-      'GaslessNotConfigured' || 'CoinNotFound' => (
-        GaslessTransferErrorKind.configuration,
-        GaslessTransferErrorCode.configurationInvalid,
-        'GasFree requires the asset to be reactivated with provider settings',
-        false,
-      ),
-      'TronRpcUnavailable' || 'ProviderError' || 'InternalError' => (
-        GaslessTransferErrorKind.traceUnavailable,
-        GaslessTransferErrorCode.providerUnavailable,
-        'GasFree account status is temporarily unavailable',
-        true,
-      ),
+    final (
+      GaslessTransferErrorKind,
+      GaslessTransferErrorCode,
+      String,
+      bool,
+      String,
+    )
+    mapping = switch (error) {
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.providerIdentityMismatch,
+      ) =>
+        (
+          GaslessTransferErrorKind.providerResponse,
+          GaslessTransferErrorCode.serviceProviderMismatch,
+          'GasFree provider identity does not match the configured pin',
+          false,
+          'sdk_errors.gasless_response_invalid',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.gasfreeAddressMismatch,
+      ) =>
+        (
+          GaslessTransferErrorKind.providerResponse,
+          GaslessTransferErrorCode.custodyAddressMismatch,
+          'GasFree custody address does not match the wallet',
+          false,
+          'sdk_errors.gasless_response_invalid',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.tokenDecimalMismatch,
+      ) =>
+        (
+          GaslessTransferErrorKind.providerResponse,
+          GaslessTransferErrorCode.tokenDecimalMismatch,
+          'GasFree token decimals do not match the activated asset',
+          false,
+          'sdk_errors.gasless_response_invalid',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.coinNotSupported,
+      ) =>
+        (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.coinNotSupported,
+          'GasFree is not supported for this asset',
+          false,
+          'sdk_errors.gasless_token_unsupported',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.notEthCoin,
+      ) =>
+        (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.notEthCoin,
+          'GasFree account status requires an EVM/TRON asset',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.gaslessNotConfigured,
+      ) =>
+        (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.gaslessNotConfigured,
+          'GasFree requires the asset to be reactivated with provider settings',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.coinNotFound,
+      ) =>
+        (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.coinNotFound,
+          'GasFree account status asset is not activated',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.tronRpcUnavailable,
+      ) =>
+        (
+          GaslessTransferErrorKind.traceUnavailable,
+          GaslessTransferErrorCode.tronRpcUnavailable,
+          'The TRON RPC client is unavailable for GasFree account status',
+          true,
+          'sdk_errors.gasless_status_unavailable',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.providerError,
+      ) =>
+        (
+          GaslessTransferErrorKind.traceUnavailable,
+          GaslessTransferErrorCode.providerError,
+          'The GasFree provider could not return account status',
+          true,
+          'sdk_errors.gasless_status_unavailable',
+        ),
+      GaslessAccountStatusException(
+        type: GaslessAccountStatusErrorType.internalError,
+      ) =>
+        (
+          GaslessTransferErrorKind.traceUnavailable,
+          GaslessTransferErrorCode.internalError,
+          'KDF could not process GasFree account status',
+          false,
+          'sdk_errors.gasless_status_unavailable',
+        ),
       _ => (
         GaslessTransferErrorKind.traceUnavailable,
         GaslessTransferErrorCode.providerUnavailable,
         'GasFree account status is temporarily unavailable',
         true,
+        'sdk_errors.gasless_status_unavailable',
       ),
     };
     return GaslessTransferException(
@@ -831,6 +913,7 @@ class WithdrawalManager {
       message: mapping.$3,
       retryable: mapping.$4,
       terminal: !mapping.$4,
+      localizationKey: mapping.$5,
     );
   }
 
@@ -842,10 +925,8 @@ class WithdrawalManager {
           .findAssetsByConfigId(parameters.asset)
           .single;
       final isGasless = parameters.feeMethod == WithdrawalFeeMethod.gasless;
+      if (isGasless) _validateGaslessRequestOptions(parameters);
       final walletContext = isGasless ? await _captureWalletContext() : null;
-      if (isGasless && parameters.gaslessOptions?.fallbackToNative != true) {
-        _requireGaslessPreviewAllowed(asset.id);
-      }
       _validateSiaSourceSelection(parameters, asset);
       final isTendermintProtocol = asset.protocol is TendermintProtocol;
       final isSiaProtocol = asset.protocol is SiaProtocol;
@@ -875,8 +956,10 @@ class WithdrawalManager {
         }
         final message = lastStatus.details.toString();
         throw WithdrawalException(
-          message,
-          WithdrawalException.mapErrorToCode(message),
+          isGasless ? 'GasFree withdrawal preview failed' : message,
+          isGasless
+              ? WithdrawalErrorCode.unknownError
+              : WithdrawalException.mapErrorToCode(message),
         );
       }
 
@@ -888,9 +971,11 @@ class WithdrawalManager {
       }
 
       final preview = lastStatus.details as WithdrawalPreview;
+      _rejectInconsistentGaslessRailShape(preview);
+      final responseIsGasless = _isGaslessPreview(preview);
       if (isGasless) {
         await _requireWalletContextCurrent(walletContext!);
-        if (!_isGaslessPreview(preview)) {
+        if (!responseIsGasless) {
           if (parameters.gaslessOptions?.fallbackToNative == true) {
             return preview;
           }
@@ -909,6 +994,16 @@ class WithdrawalManager {
           asset,
           walletContext,
           requestedParameters: parameters,
+        );
+      } else if (responseIsGasless) {
+        throw GaslessTransferException(
+          kind: GaslessTransferErrorKind.providerResponse,
+          message: 'KDF returned the GasFree rail for a Standard withdrawal',
+          retryable: false,
+          terminal: true,
+          code: GaslessTransferErrorCode.responseMismatch,
+          stage: GaslessTransferStage.preview,
+          localizationKey: 'sdk_errors.gasless_response_invalid',
         );
       }
       return preview;
@@ -972,6 +1067,7 @@ class WithdrawalManager {
     var relayInvocationBegan = false;
     try {
       final asset = _assetProvider.findAssetsByConfigId(assetId).single;
+      _rejectInconsistentGaslessRailShape(preview);
       final isGasless = _isGaslessPreview(preview);
       final walletContext = isGasless ? await _captureWalletContext() : null;
       operationContext = walletContext;
@@ -998,7 +1094,6 @@ class WithdrawalManager {
 
       if (isGasless) {
         await _requireWalletContextCurrent(walletContext!);
-        _requireGaslessReady(asset.id);
       }
 
       // Initial progress
@@ -1033,29 +1128,31 @@ class WithdrawalManager {
       // is submitted. Attach first and buffer coin events until the response
       // supplies the trace id.
       final streamingManager = _eventStreamingManager;
-      if (prepared != null && streamingManager == null) {
-        throw GaslessTransferException(
-          kind: GaslessTransferErrorKind.configuration,
-          message: 'GasFree trace streaming is not configured',
-          retryable: false,
-          terminal: false,
-          code: GaslessTransferErrorCode.configurationInvalid,
-          stage: GaslessTransferStage.submission,
-          localizationKey: 'sdk_errors.gasless_stream_unavailable',
-        );
-      }
       if (prepared != null) {
-        traceStreamSession = await _GaslessTraceStreamSession.attach(
-          streamingManager!,
-          assetId,
-        );
+        if (streamingManager == null) {
+          throw _gaslessTraceStreamUnavailable(
+            'GasFree trace streaming is not configured',
+          );
+        }
+        try {
+          traceStreamSession = await _GaslessTraceStreamSession.attach(
+            streamingManager,
+            assetId,
+          );
+        } on GaslessTraceStreamingRequestException catch (error) {
+          throw _mapGaslessTraceStreamingRequestError(error);
+        } on Object {
+          throw _gaslessTraceStreamUnavailable(
+            'GasFree trace stream could not be attached before submission',
+          );
+        }
         await _requireWalletContextCurrent(walletContext!);
+        traceStreamSession.requireActiveForSubmission();
       }
 
       // Broadcast the pre-signed transaction (or relay the gas-free payload).
       final SendRawTransactionResponse response;
       try {
-        traceStreamSession?.requireActiveForSubmission();
         relayInvocationBegan = true;
         response = await _client.rpc.withdraw.sendRawTransaction(
           coin: assetId,
@@ -1063,7 +1160,11 @@ class WithdrawalManager {
           // Submit the exact payload snapshot that passed validation. The
           // caller-owned preview map may otherwise be mutated while secure
           // persistence and stream registration are awaiting completion.
-          txJson: validated?.relay.toJson() ?? preview.txJson,
+          gaslessRelayPayload: validated?.relay,
+          // Raw transaction JSON is reserved for non-GasFree platform
+          // transactions. GasFree always crosses this boundary as the typed
+          // payload that passed validation above.
+          txJson: validated == null ? preview.txJson : null,
         );
       } catch (error) {
         if (prepared == null) rethrow;
@@ -1246,8 +1347,29 @@ class WithdrawalManager {
   /// Whether [preview] represents a gas-free (gasless) transfer that must be
   /// relayed (rather than directly broadcast) and then tracked.
   bool _isGaslessPreview(WithdrawalPreview preview) =>
-      preview.fee is FeeInfoTronGasless ||
-      preview.txJson?['relay_type'] == 'tron_gasfree';
+      preview.fee is FeeInfoTronGasless;
+
+  /// Rejects a raw GasFree relay marker paired with non-GasFree fee details.
+  ///
+  /// The fee union is the typed rail discriminator. Looking at raw relay JSON
+  /// is restricted to rejecting an inconsistent response; it must never
+  /// select the GasFree happy path.
+  void _rejectInconsistentGaslessRailShape(WithdrawalPreview preview) {
+    if (!_isGaslessPreview(preview) &&
+        preview.txJson?['relay_type'] ==
+            TronGasfreeRelayPayload.relayTypeValue) {
+      throw GaslessTransferException(
+        kind: GaslessTransferErrorKind.providerResponse,
+        message:
+            'GasFree relay payload is inconsistent with the withdrawal fee',
+        retryable: false,
+        terminal: true,
+        code: GaslessTransferErrorCode.responseMismatch,
+        stage: GaslessTransferStage.preview,
+        localizationKey: 'sdk_errors.gasless_response_invalid',
+      );
+    }
+  }
 
   /// Builds a [WithdrawalResult] from a preview, optionally overriding the
   /// (on-chain) [txHash] and final [fee].
@@ -1258,8 +1380,9 @@ class WithdrawalManager {
     FeeInfo? fee,
     String? gaslessTraceId,
   }) {
+    final isGasless = _isGaslessPreview(preview);
     return WithdrawalResult(
-      txHash: txHash ?? preview.txHash,
+      txHash: txHash ?? (isGasless ? null : preview.txHash),
       balanceChanges: preview.balanceChanges,
       coin: assetId,
       toAddress: preview.to.isNotEmpty ? preview.to.first : '',
@@ -1267,10 +1390,10 @@ class WithdrawalManager {
       kmdRewardsEligible:
           preview.kmdRewards != null &&
           Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
-      confirmationBlockHeight: preview.blockHeight > 0
+      confirmationBlockHeight: !isGasless && preview.blockHeight > 0
           ? preview.blockHeight
           : null,
-      confirmedAt: preview.timestamp > 0
+      confirmedAt: !isGasless && preview.timestamp > 0
           ? DateTime.fromMillisecondsSinceEpoch(
               preview.timestamp * 1000,
               isUtc: true,
@@ -1298,6 +1421,13 @@ class WithdrawalManager {
     );
     current = initial.pending;
     if (!await _isPendingWalletCurrent(current)) return;
+    if (initial.isTerminal) {
+      final terminalWallet = _pendingGaslessWallets[current.journalId];
+      await _removePendingGaslessTransfer(traceId);
+      if (terminalWallet == null || !await _isWalletIdCurrent(terminalWallet)) {
+        return;
+      }
+    }
     yield initial.progress;
     if (initial.isTerminal || streamSession == null) return;
 
@@ -1305,15 +1435,11 @@ class WithdrawalManager {
       await for (final event in streamSession.forTrace(assetId, traceId)) {
         if (!await _isPendingWalletCurrent(current)) return;
         if (event is GaslessTraceErrorEvent) {
-          yield _gaslessTraceUnavailableProgress(
-            assetId: assetId,
-            traceId: traceId,
-            withdrawalResult: withdrawalResult,
-            pending: current,
-          );
-          // KDF trace errors are non-terminal; its streamer keeps retrying.
-          // Preserve live tracking and wait for the next typed snapshot.
-          continue;
+          // KDF removes a trace after its bounded provider-error limit but
+          // leaves the coin-level stream open. Every typed error therefore
+          // ends this live trace session; recover once through the
+          // authoritative status endpoint below without inspecting its text.
+          break;
         }
         if (event is! GaslessTraceEvent) continue;
         final applied = await _applyGaslessTraceSnapshot(
@@ -1324,6 +1450,14 @@ class WithdrawalManager {
         current = applied.pending;
         if (!await _isPendingWalletCurrent(current)) return;
         if (!applied.wasApplied) continue;
+        if (applied.isTerminal) {
+          final terminalWallet = _pendingGaslessWallets[current.journalId];
+          await _removePendingGaslessTransfer(traceId);
+          if (terminalWallet == null ||
+              !await _isWalletIdCurrent(terminalWallet)) {
+            return;
+          }
+        }
         yield applied.progress;
         if (applied.isTerminal) return;
       }
@@ -1340,6 +1474,13 @@ class WithdrawalManager {
       pending: current,
     );
     if (!await _isPendingWalletCurrent(fallback.pending)) return;
+    if (fallback.isTerminal) {
+      final terminalWallet = _pendingGaslessWallets[fallback.pending.journalId];
+      await _removePendingGaslessTransfer(traceId);
+      if (terminalWallet == null || !await _isWalletIdCurrent(terminalWallet)) {
+        return;
+      }
+    }
     yield fallback.progress;
   }
 
@@ -1371,14 +1512,14 @@ class WithdrawalManager {
       );
     } on WalletChangedDisconnectException {
       rethrow;
-    } catch (_) {
+    } catch (error) {
       if (!await _isPendingWalletCurrent(pending)) {
         throw const WalletChangedDisconnectException(
           'Wallet changed during GasFree trace reconciliation',
         );
       }
-      // Transport unavailability supplies no lifecycle evidence. Retain any
-      // accepted/submitted/on-chain state already established by KDF.
+      // An RPC error supplies no lifecycle evidence. Retain any accepted,
+      // submitted, or on-chain state already established by KDF.
       final retained = switch (pending.state) {
         GaslessTransferState.preparing ||
         GaslessTransferState.rejectedBeforeRelay => pending.copyWith(
@@ -1407,6 +1548,7 @@ class WithdrawalManager {
           traceId: traceId,
           withdrawalResult: withdrawalResult,
           pending: retained,
+          error: _mapGaslessTraceStatusError(error, traceId),
         ),
       );
     }
@@ -1448,11 +1590,14 @@ class WithdrawalManager {
     if (snapshot.state == GaslessTraceState.confirmed) {
       final finalFee = snapshot.finalFee;
       final onChainHash = snapshot.txHashOnChain;
-      if (finalFee == null ||
-          onChainHash == null ||
-          onChainHash.trim().isEmpty ||
-          finalFee < Decimal.zero ||
-          finalFee > pending.signedMaxFee) {
+      final confirmedAtSeconds = snapshot.confirmedAt;
+      final confirmedAt = confirmedAtSeconds == null
+          ? null
+          : _gaslessConfirmedAt(confirmedAtSeconds);
+      if ((finalFee != null &&
+              (finalFee < Decimal.zero || finalFee > pending.signedMaxFee)) ||
+          (onChainHash != null && onChainHash.trim().isEmpty) ||
+          (confirmedAtSeconds != null && confirmedAtSeconds < 0)) {
         final unknown = pending.copyWith(
           state: GaslessTransferState.submittedUnknown,
           updatedAt: DateTime.now().toUtc(),
@@ -1472,7 +1617,9 @@ class WithdrawalManager {
                     ? 'GasFree final fee is negative'
                     : finalFee != null && finalFee > pending.signedMaxFee
                     ? 'GasFree final fee exceeds the signed maximum'
-                    : 'GasFree confirmation omitted final settlement data',
+                    : confirmedAtSeconds != null && confirmedAtSeconds < 0
+                    ? 'GasFree confirmation timestamp is negative'
+                    : 'GasFree confirmation included an invalid transaction hash',
                 retryable: false,
                 terminal: false,
                 traceId: traceId,
@@ -1486,8 +1633,10 @@ class WithdrawalManager {
           ),
         );
       }
-      await _removePendingGaslessTransfer(traceId);
-      return _AppliedGaslessTrace(
+      // Construct the complete terminal result before deleting its recovery
+      // record. Any malformed provider value must leave the journal durable
+      // and non-resubmittable.
+      final applied = _AppliedGaslessTrace(
         pending: pending.copyWith(
           state: GaslessTransferState.confirmed,
           updatedAt: DateTime.now().toUtc(),
@@ -1506,12 +1655,7 @@ class WithdrawalManager {
             gaslessTraceId: traceId,
             kmdRewardsEligible: withdrawalResult.kmdRewardsEligible,
             confirmationBlockHeight: snapshot.blockHeight,
-            confirmedAt: snapshot.confirmedAt == null
-                ? null
-                : DateTime.fromMillisecondsSinceEpoch(
-                    snapshot.confirmedAt! * 1000,
-                    isUtc: true,
-                  ),
+            confirmedAt: confirmedAt,
           ),
           taskId: traceId,
           gaslessState: snapshot.state,
@@ -1519,10 +1663,10 @@ class WithdrawalManager {
           submission: submission,
         ),
       );
+      return applied;
     }
 
     if (snapshot.state == GaslessTraceState.failed) {
-      await _removePendingGaslessTransfer(traceId);
       return _AppliedGaslessTrace(
         pending: pending.copyWith(
           state: GaslessTransferState.failedFinal,
@@ -1577,6 +1721,20 @@ class WithdrawalManager {
     );
   }
 
+  DateTime? _gaslessConfirmedAt(int secondsSinceEpoch) {
+    if (secondsSinceEpoch < 0) return null;
+    try {
+      return DateTime.fromMillisecondsSinceEpoch(
+        secondsSinceEpoch * Duration.millisecondsPerSecond,
+        isUtc: true,
+      );
+    } on ArgumentError {
+      // KDF's confirmed state is authoritative even when its optional u64
+      // timestamp cannot be represented by this Dart runtime.
+      return null;
+    }
+  }
+
   int _gaslessTraceRank(GaslessTraceState state) => switch (state) {
     GaslessTraceState.pending => 0,
     GaslessTraceState.submitted => 1,
@@ -1611,28 +1769,243 @@ class WithdrawalManager {
     required String traceId,
     required WithdrawalResult withdrawalResult,
     required PendingGaslessTransfer pending,
-  }) => WithdrawalProgress(
-    status: WithdrawalStatus.inProgress,
-    message: 'Gas-free transfer status is temporarily unavailable',
-    withdrawalResult: withdrawalResult,
-    taskId: traceId,
-    sdkError: _mapError(
-      GaslessTransferException(
+    GaslessTransferException? error,
+  }) {
+    final traceError =
+        error ??
+        GaslessTransferException(
+          kind: GaslessTransferErrorKind.traceUnavailable,
+          code: GaslessTransferErrorCode.traceUnavailable,
+          stage: GaslessTransferStage.status,
+          message: 'GasFree transfer status could not be reconciled',
+          retryable: false,
+          terminal: false,
+          localizationKey: 'sdk_errors.gasless_status_unavailable',
+          traceId: traceId,
+        );
+    return WithdrawalProgress(
+      status: WithdrawalStatus.inProgress,
+      message: traceError.message,
+      withdrawalResult: withdrawalResult,
+      taskId: traceId,
+      sdkError: _mapError(
+        traceError,
+        operation: 'withdrawal.gasless.trace',
+        assetId: assetId,
+      ),
+      gaslessTransferState: pending.state,
+      submission: WithdrawalSubmission.gaslessRelay(
+        traceId: traceId,
+        journalId: pending.journalId,
+      ),
+    );
+  }
+
+  GaslessTransferException _mapGaslessTraceStatusError(
+    Object error,
+    String traceId,
+  ) {
+    // `retryable` in this status-only path means that reconciliation may be
+    // attempted again. The accepted relay and its journal are never retried.
+    if (error is GaslessTransferException) {
+      final retryable =
+          error.code == GaslessTransferErrorCode.providerError ||
+          error.code == GaslessTransferErrorCode.providerUnavailable ||
+          error.code == GaslessTransferErrorCode.providerTimeout;
+      return GaslessTransferException(
+        kind: error.kind,
+        code: error.code,
+        stage: GaslessTransferStage.status,
+        message: error.message,
+        retryable: retryable,
+        terminal: false,
+        localizationKey: error.localizationKey,
+        traceId: traceId,
+      );
+    }
+    if (error is FormatException || error is ArgumentError) {
+      return GaslessTransferException(
+        kind: GaslessTransferErrorKind.providerResponse,
+        code: GaslessTransferErrorCode.responseMismatch,
+        stage: GaslessTransferStage.status,
+        message: 'GasFree trace status has an invalid response shape',
+        retryable: false,
+        terminal: false,
+        localizationKey: 'sdk_errors.gasless_response_invalid',
+        traceId: traceId,
+      );
+    }
+    if (error is TimeoutException) {
+      return GaslessTransferException(
         kind: GaslessTransferErrorKind.traceUnavailable,
-        message: 'GasFree transfer status is temporarily unavailable',
+        code: GaslessTransferErrorCode.providerTimeout,
+        stage: GaslessTransferStage.status,
+        message: 'GasFree trace status timed out',
         retryable: true,
         terminal: false,
+        localizationKey: 'sdk_errors.gasless_status_unavailable',
         traceId: traceId,
-      ),
-      operation: 'withdrawal.gasless.trace',
-      assetId: assetId,
-    ),
-    gaslessTransferState: pending.state,
-    submission: WithdrawalSubmission.gaslessRelay(
+      );
+    }
+    if (error is GaslessTraceStatusException) {
+      final (
+        GaslessTransferErrorKind,
+        GaslessTransferErrorCode,
+        String,
+        bool,
+        String,
+      )
+      mapping = switch (error.type) {
+        GaslessTraceStatusErrorType.traceNotFound => (
+          GaslessTransferErrorKind.invalidTrace,
+          GaslessTransferErrorCode.traceNotFound,
+          'GasFree trace was not found',
+          false,
+          'sdk_errors.gasless_response_invalid',
+        ),
+        GaslessTraceStatusErrorType.invalidTraceId => (
+          GaslessTransferErrorKind.invalidTrace,
+          GaslessTransferErrorCode.invalidTraceId,
+          'GasFree trace ID is invalid',
+          false,
+          'sdk_errors.gasless_response_invalid',
+        ),
+        GaslessTraceStatusErrorType.coinNotFound => (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.coinNotFound,
+          'GasFree trace asset is not activated',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+        GaslessTraceStatusErrorType.notEthCoin => (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.notEthCoin,
+          'GasFree trace asset has an unsupported protocol',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+        GaslessTraceStatusErrorType.coinNotSupported => (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.coinNotSupported,
+          'GasFree trace asset is not supported',
+          false,
+          'sdk_errors.gasless_token_unsupported',
+        ),
+        GaslessTraceStatusErrorType.gaslessNotConfigured => (
+          GaslessTransferErrorKind.configuration,
+          GaslessTransferErrorCode.gaslessNotConfigured,
+          'GasFree trace provider is not configured',
+          false,
+          'sdk_errors.gasless_capability_not_ready',
+        ),
+        GaslessTraceStatusErrorType.providerError => (
+          GaslessTransferErrorKind.traceUnavailable,
+          GaslessTransferErrorCode.providerError,
+          'GasFree provider could not return the trace status',
+          true,
+          'sdk_errors.gasless_status_unavailable',
+        ),
+        GaslessTraceStatusErrorType.internalError => (
+          GaslessTransferErrorKind.traceUnavailable,
+          GaslessTransferErrorCode.internalError,
+          'KDF could not process the GasFree trace status',
+          false,
+          'sdk_errors.gasless_status_unavailable',
+        ),
+      };
+      return GaslessTransferException(
+        kind: mapping.$1,
+        code: mapping.$2,
+        stage: GaslessTransferStage.status,
+        message: mapping.$3,
+        retryable: mapping.$4,
+        terminal: false,
+        localizationKey: mapping.$5,
+        traceId: traceId,
+      );
+    }
+    // Unknown failures provide no evidence about lifecycle or connectivity.
+    // Keep the accepted trace recoverable without advertising a retry.
+    return GaslessTransferException(
+      kind: GaslessTransferErrorKind.traceUnavailable,
+      code: GaslessTransferErrorCode.traceUnavailable,
+      stage: GaslessTransferStage.status,
+      message: 'GasFree transfer status could not be reconciled',
+      retryable: false,
+      terminal: false,
+      localizationKey: 'sdk_errors.gasless_status_unavailable',
       traceId: traceId,
-      journalId: pending.journalId,
-    ),
-  );
+    );
+  }
+
+  GaslessTransferException _gaslessTraceStreamUnavailable(String message) =>
+      GaslessTransferException(
+        kind: GaslessTransferErrorKind.traceUnavailable,
+        code: GaslessTransferErrorCode.traceUnavailable,
+        stage: GaslessTransferStage.submission,
+        message: message,
+        retryable: true,
+        terminal: false,
+        localizationKey: 'sdk_errors.gasless_capability_not_ready',
+      );
+
+  GaslessTransferException _mapGaslessTraceStreamingRequestError(
+    GaslessTraceStreamingRequestException error,
+  ) {
+    final (
+      GaslessTransferErrorKind,
+      GaslessTransferErrorCode,
+      String,
+      bool,
+      String,
+    )
+    mapping = switch (error.type) {
+      GaslessTraceStreamingRequestErrorType.enableError => (
+        GaslessTransferErrorKind.traceUnavailable,
+        GaslessTransferErrorCode.traceStreamEnableError,
+        'KDF could not enable GasFree trace streaming',
+        true,
+        'sdk_errors.gasless_capability_not_ready',
+      ),
+      GaslessTraceStreamingRequestErrorType.coinNotFound => (
+        GaslessTransferErrorKind.configuration,
+        GaslessTransferErrorCode.coinNotFound,
+        'The GasFree trace-stream coin was not found',
+        false,
+        'sdk_errors.gasless_capability_not_ready',
+      ),
+      GaslessTraceStreamingRequestErrorType.coinNotSupported => (
+        GaslessTransferErrorKind.configuration,
+        GaslessTransferErrorCode.coinNotSupported,
+        'GasFree trace streaming is not supported for this coin',
+        false,
+        'sdk_errors.gasless_token_unsupported',
+      ),
+      GaslessTraceStreamingRequestErrorType.gaslessNotConfigured => (
+        GaslessTransferErrorKind.configuration,
+        GaslessTransferErrorCode.gaslessNotConfigured,
+        'GasFree is not configured for trace streaming',
+        false,
+        'sdk_errors.gasless_capability_not_ready',
+      ),
+      GaslessTraceStreamingRequestErrorType.internal => (
+        GaslessTransferErrorKind.traceUnavailable,
+        GaslessTransferErrorCode.traceStreamInternal,
+        'KDF returned an internal GasFree trace-stream error',
+        false,
+        'sdk_errors.gasless_capability_not_ready',
+      ),
+    };
+    return GaslessTransferException(
+      kind: mapping.$1,
+      code: mapping.$2,
+      stage: GaslessTransferStage.submission,
+      message: mapping.$3,
+      retryable: mapping.$4,
+      terminal: false,
+      localizationKey: mapping.$5,
+    );
+  }
 
   String _gaslessStateMessage(GaslessTraceState state) => switch (state) {
     GaslessTraceState.pending => 'Awaiting gas-free relay...',
@@ -1660,6 +2033,8 @@ class WithdrawalManager {
     }
     final walletContext = await _captureWalletContext();
     final walletId = walletContext.walletId;
+    _requireVerifiedGaslessJournalIdentity(walletId);
+    await _resolveAmbiguousLegacyTransfers(repository, walletContext);
     final transfers = await repository.list(walletId);
     await _requireWalletContextCurrent(walletContext);
     for (final transfer in transfers) {
@@ -1678,6 +2053,8 @@ class WithdrawalManager {
       return;
     }
     final walletContext = await _captureWalletContext();
+    _requireVerifiedGaslessJournalIdentity(walletContext.walletId);
+    await _resolveAmbiguousLegacyTransfers(repository, walletContext);
     final events =
         StreamController<
           ({List<PendingGaslessTransfer>? transfers, bool walletChanged})
@@ -1685,10 +2062,17 @@ class WithdrawalManager {
     final repositorySubscription = repository
         .watch(walletContext.walletId)
         .listen(
-          (transfers) =>
-              events.add((transfers: transfers, walletChanged: false)),
-          onError: events.addError,
-          onDone: events.close,
+          (transfers) {
+            if (!events.isClosed) {
+              events.add((transfers: transfers, walletChanged: false));
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!events.isClosed) events.addError(error, stackTrace);
+          },
+          onDone: () {
+            if (!events.isClosed) unawaited(events.close());
+          },
         );
     final walletSubscription = _walletGenerationChanges.stream
         .where((generation) => generation != walletContext.generation)
@@ -1709,9 +2093,12 @@ class WithdrawalManager {
         yield event.transfers!;
       }
     } finally {
-      await repositorySubscription.cancel();
-      await walletSubscription.cancel();
-      if (!events.isClosed) await events.close();
+      // Cancellation starts synchronously, but an async-generator
+      // subscription can keep its cancellation future pending while paused at
+      // a yield. Do not hold wallet-switch stream completion behind it.
+      unawaited(repositorySubscription.cancel());
+      unawaited(walletSubscription.cancel());
+      if (!events.isClosed) unawaited(events.close());
     }
   }
 
@@ -1725,6 +2112,8 @@ class WithdrawalManager {
     }
     final walletContext = await _captureWalletContext();
     final walletId = walletContext.walletId;
+    _requireVerifiedGaslessJournalIdentity(walletId);
+    await _resolveAmbiguousLegacyTransfers(repository, walletContext);
     final pending = await repository.find(walletId, identity);
     await _requireWalletContextCurrent(walletContext);
     if (pending == null) {
@@ -1795,6 +2184,13 @@ class WithdrawalManager {
       pending: pending,
     );
     await _requireWalletContextCurrent(walletContext);
+    if (reconciled.isTerminal) {
+      // The terminal progress has already been fully constructed and validated
+      // at this point. Delete only under the same wallet context, then recheck
+      // before exposing completion to the caller.
+      await _removePendingGaslessTransfer(traceId);
+      await _requireWalletContextCurrent(walletContext);
+    }
     yield reconciled.progress;
   }
 
@@ -1808,37 +2204,15 @@ class WithdrawalManager {
     }
   }
 
-  void _requireGaslessReady(AssetId assetId) {
-    if (_gaslessCapabilities.isReady(assetId)) return;
-    throw GaslessTransferException(
-      kind: GaslessTransferErrorKind.capabilityNotReady,
-      message: 'Gas-free transfers are not ready for ${assetId.id}',
-      retryable: true,
-      terminal: false,
-    );
-  }
-
-  void _requireGaslessPreviewAllowed(AssetId assetId) {
-    if (_gaslessCapabilities.canAttemptAuthoritativePreview(assetId)) return;
-    throw GaslessTransferException(
-      kind: GaslessTransferErrorKind.capabilityNotReady,
-      message: 'Gas-free preview is not available for ${assetId.id}',
-      retryable: true,
-      terminal: false,
-    );
-  }
-
   PendingGaslessTransfer _pendingTransferFromPreview({
     required WithdrawalPreview preview,
     required String assetId,
     required String? traceId,
     required String journalId,
     required TronGasfreeRelayPayload relay,
+    required Decimal authorizationMaxFee,
     GaslessTransferState state = GaslessTransferState.submittedPending,
   }) {
-    final gaslessFee = preview.fee is FeeInfoTronGasless
-        ? preview.fee as FeeInfoTronGasless
-        : null;
     final now = DateTime.now().toUtc();
     return PendingGaslessTransfer(
       traceId: traceId,
@@ -1849,8 +2223,7 @@ class WithdrawalManager {
       custodyAddress: relay.gasfreeAddress,
       destinationAddress: relay.signedAuthorization.receiver,
       requestedAmount: preview.balanceChanges.totalAmount,
-      signedMaxFee:
-          gaslessFee?.signedMaxFee ?? gaslessFee?.totalTokenFee ?? Decimal.zero,
+      signedMaxFee: authorizationMaxFee,
       authorizationDeadline: relay.signedAuthorization.deadline,
       balanceChanges: preview.balanceChanges,
       fee: preview.fee,
@@ -1877,29 +2250,6 @@ class WithdrawalManager {
         code: GaslessTransferErrorCode.invalidSignedPreview,
         stage: GaslessTransferStage.preview,
         localizationKey: 'sdk_errors.gasless_preview_invalid',
-      );
-    }
-    final network = _canonicalGaslessNetworkFor(asset);
-    if (relay.chainId != network.chainId) {
-      throw GaslessTransferException(
-        kind: GaslessTransferErrorKind.providerResponse,
-        message: 'GasFree signed preview has an unexpected chain id',
-        retryable: false,
-        terminal: true,
-        code: GaslessTransferErrorCode.chainIdMismatch,
-        stage: GaslessTransferStage.preview,
-        localizationKey: 'sdk_errors.gasless_response_invalid',
-      );
-    }
-    if (relay.verifyingContract != network.verifyingContract) {
-      throw GaslessTransferException(
-        kind: GaslessTransferErrorKind.providerResponse,
-        message: 'GasFree signed preview has an unexpected verifier',
-        retryable: false,
-        terminal: true,
-        code: GaslessTransferErrorCode.verifyingContractMismatch,
-        stage: GaslessTransferStage.preview,
-        localizationKey: 'sdk_errors.gasless_response_invalid',
       );
     }
     final auth = relay.signedAuthorization;
@@ -1939,13 +2289,60 @@ class WithdrawalManager {
                 : requestedParameters.amount != null &&
                       requestedParameters.amount ==
                           preview.balanceChanges.totalAmount);
+    final requestedSource = requestedParameters?.from?.toRpcParams();
+    final sourceSelectorMatches =
+        requestedParameters == null ||
+        const DeepCollectionEquality().equals(relay.hdFrom, requestedSource);
     final maxFeeMatches =
         gaslessFee != null &&
-        gaslessFee.signedMaxFee != null &&
         authorizationMaxFee != null &&
-        authorizationMaxFee > Decimal.zero &&
-        gaslessFee.signedMaxFee! > Decimal.zero &&
+        authorizationMaxFee >= Decimal.zero &&
+        gaslessFee.signedMaxFee >= Decimal.zero &&
         authorizationMaxFee == gaslessFee.signedMaxFee;
+    final requestedMaxFee = requestedParameters?.gaslessOptions?.maxFee;
+    final requestedMaxFeeMatches =
+        requestedMaxFee == null ||
+        requestedMaxFee >= Decimal.zero &&
+            authorizationMaxFee != null &&
+            authorizationMaxFee <= requestedMaxFee;
+    final activationFee = gaslessFee?.activationFee ?? Decimal.zero;
+    final feeBreakdownMatches =
+        gaslessFee != null &&
+        gaslessFee.transferFee >= Decimal.zero &&
+        activationFee >= Decimal.zero &&
+        gaslessFee.totalTokenFee >= Decimal.zero &&
+        gaslessFee.totalTokenFee == gaslessFee.transferFee + activationFee &&
+        authorizationMaxFee != null &&
+        gaslessFee.totalTokenFee <= authorizationMaxFee;
+    final createdAt = DateTime.tryParse(relay.createdAt)?.toUtc();
+    final requestedDeadlineSeconds =
+        requestedParameters?.gaslessOptions?.deadlineSeconds;
+    final allowedDeadlineSeconds =
+        requestedDeadlineSeconds ?? _defaultGaslessDeadlineSeconds;
+    final nowSeconds =
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/
+        Duration.millisecondsPerSecond;
+    final createdAtSeconds = createdAt == null
+        ? null
+        : createdAt.millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
+    final createdAtDeadline = createdAtSeconds == null
+        ? null
+        : BigInt.from(createdAtSeconds);
+    final deadlineMatches =
+        requestedDeadlineSeconds != null && requestedDeadlineSeconds <= 0
+        ? false
+        : createdAtSeconds != null &&
+              createdAtDeadline != null &&
+              createdAtSeconds <=
+                  nowSeconds + _gaslessDeadlineClockSkewSeconds &&
+              auth.deadline > createdAtDeadline &&
+              (requestedParameters == null ||
+                  auth.deadline <=
+                      BigInt.from(
+                        createdAtSeconds +
+                            allowedDeadlineSeconds +
+                            _gaslessDeadlineClockSkewSeconds,
+                      ));
     final signature = auth.signature;
     final signatureShapeValid =
         signature.length == 130 &&
@@ -1953,7 +2350,8 @@ class WithdrawalManager {
     final feeContextMatches =
         gaslessFee != null &&
         gaslessFee.coin == assetId &&
-        gaslessFee.feeMethod.toLowerCase() == 'gasless';
+        gaslessFee.feeMethod == 'gasless' &&
+        gaslessFee.providerName == 'gasfree';
     final walletPubkeyHash = walletContext.walletId.pubkeyHash?.trim();
     final status = _gaslessCapabilities.statusFor(asset.id);
     final protocol = asset.protocol;
@@ -1963,27 +2361,33 @@ class WithdrawalManager {
     final capabilityContextMatches =
         walletPubkeyHash != null &&
         walletPubkeyHash.isNotEmpty &&
-        _gaslessCapabilities.canSendGasless(asset.id) &&
-        status?.gasfreeAddress == relay.gasfreeAddress &&
-        status?.serviceProvider == auth.serviceProvider &&
+        _gaslessCapabilities.isConfigured(asset) &&
+        (status == null || status.gasfreeAddress == relay.gasfreeAddress) &&
+        (status?.serviceProvider == null ||
+            status!.serviceProvider == auth.serviceProvider) &&
         contract == auth.token;
-    final selector = relay.hdFrom;
-    final isCanonicalSource =
-        selector == null ||
-        selector['account_id'] == 0 &&
-            selector['address_id'] == 0 &&
-            selector['chain']?.toString().toLowerCase() == 'external';
+    final walletSourceTypeMatches =
+        walletContext.walletId.authOptions.derivationMethod ==
+            DerivationMethod.hdWallet ||
+        relay.hdFrom == null;
     if (relay.coin != assetId ||
+        preview.coin != assetId ||
+        preview.txHex != null ||
+        preview.txHash != null ||
         !receiverMatches ||
         !sourceMatches ||
         !custodyMatches ||
         !amountMatches ||
         !requestMatches ||
+        !sourceSelectorMatches ||
         !maxFeeMatches ||
+        !requestedMaxFeeMatches ||
+        !feeBreakdownMatches ||
+        !deadlineMatches ||
         !feeContextMatches ||
         !capabilityContextMatches ||
+        !walletSourceTypeMatches ||
         authorizationNonce == null ||
-        !isCanonicalSource ||
         !signatureShapeValid) {
       throw GaslessTransferException(
         kind: GaslessTransferErrorKind.providerResponse,
@@ -2006,45 +2410,25 @@ class WithdrawalManager {
         localizationKey: 'sdk_errors.gasless_authorization_expired',
       );
     }
-    return _ValidatedGaslessPreview(relay);
+    return _ValidatedGaslessPreview(relay, authorizationMaxFee);
   }
 
-  ({String chainId, String verifyingContract}) _canonicalGaslessNetworkFor(
-    Asset asset,
-  ) {
-    final tokenProtocol = asset.protocol;
-    final parentId = asset.id.parentId;
-    final parent = parentId == null ? null : _assetProvider.fromId(parentId);
-    final parentProtocol = parent?.protocol;
-    if (tokenProtocol is! Trc20Protocol ||
-        parentId == null ||
-        tokenProtocol.platform != parentId.id ||
-        parentProtocol is! TrxProtocol) {
+  void _validateGaslessRequestOptions(WithdrawParameters parameters) {
+    final options = parameters.gaslessOptions;
+    final maxFee = options?.maxFee;
+    final deadlineSeconds = options?.deadlineSeconds;
+    if ((maxFee != null && maxFee < Decimal.zero) ||
+        (deadlineSeconds != null && deadlineSeconds <= 0)) {
       throw GaslessTransferException(
         kind: GaslessTransferErrorKind.configuration,
-        message: 'GasFree requires an activated TRON parent configuration',
+        message: 'GasFree withdrawal constraints are invalid',
         retryable: false,
         terminal: true,
         code: GaslessTransferErrorCode.configurationInvalid,
         stage: GaslessTransferStage.preview,
+        localizationKey: 'sdk_errors.gasless_configuration_invalid',
       );
     }
-
-    final network =
-        _canonicalTronGaslessNetworks[parentProtocol.network
-            ?.trim()
-            .toLowerCase()];
-    if (network == null) {
-      throw GaslessTransferException(
-        kind: GaslessTransferErrorKind.configuration,
-        message: 'GasFree requires a supported TRON network configuration',
-        retryable: false,
-        terminal: true,
-        code: GaslessTransferErrorCode.configurationInvalid,
-        stage: GaslessTransferStage.preview,
-      );
-    }
-    return network;
   }
 
   Future<PendingGaslessTransfer> _prepareGaslessTransfer(
@@ -2060,6 +2444,7 @@ class WithdrawalManager {
       traceId: null,
       journalId: journalId,
       relay: validated.relay,
+      authorizationMaxFee: validated.authorizationMaxFee,
       state: GaslessTransferState.preparing,
     );
     final repository = _pendingGaslessTransfers;
@@ -2075,6 +2460,7 @@ class WithdrawalManager {
         localizationKey: 'sdk_errors.gasless_storage_unavailable',
       );
     }
+    await _resolveAmbiguousLegacyTransfers(repository, walletContext);
     final bool reserved;
     try {
       reserved = await repository.reserve(walletId, pending);
@@ -2108,6 +2494,55 @@ class WithdrawalManager {
     }
     _pendingGaslessWallets[pending.journalId] = walletId;
     return pending;
+  }
+
+  Future<void> _resolveAmbiguousLegacyTransfers(
+    PendingGaslessTransferRepository repository,
+    WalletOperationContext walletContext,
+  ) async {
+    final candidates = await repository.listAmbiguousLegacyTransfers(
+      walletContext.walletId,
+    );
+    await _requireWalletContextCurrent(walletContext);
+    if (candidates.isEmpty) return;
+
+    final resolver = _freshSourceAddressResolver;
+    if (resolver == null) {
+      throw const GaslessTransferLegacyResolutionException();
+    }
+
+    final assets = candidates.map((transfer) => transfer.assetId).toSet();
+    final ownedSourcesByAsset = <String, Set<String>>{};
+    for (final assetId in assets) {
+      try {
+        final asset = _assetProvider.findAssetsByConfigId(assetId).single;
+        final freshAddresses = await resolver(asset);
+        await _requireWalletContextCurrent(walletContext);
+        final normalized = freshAddresses
+            .map((address) => address.trim())
+            .where((address) => address.isNotEmpty)
+            .toSet();
+        if (normalized.isEmpty) {
+          throw const GaslessTransferLegacyResolutionException();
+        }
+        ownedSourcesByAsset[assetId] = normalized;
+      } on WalletChangedDisconnectException {
+        rethrow;
+      } on GaslessTransferLegacyResolutionException {
+        rethrow;
+      } catch (_) {
+        // Do not partially resolve a legacy journal when any asset lacks a
+        // complete, fresh ownership proof.
+        throw const GaslessTransferLegacyResolutionException();
+      }
+    }
+
+    await _requireWalletContextCurrent(walletContext);
+    await repository.resolveAmbiguousLegacyTransfers(
+      walletContext.walletId,
+      ownedSourceAddressesByAsset: ownedSourcesByAsset,
+    );
+    await _requireWalletContextCurrent(walletContext);
   }
 
   BigInt? _parseUnsigned256(String? raw) {
@@ -2182,14 +2617,12 @@ class WithdrawalManager {
 
   Future<bool> _isPendingWalletCurrent(PendingGaslessTransfer transfer) async {
     final original = _pendingGaslessWallets[transfer.journalId];
+    return original != null && await _isWalletIdCurrent(original);
+  }
+
+  Future<bool> _isWalletIdCurrent(WalletId original) async {
     final current = await _walletIdResolver?.call();
-    if (original == null || current == null) return false;
-    final originalStable = original.pubkeyHash?.trim();
-    final currentStable = current.pubkeyHash?.trim();
-    if (originalStable != null && currentStable != null) {
-      return originalStable == currentStable;
-    }
-    return original.isSameAs(current);
+    return current != null && isSameStableWallet(original, current);
   }
 
   Future<void> _upsertPendingGaslessTransfer(
@@ -2553,9 +2986,10 @@ class WithdrawalManager {
 }
 
 class _ValidatedGaslessPreview {
-  const _ValidatedGaslessPreview(this.relay);
+  const _ValidatedGaslessPreview(this.relay, this.authorizationMaxFee);
 
   final TronGasfreeRelayPayload relay;
+  final Decimal authorizationMaxFee;
 }
 
 class _GaslessTraceSnapshot {
@@ -2577,22 +3011,29 @@ class _GaslessTraceSnapshot {
     finalFee: response.finalFee,
   );
 
-  factory _GaslessTraceSnapshot.fromEvent(GaslessTraceEvent event) =>
-      _GaslessTraceSnapshot(
-        state: switch (event.state) {
-          GaslessTraceEventState.pending => GaslessTraceState.pending,
-          GaslessTraceEventState.submitted => GaslessTraceState.submitted,
-          GaslessTraceEventState.onChain => GaslessTraceState.onChain,
-          GaslessTraceEventState.confirmed => GaslessTraceState.confirmed,
-          GaslessTraceEventState.failed => GaslessTraceState.failed,
-        },
-        txHashOnChain: event.txHashOnChain,
-        blockHeight: event.blockHeight,
-        confirmedAt: event.confirmedAt,
-        finalFee: event.finalFee == null
-            ? null
-            : Decimal.tryParse(event.finalFee!),
+  factory _GaslessTraceSnapshot.fromEvent(GaslessTraceEvent event) {
+    final blockHeight = event.blockHeight;
+    final confirmedAt = event.confirmedAt;
+    if ((blockHeight != null && blockHeight < 0) ||
+        (confirmedAt != null && confirmedAt < 0)) {
+      throw const FormatException(
+        'GasFree trace event contains a negative unsigned field',
       );
+    }
+    return _GaslessTraceSnapshot(
+      state: switch (event.state) {
+        GaslessTraceEventState.pending => GaslessTraceState.pending,
+        GaslessTraceEventState.submitted => GaslessTraceState.submitted,
+        GaslessTraceEventState.onChain => GaslessTraceState.onChain,
+        GaslessTraceEventState.confirmed => GaslessTraceState.confirmed,
+        GaslessTraceEventState.failed => GaslessTraceState.failed,
+      },
+      txHashOnChain: event.txHashOnChain,
+      blockHeight: blockHeight,
+      confirmedAt: confirmedAt,
+      finalFee: event.finalFee == null ? null : Decimal.parse(event.finalFee!),
+    );
+  }
 
   final GaslessTraceState state;
   final String? txHashOnChain;
@@ -2656,12 +3097,12 @@ class _GaslessTraceStreamSession {
     if (!_isTerminated && !_events.isClosed) return;
     throw GaslessTransferException(
       kind: GaslessTransferErrorKind.traceUnavailable,
+      code: GaslessTransferErrorCode.traceUnavailable,
+      stage: GaslessTransferStage.submission,
       message: 'GasFree trace stream disconnected before submission',
       retryable: true,
       terminal: false,
-      code: GaslessTransferErrorCode.traceUnavailable,
-      stage: GaslessTransferStage.submission,
-      localizationKey: 'sdk_errors.gasless_stream_unavailable',
+      localizationKey: 'sdk_errors.gasless_capability_not_ready',
     );
   }
 
@@ -2678,6 +3119,9 @@ class _GaslessTraceStreamSession {
 
   Future<void> close() async {
     await _subscription.cancel();
-    if (!_events.isClosed) await _events.close();
+    // A single-subscription controller's close future waits for a listener.
+    // Submission failures and immediate terminal reconciliation never consume
+    // the buffered stream, so do not deadlock cleanup in those paths.
+    if (!_events.isClosed) unawaited(_events.close());
   }
 }

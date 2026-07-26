@@ -10,7 +10,7 @@ class TronGaslessTokenActivationConfig {
   factory TronGaslessTokenActivationConfig.fromJson(JsonMap json) {
     final transferMaxFee = json.valueOrNull<Object>('transfer_max_fee');
     return TronGaslessTokenActivationConfig(
-      enabled: json.value<bool>('enabled'),
+      enabled: json.valueOrNull<bool>('enabled') ?? false,
       transferMaxFee: transferMaxFee == null
           ? null
           : Decimal.parse(transferMaxFee.toString()),

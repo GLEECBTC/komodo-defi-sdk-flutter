@@ -3,6 +3,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_coin_updates/src/coins_config/config_transform.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
+class _SetFieldTransform implements CoinConfigTransform {
+  const _SetFieldTransform(this.key, this.value);
+
+  final String key;
+  final Object value;
+
+  @override
+  bool needsTransform(JsonMap config) => config[key] != value;
+
+  @override
+  JsonMap transform(JsonMap config) => JsonMap.of(config)..[key] = value;
+}
+
 /// Unit tests for coin configuration transformation pipeline and individual transforms.
 ///
 /// **Purpose**: Tests the configuration transformation system that modifies coin
@@ -49,6 +62,19 @@ void main() {
       final once = transformer.apply(JsonMap.of(input));
       final twice = transformer.apply(JsonMap.of(once));
       expect(twice, equals(once));
+    });
+
+    test('additional transforms run after the configured base transforms', () {
+      const transformer = CoinConfigTransformer(
+        transforms: [_SetFieldTransform('stage', 'base')],
+        additionalTransforms: [_SetFieldTransform('stage', 'application')],
+      );
+      final input = <String, dynamic>{'coin': 'KMD'};
+
+      final transformed = transformer.apply(input);
+
+      expect(transformed['stage'], 'application');
+      expect(input, {'coin': 'KMD'});
     });
   });
 

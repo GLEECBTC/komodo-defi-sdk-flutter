@@ -159,7 +159,7 @@ enum {spec.dart_enum} implements GaslessRpcErrorType {{
 def _render_exception(spec: ErrorEnum) -> str:
     extract_error = (
         f"""\
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null || outer['error_type'] != '{spec.outer_error_type}') {{
       return null;
     }}
@@ -167,7 +167,7 @@ def _render_exception(spec: ErrorEnum) -> str:
     if (error == null) return null;"""
         if spec.outer_error_type is not None
         else """\
-    final outer = _gaslessErrorEnvelope(json);
+    final outer = _directGaslessError(json);
     if (outer == null) return null;
     final error = outer;"""
     )
@@ -206,9 +206,7 @@ final class {spec.dart_exception}
     return {spec.dart_exception}(
       type: type,
       errorData: error['error_data'],
-      message: {metadata_source}['error'] is String
-          ? {metadata_source}['error'] as String
-          : {metadata_source}['message'] as String?,
+      message: {metadata_source}['error'] as String,
       path: {metadata_source}['error_path'] as String?,
       trace: {metadata_source}['error_trace'] as String?,
     );
@@ -272,19 +270,8 @@ abstract class GaslessEndpointException<T extends GaslessRpcErrorType>
 
 {exceptions}
 
-JsonMap? _gaslessErrorEnvelope(JsonMap json) {{
-  final result = _asJsonMap(json['result']);
-  final rawDetails = result?['details'];
-  final details =
-      _asJsonMap(rawDetails) ??
-      (rawDetails is String ? tryParseJson(rawDetails) : null);
-  if (details != null) return details;
-
-  final message = _asJsonMap(json['message']);
-  if (message != null) return message;
-
-  return json['error_type'] is String ? json : null;
-}}
+JsonMap? _directGaslessError(JsonMap json) =>
+    json['error_type'] is String && json['error'] is String ? json : null;
 
 JsonMap? _asJsonMap(Object? value) =>
     value is Map<String, dynamic> ? value : null;

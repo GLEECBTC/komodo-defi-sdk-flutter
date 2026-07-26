@@ -25,24 +25,39 @@ abstract class CoinConfigTransform {
 /// respective classes.
 class CoinConfigTransformer {
   /// Creates a new [CoinConfigTransformer] with the provided transforms.
-  /// If [transforms] is omitted, a default set is used.
-  const CoinConfigTransformer({List<CoinConfigTransform>? transforms})
-    : _transforms =
-          transforms ??
-          const [
-            WssWebsocketTransform(),
-            SslElectrumTransform(),
-            ZhtlcLightWalletTransform(),
-            TronQuickNodeTransform(),
-            ParentCoinTransform(),
-          ];
+  ///
+  /// If [transforms] is omitted, the built-in normalization set is used.
+  /// [additionalTransforms] always runs after that set so an application can
+  /// amend the normalized asset configuration without replacing SDK defaults.
+  const CoinConfigTransformer({
+    List<CoinConfigTransform>? transforms,
+    this.additionalTransforms = const [],
+  }) : _transforms =
+           transforms ??
+           const [
+             WssWebsocketTransform(),
+             SslElectrumTransform(),
+             ZhtlcLightWalletTransform(),
+             TronQuickNodeTransform(),
+             ParentCoinTransform(),
+           ];
 
   final List<CoinConfigTransform> _transforms;
 
+  /// Application-supplied transforms applied after [_transforms].
+  final List<CoinConfigTransform> additionalTransforms;
+
   /// Applies all necessary transforms to the given coin configuration.
   JsonMap apply(JsonMap config) {
-    final neededTransforms = _transforms.where((t) => t.needsTransform(config));
+    final normalized = _applyTransforms(config, _transforms);
+    return _applyTransforms(normalized, additionalTransforms);
+  }
 
+  JsonMap _applyTransforms(
+    JsonMap config,
+    List<CoinConfigTransform> transforms,
+  ) {
+    final neededTransforms = transforms.where((t) => t.needsTransform(config));
     if (neededTransforms.isEmpty) {
       return config;
     }

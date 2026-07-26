@@ -82,9 +82,9 @@ class GaslessTraceStatusResponse extends BaseResponse {
     this.finalFee,
     this.failureReason,
   }) {
-    if (state == GaslessTraceState.failed && failureReason == null) {
+    if (state == GaslessTraceState.failed && failureReason != 'unknown') {
       throw const FormatException(
-        'A failed GasFree trace must include failure_reason',
+        'A failed GasFree trace must have failure_reason "unknown"',
       );
     }
     if (state != GaslessTraceState.failed && failureReason != null) {
@@ -95,7 +95,12 @@ class GaslessTraceStatusResponse extends BaseResponse {
   }
 
   factory GaslessTraceStatusResponse.parse(Map<String, dynamic> json) {
-    final result = json.valueOrNull<JsonMap>('result') ?? json;
+    final result = json.valueOrNull<JsonMap>('result');
+    if (result == null) {
+      throw const FormatException(
+        'GasFree trace status requires an MMRPC result envelope',
+      );
+    }
     const allowedKeys = {
       'state',
       'tx_hash_on_chain',
@@ -104,6 +109,13 @@ class GaslessTraceStatusResponse extends BaseResponse {
       'final_fee',
       'failure_reason',
     };
+    final missingKeys = allowedKeys.where((key) => !result.containsKey(key));
+    if (missingKeys.isNotEmpty) {
+      throw FormatException(
+        'GasFree trace status is missing fields serialized by KDF: '
+        '${missingKeys.join(', ')}',
+      );
+    }
     final unknownKeys = result.keys.where((key) => !allowedKeys.contains(key));
     if (unknownKeys.isNotEmpty) {
       throw FormatException(
@@ -111,16 +123,39 @@ class GaslessTraceStatusResponse extends BaseResponse {
         '${unknownKeys.join(', ')}',
       );
     }
-    final finalFeeRaw = result.valueOrNull<dynamic>('final_fee');
+    final finalFeeRaw = result['final_fee'];
+    if (finalFeeRaw != null && finalFeeRaw is! String) {
+      throw const FormatException(
+        'GasFree final_fee must be a numeric string or null',
+      );
+    }
+    final confirmedAt = result.valueOrNull<int>('confirmed_at');
+    if (confirmedAt != null && confirmedAt < 0) {
+      throw const FormatException(
+        'GasFree confirmed_at must be a non-negative integer',
+      );
+    }
+    final blockHeight = result.valueOrNull<int>('block_height');
+    if (blockHeight != null && blockHeight < 0) {
+      throw const FormatException(
+        'GasFree block_height must be a non-negative integer',
+      );
+    }
+    final finalFee = finalFeeRaw == null
+        ? null
+        : Decimal.parse(finalFeeRaw as String);
+    if (finalFee != null && finalFee < Decimal.zero) {
+      throw const FormatException(
+        'GasFree final_fee must be a non-negative numeric string',
+      );
+    }
     return GaslessTraceStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
       state: GaslessTraceState.parse(result.value<String>('state')),
       txHashOnChain: result.valueOrNull<String>('tx_hash_on_chain'),
-      blockHeight: result.valueOrNull<int>('block_height'),
-      confirmedAt: result.valueOrNull<int>('confirmed_at'),
-      finalFee: finalFeeRaw == null
-          ? null
-          : Decimal.parse(finalFeeRaw.toString()),
+      blockHeight: blockHeight,
+      confirmedAt: confirmedAt,
+      finalFee: finalFee,
       failureReason: result.valueOrNull<String>('failure_reason'),
     );
   }

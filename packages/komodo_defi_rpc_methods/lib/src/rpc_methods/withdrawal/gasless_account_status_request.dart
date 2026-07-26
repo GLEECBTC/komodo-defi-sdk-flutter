@@ -82,7 +82,12 @@ class GaslessAccountStatusResponse extends BaseResponse {
   }
 
   factory GaslessAccountStatusResponse.parse(Map<String, dynamic> json) {
-    final result = json.valueOrNull<JsonMap>('result') ?? json;
+    final result = json.valueOrNull<JsonMap>('result');
+    if (result == null) {
+      throw const FormatException(
+        'GasFree account status requires an MMRPC result envelope',
+      );
+    }
     const allowedKeys = {
       'gasfree_address',
       'service_provider',
@@ -95,6 +100,13 @@ class GaslessAccountStatusResponse extends BaseResponse {
       'activation_fee',
       'max_withdrawable',
     };
+    final missingKeys = allowedKeys.where((key) => !result.containsKey(key));
+    if (missingKeys.isNotEmpty) {
+      throw FormatException(
+        'GasFree account status is missing fields serialized by KDF: '
+        '${missingKeys.join(', ')}',
+      );
+    }
     final unknownKeys = result.keys.where((key) => !allowedKeys.contains(key));
     if (unknownKeys.isNotEmpty) {
       throw FormatException(
@@ -103,27 +115,43 @@ class GaslessAccountStatusResponse extends BaseResponse {
       );
     }
 
-    Decimal? dec(String key) {
-      final raw = result.valueOrNull<dynamic>(key);
-      return raw == null ? null : Decimal.parse(raw.toString());
+    Decimal? decimalString(String key) {
+      final raw = result[key];
+      if (raw == null) return null;
+      if (raw is! String) {
+        throw FormatException(
+          'GasFree account status $key must be a numeric string or null',
+        );
+      }
+      final amount = Decimal.parse(raw);
+      if (amount < Decimal.zero) {
+        throw FormatException(
+          'GasFree account status $key must be non-negative',
+        );
+      }
+      return amount;
     }
 
+    final onChainBalance = decimalString('on_chain_balance');
+    if (onChainBalance == null) {
+      throw const FormatException(
+        'GasFree account status on_chain_balance must be a numeric string',
+      );
+    }
     return GaslessAccountStatusResponse(
       mmrpc: json.valueOrNull<String>('mmrpc'),
       gasfreeAddress: result.value<String>('gasfree_address'),
-      onChainBalance: Decimal.parse(
-        result.value<dynamic>('on_chain_balance').toString(),
-      ),
+      onChainBalance: onChainBalance,
       availability: GaslessAccountAvailability.parse(
         result.value<String>('availability'),
       ),
       serviceProvider: result.valueOrNull<String>('service_provider'),
       active: result.valueOrNull<bool>('active'),
-      frozenBalance: dec('frozen_balance'),
-      spendableBalance: dec('spendable_balance'),
-      transferFee: dec('transfer_fee'),
-      activationFee: dec('activation_fee'),
-      maxWithdrawable: dec('max_withdrawable'),
+      frozenBalance: decimalString('frozen_balance'),
+      spendableBalance: decimalString('spendable_balance'),
+      transferFee: decimalString('transfer_fee'),
+      activationFee: decimalString('activation_fee'),
+      maxWithdrawable: decimalString('max_withdrawable'),
     );
   }
 
@@ -177,6 +205,11 @@ class GaslessAccountStatusResponse extends BaseResponse {
         frozenBalance != null &&
         spendableBalance != null &&
         transferFee != null;
+    if ((active ?? false) && activationFee != null) {
+      throw const FormatException(
+        'An active GasFree account cannot include an activation fee',
+      );
+    }
 
     switch (availability) {
       case GaslessAccountAvailability.available:

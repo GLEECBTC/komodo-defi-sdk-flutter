@@ -1,6 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 
+Map<String, dynamic> _gaslessTraceMessage({
+  String coin = 'USDT-TRC20',
+  String traceId = 'trace-1',
+  String state = 'submitted',
+  String? txHashOnChain,
+  int? blockHeight,
+  int? confirmedAt,
+  Object? finalFee,
+  String? failureReason,
+}) => {
+  'coin': coin,
+  'trace_id': traceId,
+  'state': state,
+  'tx_hash_on_chain': txHashOnChain,
+  'block_height': blockHeight,
+  'confirmed_at': confirmedAt,
+  'final_fee': finalFee,
+  'failure_reason': failureReason,
+};
+
 void main() {
   group('KdfEvent.parseAll - BALANCE', () {
     test('BALANCE:TRX list payload yields one event per ticker, summed across '
@@ -105,16 +125,13 @@ void main() {
     test('parses the exact success event shape', () {
       final event = KdfEvent.parseAll(<String, dynamic>{
         '_type': 'GASLESS_TRACE:USDT-TRC20',
-        'message': {
-          'coin': 'USDT-TRC20',
-          'trace_id': 'trace-1',
-          'state': 'on_chain',
-          'tx_hash_on_chain': 'on-chain-hash',
-          'block_height': 57175988,
-          'confirmed_at': 1747909638,
-          'final_fee': '2.000000',
-          'failure_reason': null,
-        },
+        'message': _gaslessTraceMessage(
+          state: 'on_chain',
+          txHashOnChain: 'on-chain-hash',
+          blockHeight: 57175988,
+          confirmedAt: 1747909638,
+          finalFee: '2.000000',
+        ),
       }).single;
 
       expect(event, isA<GaslessTraceEvent>());
@@ -145,15 +162,28 @@ void main() {
       expect(traceError.error, 'Request to GasFree provider timed out');
     });
 
+    for (final type in const [
+      'GASLESS_TRACE',
+      'GASLESS_TRACE:',
+      'ERROR:GASLESS_TRACE',
+      'ERROR:GASLESS_TRACE:',
+    ]) {
+      test('rejects unsuffixed runtime type $type', () {
+        expect(
+          () => KdfEvent.parseAll(<String, dynamic>{
+            '_type': type,
+            'message': _gaslessTraceMessage(traceId: 'trace-unsuffixed'),
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+
     test('rejects unknown lifecycle states', () {
       expect(
         () => KdfEvent.parseAll(<String, dynamic>{
           '_type': 'GASLESS_TRACE:USDT-TRC20',
-          'message': {
-            'coin': 'USDT-TRC20',
-            'trace_id': 'trace-3',
-            'state': 'WAITING',
-          },
+          'message': _gaslessTraceMessage(traceId: 'trace-3', state: 'WAITING'),
         }),
         throwsFormatException,
       );
@@ -163,10 +193,67 @@ void main() {
       expect(
         () => KdfEvent.parseAll(<String, dynamic>{
           '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': _gaslessTraceMessage(
+            coin: 'USDC-TRC20',
+            traceId: 'trace-4',
+          ),
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects a success event missing its payload coin', () {
+      final message = _gaslessTraceMessage(traceId: 'trace-no-coin')
+        ..remove('coin');
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': message,
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects an error event missing its payload coin', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'ERROR:GASLESS_TRACE:USDT-TRC20',
           'message': {
-            'coin': 'USDC-TRC20',
-            'trace_id': 'trace-4',
-            'state': 'submitted',
+            'trace_id': 'trace-no-coin',
+            'error': 'provider unavailable',
+          },
+        }),
+        throwsFormatException,
+      );
+    });
+
+    for (final field in const {'coin', 'trace_id', 'error'}) {
+      test('rejects an error event missing $field', () {
+        final message = <String, dynamic>{
+          'coin': 'USDT-TRC20',
+          'trace_id': 'trace-error',
+          'error': 'provider unavailable',
+        }..remove(field);
+
+        expect(
+          () => KdfEvent.parseAll(<String, dynamic>{
+            '_type': 'ERROR:GASLESS_TRACE:USDT-TRC20',
+            'message': message,
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+
+    test('rejects unknown GasFree trace error fields', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'ERROR:GASLESS_TRACE:USDT-TRC20',
+          'message': {
+            'coin': 'USDT-TRC20',
+            'trace_id': 'trace-error',
+            'error': 'provider unavailable',
+            'request_id': 'local-only',
           },
         }),
         throwsFormatException,
@@ -174,29 +261,106 @@ void main() {
     });
 
     test('rejects mixed failure shapes', () {
+      final failed = KdfEvent.parseAll(<String, dynamic>{
+        '_type': 'GASLESS_TRACE:USDT-TRC20',
+        'message': _gaslessTraceMessage(
+          traceId: 'trace-failed',
+          state: 'failed',
+          failureReason: 'unknown',
+        ),
+      }).single;
+      expect((failed as GaslessTraceEvent).failureReason, 'unknown');
+
       expect(
         () => KdfEvent.parseAll(<String, dynamic>{
           '_type': 'GASLESS_TRACE:USDT-TRC20',
-          'message': {
-            'coin': 'USDT-TRC20',
-            'trace_id': 'trace-5',
-            'state': 'failed',
-          },
+          'message': _gaslessTraceMessage(traceId: 'trace-5', state: 'failed'),
         }),
         throwsFormatException,
       );
       expect(
         () => KdfEvent.parseAll(<String, dynamic>{
           '_type': 'GASLESS_TRACE:USDT-TRC20',
-          'message': {
-            'coin': 'USDT-TRC20',
-            'trace_id': 'trace-6',
-            'state': 'confirmed',
-            'failure_reason': 'must not be present',
-          },
+          'message': _gaslessTraceMessage(
+            traceId: 'trace-provider-reason',
+            state: 'failed',
+            failureReason: 'provider rejected',
+          ),
         }),
         throwsFormatException,
       );
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': _gaslessTraceMessage(
+            traceId: 'trace-6',
+            state: 'confirmed',
+            failureReason: 'must not be present',
+          ),
+        }),
+        throwsFormatException,
+      );
+    });
+
+    for (final field in const {
+      'coin',
+      'trace_id',
+      'state',
+      'tx_hash_on_chain',
+      'block_height',
+      'confirmed_at',
+      'final_fee',
+      'failure_reason',
+    }) {
+      test('rejects a success event missing $field', () {
+        final message = _gaslessTraceMessage()..remove(field);
+
+        expect(
+          () => KdfEvent.parseAll(<String, dynamic>{
+            '_type': 'GASLESS_TRACE:USDT-TRC20',
+            'message': message,
+          }),
+          throwsFormatException,
+        );
+      });
+    }
+
+    test('rejects unknown fields and invalid numeric values', () {
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': _gaslessTraceMessage()..['request_id'] = 'local-only',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => KdfEvent.parseAll(<String, dynamic>{
+          '_type': 'GASLESS_TRACE:USDT-TRC20',
+          'message': _gaslessTraceMessage(finalFee: 2),
+        }),
+        throwsFormatException,
+      );
+      for (final finalFee in const ['not-a-number', '-1']) {
+        expect(
+          () => KdfEvent.parseAll(<String, dynamic>{
+            '_type': 'GASLESS_TRACE:USDT-TRC20',
+            'message': _gaslessTraceMessage(finalFee: finalFee),
+          }),
+          throwsFormatException,
+        );
+      }
+      for (final message in [
+        _gaslessTraceMessage(blockHeight: -1),
+        _gaslessTraceMessage(confirmedAt: -1),
+      ]) {
+        expect(
+          () => KdfEvent.parseAll(<String, dynamic>{
+            '_type': 'GASLESS_TRACE:USDT-TRC20',
+            'message': message,
+          }),
+          throwsFormatException,
+        );
+      }
     });
   });
 }
