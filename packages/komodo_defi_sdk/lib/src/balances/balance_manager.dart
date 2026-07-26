@@ -115,6 +115,15 @@ class BalanceManager implements IBalanceManager {
   /// Stale-guard timers to periodically refresh balances even while streaming
   final Map<AssetId, Timer> _staleBalanceTimers = {};
 
+  /// Pending deferred watcher teardowns, keyed by asset. See the `onCancel`
+  /// hook in [watchBalance].
+  final Map<AssetId, Timer> _watcherTeardownTimers = {};
+
+  /// How long a per-asset watcher survives after its last listener leaves.
+  /// Long enough to absorb an unsubscribe/resubscribe within the same frame or
+  /// two, short enough that a genuinely closed page stops polling promptly.
+  static const Duration _watcherTeardownGrace = Duration(milliseconds: 500);
+
   /// Current wallet ID being tracked
   WalletId? _currentWalletId;
 
@@ -288,6 +297,12 @@ class BalanceManager implements IBalanceManager {
     }
     _staleBalanceTimers.clear();
 
+    // Deferred teardowns are meaningless once the controllers are discarded.
+    for (final timer in _watcherTeardownTimers.values) {
+      timer.cancel();
+    }
+    _watcherTeardownTimers.clear();
+
     final List<StreamController<BalanceInfo>> controllers = _balanceControllers
         .values
         .toList();
@@ -381,8 +396,18 @@ class BalanceManager implements IBalanceManager {
       late final StreamController<BalanceInfo> createdController;
       createdController = StreamController<BalanceInfo>.broadcast(
         onListen: () {
+          // A pending teardown means the last listener left within the grace
+          // window - typically a widget rebuild handing StreamBuilder a new
+          // stream object. Keep the live watcher instead of restarting it.
+          final pendingTeardown = _watcherTeardownTimers.remove(assetId);
+          pendingTeardown?.cancel();
+
           if (!_isWalletContextCurrentSync(walletContext) ||
               !identical(_balanceControllers[assetId], createdController)) {
+            return;
+          }
+          if (pendingTeardown != null && _activeWatchers.containsKey(assetId)) {
+            _logger.fine('onListen: ${assetId.name} reused live watcher');
             return;
           }
           _logger.fine(
@@ -391,8 +416,23 @@ class BalanceManager implements IBalanceManager {
           _startWatchingBalance(assetId, activateIfNeeded);
         },
         onCancel: () {
-          _logger.fine('onCancel: ${assetId.name}');
-          _stopWatchingBalance(assetId, expectedController: createdController);
+          // Defer the teardown. Broadcast controllers fire onCancel on every
+          // 1->0 listener transition, so an unsubscribe/resubscribe flap would
+          // otherwise cancel the KDF subscription and stale guard and pay the
+          // full restart cost (storage read, activation check, getPubkeys,
+          // subscribe_to_balance) to end up exactly where it started.
+          _watcherTeardownTimers[assetId]?.cancel();
+          _watcherTeardownTimers[assetId] = Timer(_watcherTeardownGrace, () {
+            _watcherTeardownTimers.remove(assetId);
+            if (createdController.isClosed || createdController.hasListener) {
+              return;
+            }
+            _logger.fine('onCancel: ${assetId.name} (grace elapsed)');
+            _stopWatchingBalance(
+              assetId,
+              expectedController: createdController,
+            );
+          });
         },
       );
       return createdController;
@@ -1075,6 +1115,11 @@ class BalanceManager implements IBalanceManager {
     _isDisposed = true;
     _walletGeneration++;
     _pendingFastRefresh.clear();
+
+    for (final timer in _watcherTeardownTimers.values) {
+      timer.cancel();
+    }
+    _watcherTeardownTimers.clear();
 
     // Take snapshots to avoid concurrent modification while cancelling/closing
     final StreamSubscription<KdfUser?>? authSub = _authSubscription;

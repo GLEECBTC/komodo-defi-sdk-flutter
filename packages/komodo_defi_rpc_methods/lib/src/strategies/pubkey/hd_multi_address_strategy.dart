@@ -10,6 +10,12 @@ mixin HDWalletMixin on PubkeyStrategy {
   int get _gapLimit => 20;
   Duration get _scanPollInterval => const Duration(milliseconds: 250);
   Duration get _scanTimeout => const Duration(seconds: 20);
+  Duration get _accountBalancePollInterval => const Duration(milliseconds: 100);
+
+  /// Deliberately more generous than [_scanTimeout]: a wallet with many
+  /// derived addresses can legitimately take a while. This is a hang guard,
+  /// not a latency budget.
+  Duration get _accountBalanceTimeout => const Duration(seconds: 60);
 
   @override
   bool get supportsMultipleAddresses => true;
@@ -75,17 +81,29 @@ mixin HDWalletMixin on PubkeyStrategy {
       accountIndex: 0,
     );
 
-    AccountBalanceInfo? result;
-    while (result == null) {
+    final startedAt = DateTime.now();
+    while (true) {
       final status = await client.rpc.hdWallet.accountBalanceStatus(
         taskId: initResponse.taskId,
         forgetIfFinished: false,
       );
-      result = (status.details..throwIfError).data;
+      final result = (status.details..throwIfError).data;
+      // Return as soon as the task resolves. The delay used to run
+      // unconditionally after the assignment, so every call paid an extra
+      // 100ms even when the first poll already succeeded - once per asset on
+      // every fresh pubkey fetch.
+      if (result != null) return result;
 
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // Guard against a task that never resolves. Without this the loop is
+      // unbounded, unlike scanForNewAddresses above.
+      if (DateTime.now().difference(startedAt) >= _accountBalanceTimeout) {
+        throw TimeoutException(
+          'Timed out fetching account balance for ${assetId.id}',
+        );
+      }
+
+      await Future<void>.delayed(_accountBalancePollInterval);
     }
-    return result;
   }
 
   Future<AssetPubkeys> convertBalanceInfoToAssetPubkeys(

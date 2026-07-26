@@ -697,6 +697,7 @@ class ActivationManager {
     ActivationProgress success,
     _GaslessActivationContext context,
   ) async {
+    final pendingProbes = <({Asset asset, int epoch})>[];
     try {
       await _requireGaslessContextCurrent(context);
       final assets = _gaslessAssets(group).toList();
@@ -758,30 +759,15 @@ class ActivationManager {
           asset.id,
         );
         _gaslessCapabilities.markChecking(asset.id);
-        try {
-          final status = await _client.rpc.withdraw.gaslessAccountStatus(
-            coin: asset.id.id,
-          );
-          await _requireGaslessContextCurrent(context);
-          if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
-            asset.id,
-            statusEpoch,
-          )) {
-            continue;
-          }
-          _gaslessCapabilities.refreshAccountStatus(asset, status);
-        } catch (error) {
-          await _requireGaslessContextCurrent(context);
-          if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
-            asset.id,
-            statusEpoch,
-          )) {
-            continue;
-          }
-          if (!_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
-            _gaslessCapabilities.markUnconfirmed(asset.id);
-          }
-        }
+        pendingProbes.add((asset: asset, epoch: statusEpoch));
+      }
+
+      // The identity binding above is local and stays on the activation path,
+      // so the terminal progress still reports GasFree as "checking" rather
+      // than absent. The account-status RPC itself is deliberately not awaited
+      // here - see [_refreshGaslessAccountStatuses].
+      if (pendingProbes.isNotEmpty) {
+        unawaited(_refreshGaslessAccountStatuses(pendingProbes, context));
       }
       return success;
     } catch (error, stackTrace) {
@@ -810,6 +796,59 @@ class ActivationManager {
       // activation. The typed account status and capability state gate the
       // optional rail while Standard TRON remains usable.
       return success;
+    }
+  }
+
+  /// Refreshes GasFree account status out of band.
+  ///
+  /// Deliberately not awaited by the activation stream.
+  /// `gasless::account_status` is a proxy round trip with a 10s timeout, and
+  /// awaiting it before yielding the terminal [ActivationProgress] held the
+  /// asset in `activating` - with no balance watcher and no Send - for its
+  /// entire duration. Since USDT-TRC20 is a default coin, that landed on the
+  /// post-login critical path for every wallet that has it.
+  ///
+  /// Safe to land late: the result is already non-fatal (a failure only marks
+  /// the capability unconfirmed), and the registry guards stale results with
+  /// per-asset probe epochs plus the wallet-context check below.
+  Future<void> _refreshGaslessAccountStatuses(
+    List<({Asset asset, int epoch})> probes,
+    _GaslessActivationContext context,
+  ) async {
+    for (final probe in probes) {
+      final asset = probe.asset;
+      try {
+        final status = await _client.rpc.withdraw.gaslessAccountStatus(
+          coin: asset.id.id,
+        );
+        await _requireGaslessContextCurrent(context);
+        if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
+          asset.id,
+          probe.epoch,
+        )) {
+          continue;
+        }
+        _gaslessCapabilities.refreshAccountStatus(asset, status);
+      } on WalletChangedDisconnectException {
+        // The wallet changed underneath us; every remaining result is stale
+        // and the registry is reset by the auth listener.
+        return;
+      } catch (error) {
+        try {
+          await _requireGaslessContextCurrent(context);
+        } on WalletChangedDisconnectException {
+          return;
+        }
+        if (!_gaslessCapabilities.isCurrentAccountStatusProbe(
+          asset.id,
+          probe.epoch,
+        )) {
+          continue;
+        }
+        if (!_gaslessCapabilities.markAccountStatusError(asset.id, error)) {
+          _gaslessCapabilities.markUnconfirmed(asset.id);
+        }
+      }
     }
   }
 
