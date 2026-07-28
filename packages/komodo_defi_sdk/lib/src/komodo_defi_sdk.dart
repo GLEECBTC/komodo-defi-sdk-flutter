@@ -221,6 +221,34 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     return result.isSuccess;
   }
 
+  /// Current activation state of every asset the SDK has observed.
+  ///
+  /// Assets absent from this map are neither activating, active nor failed.
+  Map<AssetId, AssetActivationState> get activationStates =>
+      _assertSdkInitialized(
+        _container<SharedActivationCoordinator>(),
+      ).activationStates;
+
+  /// Current activation states, then every subsequent change.
+  ///
+  /// Observe this rather than polling the activated-assets set: the first
+  /// event is always a snapshot, so a subscriber that attaches mid-activation
+  /// - or long after one finished - still learns the truth. It also covers
+  /// activations performed by other SDK subsystems, which no caller could
+  /// otherwise see.
+  Stream<Map<AssetId, AssetActivationState>> watchActivationStates() =>
+      _assertSdkInitialized(
+        _container<SharedActivationCoordinator>(),
+      ).watchActivationStates();
+
+  /// Current state for [assetId], then every subsequent change to it.
+  ///
+  /// Emits null while the asset is not tracked.
+  Stream<AssetActivationState?> watchActivationStateOf(AssetId assetId) =>
+      _assertSdkInitialized(
+        _container<SharedActivationCoordinator>(),
+      ).watchActivationStateOf(assetId);
+
   /// Deletes a persisted custom token from SDK-managed storage.
   ///
   /// This removes the token from the custom-token store and the in-memory
@@ -450,38 +478,59 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       );
     }
 
-    final stopwatch = Stopwatch()..start();
-    var forceRefresh = true;
+    bool meetsThreshold(Set<AssetId> enabled) =>
+        enabled.intersection(targets).length / targets.length >= threshold;
 
-    while (true) {
-      Set<AssetId> enabled;
-      try {
-        enabled = await activatedAssetsCache.getActivatedAssetIds(
-          forceRefresh: forceRefresh,
-        );
-      } on TimeoutException {
-        // The cache's liveness ceiling fired. Treat it as "not at the threshold
-        // yet" so [timeout] below governs the outcome, rather than escaping as
-        // an exception this signature does not advertise.
-        enabled = const {};
-      }
-      forceRefresh = false;
+    final completer = Completer<bool>();
+    StreamSubscription<Map<AssetId, AssetActivationState>>? subscription;
+    Timer? deadline;
+    Timer? backstop;
 
-      final matched = enabled.intersection(targets).length;
-      final coverage = matched / targets.length;
-      if (coverage >= threshold) {
-        return true;
-      }
-
-      if (stopwatch.elapsed >= timeout) {
-        return false;
-      }
-
-      final remaining = timeout - stopwatch.elapsed;
-      await Future<void>.delayed(
-        remaining < pollInterval ? remaining : pollInterval,
-      );
+    void finish({required bool reached}) {
+      if (completer.isCompleted) return;
+      deadline?.cancel();
+      backstop?.cancel();
+      unawaited(subscription?.cancel());
+      completer.complete(reached);
     }
+
+    // The stream replays its current snapshot on subscribe, so the
+    // "already at the threshold" case resolves on the first event and needs
+    // no separate probe.
+    subscription = watchActivationStates().listen((states) {
+      final active = <AssetId>{
+        for (final entry in states.entries)
+          if (entry.value.isActive) entry.key,
+      };
+      if (meetsThreshold(active)) finish(reached: true);
+    });
+
+    // Armed before anything is awaited. Both previous implementations of this
+    // wait evaluated elapsed-versus-timeout *after* an unbounded read, so a
+    // wedged node made a documented-timeout method hang forever.
+    deadline = Timer(timeout, () => finish(reached: false));
+
+    // [pollInterval] keeps its documented meaning as a backstop: anything the
+    // activation stream cannot see on its own can still resolve the wait from
+    // KDF's enabled-asset set.
+    Future<void> probe() async {
+      try {
+        final enabled = await activatedAssetsCache.getActivatedAssetIds(
+          forceRefresh: true,
+        );
+        if (meetsThreshold(enabled)) finish(reached: true);
+      } on TimeoutException {
+        // The cache's liveness ceiling fired. Treat it as "not at the
+        // threshold yet" so [timeout] governs the outcome.
+      } on Object {
+        // Same: a failed read is not a verdict.
+      }
+    }
+
+    unawaited(probe());
+    backstop = Timer.periodic(pollInterval, (_) => unawaited(probe()));
+
+    return completer.future;
   }
 
   /// Convenience helper that accepts asset tickers instead of [AssetId]s.

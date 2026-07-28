@@ -28,20 +28,6 @@ class SharedActivationCoordinator {
   /// Track pending activations to prevent duplicates
   final Map<AssetId, Completer<ActivationResult>> _pendingActivations = {};
 
-  /// Track active activation streams for joining
-  final Map<AssetId, StreamController<ActivationProgress>> _activeStreams = {};
-
-  /// Track failed activations
-  final Set<AssetId> _failedActivations = <AssetId>{};
-
-  /// Stream controller for broadcasting failed activations changes
-  final StreamController<Set<AssetId>> _failedActivationsController =
-      StreamController<Set<AssetId>>.broadcast();
-
-  /// Stream controller for broadcasting pending activations changes
-  final StreamController<Set<AssetId>> _pendingActivationsController =
-      StreamController<Set<AssetId>>.broadcast();
-
   /// Current wallet ID being tracked
   WalletId? _currentWalletId;
 
@@ -75,21 +61,6 @@ class SharedActivationCoordinator {
       }
     }
     _pendingActivations.clear();
-
-    // Close all active streams
-    for (final controller in _activeStreams.values) {
-      if (!controller.isClosed) {
-        controller.close();
-      }
-    }
-    _activeStreams.clear();
-
-    // Clear failed activations
-    _failedActivations.clear();
-
-    // Notify stream watchers of state changes
-    _broadcastPendingActivations();
-    _broadcastFailedActivations();
   }
 
   /// Activate an asset with coordination across all managers.
@@ -123,13 +94,8 @@ class SharedActivationCoordinator {
     _pendingActivations[asset.id] = completer;
 
     // Clear any previous failed status for this asset
-    if (_failedActivations.remove(asset.id)) {
-      _broadcastFailedActivations();
-    }
 
     // Broadcast that this asset is now pending
-    _broadcastPendingActivations();
-
     try {
       // Subscribe to activation stream and wait for completion
       await for (final progress in _activationManager.activateAsset(asset)) {
@@ -143,8 +109,10 @@ class SharedActivationCoordinator {
                 completer.complete(result);
               }
             } catch (e) {
-              _failedActivations.add(asset.id);
-              _broadcastFailedActivations();
+              _activationManager.recordActivationFailure(
+                asset.id,
+                'Activation completed but the coin did not become available',
+              );
               final result = ActivationResult.failure(
                 asset.id,
                 'Activation completed but coin did not become available: $e',
@@ -154,8 +122,6 @@ class SharedActivationCoordinator {
               }
             }
           } else {
-            _failedActivations.add(asset.id);
-            _broadcastFailedActivations();
             final result = ActivationResult.failure(
               asset.id,
               progress.errorMessage ?? 'Unknown activation error',
@@ -169,8 +135,6 @@ class SharedActivationCoordinator {
       }
     } catch (e, stackTrace) {
       if (!completer.isCompleted) {
-        _failedActivations.add(asset.id);
-        _broadcastFailedActivations();
         log(
           'Activation failed for ${asset.id.id}: $e',
           name: 'SharedActivationCoordinator',
@@ -203,8 +167,10 @@ class SharedActivationCoordinator {
           'progress event; failing the activation rather than hanging',
           name: 'SharedActivationCoordinator',
         );
-        _failedActivations.add(asset.id);
-        _broadcastFailedActivations();
+        _activationManager.recordActivationFailure(
+          asset.id,
+          'Activation stream ended without a terminal progress event',
+        );
         completer.complete(
           ActivationResult.failure(
             asset.id,
@@ -213,86 +179,9 @@ class SharedActivationCoordinator {
         );
       }
       _pendingActivations.remove(asset.id);
-      _broadcastPendingActivations();
     }
 
     return completer.future;
-  }
-
-  /// Get activation progress stream for an asset.
-  /// Multiple subscribers will share the same stream.
-  Stream<ActivationProgress> activateAssetStream(Asset asset) {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-
-    // Check if there's already an active stream for this asset
-    var controller = _activeStreams[asset.id];
-    if (controller != null && !controller.isClosed) {
-      log(
-        'Joining existing activation stream for ${asset.id.id}',
-        name: 'SharedActivationCoordinator',
-      );
-      return controller.stream;
-    }
-
-    // Create new broadcast controller
-    controller = StreamController<ActivationProgress>.broadcast(
-      onCancel: () {
-        // Clean up when all listeners cancel
-        if (controller?.hasListener == false) {
-          _activeStreams.remove(asset.id);
-          controller?.close();
-        }
-      },
-    );
-    _activeStreams[asset.id] = controller;
-
-    // Start activation and forward progress to subscribers
-    _activationManager
-        .activateAsset(asset)
-        .listen(
-          (progress) {
-            final currentController = _activeStreams[asset.id];
-            if (currentController != null && !currentController.isClosed) {
-              currentController.add(progress);
-            }
-
-            // Clean up when activation completes
-            if (progress.isComplete) {
-              // For stream-based activation, we don't wait for coin availability
-              // as subscribers may want to handle this themselves
-              Timer.run(() {
-                final controllerToClose = _activeStreams.remove(asset.id);
-                if (controllerToClose != null && !controllerToClose.isClosed) {
-                  controllerToClose.close();
-                }
-              });
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            final currentController = _activeStreams[asset.id];
-            if (currentController != null && !currentController.isClosed) {
-              currentController.addError(error, stackTrace);
-              _activeStreams.remove(asset.id);
-              currentController.close();
-            }
-          },
-          onDone: () {
-            final controllerToClose = _activeStreams.remove(asset.id);
-            if (controllerToClose != null && !controllerToClose.isClosed) {
-              controllerToClose.close();
-            }
-          },
-        );
-
-    return controller.stream;
-  }
-
-  /// Check if an asset is currently being activated
-  bool isActivationInProgress(AssetId assetId) {
-    return _pendingActivations.containsKey(assetId) ||
-        _activeStreams.containsKey(assetId);
   }
 
   /// Check if an asset is active (delegated to ActivationManager)
@@ -300,46 +189,40 @@ class SharedActivationCoordinator {
     return _activationManager.isAssetActive(assetId);
   }
 
-  /// Watch failed activations.
-  /// Returns a stream that emits the current set of failed asset IDs
-  /// whenever it changes.
-  Stream<Set<AssetId>> watchFailedActivations() {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-    return _failedActivationsController.stream;
-  }
+  /// Assets whose activation is currently in flight.
+  ///
+  /// Derived from [ActivationManager.activationStates] rather than this
+  /// class's own bookkeeping, so it also covers activations that never went
+  /// through this coordinator - notably the `AssetManager.activateAsset` path
+  /// the app's ZHTLC flow uses.
+  Set<AssetId> get pendingActivations => _activationManager
+      .activationStates
+      .entries
+      .where((entry) => entry.value.isActivating)
+      .map((entry) => entry.key)
+      .toSet();
 
-  /// Watch pending activations.
-  /// Returns a stream that emits the current set of pending asset IDs
-  /// whenever it changes.
-  Stream<Set<AssetId>> watchPendingActivations() {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-    return _pendingActivationsController.stream;
-  }
+  /// Assets whose most recent activation attempt failed.
+  Set<AssetId> get failedActivations => _activationManager
+      .activationStates
+      .entries
+      .where((entry) => entry.value.isFailed)
+      .map((entry) => entry.key)
+      .toSet();
 
-  /// Get current set of failed activations
-  Set<AssetId> get failedActivations => Set<AssetId>.from(_failedActivations);
+  /// Current activation state of every asset the SDK has observed.
+  Map<AssetId, AssetActivationState> get activationStates =>
+      _activationManager.activationStates;
 
-  /// Get current set of pending activations
-  Set<AssetId> get pendingActivations => _pendingActivations.keys.toSet();
+  /// Current activation states, then every subsequent change.
+  ///
+  /// See [ActivationManager.watchActivationStates].
+  Stream<Map<AssetId, AssetActivationState>> watchActivationStates() =>
+      _activationManager.watchActivationStates();
 
-  /// Clear failed activation status for an asset
-  void clearFailedActivation(AssetId assetId) {
-    if (_failedActivations.remove(assetId)) {
-      _broadcastFailedActivations();
-    }
-  }
-
-  /// Clear all failed activations
-  void clearAllFailedActivations() {
-    if (_failedActivations.isNotEmpty) {
-      _failedActivations.clear();
-      _broadcastFailedActivations();
-    }
-  }
+  /// Current state for [assetId], then every subsequent change to it.
+  Stream<AssetActivationState?> watchActivationStateOf(AssetId assetId) =>
+      _activationManager.watchActivationStateOf(assetId);
 
   /// Wait for a coin to become available after activation completes.
   /// This addresses the timing issue where activation RPC completes successfully
@@ -391,20 +274,6 @@ class SharedActivationCoordinator {
     );
   }
 
-  /// Broadcast current failed activations to stream listeners
-  void _broadcastFailedActivations() {
-    if (!_failedActivationsController.isClosed) {
-      _failedActivationsController.add(Set<AssetId>.from(_failedActivations));
-    }
-  }
-
-  /// Broadcast current pending activations to stream listeners
-  void _broadcastPendingActivations() {
-    if (!_pendingActivationsController.isClosed) {
-      _pendingActivationsController.add(_pendingActivations.keys.toSet());
-    }
-  }
-
   /// Dispose of the coordinator and clean up resources
   Future<void> dispose() async {
     if (_isDisposed) return;
@@ -430,23 +299,9 @@ class SharedActivationCoordinator {
     _pendingActivations.clear();
 
     // Close all active streams
-    for (final controller in _activeStreams.values) {
-      if (!controller.isClosed) {
-        controller.close();
-      }
-    }
-    _activeStreams.clear();
-
     // Close state tracking streams
-    if (!_failedActivationsController.isClosed) {
-      _failedActivationsController.close();
-    }
-    if (!_pendingActivationsController.isClosed) {
-      _pendingActivationsController.close();
-    }
 
     // Clear state tracking sets
-    _failedActivations.clear();
   }
 }
 
