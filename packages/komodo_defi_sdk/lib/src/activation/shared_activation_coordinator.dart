@@ -180,6 +180,38 @@ class SharedActivationCoordinator {
         completer.complete(ActivationResult.failure(asset.id, e.toString()));
       }
     } finally {
+      // The `await for` above only completes the completer when it sees a
+      // terminal `progress.isComplete`. A progress stream that ends without one
+      // - an activation strategy returning early, a controller closed by a
+      // session reset, an empty stream - falls straight through to here with
+      // the completer still pending, and `completer.future` below then never
+      // resolves.
+      //
+      // That future is awaited by every caller of this coordinator:
+      // `BalanceManager._ensureAssetActivated` (so the balance watcher never
+      // starts) and the wallet's login fan-out via `ensureAssetActivated` (so
+      // `Future.wait` over the whole batch never returns, the coin holds
+      // `activating` forever, and the app's post-login bookkeeping never runs).
+      // Anyone who joined through `_pendingActivations` hangs with it.
+      //
+      // Fail closed instead: a failure is recoverable - the caller retries, and
+      // the app's reconcile pass corrects the row if KDF did activate it after
+      // all - whereas a pending future is not.
+      if (!completer.isCompleted) {
+        log(
+          'Activation stream for ${asset.id.id} ended without a terminal '
+          'progress event; failing the activation rather than hanging',
+          name: 'SharedActivationCoordinator',
+        );
+        _failedActivations.add(asset.id);
+        _broadcastFailedActivations();
+        completer.complete(
+          ActivationResult.failure(
+            asset.id,
+            'Activation stream ended without a terminal progress event',
+          ),
+        );
+      }
       _pendingActivations.remove(asset.id);
       _broadcastPendingActivations();
     }

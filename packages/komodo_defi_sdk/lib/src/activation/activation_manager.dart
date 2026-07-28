@@ -631,14 +631,40 @@ class ActivationManager {
             }
           }
 
-          // Pre-cache balance for the activated asset
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
-          await _balanceManager.precacheBalance(asset);
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
+          // Pre-cache the balance, but do NOT await it here.
+          //
+          // Two reasons, and the first is a hard deadlock:
+          //
+          // 1. `precacheBalance` awaits `PubkeyManager.getPubkeys(asset)`. On
+          //    the fresh-fetch path - no in-memory cache, no in-flight request,
+          //    no persisted pubkeys, i.e. the first ever activation of this
+          //    asset for this wallet on this device - that re-enters
+          //    `SharedActivationCoordinator.activateAsset(asset)`. The
+          //    coordinator finds its own still-pending completer in
+          //    `_pendingActivations` and joins it. But that completer is only
+          //    completed after this method returns, so the activation waits on
+          //    itself. Nothing on the chain has a timeout, so the asset stays
+          //    `activating` forever and every caller blocked on it - the login
+          //    fan-out's `Future.wait`, the balance watcher's
+          //    `_ensureAssetActivated` - hangs with it.
+          //
+          // 2. Even without the cycle it is a `get_new_address`/pubkey round
+          //    trip per asset sitting between KDF reporting success and the
+          //    terminal `ActivationProgress` the UI is waiting on. It is a
+          //    cache warm-up; nothing about the activation's correctness
+          //    depends on it, and the balance watcher fetches the balance on
+          //    its own anyway.
+          //
+          // The genuinely load-bearing side effects above (asset history,
+          // custom-token storage, cache invalidation, completing the join
+          // future) stay inline and still gate the terminal event.
+          unawaited(
+            _balanceManager.precacheBalance(asset).catchError((Object e) {
+              debugPrint(
+                'Background balance pre-cache failed for ${asset.id.id}: $e',
+              );
+            }),
+          );
         }
 
         if (gaslessContext != null) {
