@@ -135,6 +135,16 @@ Future<void> _waitForActiveWatcher(
   }
 }
 
+Future<void> _waitForNoActiveWatcher(
+  BalanceManager manager,
+  AssetId assetId,
+) async {
+  for (var attempt = 0; attempt < 100; attempt++) {
+    if (!manager.hasActiveWatcher(assetId)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
 void main() {
   test(
     'delayed auth event cannot emit wallet A cached balance to wallet B',
@@ -206,7 +216,7 @@ void main() {
   );
 
   test(
-    'old controller cleanup cannot stop the replacement wallet watcher',
+    'stale controller cannot swallow replacement watcher teardown',
     () async {
       final auth = _MockAuth();
       final activation = _MockActivationCoordinator();
@@ -292,11 +302,13 @@ void main() {
       await _waitForActiveWatcher(manager, asset.id);
       expect(manager.hasActiveWatcher(asset.id), isTrue);
 
+      await walletBSubscription.cancel();
+      walletBSubscription = null;
       walletASubscription.resume();
       await walletADone.future;
-      await Future<void>.delayed(Duration.zero);
+      await _waitForNoActiveWatcher(manager, asset.id);
 
-      expect(manager.hasActiveWatcher(asset.id), isTrue);
+      expect(manager.hasActiveWatcher(asset.id), isFalse);
       expect(
         manager.lastKnownForWallet(asset.id, _walletB.walletId)?.total,
         Decimal.fromInt(9),

@@ -396,16 +396,23 @@ class BalanceManager implements IBalanceManager {
       late final StreamController<BalanceInfo> createdController;
       createdController = StreamController<BalanceInfo>.broadcast(
         onListen: () {
+          // Claim the pending teardown only once this controller is known to
+          // be the live one. `_watcherTeardownTimers` is keyed by asset, not
+          // by controller, so cancelling before these guards would let a
+          // listener on a stale controller swallow the *current* controller's
+          // teardown - leaking its KDF subscription and stale guard. A timer
+          // left pending is harmless: _stopWatchingBalance re-checks identity.
+          if (!_isWalletContextCurrentSync(walletContext) ||
+              !identical(_balanceControllers[assetId], createdController)) {
+            return;
+          }
+
           // A pending teardown means the last listener left within the grace
           // window - typically a widget rebuild handing StreamBuilder a new
           // stream object. Keep the live watcher instead of restarting it.
           final pendingTeardown = _watcherTeardownTimers.remove(assetId);
           pendingTeardown?.cancel();
 
-          if (!_isWalletContextCurrentSync(walletContext) ||
-              !identical(_balanceControllers[assetId], createdController)) {
-            return;
-          }
           if (pendingTeardown != null && _activeWatchers.containsKey(assetId)) {
             _logger.fine('onListen: ${assetId.name} reused live watcher');
             return;
@@ -416,6 +423,13 @@ class BalanceManager implements IBalanceManager {
           _startWatchingBalance(assetId, activateIfNeeded);
         },
         onCancel: () {
+          // A stale controller must not replace the live controller's
+          // asset-keyed teardown timer.
+          if (!_isWalletContextCurrentSync(walletContext) ||
+              !identical(_balanceControllers[assetId], createdController)) {
+            return;
+          }
+
           // Defer the teardown. Broadcast controllers fire onCancel on every
           // 1->0 listener transition, so an unsubscribe/resubscribe flap would
           // otherwise cancel the KDF subscription and stale guard and pay the
