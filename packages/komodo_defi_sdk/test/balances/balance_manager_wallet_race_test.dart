@@ -135,16 +135,6 @@ Future<void> _waitForActiveWatcher(
   }
 }
 
-Future<void> _waitForNoActiveWatcher(
-  BalanceManager manager,
-  AssetId assetId,
-) async {
-  for (var attempt = 0; attempt < 100; attempt++) {
-    if (!manager.hasActiveWatcher(assetId)) return;
-    await Future<void>.delayed(const Duration(milliseconds: 10));
-  }
-}
-
 void main() {
   test(
     'delayed auth event cannot emit wallet A cached balance to wallet B',
@@ -258,57 +248,54 @@ void main() {
         eventStreamingManager: eventStreaming,
         assetHistoryStorage: assetHistory,
       );
+      final balances = <BalanceInfo>[];
+      final errors = <Object>[];
       final walletAFirst = Completer<BalanceInfo>();
-      final walletADisconnecting = Completer<void>();
-      final walletADone = Completer<void>();
-      late final StreamSubscription<BalanceInfo> walletASubscription;
-      walletASubscription = manager
-          .watchBalance(asset.id)
-          .listen(
-            (balance) {
-              if (!walletAFirst.isCompleted) walletAFirst.complete(balance);
-            },
-            onError: (Object error) {
-              if (error is WalletChangedDisconnectException &&
-                  !walletADisconnecting.isCompleted) {
-                // Hold the old controller open while wallet B installs its
-                // replacement. Its later onCancel must not tear B down.
-                walletASubscription.pause();
-                walletADisconnecting.complete();
-              }
-            },
-            onDone: walletADone.complete,
-          );
-      StreamSubscription<BalanceInfo>? walletBSubscription;
+      final walletBFirst = Completer<BalanceInfo>();
+      final subscription = manager.watchBalance(asset.id).listen((balance) {
+        balances.add(balance);
+        if (balance.total == Decimal.fromInt(5) && !walletAFirst.isCompleted) {
+          walletAFirst.complete(balance);
+        }
+        if (balance.total == Decimal.fromInt(9) && !walletBFirst.isCompleted) {
+          walletBFirst.complete(balance);
+        }
+      }, onError: errors.add);
       addTearDown(() async {
-        await walletASubscription.cancel();
-        await walletBSubscription?.cancel();
+        await subscription.cancel();
         await manager.dispose();
         await authChanges.close();
       });
 
       expect((await walletAFirst.future).total, Decimal.fromInt(5));
+      await _waitForActiveWatcher(manager, asset.id);
       expect(manager.hasActiveWatcher(asset.id), isTrue);
 
       currentUser = _walletB;
       authChanges.add(_walletB);
-      await walletADisconnecting.future;
 
-      final walletBFirst = Completer<BalanceInfo>();
-      walletBSubscription = manager.watchBalance(asset.id).listen((balance) {
-        if (!walletBFirst.isCompleted) walletBFirst.complete(balance);
-      });
+      // The reset closes wallet A's controller underneath this subscription.
+      // The subscription must recover onto wallet B rather than end - see the
+      // contract on `IBalanceManager.watchBalance`.
       expect((await walletBFirst.future).total, Decimal.fromInt(9));
-      await _waitForActiveWatcher(manager, asset.id);
-      expect(manager.hasActiveWatcher(asset.id), isTrue);
+      expect(
+        errors.whereType<WalletChangedDisconnectException>(),
+        isNotEmpty,
+        reason: 'the disconnect is reported to listeners before recovery',
+      );
 
-      await walletBSubscription.cancel();
-      walletBSubscription = null;
-      walletASubscription.resume();
-      await walletADone.future;
-      await _waitForNoActiveWatcher(manager, asset.id);
+      // Wallet A's controller was closed while this attachment was still
+      // subscribed to it, so its `onCancel` ran against an asset key that by
+      // then belonged to wallet B. Had it been allowed to arm a teardown, the
+      // timer would fire once the grace window elapsed and stop B's watcher.
+      // The window is 500ms; wait comfortably past it.
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
 
-      expect(manager.hasActiveWatcher(asset.id), isFalse);
+      expect(
+        manager.hasActiveWatcher(asset.id),
+        isTrue,
+        reason: "wallet A's teardown must not reach wallet B's watcher",
+      );
       expect(
         manager.lastKnownForWallet(asset.id, _walletB.walletId)?.total,
         Decimal.fromInt(9),

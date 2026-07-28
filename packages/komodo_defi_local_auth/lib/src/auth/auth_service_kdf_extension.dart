@@ -399,11 +399,37 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
+  /// Whether a startup-sensitive RPC failure is worth one retry.
+  ///
+  /// The first four are transport faults. The fifth covers KDF answering *with*
+  /// an error while it is still coming up or is saturated - on web a
+  /// single-threaded WASM instance sharing the Flutter isolate with a login's
+  /// activation fan-out. Without it, one such response on the very first
+  /// attempt makes [_ensureAuthenticatedWalletIdentity] fall straight through
+  /// to a name-only identity with no retry, and that downgrade is emitted on
+  /// the auth stream to every wallet-scoped consumer.
   bool _shouldRecoverStartupSensitiveRpc(Object error) {
     return error is TimeoutException ||
         error is SocketException ||
         error is HttpException ||
-        error is HandshakeException;
+        error is HandshakeException ||
+        (error is GeneralErrorResponse && !_isPermanentStartupRpcError(error));
+  }
+
+  /// Errors KDF has explicitly classified as terminal.
+  ///
+  /// A deny-list, not an allow-list: the saturation responses this retry exists
+  /// for often carry no `error_type` at all, so anything unrecognised must stay
+  /// retryable. Retrying a *modelled* failure only delays the real message and
+  /// re-labels it `apiConnectionError`.
+  bool _isPermanentStartupRpcError(GeneralErrorResponse error) {
+    if (_isIncorrectPasswordRpcError(error) ||
+        _isWalletNotFoundRpcError(error)) {
+      return true;
+    }
+    final errorType = _extractRpcErrorType(error);
+    return _isInternalWalletError(errorType) ||
+        (errorType ?? '').toLowerCase() == 'invalidrequest';
   }
 
   Future<KdfStartupConfig> _generateStartupConfig({

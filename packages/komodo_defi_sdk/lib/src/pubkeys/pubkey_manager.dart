@@ -180,6 +180,10 @@ class PubkeyManager implements IPubkeyManager {
         user.walletId,
       );
       _currentWalletId = operationWalletId;
+    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+      // Same wallet, identity RPC temporarily unavailable. See the matching
+      // branch in [_handleAuthStateChanged].
+      operationWalletId = currentWalletId;
     } else {
       // Auth streams are asynchronous. Invalidate proactively so a caller
       // cannot observe the prior wallet's cache before the event arrives.
@@ -369,7 +373,11 @@ class PubkeyManager implements IPubkeyManager {
       throw StateError('PubkeyManager has been disposed');
     }
     final current = _currentWalletId;
-    if (current == null || !isSameStableWallet(current, walletId)) {
+    // Asymmetric comparison: caller's captured identity first, latest accepted
+    // identity second. See the matching note in `BalanceManager` - reversed,
+    // this rejects the legitimate name-only -> pubkeyHash-enriched transition
+    // and the cache never hits.
+    if (current == null || !isSameStableWallet(walletId, current)) {
       return null;
     }
     return _pubkeysCache[assetId];
@@ -663,6 +671,21 @@ class PubkeyManager implements IPubkeyManager {
           newWalletId,
         );
       }
+      return;
+    }
+
+    // Same wallet observed without its pubkeyHash because the identity RPC is
+    // temporarily unavailable - not a wallet switch. Resetting here would drop
+    // every cached pubkey set for a wallet that never changed, and the RPC is
+    // most likely to blip precisely when KDF is saturated with login
+    // activations. See [isDegradedWalletIdentity].
+    if (currentWalletId != null &&
+        newWalletId != null &&
+        isDegradedWalletIdentity(currentWalletId, newWalletId)) {
+      _logger.warning(
+        'Ignoring a degraded wallet identity for ${currentWalletId.name} '
+        '(identity RPC unavailable); keeping pubkey state',
+      );
       return;
     }
 

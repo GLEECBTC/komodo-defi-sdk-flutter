@@ -528,4 +528,55 @@ void main() {
       );
     },
   );
+
+  test('a degraded identity does not drop cached pubkeys', () async {
+    // The mirror of the test above. `_ensureAuthenticatedWalletIdentity` strips
+    // the pubkeyHash whenever the identity RPC is unavailable, so the *same*
+    // wallet is observed name-only. Treating that as a wallet change would
+    // clear every cached pubkey set - and the RPC is most likely to blip
+    // exactly during a login's activation fan-out.
+    final client = _MockApiClient();
+    final auth = _MockAuth();
+    final activation = _MockActivationCoordinator();
+    final storage = _RecordingPubkeysStorage();
+    final authChanges = StreamController<KdfUser?>.broadcast();
+    KdfUser? currentUser = _hashAWallet;
+    final asset = _singleAddressAsset();
+
+    when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+    when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+    when(
+      () => activation.activateAsset(asset),
+    ).thenAnswer((_) async => ActivationResult.success(asset.id));
+    when(() => client.executeRpc(any())).thenAnswer((_) async {
+      return {
+        'address': 'cosmos1hasha',
+        'balance': '5',
+        'unspendable_balance': '0',
+        'coin': asset.id.id,
+      };
+    });
+
+    final manager = PubkeyManager(client, auth, activation, storage: storage);
+    addTearDown(() async {
+      await manager.dispose();
+      await authChanges.close();
+    });
+
+    final pubkeys = await manager.getPubkeys(asset);
+    expect(
+      manager.lastKnownForWallet(asset.id, _hashAWallet.walletId),
+      pubkeys,
+    );
+
+    currentUser = _nameOnlyWallet;
+    authChanges.add(_nameOnlyWallet);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(
+      manager.lastKnownForWallet(asset.id, _hashAWallet.walletId),
+      pubkeys,
+      reason: 'a degraded identity is not a wallet change',
+    );
+  });
 }
