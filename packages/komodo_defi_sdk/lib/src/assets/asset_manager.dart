@@ -137,18 +137,20 @@ class AssetManager implements IAssetProvider {
   /// followed by other assets in alphabetical order.
   /// The filtering and ordering is handled by the underlying coin_config_manager.
   ///
-  /// Returns an unmodifiable *view*, not a copy.
+  /// Returns an unmodifiable, `==`/`hashCode`-keyed snapshot.
   ///
   /// This getter is on hot paths - every [fromId], [findAssetsByConfigId] and
   /// [childAssetsOf] call, and those run once per enabled coin on every
   /// activated-assets refresh. `Map.unmodifiable` copies, so the previous
   /// implementation rebuilt the whole ~800-entry catalogue on each access,
-  /// dozens of times during login. [UnmodifiableMapView] is O(1) to construct
-  /// and gives the same immutability guarantee to callers.
+  /// dozens of times during login.
   ///
-  /// A view rather than a memoised copy also avoids a staleness trap: the
-  /// underlying filter caches are mutated in place when custom tokens are
-  /// added or removed, so any cached copy would silently miss those.
+  /// [CoinConfigManager.filteredAssets] now memoises that snapshot and
+  /// invalidates it on every mutation, so this is O(1) without changing the
+  /// map's lookup semantics. Note that it must stay a hash-keyed map: the
+  /// filter caches are `SplayTreeMap`s whose comparator is *not* consistent
+  /// with [AssetId] equality, so exposing one directly silently misses on ids
+  /// that are `==` a stored key but stringify differently.
   @override
   Map<AssetId, Asset> get available =>
       UnmodifiableMapView(_coins.filteredAssets(_currentFilterStrategy));

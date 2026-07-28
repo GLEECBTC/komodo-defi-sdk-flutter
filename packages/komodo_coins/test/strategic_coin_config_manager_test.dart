@@ -316,6 +316,45 @@ void main() {
 
         expect(identical(firstCall, secondCall), isTrue);
       });
+
+      test('keys resolve by AssetId equality, not by tree ordering', () {
+        const filter = UtxoAssetFilterStrategy();
+        final filtered = manager.filteredAssets(filter);
+        final storedId = filtered.keys.first;
+
+        // Same [id, subClass, chainId] - therefore `==` with an equal
+        // hashCode - but a different `parentId`, so `toString()` differs and
+        // the filter cache's SplayTreeMap comparator orders them apart. This
+        // is the shape of any child-token id parsed with `knownIds: null`,
+        // as `Transaction.fromJson` does. The returned map must key off
+        // equality so such an id still resolves.
+        final equalIdWithParent = AssetId(
+          id: storedId.id,
+          name: storedId.name,
+          symbol: storedId.symbol,
+          chainId: storedId.chainId,
+          derivationPath: storedId.derivationPath,
+          subClass: storedId.subClass,
+          parentId: AssetId(
+            id: 'SOMEPARENT',
+            name: 'Some Parent',
+            symbol: AssetSymbol(assetConfigId: 'SOMEPARENT'),
+            chainId: storedId.chainId,
+            derivationPath: null,
+            subClass: storedId.subClass,
+          ),
+        );
+
+        expect(equalIdWithParent, equals(storedId));
+        expect(equalIdWithParent.hashCode, equals(storedId.hashCode));
+        expect(
+          equalIdWithParent.toString(),
+          isNot(equals(storedId.toString())),
+        );
+
+        expect(filtered.containsKey(equalIdWithParent), isTrue);
+        expect(filtered[equalIdWithParent], isNotNull);
+      });
     });
 
     group('Asset lookup', () {
