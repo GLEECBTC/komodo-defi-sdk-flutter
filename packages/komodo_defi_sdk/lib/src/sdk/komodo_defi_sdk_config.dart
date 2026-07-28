@@ -18,6 +18,7 @@ class KomodoDefiSdkConfig {
     this.maxPreActivationAttempts = 3,
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
+    this.activatedAssetsCacheFetchTimeout = const Duration(seconds: 30),
     this.marketDataConfig = const MarketDataConfig(),
     this.tronProApiKey,
     this.tronGaslessProvider,
@@ -45,6 +46,12 @@ class KomodoDefiSdkConfig {
   /// Time-to-live for the activated assets cache.
   /// Set to [Duration.zero] to disable caching.
   final Duration activatedAssetsCacheTtl;
+
+  /// Liveness ceiling on a single activated-assets read.
+  ///
+  /// Not a latency budget: it exists so `get_enabled_coins` can never fail to
+  /// return, which would otherwise defeat every deadline built on top of it.
+  final Duration activatedAssetsCacheFetchTimeout;
 
   /// Configuration for market data repositories
   final MarketDataConfig marketDataConfig;
@@ -74,6 +81,7 @@ class KomodoDefiSdkConfig {
     int? maxPreActivationAttempts,
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
+    Duration? activatedAssetsCacheFetchTimeout,
     MarketDataConfig? marketDataConfig,
     String? tronProApiKey,
     TronGaslessProviderConfig? tronGaslessProvider,
@@ -92,6 +100,9 @@ class KomodoDefiSdkConfig {
       activationRetryDelay: activationRetryDelay ?? this.activationRetryDelay,
       activatedAssetsCacheTtl:
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
+      activatedAssetsCacheFetchTimeout:
+          activatedAssetsCacheFetchTimeout ??
+          this.activatedAssetsCacheFetchTimeout,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
       tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,

@@ -454,9 +454,17 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     var forceRefresh = true;
 
     while (true) {
-      final enabled = await activatedAssetsCache.getActivatedAssetIds(
-        forceRefresh: forceRefresh,
-      );
+      Set<AssetId> enabled;
+      try {
+        enabled = await activatedAssetsCache.getActivatedAssetIds(
+          forceRefresh: forceRefresh,
+        );
+      } on TimeoutException {
+        // The cache's liveness ceiling fired. Treat it as "not at the threshold
+        // yet" so [timeout] below governs the outcome, rather than escaping as
+        // an exception this signature does not advertise.
+        enabled = const {};
+      }
       forceRefresh = false;
 
       final matched = enabled.intersection(targets).length;

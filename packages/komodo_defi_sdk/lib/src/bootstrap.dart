@@ -167,6 +167,7 @@ Future<void> bootstrap({
       auth: auth,
       assetLookup: assets,
       ttl: config.activatedAssetsCacheTtl,
+      fetchTimeout: config.activatedAssetsCacheFetchTimeout,
     );
   }, dependsOn: [ApiClient, KomodoDefiLocalAuth, AssetManager]);
 
