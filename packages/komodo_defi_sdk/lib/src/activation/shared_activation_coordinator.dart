@@ -189,27 +189,6 @@ class SharedActivationCoordinator {
     return _activationManager.isAssetActive(assetId);
   }
 
-  /// Assets whose activation is currently in flight.
-  ///
-  /// Derived from [ActivationManager.activationStates] rather than this
-  /// class's own bookkeeping, so it also covers activations that never went
-  /// through this coordinator - notably the `AssetManager.activateAsset` path
-  /// the app's ZHTLC flow uses.
-  Set<AssetId> get pendingActivations => _activationManager
-      .activationStates
-      .entries
-      .where((entry) => entry.value.isActivating)
-      .map((entry) => entry.key)
-      .toSet();
-
-  /// Assets whose most recent activation attempt failed.
-  Set<AssetId> get failedActivations => _activationManager
-      .activationStates
-      .entries
-      .where((entry) => entry.value.isFailed)
-      .map((entry) => entry.key)
-      .toSet();
-
   /// Current activation state of every asset the SDK has observed.
   Map<AssetId, AssetActivationState> get activationStates =>
       _activationManager.activationStates;

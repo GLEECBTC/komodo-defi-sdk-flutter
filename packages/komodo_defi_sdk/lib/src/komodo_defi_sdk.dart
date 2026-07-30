@@ -96,6 +96,10 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// ```
 ///
 /// This will clean up all resources and stop any background operations.
+/// How often the threshold wait re-reads KDF as a backstop behind the
+/// activation stream. Internal: callers wait on state, not on a poll.
+const Duration _thresholdBackstopInterval = Duration(seconds: 2);
+
 class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Creates a new instance of [KomodoDefiSdk] with optional host configuration
   /// and SDK configuration.
@@ -447,8 +451,11 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   Stream<String> get logStream =>
       _assertSdkInitialized(_container<KomodoDefiFramework>().logStream);
 
-  /// Waits until the percentage of enabled assets among [assetIds] meets or
-  /// exceeds [threshold], polling at [pollInterval] until [timeout].
+  /// Waits until the share of enabled assets among [assetIds] meets or
+  /// exceeds [threshold], or [timeout] elapses.
+  ///
+  /// Resolves off the SDK's activation-state stream, so it settles as soon as
+  /// the assets become active rather than on a poll boundary.
   ///
   /// Returns `true` when the threshold is reached, or `false` if the timeout
   /// elapses first.
@@ -456,7 +463,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     Iterable<AssetId> assetIds, {
     double threshold = 0.5,
     Duration timeout = const Duration(seconds: 30),
-    Duration pollInterval = const Duration(seconds: 2),
   }) async {
     _assertSdkInitialized(activatedAssetsCache);
 
@@ -470,14 +476,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     if (timeout <= Duration.zero) {
       throw ArgumentError.value(timeout, 'timeout', 'must be positive');
     }
-    if (pollInterval <= Duration.zero) {
-      throw ArgumentError.value(
-        pollInterval,
-        'pollInterval',
-        'must be positive',
-      );
-    }
-
     bool meetsThreshold(Set<AssetId> enabled) =>
         enabled.intersection(targets).length / targets.length >= threshold;
 
@@ -510,9 +508,9 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     // wedged node made a documented-timeout method hang forever.
     deadline = Timer(timeout, () => finish(reached: false));
 
-    // [pollInterval] keeps its documented meaning as a backstop: anything the
-    // activation stream cannot see on its own can still resolve the wait from
-    // KDF's enabled-asset set.
+    // A backstop behind the stream: anything the activation state cannot see
+    // on its own can still resolve the wait from KDF's enabled-asset set, and
+    // the read folds that answer back into the state map.
     Future<void> probe() async {
       try {
         final enabled = await activatedAssetsCache.getActivatedAssetIds(
@@ -528,7 +526,10 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     }
 
     unawaited(probe());
-    backstop = Timer.periodic(pollInterval, (_) => unawaited(probe()));
+    backstop = Timer.periodic(
+      _thresholdBackstopInterval,
+      (_) => unawaited(probe()),
+    );
 
     return completer.future;
   }
@@ -540,7 +541,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     Iterable<String> tickers, {
     double threshold = 0.5,
     Duration timeout = const Duration(seconds: 30),
-    Duration pollInterval = const Duration(seconds: 2),
   }) {
     final ids = tickers
         .expand((ticker) => assets.findAssetsByConfigId(ticker))
@@ -549,7 +549,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       ids,
       threshold: threshold,
       timeout: timeout,
-      pollInterval: pollInterval,
     );
   }
 
