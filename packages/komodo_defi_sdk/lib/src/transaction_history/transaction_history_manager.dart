@@ -380,6 +380,28 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
     final walletContext = await _captureWalletContext();
 
+    // Cached rows are yielded *before* activation, not after.
+    //
+    // `_ensureAssetActivated` has no upper bound - it awaits the shared
+    // activation coordinator, which polls KDF indefinitely. Reading storage
+    // after it meant a coin page re-opened seconds after the last fetch showed
+    // a spinner for as long as activation took, despite every row already
+    // being in memory. Storage is a local read and cannot block on the network.
+    //
+    // Activation is still awaited below, before the network walk: local history
+    // does not prove the asset is enabled in KDF *right now*, and that stays
+    // true once this storage is persisted across sessions.
+    final localPage = await _storage.getTransactions(
+      asset.id,
+      walletContext.walletId,
+      limit: _maxBatchSize,
+    );
+    await _requireWalletContextCurrent(walletContext);
+
+    if (localPage.transactions.isNotEmpty) {
+      yield localPage.transactions;
+    }
+
     try {
       await _ensureAssetActivated(asset);
       await _requireWalletContextCurrent(walletContext);
@@ -398,18 +420,6 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       }
     }
     final strategy = _strategyFactory.forAsset(asset);
-
-    // First try to get any cached transactions
-    final localPage = await _storage.getTransactions(
-      asset.id,
-      walletContext.walletId,
-      limit: _maxBatchSize,
-    );
-    await _requireWalletContextCurrent(walletContext);
-
-    if (localPage.transactions.isNotEmpty) {
-      yield localPage.transactions;
-    }
 
     String? fromId;
     var hasMore = true;
