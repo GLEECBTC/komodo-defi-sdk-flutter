@@ -1,7 +1,7 @@
 {
   "api": {
-    "api_commit_hash": "bd413dcfea73c9de2e85903323946a378b180fa7",
-    "branch": "feat/tron-gasfree",
+    "api_commit_hash": "ed8de236b213417841fa9d691352f09672e67ee3",
+    "branch": "perf/hd-scan-concurrency",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
     "require_full_commit_hash": true,
@@ -15,6 +15,7 @@
       "windows"
     ],
     "source_urls": [
+      "https://kdf-dev-builds.nitride.app",
       "https://nitride-kdf-builds.web.app",
       "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
       "https://devbuilds.gleec.com",
@@ -24,14 +25,14 @@
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "9242cbba06eda6e82fc057897781cea2adf85f67f0cf5710f4feaf0a5e6d844c"
+          "9c334fae4b1e872826de44bf26dd7fced4260a7e7cadae94e5c0dea896976a55"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "0cc494a8ff7b3f926cebc6956cda61c9928c7366624d592c71e29f080a3255bd"
+          "f761ec72204b10acb2557f683d8a80e4af268e721af162a43c93f9f5d57261f0"
         ],
         "path": "ios"
       },
@@ -39,35 +40,35 @@
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
         "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
         "valid_zip_sha256_checksums": [
-          "f1d8a52c7c34d9721761733586f7262177b5362f911d8a220b2550e1f9844bbe"
+          "1e02aede2a3a2ffadb3be659cc181f8a1d6a701787ddf97921785ec7cd5f3b5a"
         ],
         "path": "macos/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "929d57312908544c9e6ae94d660d8ae14c21fb84547821ba0e0aba26c4daf29a"
+          "637b56d7e2fdaaf0d03691ea3e07f31c67471633a3ce1baa48859020ac070a36"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "9953572e03956a751dcef365df76b6b84a3675800323220d50409dbd8175f037"
+          "d841495f25b990d1006dab99cfe523e00f89f22656850d0886c6513738e9395b"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "ec5e2c801520e00ed1fd18c82c0edc0ade30716c6a4fb8aab453f265ce6afb33"
+          "a486d98edae47cf8290eb682fb13101679b817ad6690b3649fb95fde64c5e0a5"
         ],
         "path": "linux/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "04062cf1a271888eab9a757fa1a19e41038beea15b19484a21e5731d4dfc05e0"
+          "8fe524add2a46e309ad50e4df6d3da27093cd6eb5259e465acf02faaaa21ab21"
         ],
         "path": "windows/bin"
       }
@@ -76,7 +77,7 @@
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "2997add793e16eaca4c39c13c5f2a379b916d93a",
+    "bundled_coins_repo_commit": "cec5a649617df2c49bf518811c6515c60ee0c13f",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
     "coins_repo_branch": "master",
