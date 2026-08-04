@@ -113,6 +113,10 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      // Default to "not activated this session", which is the shape that makes
+      // `_scanForNewHdAddressesIfNeeded` still scan. The skip is opt-in and is
+      // covered explicitly further down.
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
 
       manager = PubkeyManager(client, auth, activation);
 
@@ -602,6 +606,7 @@ void main() {
       client = _MockApiClient();
       auth = _MockAuth();
       activation = _MockActivationCoordinator();
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
     });
 
     test(
@@ -741,6 +746,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks
@@ -1158,6 +1164,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks
@@ -1439,6 +1446,9 @@ void main() {
       when(
         () => disposalActivation.isAssetActive(any()),
       ).thenAnswer((_) async => true);
+      when(
+        () => disposalActivation.wasFreshlyActivated(any()),
+      ).thenReturn(false);
       when(() => disposalActivation.activateAsset(any())).thenAnswer((
         invocation,
       ) async {
@@ -1655,6 +1665,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkeys_storage.dart';
@@ -29,6 +30,18 @@ abstract class IPubkeyManager {
   /// Get the last known pubkeys for an asset without triggering a refresh.
   /// Returns null if no pubkeys have been fetched yet.
   AssetPubkeys? lastKnown(AssetId assetId);
+
+  /// Persisted pubkeys for [asset] without any network round trip.
+  ///
+  /// Reads the in-memory entry if present, otherwise hydrates from the
+  /// wallet-scoped store. Unlike [getPubkeys] this **never** falls through to a
+  /// fresh fetch and never activates the asset, so it is safe on paths that
+  /// must not block - including inside the activation critical section, where
+  /// [getPubkeys] would re-enter the coordinator and self-join.
+  ///
+  /// Returns null when nothing is stored, or when the store or the auth read is
+  /// not usable yet. Callers treat that as "nothing to paint", not an error.
+  Future<AssetPubkeys?> hydratedPubkeys(Asset asset);
 
   /// Create a new pubkey for an asset if supported
   Future<PubkeyInfo> createNewPubkey(Asset asset);
@@ -79,6 +92,12 @@ class PubkeyManager implements IPubkeyManager {
   final Map<(AssetId, int), Future<AssetPubkeys>> _inFlightPubkeyRequests = {};
   final Map<String, DateTime> _hdAddressScanRetryAfter = {};
   static const Duration _hdAddressScanRetryCooldown = Duration(minutes: 2);
+
+  /// `wallet:asset` keys whose address scan was satisfied by activation.
+  ///
+  /// Cleared by [_resetState] with everything else, so a wallet switch or a
+  /// fresh sign-in scans again.
+  final Set<String> _hdAddressScanDone = <String>{};
 
   StreamSubscription<KdfUser?>? _authSubscription;
   WalletId? _currentWalletId;
@@ -141,6 +160,35 @@ class PubkeyManager implements IPubkeyManager {
     final pubkeys = await _fetchFreshPubkeys(asset, walletContext);
     await _requireWalletContextCurrent(walletContext);
     return pubkeys;
+  }
+
+  @override
+  Future<AssetPubkeys?> hydratedPubkeys(Asset asset) async {
+    if (_isDisposed) return null;
+
+    try {
+      // Capture before touching the cache. This call is what proactively
+      // detects a wallet switch the auth stream has not delivered yet, and
+      // clears `_pubkeysCache` via `_resetState` when it finds one. Reading the
+      // cache first would hand back the *previous* wallet's pubkeys, which
+      // `BalanceManager._emitHydratedBalance` then paints as a balance under
+      // the new wallet. `getPubkeys` and `watchPubkeys` order it this way for
+      // the same reason.
+      final walletContext = await _captureWalletContext();
+
+      // Deliberately does not write to `_pubkeysCache`. `getPubkeys` returns a
+      // cache hit verbatim and only schedules its background refresh on the
+      // *hydration* branch, so seeding the cache here would make a stored value
+      // permanently authoritative and stop it ever being refreshed.
+      final cached = _pubkeysCache[asset.id];
+      if (cached != null) return cached;
+
+      final hydrated = await _hydrateFromStorageForWallet(walletContext, asset);
+      if (hydrated == null) return null;
+      return _isWalletContextCurrentSync(walletContext) ? hydrated : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -285,6 +333,19 @@ class PubkeyManager implements IPubkeyManager {
         walletContext: walletContext,
         asset: asset,
         strategy: strategy,
+        // A *fresh* activation already made KDF walk the address gap:
+        // `UtxoProtocol.defaultActivationParams` sends
+        // `scan_policy: scan_if_new_wallet` with `gap_limit: 20`. Asking for
+        // `task::scan_for_new_addresses` on top of that is the same walk
+        // again, immediately, for nothing.
+        //
+        // Measured on a real KDF (KMD, HD, fresh wallet): activation took 47s
+        // and the scan that followed spent its entire 20s deadline before
+        // giving up with `TimeoutException: Timed out scanning for new
+        // addresses`, which this method then swallows and continues past. So
+        // the second walk contributed 20 of the 89 seconds to first balance
+        // and changed nothing about the result.
+        alreadyScannedByActivation: _activationAlreadyScanned(asset),
       );
       await _requireWalletContextCurrent(walletContext);
       final raw = await strategy.getPubkeys(asset.id, _client);
@@ -499,6 +560,22 @@ class PubkeyManager implements IPubkeyManager {
     if (!identical(_pubkeysControllers[asset.id], controller)) return;
     _logger.fine('Starting watcher for ${asset.id.name}');
 
+    // Last value handed to [controller], so the 30s poll below can drop
+    // no-op re-emissions. Addresses change rarely; re-emitting an identical
+    // snapshot every tick made the app's `CoinAddressesBloc` cycle through its
+    // `submitting` state with an empty address list, so the coin page's
+    // addresses section blanked to a spinner twice a minute for no reason.
+    AssetPubkeys? lastEmitted;
+
+    void emit(AssetPubkeys pubkeys) {
+      if (controller.isClosed || !_isWalletContextCurrentSync(walletContext)) {
+        return;
+      }
+      if (lastEmitted == pubkeys) return;
+      lastEmitted = pubkeys;
+      controller.add(pubkeys);
+    }
+
     try {
       // Ensure activation if requested, otherwise only proceed if already active
       bool isActive = await _activationCoordinator.isAssetActive(asset.id);
@@ -520,20 +597,13 @@ class PubkeyManager implements IPubkeyManager {
         await _requireWalletContextCurrent(walletContext);
         if (hydrated != null) {
           _pubkeysCache[asset.id] = hydrated;
-          if (!controller.isClosed &&
-              _isWalletContextCurrentSync(walletContext)) {
-            controller.add(hydrated);
-          }
+          emit(hydrated);
         }
 
         final first = await _fetchFreshPubkeys(asset, walletContext);
         await _requireWalletContextCurrent(walletContext);
         _pubkeysCache[asset.id] = first;
-        if (!controller.isClosed &&
-            _isWalletContextCurrentSync(walletContext) &&
-            (hydrated == null || first != hydrated)) {
-          controller.add(first);
-        }
+        emit(first);
         _logger.fine('Emitted initial pubkeys for ${asset.id.name}');
       }
 
@@ -571,11 +641,7 @@ class PubkeyManager implements IPubkeyManager {
           })
           .listen(
             (AssetPubkeys? pubkeys) {
-              if (pubkeys != null &&
-                  !controller.isClosed &&
-                  _isWalletContextCurrentSync(walletContext)) {
-                controller.add(pubkeys);
-              }
+              if (pubkeys != null) emit(pubkeys);
             },
             onError: (Object error) {
               if (!controller.isClosed &&
@@ -696,16 +762,51 @@ class PubkeyManager implements IPubkeyManager {
     await _resetState();
   }
 
+  /// Whether this session's activation of [asset] already walked the address
+  /// gap, making [_scanForNewHdAddressesIfNeeded] a duplicate of it.
+  ///
+  /// Both conditions matter. The activation must have actually happened this
+  /// session (a warm re-login finds the asset already enabled and scans
+  /// nothing), and the protocol's activation params must carry a scanning
+  /// policy - `UtxoProtocol` sends `scan_policy: scan_if_new_wallet`, whereas
+  /// the ETH-family params have no `scan_policy` field at all, so their HD
+  /// address discovery is *not* covered by activation and must still scan.
+  bool _activationAlreadyScanned(Asset asset) {
+    if (!_activationCoordinator.wasFreshlyActivated(asset.id)) return false;
+    try {
+      final policy = asset.protocol.defaultActivationParams().scanPolicy;
+      return policy != null && policy != ScanPolicy.doNotScan;
+    } catch (_) {
+      // A protocol that cannot build default params tells us nothing; scan.
+      return false;
+    }
+  }
+
   Future<void> _scanForNewHdAddressesIfNeeded({
     required WalletOperationContext walletContext,
     required Asset asset,
     required PubkeyStrategy strategy,
+    bool alreadyScannedByActivation = false,
   }) async {
     if (!strategy.supportsMultipleAddresses) {
       return;
     }
 
     final scanKey = '${walletContext.walletId.compoundId}:${asset.id.id}';
+
+    // Skip the walk KDF has just done. Recorded rather than simply returned so
+    // a *later* fetch on the same asset - after new addresses could plausibly
+    // have been used - still scans; only the redundant back-to-back one is
+    // dropped.
+    if (alreadyScannedByActivation && !_hdAddressScanDone.contains(scanKey)) {
+      _hdAddressScanDone.add(scanKey);
+      _logger.info(
+        'Skipping HD address scan for ${asset.id.id}: activation already '
+        'scanned with the same gap limit',
+      );
+      return;
+    }
+
     final retryAfter = _hdAddressScanRetryAfter[scanKey];
     if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
       return;
@@ -750,6 +851,7 @@ class PubkeyManager implements IPubkeyManager {
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
+    _hdAddressScanDone.clear();
     _watchedAssets.clear();
 
     // Cancel all active watchers concurrently
@@ -818,6 +920,7 @@ class PubkeyManager implements IPubkeyManager {
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
+    _hdAddressScanDone.clear();
 
     // Collect all async cleanup operations and run them concurrently.
     final List<Future<void>> pending = <Future<void>>[];
