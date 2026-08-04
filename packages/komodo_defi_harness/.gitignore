@@ -1,0 +1,8 @@
+# Dart/Flutter build output. The repo-root ignore is anchored (`/build/`), so it
+# does not reach this package.
+.dart_tool/
+build/
+
+# KDF web artefacts fetched by the framework's build transformer, mirroring
+# packages/komodo_defi_framework/.gitignore.
+web/kdf/

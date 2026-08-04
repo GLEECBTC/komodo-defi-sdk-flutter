@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "Committed reference for tool/compare_bench.dart. NEVER auto-updated: a gate",
+    "that can rewrite its own reference ratchets silently, and three 10%",
+    "'acceptable' regressions become a 33% one nobody reported. Move these numbers",
+    "by hand, in the PR that causes the change, so the diff is reviewed.",
+    "",
+    "Only auth_signin_ms and first_post_activation_balance_ms are gated. The other",
+    "phases are recorded for context: sdk_init_ms includes a network seed-node",
+    "fetch, and first_paint_ms can be a pre-activation cache/synthetic paint that",
+    "would stay green while activation regressed to minutes.",
+    "",
+    "MEASURED ON macOS (see 'environment'). CI runs ubuntu-latest. The dominant",
+    "terms here are fixed awaits in the SDK rather than CPU work - the activation",
+    "poll loop alone contributes 2 x 500ms - so these should transfer, but replace",
+    "them with the first green CI run's medians before trusting a marginal result.",
+    "compare_bench.dart warns when the platform differs."
+  ],
+  "iterations": 3,
+  "environment": {
+    "os": "macos",
+    "os_version": "Version 26.5.1 (Build 25F80)",
+    "processors": 16,
+    "dart_version": "3.12.0 (stable) (Fri May 8 01:51:14 2026 -0700) on \"macos_arm64\""
+  },
+  "median": {
+    "hd": {
+      "sdk_init_ms": 76,
+      "auth_signin_ms": 510,
+      "first_paint_ms": 7,
+      "activation_ms": 1014,
+      "first_post_activation_balance_ms": 1025,
+      "counter.identity_rpcs_per_signin": 5,
+      "counter.rpcs_per_signin": 8,
+      "counter.balance_emissions": 2
+    },
+    "iguana": {
+      "sdk_init_ms": 57,
+      "auth_signin_ms": 507,
+      "first_paint_ms": 6,
+      "activation_ms": 1015,
+      "first_post_activation_balance_ms": 1024,
+      "counter.identity_rpcs_per_signin": 5,
+      "counter.rpcs_per_signin": 7,
+      "counter.balance_emissions": 2
+    }
+  }
+}
