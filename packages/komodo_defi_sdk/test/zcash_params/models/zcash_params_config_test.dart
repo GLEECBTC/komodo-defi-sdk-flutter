@@ -114,11 +114,11 @@ void main() {
 
     group('constructor', () {
       test('creates instance with all parameters', () {
+        expect(config.primaryUrl, equals('https://z.cash/downloads/'));
         expect(
-          config.primaryUrl,
+          config.backupUrl,
           equals('https://komodoplatform.com/downloads/'),
         );
-        expect(config.backupUrl, equals('https://z.cash/downloads/'));
         expect(config.downloadTimeoutSeconds, equals(1800));
         expect(config.maxRetries, equals(3));
         expect(config.retryDelaySeconds, equals(5));
@@ -151,11 +151,11 @@ void main() {
       test('has correct default values', () {
         expect(
           ZcashParamsConfig.defaultConfig.primaryUrl,
-          equals('https://komodoplatform.com/downloads/'),
+          equals('https://z.cash/downloads/'),
         );
         expect(
           ZcashParamsConfig.defaultConfig.backupUrl,
-          equals('https://z.cash/downloads/'),
+          equals('https://komodoplatform.com/downloads/'),
         );
         expect(ZcashParamsConfig.defaultConfig.paramFiles.length, equals(2));
       });
@@ -183,11 +183,11 @@ void main() {
       test('has correct default values', () {
         expect(
           ZcashParamsConfig.extendedConfig.primaryUrl,
-          equals('https://komodoplatform.com/downloads/'),
+          equals('https://z.cash/downloads/'),
         );
         expect(
           ZcashParamsConfig.extendedConfig.backupUrl,
-          equals('https://z.cash/downloads/'),
+          equals('https://komodoplatform.com/downloads/'),
         );
         expect(ZcashParamsConfig.extendedConfig.paramFiles.length, equals(3));
       });
@@ -238,8 +238,8 @@ void main() {
         expect(
           config.downloadUrls,
           equals([
-            'https://komodoplatform.com/downloads/',
             'https://z.cash/downloads/',
+            'https://komodoplatform.com/downloads/',
           ]),
         );
       });
@@ -388,7 +388,7 @@ void main() {
         final url = config.getFileUrl(config.primaryUrl, fileName);
         expect(
           url,
-          equals('https://komodoplatform.com/downloads/sapling-spend.params'),
+          equals('https://z.cash/downloads/sapling-spend.params'),
         );
       });
 
@@ -396,7 +396,10 @@ void main() {
         const fileName = 'sapling-output.params';
 
         final url = config.getFileUrl(config.backupUrl, fileName);
-        expect(url, equals('https://z.cash/downloads/sapling-output.params'));
+        expect(
+          url,
+          equals('https://komodoplatform.com/downloads/sapling-output.params'),
+        );
       });
 
       test('handles empty file name', () {

@@ -646,6 +646,63 @@ class BalanceManager implements IBalanceManager {
     });
   }
 
+  /// Paints a balance from the persisted pubkey store, ahead of activation.
+  ///
+  /// [_balanceCache] is in-memory only, so on a cold start `lastKnownForWallet`
+  /// has nothing and the row renders a placeholder until the entire activation
+  /// pipeline *plus* a `getPubkeys` round trip completes - a wait with no upper
+  /// bound. The per-address balances needed to render that row were already
+  /// written to disk by the previous session, so read them directly instead.
+  ///
+  /// Uses [PubkeyManager.hydratedPubkeys] rather than `getPubkeys`: the latter
+  /// falls through to a network fetch that activates the asset, which is both
+  /// the wait being avoided here and a re-entrancy hazard on this path.
+  ///
+  /// The value is deliberately allowed to be stale - it is replaced as soon as
+  /// the real fetch lands below. Returns whether anything was emitted.
+  Future<bool> _emitHydratedBalance(
+    Asset asset,
+    WalletOperationContext walletContext,
+    StreamController<BalanceInfo> controller,
+    Stopwatch sinceWatcherStart,
+  ) async {
+    final pubkeyManager = _pubkeyManager;
+    if (pubkeyManager == null) return false;
+
+    // This runs on the un-awaited watcher-start path, where an uncaught throw
+    // leaves a subscribed controller with no producer and no way to retry - the
+    // exact permanent-stall shape [_startWatchingBalanceStreamWithRetry]
+    // exists to prevent. A cosmetic early paint must never be able to cause it.
+    final AssetPubkeys? hydrated;
+    try {
+      hydrated = await pubkeyManager.hydratedPubkeys(asset);
+    } catch (error, stackTrace) {
+      _logger.fine(
+        'Hydrated balance unavailable for ${asset.id.name}',
+        error,
+        stackTrace,
+      );
+      return false;
+    }
+    if (hydrated == null || hydrated.isEmpty) return false;
+
+    // The await above can outlive the wallet, the controller or this watcher.
+    if (controller.isClosed ||
+        !identical(_balanceControllers[asset.id], controller) ||
+        !_isWalletContextCurrentSync(walletContext)) {
+      return false;
+    }
+
+    final balance = hydrated.balance;
+    _balanceCache[asset.id] = balance;
+    controller.add(balance);
+    _logger.info(
+      'balance[${asset.id.id}] hydrated paint after '
+      '${sinceWatcherStart.elapsedMilliseconds}ms (from persisted pubkeys)',
+    );
+    return true;
+  }
+
   /// Ensures an asset is activated using the shared activation coordinator
   Future<bool> _ensureAssetActivated(Asset asset, bool activateIfNeeded) async {
     // Check if activationCoordinator is initialized
@@ -727,6 +784,16 @@ class BalanceManager implements IBalanceManager {
     AssetId assetId,
     bool activateIfNeeded,
   ) async {
+    // Every balance emission below is timed from here and logged at INFO.
+    //
+    // These were `fine`, which means they were absent from every release build
+    // - and the one thing a release log needed to say about a slow wallet was
+    // which of the three emissions the row was showing: the cached/synthetic
+    // paint, the hydrated paint, or the value actually fetched from KDF. Two of
+    // those are supposed to be near-instant, so a fast first paint tells you
+    // nothing on its own. The elapsed field is what separates "the cache
+    // worked" from "activation is slow" without attaching a debugger.
+    final sinceWatcherStart = Stopwatch()..start();
     final controller = _balanceControllers[assetId];
     if (controller == null || _isDisposed) return;
 
@@ -808,7 +875,17 @@ class BalanceManager implements IBalanceManager {
     );
     if (maybeKnownBalance != null) {
       controller.add(maybeKnownBalance);
-      _logger.fine('Emitted initial balance for ${assetId.name}');
+      _logger.info(
+        'balance[${assetId.id}] cached paint after '
+        '${sinceWatcherStart.elapsedMilliseconds}ms',
+      );
+    } else if (await _emitHydratedBalance(
+      asset,
+      walletContext,
+      controller,
+      sinceWatcherStart,
+    )) {
+      // Painted from the persisted pubkey store. See [_emitHydratedBalance].
     } else if (isFirstTimeEnabling && isNewWallet) {
       // For newly created wallets (not imported) on first-time asset enablement,
       // assume zero balance to reduce RPC spam
@@ -819,8 +896,12 @@ class BalanceManager implements IBalanceManager {
       );
       _balanceCache[assetId] = zeroBalance;
       controller.add(zeroBalance);
-      _logger.fine(
-        'Emitted zero balance for first-time asset ${assetId.name} in new wallet',
+      // Emitted *before* activation is even requested, so this number says
+      // nothing about KDF. Named accordingly.
+      _logger.info(
+        'balance[${assetId.id}] synthetic-zero paint after '
+        '${sinceWatcherStart.elapsedMilliseconds}ms '
+        '(first-time asset in a new wallet)',
       );
     }
 
@@ -875,6 +956,10 @@ class BalanceManager implements IBalanceManager {
         if (_isWalletContextCurrentSync(walletContext) &&
             !controller.isClosed) {
           controller.add(balance);
+          _logger.info(
+            'balance[${assetId.id}] fetched after '
+            '${sinceWatcherStart.elapsedMilliseconds}ms (first enable)',
+          );
         }
       } else if (isActive) {
         // If active but not first time, still get balance
@@ -882,6 +967,12 @@ class BalanceManager implements IBalanceManager {
         if (_isWalletContextCurrentSync(walletContext) &&
             !controller.isClosed) {
           controller.add(balance);
+          // The only one of these emissions that reflects activation plus a
+          // real round trip. This is time-to-balance.
+          _logger.info(
+            'balance[${assetId.id}] fetched after '
+            '${sinceWatcherStart.elapsedMilliseconds}ms',
+          );
         }
       }
 

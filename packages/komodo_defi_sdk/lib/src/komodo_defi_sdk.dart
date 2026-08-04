@@ -217,11 +217,16 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// This is the preferred path for app code that wants to ensure an asset is
   /// enabled without racing other managers that may be activating the same
   /// asset concurrently.
-  Future<bool> ensureAssetActivated(Asset asset) async {
+  ///
+  /// [timeout] overrides [SharedActivationCoordinator.defaultActivationTimeout]
+  /// for this attempt. The coordinator has always accepted one; exposing it
+  /// here is what lets a test exercise the deadline in bounded time instead of
+  /// waiting out the 60s production value.
+  Future<bool> ensureAssetActivated(Asset asset, {Duration? timeout}) async {
     final coordinator = _assertSdkInitialized(
       _container<SharedActivationCoordinator>(),
     );
-    final result = await coordinator.activateAsset(asset);
+    final result = await coordinator.activateAsset(asset, timeout: timeout);
     return result.isSuccess;
   }
 

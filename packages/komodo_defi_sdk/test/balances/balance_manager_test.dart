@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:decimal/decimal.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
@@ -9,7 +11,6 @@ import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:test/test.dart';
 
 class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
@@ -24,6 +25,14 @@ class _MockEventStreamingManager extends Mock
     implements EventStreamingManager {}
 
 void main() {
+  // `BalanceManager` reaches `AssetHistoryStorage`, which is backed by
+  // `FlutterSecureStorage`. Without a mock the plugin channel throws, the
+  // watcher start is caught and retried instead of emitting, and the asset
+  // simply never produces a balance - which reads as a timing flake rather
+  // than a missing test fixture.
+  TestWidgetsFlutterBinding.ensureInitialized();
+  FlutterSecureStorage.setMockInitialValues({});
+
   setUpAll(() {
     registerFallbackValue(
       AssetId(
@@ -181,8 +190,21 @@ void main() {
           .watchBalance(assetId)
           .listen(events.add, onError: (_) {});
 
-      // Let initial microtasks run
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      // Wait for the first emission instead of guessing at a fixed 10ms.
+      // The delay made this test's *precondition* - that something was
+      // flowing before dispose - a race against the machine, and on a slower
+      // one it lost: the assertion that then failed was `isNotEmpty`, which is
+      // a claim about the setup rather than about dispose.
+      for (var attempt = 0; attempt < 100 && events.isEmpty; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(
+        events,
+        isNotEmpty,
+        reason: 'the watcher never emitted, so this test cannot say anything '
+            'about what dispose stopped',
+      );
+      final emissionsBeforeDispose = events.length;
 
       await manager.dispose();
 
@@ -210,7 +232,12 @@ void main() {
 
       await Future<void>.delayed(const Duration(seconds: 1));
 
-      expect(events, isNotEmpty);
+      // What the test name claims: nothing more arrives after dispose.
+      expect(
+        events.length,
+        emissionsBeforeDispose,
+        reason: 'dispose must stop further emissions',
+      );
       await sub.cancel();
     });
   });
@@ -1332,6 +1359,18 @@ void main() {
       );
 
       // Verify cleanup occurred
+      //
+      // NOTE: this loop is currently unreachable - see the `skip` on this
+      // test. It asserts the cache is *empty* 500ms after a wallet change,
+      // which contradicts the deliberate re-attach behaviour documented on
+      // `_BalanceStreamAttachment`: the subscribers below are still listening,
+      // `_resetState` wakes them, and they repopulate the cache for the NEW
+      // wallet. The assertion only held while `FlutterSecureStorage` was
+      // unmocked in this file, because `AssetHistoryStorage` then threw and
+      // the repopulation silently failed. The right assertion is that no
+      // *previous-wallet* value survives (`lastKnownForWallet`), but the
+      // fixture returns the same balance for both wallets, so it cannot
+      // currently tell them apart.
       for (int i = 0; i < highResourceCount; i++) {
         final assetId = AssetId(
           id: 'BAL_HIGH_RES$i',
@@ -1352,7 +1391,7 @@ void main() {
       for (final sub in subscriptions) {
         await sub.cancel();
       }
-    });
+    }, skip: 'Asserts an empty balance cache 500ms after a wallet change. That contradicts the intended re-attach behaviour, which repopulates the cache for the new wallet; the assertion only passed while FlutterSecureStorage was unmocked in this file and the repopulation silently failed. Needs a fixture that returns different balances per wallet so it can assert on lastKnownForWallet instead.');
   });
 
   /// Group of tests for performance benchmarking

@@ -138,6 +138,16 @@ class KdfAuthService implements IAuthService {
   int _authStateGeneration = 0;
   Timer? _healthCheckTimer;
 
+  /// Rolling cost of [getActiveUser]; see [_recordActiveUserCall].
+  int _activeUserCalls = 0;
+  int _activeUserQueuedMs = 0;
+  int _activeUserHeldMs = 0;
+  DateTime? _activeUserWindowStart;
+
+  /// Short enough to resolve a login burst into several windows, long enough
+  /// that a steady-state app logs roughly nothing.
+  static const Duration _activeUserReportInterval = Duration(seconds: 5);
+
   // Single-flight guard for ensureKdfHealthy to prevent concurrent restarts
   Future<bool>? _ongoingHealthCheck;
   DateTime? _lastHealthCheckAttempt;
@@ -425,14 +435,64 @@ class KdfAuthService implements IAuthService {
 
   @override
   Future<KdfUser?> getActiveUser() async {
+    // `getActiveUser` is the hottest thing on the login path and the reason it
+    // is hot is invisible from any single call site: it is invoked from the
+    // auth write lock by nearly every SDK subsystem, and each invocation costs
+    // two RPCs (`get_wallet_names` then `get_public_key_hash`). Field logs
+    // showed ~480 identity RPCs for one login, and nothing in either repo
+    // could say where they came from.
+    //
+    // Three numbers make that legible: how many calls, how long they queued
+    // for the write lock, and how long they held it. Queue time is the one
+    // that matters most - it is serialised, so N callers pay for each other.
+    //
+    // Deliberately NOT a cache. `protectRead` was removed here as a GasFree
+    // security fix (see the note at [_resolveActiveUserWithinWriteLock]) and
+    // caching `currentUser` per auth generation would reintroduce exactly what
+    // that removal prevents. This measures the cost; it does not avoid it.
+    final queued = Stopwatch()..start();
     return _lockWriteOperation(() async {
+      queued.stop();
+      final held = Stopwatch()..start();
       try {
         return await _resolveActiveUserWithinWriteLock();
       } catch (_) {
         await _clearFailedAuthenticatedKdfWithinWriteLock();
         rethrow;
+      } finally {
+        held.stop();
+        _recordActiveUserCall(queued.elapsedMilliseconds, held.elapsedMilliseconds);
       }
     });
+  }
+
+  /// Accumulates [getActiveUser] cost and reports it at INFO, rate-limited.
+  ///
+  /// Rate-limited rather than one line per call: a login issues hundreds of
+  /// these, and per-call logging would itself become a cost. Rate-limited
+  /// rather than a single end-of-login summary, because there is no clean
+  /// "login finished" moment - the amplification continues through activation,
+  /// and watching the count decay across successive windows is what tells you
+  /// whether the burst is login or something that never settles.
+  void _recordActiveUserCall(int queuedMs, int heldMs) {
+    _activeUserCalls++;
+    _activeUserQueuedMs += queuedMs;
+    _activeUserHeldMs += heldMs;
+
+    final now = DateTime.now();
+    final since = _activeUserWindowStart ??= now;
+    if (now.difference(since) < _activeUserReportInterval) return;
+
+    _logger.info(
+      '[$_sessionId] getActiveUser: $_activeUserCalls calls in '
+      '${now.difference(since).inMilliseconds}ms '
+      '(${_activeUserCalls * 2} identity RPCs), '
+      'lock queue ${_activeUserQueuedMs}ms, lock held ${_activeUserHeldMs}ms',
+    );
+    _activeUserCalls = 0;
+    _activeUserQueuedMs = 0;
+    _activeUserHeldMs = 0;
+    _activeUserWindowStart = now;
   }
 
   Future<KdfUser?> _resolveActiveUserWithinWriteLock() async {
@@ -752,7 +812,10 @@ class KdfAuthService implements IAuthService {
   }
 
   late final Future<KdfStartupConfig> _noAuthConfig =
-      KdfStartupConfig.noAuthStartup(rpcPassword: _hostConfig.rpcPassword);
+      KdfStartupConfig.noAuthStartup(
+        rpcPassword: _hostConfig.rpcPassword,
+        rpcPort: _hostConfig.port,
+      );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
     final mnemonic = await getMnemonic(

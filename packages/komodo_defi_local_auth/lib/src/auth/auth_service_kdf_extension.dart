@@ -45,6 +45,21 @@ extension KdfExtensions on KdfAuthService {
           (error is AuthException &&
               error.type == AuthExceptionType.apiConnectionError);
       if (!identityRpcIsUnavailable) {
+        // The exception deliberately carries only the cause's *type*: this
+        // message reaches the UI, and a cause like JsonUnsupportedObjectError
+        // stringifies the offending object, which here is a wallet identity
+        // response.
+        //
+        // That left nothing at all to debug with, though - a bare
+        // "causeType: JsonUnsupportedObjectError" says the response could not
+        // be re-encoded and not one thing about why. So log the full cause and
+        // stack at severe, where it reaches the log file the user can export
+        // and the redaction in the framework's log sink still applies.
+        _logger.severe(
+          '[$_sessionId] Authenticated wallet identity read failed',
+          error,
+          stackTrace,
+        );
         throw AuthException(
           'KDF returned a malformed authenticated wallet identity response',
           type: AuthExceptionType.internalError,
@@ -457,6 +472,11 @@ extension KdfExtensions on KdfAuthService {
       walletPassword: walletPassword,
       seed: plaintextMnemonic ?? encryptedMnemonic,
       rpcPassword: _hostConfig.rpcPassword,
+      // Without this the `rpcPort = 7783` default won unconditionally, so the
+      // KDF this service started never listened anywhere else - no matter what
+      // the host config said. That is what made the port effectively fixed
+      // rather than merely defaulted.
+      rpcPort: _hostConfig.port,
       allowRegistrations: allowRegistrations,
       enableHd: hdEnabled,
       allowWeakPassword: allowWeakPassword,
