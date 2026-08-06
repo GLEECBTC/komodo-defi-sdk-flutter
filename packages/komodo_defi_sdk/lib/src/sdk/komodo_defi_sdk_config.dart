@@ -15,6 +15,7 @@ class KomodoDefiSdkConfig {
     this.preActivateDefaultAssets = true,
     this.preActivateHistoricalAssets = true,
     this.preActivateCustomTokenAssets = true,
+    this.persistTransactionHistory = true,
     this.maxPreActivationAttempts = 3,
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
@@ -36,6 +37,21 @@ class KomodoDefiSdkConfig {
 
   /// Whether to automatically activate custom tokens on login
   final bool preActivateCustomTokenAssets;
+
+  /// Whether transaction history is cached on disk between sessions.
+  ///
+  /// When enabled, a coin details page renders its known history immediately on
+  /// a cold start instead of waiting for the first network round trip. The
+  /// cache is derived state and is always refreshed from the network, so
+  /// disabling this costs latency rather than correctness.
+  ///
+  /// Two caveats worth knowing. Cached history survives sign-out, and no
+  /// SDK-wide purge runs on wallet deletion yet, so a deleted wallet's history
+  /// stays on disk until something calls
+  /// `HiveTransactionStorage.purgeWallet`; the same is already true of the
+  /// pubkey cache, the activation config store and the wallet asset list. And
+  /// the store is unbounded, mirroring the in-memory behaviour it replaces.
+  final bool persistTransactionHistory;
 
   /// Maximum number of retry attempts for pre-activation
   final int maxPreActivationAttempts;
@@ -78,6 +94,7 @@ class KomodoDefiSdkConfig {
     bool? preActivateDefaultAssets,
     bool? preActivateHistoricalAssets,
     bool? preActivateCustomTokenAssets,
+    bool? persistTransactionHistory,
     int? maxPreActivationAttempts,
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
@@ -95,6 +112,8 @@ class KomodoDefiSdkConfig {
           preActivateHistoricalAssets ?? this.preActivateHistoricalAssets,
       preActivateCustomTokenAssets:
           preActivateCustomTokenAssets ?? this.preActivateCustomTokenAssets,
+      persistTransactionHistory:
+          persistTransactionHistory ?? this.persistTransactionHistory,
       maxPreActivationAttempts:
           maxPreActivationAttempts ?? this.maxPreActivationAttempts,
       activationRetryDelay: activationRetryDelay ?? this.activationRetryDelay,

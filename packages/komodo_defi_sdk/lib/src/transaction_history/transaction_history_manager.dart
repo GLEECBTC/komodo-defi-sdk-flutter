@@ -1266,6 +1266,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       timer.cancel();
     }
     _confirmationsTimers.clear();
+
+    // Release the backing store when it owns one. Opt-in rather than part of
+    // TransactionStorage, so the in-memory implementation and the test fakes
+    // are unaffected.
+    if (_storage case final ClosableTransactionStorage closable) {
+      await closable.close();
+    }
   }
 }
 

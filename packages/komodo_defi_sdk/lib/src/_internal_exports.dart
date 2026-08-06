@@ -6,4 +6,5 @@ library _internal_exports;
 export 'activation/_activation_index.dart';
 export 'assets/_assets_index.dart';
 export 'transaction_history/_transaction_history_index.dart';
+export 'transaction_history/transaction_order_index.dart';
 export 'zcash_params/_zcash_params_index.dart';

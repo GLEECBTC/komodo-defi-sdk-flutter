@@ -19,6 +19,7 @@ import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/storage/secure_rpc_password_mixin.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
@@ -342,6 +343,16 @@ Future<void> bootstrap({
         activationCoordinator,
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
+        storage: config.persistTransactionHistory
+            ? HiveTransactionStorage(
+                // Lets the store drop history belonging to wallets that no
+                // longer exist. Fails open: an error or an empty result means
+                // "do not know", never "delete everything".
+                knownWalletNamespaces: () async => (await auth.getUsers())
+                    .map((user) => walletStorageNamespace(user.walletId))
+                    .toSet(),
+              )
+            : InMemoryTransactionStorage(),
         assetHistoryStorage: container<AssetHistoryStorage>(),
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );

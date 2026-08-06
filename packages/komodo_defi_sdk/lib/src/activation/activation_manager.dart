@@ -212,11 +212,13 @@ class ActivationManager {
     await _protectedOperation(() async {
       final completer = _activationCompleters.remove(assetId);
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(ActivationFailedException(
-          assetId: assetId,
-          message: reason,
-          errorCode: 'ACTIVATION_ABANDONED',
-        ));
+        completer.completeError(
+          ActivationFailedException(
+            assetId: assetId,
+            message: reason,
+            errorCode: 'ACTIVATION_ABANDONED',
+          ),
+        );
       }
       _cancelledActivations.remove(assetId);
     });
@@ -539,7 +541,7 @@ class ActivationManager {
       _logger.info(
         'Activating ${group.primary.id.id}'
         '${group.children.isEmpty ? '' : ' with ${group.children.length} '
-            'token(s)'}',
+                  'token(s)'}',
       );
 
       try {
