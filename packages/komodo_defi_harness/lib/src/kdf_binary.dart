@@ -43,9 +43,11 @@ class KdfBinary {
     // Walk up rather than assuming a working directory: `flutter test` runs
     // from the package root, a bench entrypoint may run from the workspace
     // root, and CI may run from either.
-    for (var dir = Directory.current.absolute;
-        dir.parent.path != dir.path;
-        dir = dir.parent) {
+    for (
+      var dir = Directory.current.absolute;
+      dir.parent.path != dir.path;
+      dir = dir.parent
+    ) {
       final candidate = File(
         '${dir.path}/packages/komodo_defi_framework/$platformDir/bin/kdf',
       );

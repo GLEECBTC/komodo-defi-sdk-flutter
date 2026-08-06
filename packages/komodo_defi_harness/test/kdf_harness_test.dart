@@ -7,10 +7,7 @@ import 'package:komodo_defi_harness/komodo_defi_harness.dart';
 /// method throws (see [ReplayKdfOperations.mm2Rpc]), so this map doubles as an
 /// executable record of exactly which RPCs a login makes. When that set
 /// changes, this test is where it shows up.
-KdfScript _loginScript({
-  required String walletName,
-  bool walletExists = true,
-}) {
+KdfScript _loginScript({required String walletName, bool walletExists = true}) {
   // KDF is stateful, so the script has to be too. `get_wallet_names` is asked
   // both *before* the wallet exists (registration checks for a name clash) and
   // *after* it has been activated (the identity check rejects a null
@@ -61,7 +58,8 @@ KdfScript _loginScript({
       'mmrpc': '2.0',
       'result': {
         'format': 'plaintext',
-        'mnemonic': 'abandon abandon abandon abandon abandon abandon abandon '
+        'mnemonic':
+            'abandon abandon abandon abandon abandon abandon abandon '
             'abandon abandon abandon abandon about',
       },
     });
@@ -174,9 +172,9 @@ void main() {
     test('hang() models a KDF that stops making progress', () async {
       final script = KdfScript()..hang('task::enable_utxo::status');
 
-      final pending = script.respondTo({
-        'method': 'task::enable_utxo::status',
-      })! as Future<Map<String, dynamic>>;
+      final pending =
+          script.respondTo({'method': 'task::enable_utxo::status'})!
+              as Future<Map<String, dynamic>>;
 
       var settled = false;
       unawaited(pending.then((_) => settled = true));
@@ -200,28 +198,31 @@ void unawaited(Future<void> future) {}
 void signInSuite() {
   group('pre-authenticated sign-in', () {
     for (final walletType in harnessWalletTypes) {
-      test('registers a ${walletType.name} wallet and records the phase', () async {
-        final script = _loginScript(
-          walletName: 'harness-wallet',
-          walletExists: false,
-        );
-        final harness = await KdfHarness.replayed(script: script);
-        addTearDown(harness.dispose);
+      test(
+        'registers a ${walletType.name} wallet and records the phase',
+        () async {
+          final script = _loginScript(
+            walletName: 'harness-wallet',
+            walletExists: false,
+          );
+          final harness = await KdfHarness.replayed(script: script);
+          addTearDown(harness.dispose);
 
-        final user = await harness.signIn(walletType: walletType);
+          final user = await harness.signIn(walletType: walletType);
 
-        expect(user.walletId.name, 'harness-wallet');
-        expect(
-          user.isHd,
-          walletType == KdfWalletType.hd,
-          reason: 'walletType must reach KDF as the derivation method',
-        );
-        expect(
-          harness.metrics['auth_signin_ms'],
-          isNotNull,
-          reason: 'sign-in must be timed, not just performed',
-        );
-      });
+          expect(user.walletId.name, 'harness-wallet');
+          expect(
+            user.isHd,
+            walletType == KdfWalletType.hd,
+            reason: 'walletType must reach KDF as the derivation method',
+          );
+          expect(
+            harness.metrics['auth_signin_ms'],
+            isNotNull,
+            reason: 'sign-in must be timed, not just performed',
+          );
+        },
+      );
     }
 
     test('identity RPC volume per sign-in is observable', () async {

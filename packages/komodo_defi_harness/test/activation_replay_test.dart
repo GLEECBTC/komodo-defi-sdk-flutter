@@ -20,63 +20,60 @@ Asset _assetFor(KdfHarness harness, String ticker) {
 void main() {
   group('activation through a real SDK', () {
     for (final walletType in harnessWalletTypes) {
-      test(
-        'records first paint and post-activation balance separately '
-        '(${walletType.name})',
-        () async {
-          final fixture = KdfWalletFixture()
-            ..enableUtxo(_utxoTicker, inProgressPolls: 3)
-            ..balance(_utxoTicker, spendable: '12.5');
+      test('records first paint and post-activation balance separately '
+          '(${walletType.name})', () async {
+        final fixture = KdfWalletFixture()
+          ..enableUtxo(_utxoTicker, inProgressPolls: 3)
+          ..balance(_utxoTicker, spendable: '12.5');
 
-          final harness = await KdfHarness.replayed(script: fixture.build());
-          addTearDown(harness.dispose);
+        final harness = await KdfHarness.replayed(script: fixture.build());
+        addTearDown(harness.dispose);
 
-          await harness.signIn(walletType: walletType);
-          final asset = _assetFor(harness, _utxoTicker);
-          await harness.measureFirstBalance(asset.id);
+        await harness.signIn(walletType: walletType);
+        final asset = _assetFor(harness, _utxoTicker);
+        await harness.measureFirstBalance(asset.id);
 
-          final firstPaint = harness.metrics['first_paint_ms'];
-          final activation = harness.metrics['activation_ms'];
-          final postActivation =
-              harness.metrics['first_post_activation_balance_ms'];
+        final firstPaint = harness.metrics['first_paint_ms'];
+        final activation = harness.metrics['activation_ms'];
+        final postActivation =
+            harness.metrics['first_post_activation_balance_ms'];
 
-          expect(
-            firstPaint,
-            isNotNull,
-            reason: 'the pre-activation paint must be measured',
-          );
-          expect(
-            activation,
-            isNotNull,
-            reason: 'the asset never reached the active state',
-          );
-          expect(
-            postActivation,
-            isNotNull,
-            reason:
-                'no balance landed after activation - measureFirstBalance '
-                'timed out, which is the failure the split exists to expose',
-          );
+        expect(
+          firstPaint,
+          isNotNull,
+          reason: 'the pre-activation paint must be measured',
+        );
+        expect(
+          activation,
+          isNotNull,
+          reason: 'the asset never reached the active state',
+        );
+        expect(
+          postActivation,
+          isNotNull,
+          reason:
+              'no balance landed after activation - measureFirstBalance '
+              'timed out, which is the failure the split exists to expose',
+        );
 
-          // The point of the split. A pre-activation paint that equalled the
-          // post-activation number would mean one of them is not measuring
-          // what its name says, and the cheap one is the one a gate would
-          // accidentally end up watching.
-          expect(
-            postActivation,
-            greaterThan(firstPaint!),
-            reason:
-                'first_paint_ms must precede the fetched balance; if these '
-                'converge, first_paint_ms has stopped being a cache/synthetic '
-                'paint and the activation gate has quietly lost its teeth',
-          );
-          expect(
-            postActivation,
-            greaterThanOrEqualTo(activation!),
-            reason: 'a post-activation balance cannot predate activation',
-          );
-        },
-      );
+        // The point of the split. A pre-activation paint that equalled the
+        // post-activation number would mean one of them is not measuring
+        // what its name says, and the cheap one is the one a gate would
+        // accidentally end up watching.
+        expect(
+          postActivation,
+          greaterThan(firstPaint!),
+          reason:
+              'first_paint_ms must precede the fetched balance; if these '
+              'converge, first_paint_ms has stopped being a cache/synthetic '
+              'paint and the activation gate has quietly lost its teeth',
+        );
+        expect(
+          postActivation,
+          greaterThanOrEqualTo(activation!),
+          reason: 'a post-activation balance cannot predate activation',
+        );
+      });
     }
 
     test('polls task::enable_utxo::status until it reports Ok', () async {
@@ -153,7 +150,8 @@ void main() {
       expect(
         script.callsTo('task::account_balance::init'),
         greaterThan(0),
-        reason: 'HD balances resolve through task::account_balance, not '
+        reason:
+            'HD balances resolve through task::account_balance, not '
             'my_balance',
       );
       expect(

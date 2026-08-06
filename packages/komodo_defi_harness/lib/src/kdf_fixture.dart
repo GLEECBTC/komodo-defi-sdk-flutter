@@ -224,7 +224,9 @@ class KdfWalletFixture {
           // progress percentages, so using them keeps the progress stream
           // shaped like production.
           return _taskInProgress(
-            task.remainingPolls > 0 ? 'ConnectingElectrum' : 'LoadingBlockchain',
+            task.remainingPolls > 0
+                ? 'ConnectingElectrum'
+                : 'LoadingBlockchain',
           );
         }
         _enabledCoins.add(task.ticker);

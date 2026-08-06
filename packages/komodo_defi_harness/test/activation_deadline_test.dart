@@ -75,44 +75,50 @@ void main() {
       expect(
         script.callsTo('task::enable_utxo::status'),
         greaterThan(0),
-        reason: 'the deadline must be measured against a task that was '
+        reason:
+            'the deadline must be measured against a task that was '
             'actually polled, not one that never got started',
       );
     });
 
-    test('a later attempt starts fresh instead of joining the dead one', () async {
-      final harness = await _wedgedHarness();
-      addTearDown(harness.dispose);
-      final asset = _assetFor(harness);
-      final script = harness.script;
+    test(
+      'a later attempt starts fresh instead of joining the dead one',
+      () async {
+        final harness = await _wedgedHarness();
+        addTearDown(harness.dispose);
+        final asset = _assetFor(harness);
+        final script = harness.script;
 
-      unawaited(
-        harness.sdk
-            .ensureAssetActivated(asset, timeout: _deadline)
-            .catchError((Object _) => false),
-      );
-      await Future<void>.delayed(_deadline + const Duration(milliseconds: 750));
-      expect(script.callsTo('task::enable_utxo::init'), 1);
+        unawaited(
+          harness.sdk
+              .ensureAssetActivated(asset, timeout: _deadline)
+              .catchError((Object _) => false),
+        );
+        await Future<void>.delayed(
+          _deadline + const Duration(milliseconds: 750),
+        );
+        expect(script.callsTo('task::enable_utxo::init'), 1);
 
-      unawaited(
-        harness.sdk
-            .ensureAssetActivated(asset, timeout: _deadline)
-            .catchError((Object _) => false),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 750));
+        unawaited(
+          harness.sdk
+              .ensureAssetActivated(asset, timeout: _deadline)
+              .catchError((Object _) => false),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 750));
 
-      // This is the regression. Before the deadline landed, the second call
-      // found the wedged completer still registered in `_pendingActivations`
-      // and returned its future - no second `::init`, no progress, ever.
-      expect(
-        script.callsTo('task::enable_utxo::init'),
-        2,
-        reason:
-            'the retry must issue a NEW activation. One init here means it '
-            're-joined the dead completer, which is exactly the 4 x 90s = '
-            '363.5s per-asset stall this deadline exists to prevent',
-      );
-    });
+        // This is the regression. Before the deadline landed, the second call
+        // found the wedged completer still registered in `_pendingActivations`
+        // and returned its future - no second `::init`, no progress, ever.
+        expect(
+          script.callsTo('task::enable_utxo::init'),
+          2,
+          reason:
+              'the retry must issue a NEW activation. One init here means it '
+              're-joined the dead completer, which is exactly the 4 x 90s = '
+              '363.5s per-asset stall this deadline exists to prevent',
+        );
+      },
+    );
 
     test('concurrent callers still share one in-flight attempt', () async {
       final harness = await _wedgedHarness();

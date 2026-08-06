@@ -111,6 +111,7 @@ class KdfHarness {
     required this.metrics,
     required Directory workspace,
     required List<Secret> secrets,
+    bool deleteWorkspaceOnDispose = true,
     KdfScript? script,
     ReplayKdfOperations? operations,
     ProcessKdfOperations? processOperations,
@@ -120,6 +121,7 @@ class KdfHarness {
        _processOperations = processOperations,
        _suppressedHttpOverrides = suppressedHttpOverrides,
        _workspace = workspace,
+       _deleteWorkspaceOnDispose = deleteWorkspaceOnDispose,
        _secrets = secrets;
 
   final KomodoDefiSdk sdk;
@@ -161,6 +163,7 @@ class KdfHarness {
   final HttpOverrides? _suppressedHttpOverrides;
 
   final Directory _workspace;
+  final bool _deleteWorkspaceOnDispose;
   final List<Secret> _secrets;
 
   /// Redacted log lines captured from the framework.
@@ -170,16 +173,23 @@ class KdfHarness {
   /// itself is measurable.
   ///
   /// The step order below is load-bearing; see the inline notes.
+  /// Pass [workspace] to reuse an existing persistence directory instead of
+  /// minting a fresh one, and [deleteWorkspaceOnDispose] to keep it afterwards.
+  /// Together they let a test bring one harness down and another up over the
+  /// same on-disk state, which is the only way to exercise a cold start.
   static Future<KdfHarness> replayed({
     required KdfScript script,
     Duration rpcLatency = Duration.zero,
     KomodoDefiSdkConfig? config,
     bool requireIsolatedPort = true,
+    Directory? workspace,
+    bool deleteWorkspaceOnDispose = true,
   }) async {
     // 1. Binding first - everything below touches platform channels.
     TestWidgetsFlutterBinding.ensureInitialized();
 
-    final workspace = await Directory.systemTemp.createTemp('kdf_harness_');
+    final resolvedWorkspace =
+        workspace ?? await Directory.systemTemp.createTemp('kdf_harness_');
 
     // 2. One password, used for both the host config and the value auth reads
     //    back out of secure storage.
@@ -221,7 +231,7 @@ class KdfHarness {
     //    the activation config store and tx history all resolve through
     //    path_provider, so without this a harness run would read and write the
     //    developer's real wallet data.
-    PathProviderPlatform.instance = _WorkspacePathProvider(workspace);
+    PathProviderPlatform.instance = _WorkspacePathProvider(resolvedWorkspace);
 
     final metrics = KdfHarnessMetrics();
     final operations = ReplayKdfOperations(script, rpcLatency: rpcLatency);
@@ -244,7 +254,8 @@ class KdfHarness {
       script: script,
       operations: operations,
       metrics: metrics,
-      workspace: workspace,
+      workspace: resolvedWorkspace,
+      deleteWorkspaceOnDispose: deleteWorkspaceOnDispose,
       secrets: secrets,
     );
     harness.logs.addAll(harnessLogs);
@@ -497,15 +508,15 @@ class KdfHarness {
     final activated = Completer<void>();
     var emissions = 0;
 
-    final activationSubscription = sdk
-        .watchActivationStateOf(assetId)
-        .listen((state) {
-          if (state?.status == AssetActivationStatus.active &&
-              !activated.isCompleted) {
-            metrics.record('activation_ms', stopwatch.elapsedMilliseconds);
-            activated.complete();
-          }
-        }, onError: (Object _) {});
+    final activationSubscription = sdk.watchActivationStateOf(assetId).listen((
+      state,
+    ) {
+      if (state?.status == AssetActivationStatus.active &&
+          !activated.isCompleted) {
+        metrics.record('activation_ms', stopwatch.elapsedMilliseconds);
+        activated.complete();
+      }
+    }, onError: (Object _) {});
 
     final subscription = sdk.balances.watchBalance(assetId).listen((_) {
       emissions++;
@@ -578,7 +589,7 @@ class KdfHarness {
       await Hive.close();
     } catch (_) {}
     try {
-      if (_workspace.existsSync()) {
+      if (_deleteWorkspaceOnDispose && _workspace.existsSync()) {
         await _workspace.delete(recursive: true);
       }
     } catch (_) {}

@@ -36,14 +36,11 @@ class KdfProcessRequirements {
   bool get isSatisfied => reasons.isEmpty;
 
   /// A single line suitable for `skip:`.
-  String get skipReason =>
-      'process tier not run: ${reasons.join('; ')}';
+  String get skipReason => 'process tier not run: ${reasons.join('; ')}';
 
   /// [port] is the port the run intends to bind, which no longer has to be
   /// [kdfRpcPort]: `LocalConfig` now carries one end to end.
-  static Future<KdfProcessRequirements> check({
-    int port = kdfRpcPort,
-  }) async {
+  static Future<KdfProcessRequirements> check({int port = kdfRpcPort}) async {
     final reasons = <String>[];
 
     final optIn = Platform.environment[environmentVariable]?.trim();

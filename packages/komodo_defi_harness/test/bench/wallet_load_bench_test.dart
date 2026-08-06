@@ -72,8 +72,7 @@ void main() {
     for (final walletType in harnessWalletTypes) {
       final ofType = runs.where((r) => r['wallet_type'] == walletType.name);
       final phaseNames = <String>{
-        for (final run in ofType)
-          ...(run['phases']! as Map<String, int>).keys,
+        for (final run in ofType) ...(run['phases']! as Map<String, int>).keys,
       };
       summary[walletType.name] = {
         for (final phase in phaseNames)
