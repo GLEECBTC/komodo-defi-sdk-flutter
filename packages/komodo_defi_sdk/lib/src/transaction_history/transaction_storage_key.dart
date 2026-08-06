@@ -91,7 +91,13 @@ abstract final class TransactionStorageKey {
   /// the compound ID omits authentication options, so an HD and an Iguana
   /// session on the same seed would share a namespace.
   static String walletToken(WalletId walletId) =>
-      _digest(walletStorageNamespace(walletId));
+      tokenForNamespace(walletStorageNamespace(walletId));
+
+  /// Returns the wallet token for an already-computed storage [namespace].
+  ///
+  /// Lets callers that hold namespaces rather than [WalletId]s - the
+  /// wallet garbage collector, for one - compare against key prefixes.
+  static String tokenForNamespace(String namespace) => _digest(namespace);
 
   /// Returns the opaque token identifying [assetId].
   ///

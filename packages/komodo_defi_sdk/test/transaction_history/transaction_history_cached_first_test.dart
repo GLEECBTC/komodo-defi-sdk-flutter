@@ -144,58 +144,55 @@ void main() {
     metadata: {'isImported': true},
   );
 
-  test(
-    'cached transactions are yielded before activation completes',
-    () async {
-      final client = _MockApiClient();
-      final auth = _MockAuth();
-      final assetProvider = _MockAssetProvider();
-      final activation = _MockActivationCoordinator();
-      final pubkeys = _MockPubkeyManager();
-      final streaming = _MockEventStreamingManager();
-      final assetHistory = _MockAssetHistoryStorage();
-      final asset = _asset();
-      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+  test('cached transactions are yielded before activation completes', () async {
+    final client = _MockApiClient();
+    final auth = _MockAuth();
+    final assetProvider = _MockAssetProvider();
+    final activation = _MockActivationCoordinator();
+    final pubkeys = _MockPubkeyManager();
+    final streaming = _MockEventStreamingManager();
+    final assetHistory = _MockAssetHistoryStorage();
+    final asset = _asset();
+    final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
 
-      // Activation never resolves: this is the stalled-coin case that used to
-      // hold the coin page on a spinner despite cached rows being in memory.
-      final stuckActivation = Completer<ActivationResult>();
+    // Activation never resolves: this is the stalled-coin case that used to
+    // hold the coin page on a spinner despite cached rows being in memory.
+    final stuckActivation = Completer<ActivationResult>();
 
-      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
-      when(() => auth.currentUser).thenAnswer((_) async => wallet);
-      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
-      when(
-        () => activation.activateAsset(asset),
-      ).thenAnswer((_) => stuckActivation.future);
+    when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+    when(() => auth.currentUser).thenAnswer((_) async => wallet);
+    when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+    when(
+      () => activation.activateAsset(asset),
+    ).thenAnswer((_) => stuckActivation.future);
 
-      final manager = TransactionHistoryManager(
-        client,
-        auth,
-        assetProvider,
-        activation,
-        pubkeyManager: pubkeys,
-        eventStreamingManager: streaming,
-        storage: _SeededStorage([_cachedTx(asset.id)]),
-        assetHistoryStorage: assetHistory,
-        transactionHistoryStrategies: [_NeverStrategy()],
-      );
-      addTearDown(() async {
-        await authChanges.close();
-        await manager.dispose();
-      });
+    final manager = TransactionHistoryManager(
+      client,
+      auth,
+      assetProvider,
+      activation,
+      pubkeyManager: pubkeys,
+      eventStreamingManager: streaming,
+      storage: _SeededStorage([_cachedTx(asset.id)]),
+      assetHistoryStorage: assetHistory,
+      transactionHistoryStrategies: [_NeverStrategy()],
+    );
+    addTearDown(() async {
+      await authChanges.close();
+      await manager.dispose();
+    });
 
-      final firstBatch = await manager
-          .getTransactionsStreamed(asset)
-          .first
-          .timeout(const Duration(seconds: 5));
+    final firstBatch = await manager
+        .getTransactionsStreamed(asset)
+        .first
+        .timeout(const Duration(seconds: 5));
 
-      expect(firstBatch, hasLength(1));
-      expect(firstBatch.single.internalId, 'internal-cached');
-      expect(
-        stuckActivation.isCompleted,
-        isFalse,
-        reason: 'cached rows must not wait on activation',
-      );
-    },
-  );
+    expect(firstBatch, hasLength(1));
+    expect(firstBatch.single.internalId, 'internal-cached');
+    expect(
+      stuckActivation.isCompleted,
+      isFalse,
+      reason: 'cached rows must not wait on activation',
+    );
+  });
 }
