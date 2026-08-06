@@ -29,6 +29,56 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 var _activationConfigHiveInitialized = false;
 
+/// Handed from the [TransactionHistoryManager] factory to
+/// [_wireWalletDeletionPurge], which cannot reach the store through the
+/// container because the manager owns it privately. Cleared once consumed.
+HiveTransactionStorage? _transactionStorage;
+
+/// Clears every wallet-scoped cache when a wallet is deleted.
+///
+/// `deleteWallet` removes the wallet from KDF and from secure storage, and
+/// nothing else - so derived addresses, activation preferences, the enabled
+/// asset list and transaction history all used to outlive the wallet they
+/// described. Transaction history also self-heals at open through
+/// [HiveTransactionStorage]'s garbage collector, but only on the next launch,
+/// and the other three stores have no equivalent.
+///
+/// Every purge is best-effort and independent: a cache that will not clear
+/// must not make a deleted wallet look undeleted, and must not stop the other
+/// caches from clearing.
+Future<void> _wireWalletDeletionPurge(
+  GetIt container,
+  HiveTransactionStorage? transactionStorage,
+) async {
+  final auth = await container.getAsync<KomodoDefiLocalAuth>();
+  final assetHistory = container<AssetHistoryStorage>();
+  final pubkeys = await container.getAsync<PubkeyManager>();
+  final activationConfig = await container.getAsync<ActivationConfigService>();
+
+  auth.walletDeletions.listen((walletId) async {
+    for (final purge in <(String, Future<void> Function())>[
+      (
+        'transaction history',
+        () async => transactionStorage?.purgeWallet(walletId),
+      ),
+      ('pubkeys', () => pubkeys.purgeWallet(walletId)),
+      ('activation config', () => activationConfig.repo.purgeWallet(walletId)),
+      ('asset history', () => assetHistory.clearWalletAssets(walletId)),
+    ]) {
+      try {
+        await purge.$2();
+      } on Object catch (error, stackTrace) {
+        log(
+          'Failed to purge ${purge.$1} for a deleted wallet: $error',
+          name: 'Bootstrap',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+  });
+}
+
 final class _SdkAssetConfigTransform implements CoinConfigTransform {
   const _SdkAssetConfigTransform(this._transform);
 
@@ -344,14 +394,14 @@ Future<void> bootstrap({
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
         storage: config.persistTransactionHistory
-            ? HiveTransactionStorage(
+            ? (_transactionStorage = HiveTransactionStorage(
                 // Lets the store drop history belonging to wallets that no
                 // longer exist. Fails open: an error or an empty result means
                 // "do not know", never "delete everything".
                 knownWalletNamespaces: () async => (await auth.getUsers())
                     .map((user) => walletStorageNamespace(user.walletId))
                     .toSet(),
-              )
+              ))
             : InMemoryTransactionStorage(),
         assetHistoryStorage: container<AssetHistoryStorage>(),
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
@@ -432,6 +482,9 @@ Future<void> bootstrap({
 
   // Wait for all async singletons to initialize
   await container.allReady();
+
+  await _wireWalletDeletionPurge(container, _transactionStorage);
+  _transactionStorage = null;
 
   stopwatch.stop();
   log(

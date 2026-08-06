@@ -187,28 +187,31 @@ void main() {
     },
   );
 
-  test('the deadline releases the caller on a completely silent stream', () async {
-    // `_neverCompletingProgress` emits every 10ms, so the `await for` keeps
-    // resuming and the method reaches its `return` on its own. A stream that
-    // never emits AND never closes does not: the initiating caller used to be
-    // suspended before `return completer.future` was ever reached, so the
-    // deadline fired, completed the completer, and the caller still waited
-    // forever. Joiners were unaffected, which is what hid it.
-    final silent = StreamController<ActivationProgress>();
-    addTearDown(silent.close);
-    when(() => manager.activateAsset(any())).thenAnswer((_) => silent.stream);
+  test(
+    'the deadline releases the caller on a completely silent stream',
+    () async {
+      // `_neverCompletingProgress` emits every 10ms, so the `await for` keeps
+      // resuming and the method reaches its `return` on its own. A stream that
+      // never emits AND never closes does not: the initiating caller used to be
+      // suspended before `return completer.future` was ever reached, so the
+      // deadline fired, completed the completer, and the caller still waited
+      // forever. Joiners were unaffected, which is what hid it.
+      final silent = StreamController<ActivationProgress>();
+      addTearDown(silent.close);
+      when(() => manager.activateAsset(any())).thenAnswer((_) => silent.stream);
 
-    final coordinator = SharedActivationCoordinator(manager, auth);
-    addTearDown(coordinator.dispose);
+      final coordinator = SharedActivationCoordinator(manager, auth);
+      addTearDown(coordinator.dispose);
 
-    final result = await coordinator
-        .activateAsset(asset, timeout: const Duration(milliseconds: 200))
-        .timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => fail('the caller was never released'),
-        );
+      final result = await coordinator
+          .activateAsset(asset, timeout: const Duration(milliseconds: 200))
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => fail('the caller was never released'),
+          );
 
-    expect(result.isSuccess, isFalse);
-    expect(result.errorMessage, contains('timed out'));
-  });
+      expect(result.isSuccess, isFalse);
+      expect(result.errorMessage, contains('timed out'));
+    },
+  );
 }

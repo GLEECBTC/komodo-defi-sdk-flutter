@@ -171,37 +171,42 @@ void main() {
     await authChanges.close();
   });
 
-  test('persisted balance paints while activation is still in flight', () async {
-    // Activation never resolves: without the hydrated paint this subscriber
-    // would sit on a placeholder indefinitely.
-    final stuckActivation = Completer<ActivationResult>();
-    when(() => activation.isAssetActive(assetId)).thenAnswer((_) async => false);
-    when(
-      () => activation.activateAsset(any()),
-    ).thenAnswer((_) => stuckActivation.future);
+  test(
+    'persisted balance paints while activation is still in flight',
+    () async {
+      // Activation never resolves: without the hydrated paint this subscriber
+      // would sit on a placeholder indefinitely.
+      final stuckActivation = Completer<ActivationResult>();
+      when(
+        () => activation.isAssetActive(assetId),
+      ).thenAnswer((_) async => false);
+      when(
+        () => activation.activateAsset(any()),
+      ).thenAnswer((_) => stuckActivation.future);
 
-    when(
-      () => pubkeyManager.hydratedPubkeys(asset),
-    ).thenAnswer((_) async => _pubkeysWith(assetId, 7));
-    when(
-      () => pubkeyManager.getPubkeys(asset),
-    ).thenAnswer((_) => Completer<AssetPubkeys>().future);
+      when(
+        () => pubkeyManager.hydratedPubkeys(asset),
+      ).thenAnswer((_) async => _pubkeysWith(assetId, 7));
+      when(
+        () => pubkeyManager.getPubkeys(asset),
+      ).thenAnswer((_) => Completer<AssetPubkeys>().future);
 
-    final first = await manager
-        .watchBalance(assetId)
-        .first
-        .timeout(const Duration(seconds: 5));
+      final first = await manager
+          .watchBalance(assetId)
+          .first
+          .timeout(const Duration(seconds: 5));
 
-    expect(first.spendable, Decimal.fromInt(7));
-    expect(
-      stuckActivation.isCompleted,
-      isFalse,
-      reason: 'the hydrated paint must not wait on activation',
-    );
-    // It also becomes the last-known value, which is what the overview total
-    // and the wallet-list sort read.
-    expect(manager.lastKnown(assetId)?.spendable, Decimal.fromInt(7));
-  });
+      expect(first.spendable, Decimal.fromInt(7));
+      expect(
+        stuckActivation.isCompleted,
+        isFalse,
+        reason: 'the hydrated paint must not wait on activation',
+      );
+      // It also becomes the last-known value, which is what the overview total
+      // and the wallet-list sort read.
+      expect(manager.lastKnown(assetId)?.spendable, Decimal.fromInt(7));
+    },
+  );
 
   test('a hydration failure never stops the real watcher', () async {
     when(() => activation.isAssetActive(assetId)).thenAnswer((_) async => true);

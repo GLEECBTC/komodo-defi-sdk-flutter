@@ -427,18 +427,16 @@ void main() {
 
       await firstEvent.future;
 
-      final callsAfterCancel =
-          client.calls
-              .where((c) => c['method'] == 'trezor_connection_status')
-              .length;
+      final callsAfterCancel = client.calls
+          .where((c) => c['method'] == 'trezor_connection_status')
+          .length;
 
       // Wait longer than one polling interval; there should be no further calls
       await Future<void>.delayed(Duration(milliseconds: 60));
 
-      final callsLater =
-          client.calls
-              .where((c) => c['method'] == 'trezor_connection_status')
-              .length;
+      final callsLater = client.calls
+          .where((c) => c['method'] == 'trezor_connection_status')
+          .length;
       expect(callsLater, callsAfterCancel);
     });
 
@@ -486,10 +484,9 @@ void main() {
         ]);
 
         // Ensure only 3 RPC calls were made (initial + 2 polls)
-        final callCount =
-            client.calls
-                .where((c) => c['method'] == 'trezor_connection_status')
-                .length;
+        final callCount = client.calls
+            .where((c) => c['method'] == 'trezor_connection_status')
+            .length;
         expect(callCount, 3);
       },
     );
@@ -667,10 +664,9 @@ void main() {
         expect(events.length, 2);
         expect(events[0].status, AuthenticationStatus.initializing);
         expect(events[1].status, AuthenticationStatus.initializing);
-        final statusCalls =
-            client.calls
-                .where((c) => c['method'] == 'task::init_trezor::status')
-                .length;
+        final statusCalls = client.calls
+            .where((c) => c['method'] == 'task::init_trezor::status')
+            .length;
         expect(statusCalls, 0);
       },
     );
@@ -714,17 +710,15 @@ void main() {
 
         await firstEvent.future;
 
-        final callsAfterCancel =
-            client.calls
-                .where((c) => c['method'] == 'task::init_trezor::status')
-                .length;
+        final callsAfterCancel = client.calls
+            .where((c) => c['method'] == 'task::init_trezor::status')
+            .length;
 
         // Wait longer than one polling interval; there should be no further calls
         await Future<void>.delayed(Duration(milliseconds: 80));
-        final callsLater =
-            client.calls
-                .where((c) => c['method'] == 'task::init_trezor::status')
-                .length;
+        final callsLater = client.calls
+            .where((c) => c['method'] == 'task::init_trezor::status')
+            .length;
 
         expect(callsLater, callsAfterCancel);
       },

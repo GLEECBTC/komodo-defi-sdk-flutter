@@ -248,6 +248,19 @@ abstract interface class KomodoDefiAuth {
   /// Returns true if KDF is healthy or was successfully restarted, false otherwise.
   Future<bool> ensureKdfHealthy();
 
+  /// Emits the identity of each wallet as it is deleted.
+  ///
+  /// [deleteWallet] removes the wallet from KDF and from secure storage, but
+  /// callers may hold wallet-scoped caches of their own - derived addresses,
+  /// activation config, transaction history - that outlive it. Those caches are
+  /// keyed by [WalletId], and the identity cannot be recovered after the fact,
+  /// so it is resolved before the deletion and published here.
+  ///
+  /// Broadcast, and emitted only after the deletion succeeds. Listeners should
+  /// treat purging as best-effort: a failure to clear a derived cache must not
+  /// make the wallet look undeleted.
+  Stream<WalletId> get walletDeletions;
+
   /// Disposes of any resources held by the authentication service.
   ///
   /// This method should be called when the authentication service is no longer
@@ -266,6 +279,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   final SecureLocalStorage _secureStorage = SecureLocalStorage();
+  final _walletDeletions = StreamController<WalletId>.broadcast();
   final bool _allowRegistrations;
   late final IAuthService _authService;
   late final TrezorAuthService _trezorAuthService;
@@ -597,16 +611,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
+  Stream<WalletId> get walletDeletions => _walletDeletions.stream;
+
+  @override
   Future<void> deleteWallet({
     required String walletName,
     required String password,
   }) async {
     await ensureInitialized();
+    // Resolve the identity first: wallet-scoped caches are keyed by WalletId,
+    // and once the wallet is gone there is nothing left to derive one from.
+    final deleted = await _resolveWalletId(walletName);
     try {
       await _authService.deleteWallet(
         walletName: walletName,
         password: password,
       );
+      if (deleted != null && !_walletDeletions.isClosed) {
+        _walletDeletions.add(deleted);
+      }
     } on AuthException {
       rethrow;
     } catch (e) {
@@ -687,10 +710,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     if (signedIn != expected) {
       throw AuthException(
         'User is ${signedIn ? 'signed in' : 'not signed in'}.',
-        type:
-            signedIn
-                ? AuthExceptionType.alreadySignedIn
-                : AuthExceptionType.unauthorized,
+        type: signedIn
+            ? AuthExceptionType.alreadySignedIn
+            : AuthExceptionType.unauthorized,
       );
     }
   }
@@ -701,8 +723,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     return _authService.ensureKdfHealthy();
   }
 
+  /// Returns the stored identity for [walletName], or `null` when it is not a
+  /// known wallet.
+  ///
+  /// Failures are swallowed: a lookup that cannot complete costs a stale cache,
+  /// whereas letting it throw would fail a deletion that is otherwise fine.
+  Future<WalletId?> _resolveWalletId(String walletName) async {
+    try {
+      for (final user in await _authService.getUsers()) {
+        if (user.walletId.name == walletName) return user.walletId;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Future<void> dispose() async {
+    await _walletDeletions.close();
     await _authService.dispose();
   }
 }

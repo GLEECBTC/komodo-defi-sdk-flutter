@@ -26,7 +26,13 @@ extension on _MockActivationCoordinator {
 
 class _RecordingPubkeysStorage implements PubkeysStorage {
   final savedWallets = <WalletId>[];
+  final purgedWallets = <WalletId>[];
   int readCount = 0;
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) async {
+    purgedWallets.add(walletId);
+  }
 
   @override
   Future<Map<String, Map<String, dynamic>>> listForWallet(
@@ -318,7 +324,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       final walletAResponse = Completer<Map<String, dynamic>>();
@@ -429,7 +436,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       KdfUser? currentUser = _walletA;
@@ -486,7 +494,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       KdfUser? currentUser = _nameOnlyWallet;
@@ -600,7 +609,8 @@ void main() {
       // paints a balance straight from this.
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       final asset = _singleAddressAsset();

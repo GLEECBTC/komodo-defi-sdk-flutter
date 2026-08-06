@@ -386,10 +386,7 @@ void main() {
         const fileName = 'sapling-spend.params';
 
         final url = config.getFileUrl(config.primaryUrl, fileName);
-        expect(
-          url,
-          equals('https://z.cash/downloads/sapling-spend.params'),
-        );
+        expect(url, equals('https://z.cash/downloads/sapling-spend.params'));
       });
 
       test('works with backup URL', () {

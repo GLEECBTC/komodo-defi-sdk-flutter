@@ -55,6 +55,12 @@ abstract class IPubkeyManager {
   /// Pre-caches pubkeys for an asset to warm the cache and notify listeners
   Future<void> precachePubkeys(Asset asset);
 
+  /// Deletes every cached pubkey belonging to [walletId].
+  ///
+  /// Called when a wallet is deleted, so its derived addresses do not outlive
+  /// it on disk.
+  Future<void> purgeWallet(WalletId walletId);
+
   /// Dispose of any resources
   Future<void> dispose();
 }
@@ -907,6 +913,17 @@ class PubkeyManager implements IPubkeyManager {
       'State reset completed in ${stopwatch.elapsedMilliseconds}ms '
       '(subscriptions: ${watcherSubs.length}, controllers: ${controllers.length})',
     );
+  }
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) async {
+    await _storage.purgeWallet(walletId);
+    // Drop the in-memory view too when the deleted wallet is the one loaded,
+    // so nothing can repopulate the box from a cache that outlived it.
+    final current = _currentWalletId;
+    if (current != null && isSameStableWallet(current, walletId)) {
+      await _resetState();
+    }
   }
 
   /// Dispose of any resources

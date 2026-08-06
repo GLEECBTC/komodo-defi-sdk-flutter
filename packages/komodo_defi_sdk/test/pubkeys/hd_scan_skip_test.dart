@@ -118,8 +118,7 @@ void main() {
           {'url': 'https://eth.example'},
         ],
         'swap_contract_address': '0x0000000000000000000000000000000000000001',
-        'fallback_swap_contract':
-            '0x0000000000000000000000000000000000000002',
+        'fallback_swap_contract': '0x0000000000000000000000000000000000000002',
       }),
       isWalletOnly: false,
       signMessagePrefix: null,
@@ -134,19 +133,16 @@ void main() {
     );
   });
 
-  test(
-    'a warm re-login is not treated as freshly activated',
-    () {
-      // `SharedActivationCoordinator.activateAsset` answers "already active"
-      // for every caller after the first, which is why the freshness signal
-      // has to come from `ActivationManager` rather than from the result of
-      // the call. If a warm login were mistaken for a fresh one, the scan
-      // would be skipped on exactly the logins where it is the only thing
-      // that discovers newly used addresses.
-      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
-      expect(activation.wasFreshlyActivated(utxoAsset().id), isFalse);
-    },
-  );
+  test('a warm re-login is not treated as freshly activated', () {
+    // `SharedActivationCoordinator.activateAsset` answers "already active"
+    // for every caller after the first, which is why the freshness signal
+    // has to come from `ActivationManager` rather than from the result of
+    // the call. If a warm login were mistaken for a fresh one, the scan
+    // would be skipped on exactly the logins where it is the only thing
+    // that discovers newly used addresses.
+    when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
+    expect(activation.wasFreshlyActivated(utxoAsset().id), isFalse);
+  });
 
   test('ActivationResult distinguishes fresh from already-active', () {
     final fresh = ActivationResult.success(utxoAsset().id);

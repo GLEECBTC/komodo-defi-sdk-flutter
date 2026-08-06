@@ -86,10 +86,7 @@ void main() {
         // the home directory, so the expectation has to follow the host. These
         // assertions used to hardcode the macOS branch and failed the moment
         // the suite ran on a Linux CI runner.
-        expect(
-          path,
-          equals(_expectedParamsPath('/home/testuser')),
-        );
+        expect(path, equals(_expectedParamsPath('/home/testuser')));
       });
 
       test('uses custom homeDirectoryOverride when provided', () async {
@@ -101,10 +98,7 @@ void main() {
         final path = await downloader.getParamsPath();
 
         // Should use the custom home directory, under this host's convention.
-        expect(
-          path,
-          equals(_expectedParamsPath('/custom/home/path')),
-        );
+        expect(path, equals(_expectedParamsPath('/custom/home/path')));
       });
 
       test(
@@ -143,10 +137,7 @@ void main() {
         final path = await downloader.getParamsPath();
 
         // Path shape follows the host platform, not the home directory's shape.
-        expect(
-          path,
-          equals(_expectedParamsPath('/Users/testuser')),
-        );
+        expect(path, equals(_expectedParamsPath('/Users/testuser')));
       });
     });
 

@@ -461,7 +461,10 @@ class KdfAuthService implements IAuthService {
         rethrow;
       } finally {
         held.stop();
-        _recordActiveUserCall(queued.elapsedMilliseconds, held.elapsedMilliseconds);
+        _recordActiveUserCall(
+          queued.elapsedMilliseconds,
+          held.elapsedMilliseconds,
+        );
       }
     });
   }
