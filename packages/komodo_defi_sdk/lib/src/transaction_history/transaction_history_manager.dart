@@ -91,6 +91,17 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   final _lastBalanceForPolling = <AssetId, BalanceInfo>{};
   final _lastCustodyBalanceForPolling = <AssetId, Decimal>{};
   final _syncInProgress = <(AssetId, int)>{};
+
+  /// Assets this process has successfully activated for the current wallet.
+  ///
+  /// The activation skip in [getTransactionHistory] used to key off "we have
+  /// local history for this asset", on the reasoning that stored rows prove a
+  /// prior activation. That reasoning only holds while storage is per-process.
+  /// Once history is persisted, a cold start has rows for an asset KDF has not
+  /// enabled yet, and the strategy fetch below it would run against an inactive
+  /// coin. Tracking activation per session keeps the RPC-spam reduction the
+  /// skip was added for without inheriting a cross-session claim.
+  final _activatedThisSession = <AssetId>{};
   final _rateLimiter = _RateLimiter(const Duration(milliseconds: 500));
 
   static const _defaultPollingInterval = Duration(seconds: 30);
@@ -136,6 +147,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _lastBalanceForPolling.clear();
     _lastCustodyBalanceForPolling.clear();
     _syncInProgress.clear();
+    _activatedThisSession.clear();
     _stopAllStreaming();
   }
 
@@ -168,6 +180,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       _lastBalanceForPolling.clear();
       _lastCustodyBalanceForPolling.clear();
       _syncInProgress.clear();
+      _activatedThisSession.clear();
       _stopAllStreaming();
     }
 
@@ -319,12 +332,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         return localPage;
       }
 
-      // Skip activation check if we have local transaction history, as this
-      // implies the asset was previously activated. This reduces RPC spam when
-      // opening the coin details page repeatedly for already-activated assets.
-      final hasLocalHistory = localPage.transactions.isNotEmpty;
-
-      if (!hasLocalHistory) {
+      // Skip the activation check only when this process already activated the
+      // asset. That reduces RPC spam when the coin details page is reopened
+      // repeatedly, without assuming that persisted history implies KDF has the
+      // coin enabled right now - it does not, on a cold start.
+      if (!_activatedThisSession.contains(asset.id)) {
         await _ensureAssetActivated(asset);
         await _requireWalletContextCurrent(walletContext);
       }
@@ -709,6 +721,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         originalError: activationResult.errorMessage,
       );
     }
+    _activatedThisSession.add(asset.id);
   }
 
   Future<void> _batchStoreTransactions(
@@ -950,9 +963,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   /// falls back to EOA balance gating alone.
   ///
   /// Note: [_fetchOpaqueCursorTransactionsSince] stops at the stored head, so
-  /// custody transactions older than the head are not backfilled mid-session;
-  /// storage is in-memory and [getTransactionsStreamed] re-fetches from page 1
-  /// on every coin-details open, so the gap self-heals.
+  /// custody transactions older than the head are not backfilled mid-session.
+  /// [getTransactionsStreamed] walks the network from page 1 to exhaustion on
+  /// every coin-details open, regardless of what storage already holds, so the
+  /// gap self-heals there. That is a property of the walk, not of storage being
+  /// per-process, and it survives storage being persisted across sessions.
   ///
   /// The new balance is committed before the triggered sync runs (mirroring
   /// [_updateLastKnownBalance] for EOA balances), so a sync whose retries all
@@ -1243,6 +1258,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     _syncInProgress.clear();
+
+    _activatedThisSession.clear();
 
     // Cancel confirmations refresh timers
     for (final timer in _confirmationsTimers.values) {
