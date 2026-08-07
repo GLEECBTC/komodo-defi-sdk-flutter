@@ -89,6 +89,20 @@ class KdfOperationsWasm implements IKdfOperations {
     }
   }
 
+  /// Lazy variant, for messages whose *construction* is expensive.
+  ///
+  /// Dart evaluates interpolation eagerly, so `_debugLog('… ${x.censored()}')`
+  /// runs `censored()` - a full recursive rebuild of the request tree, with a
+  /// key-normalising pass per node - before `_debugLog` gets to check its flag.
+  /// `KdfLoggingConfig.debugLogging` is `verboseLogging && kDebugMode`, i.e.
+  /// **always false in release**, so on the RPC path that work was paid on
+  /// every call and thrown away every time.
+  void _debugLogLazy(String Function() message) {
+    if (KdfLoggingConfig.debugLogging) {
+      _log(message());
+    }
+  }
+
   @override
   Future<bool> isAvailable(IKdfHostConfig hostConfig) async {
     try {
@@ -242,7 +256,7 @@ class KdfOperationsWasm implements IKdfOperations {
   /// Makes the JavaScript RPC call and returns the raw JS response
   Future<js_interop.JSAny?> _makeJsCall(JsonMap request) async {
     final method = _rpcMethodName(request);
-    _debugLog('mm2Rpc request: ${request.censored()}');
+    _debugLogLazy(() => 'mm2Rpc request: ${request.censored()}');
     request['userpass'] = _config.rpcPassword;
 
     final jsRequest = request.jsify();

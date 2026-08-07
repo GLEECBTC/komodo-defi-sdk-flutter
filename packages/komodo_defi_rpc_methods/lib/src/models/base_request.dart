@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -32,7 +30,7 @@ extension BaseRequestApiClientExtension on ApiClient {
       throw GeneralErrorResponse.parse(response);
     }
 
-    return request.parseResponse(jsonEncode(response));
+    return request.parseResponseJson(response);
   }
 
   /// Attempts to parse the error response into a typed [MmRpcException].
@@ -97,7 +95,7 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
 
   Future<T> send(ApiClient client) async {
     final response = await client.executeRpc(toJson());
-    return parseResponse(jsonEncode(response));
+    return parseResponseJson(response);
   }
 
   /// Parse a response, handling both success and error envelopes.
@@ -108,9 +106,21 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   ///    [parseCustomErrorResponse]
   /// 2. Try to parse into a typed [MmRpcException] using [KdfErrorRegistry]
   /// 3. Fall back to [GeneralErrorResponse] via [parseGeneralErrorResponse]
-  T parseResponse(String responseBody) {
-    final json = jsonFromString(responseBody);
+  T parseResponse(String responseBody) => parseResponseJson(
+        jsonFromString(responseBody),
+      );
 
+  /// [parseResponse] for a response that is already a decoded JSON map.
+  ///
+  /// The callers inside this file hold a `JsonMap` and used to `jsonEncode` it
+  /// only for [parseResponse] to `jsonDecode` it straight back - two full
+  /// traversals of every RPC response, on the browser's only thread, to arrive
+  /// at the map they started with.
+  ///
+  /// [parseResponse] is kept as the string entry point: it is the public API
+  /// and is exercised directly by tests. Subclasses override [parse], not
+  /// this, so the split is invisible to them.
+  T parseResponseJson(JsonMap json) {
     // First check if this is an error response
     if (GeneralErrorResponse.isErrorResponse(json) &&
         !shouldParseErrorAsResponse(json)) {

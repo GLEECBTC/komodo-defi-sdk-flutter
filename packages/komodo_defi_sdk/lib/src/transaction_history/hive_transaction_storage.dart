@@ -175,25 +175,33 @@ class HiveTransactionStorage
     final writes = <String, String>{};
     final staleKeys = <String>[];
 
+    // Resolve and read every row this batch will merge into up front, rather
+    // than one await at a time inside the loop. The confirmations refresh
+    // re-stores a full page every 30 seconds per watched asset, and on web
+    // each read is its own IndexedDB round trip.
+    final existingKeys = <String, String>{};
     for (final incoming in transactions) {
-      final existingKey = _index.keyForPrefixedId(prefix, incoming.internalId);
-      var merged = incoming;
-      String? existingRecord;
+      final key = _index.keyForPrefixedId(prefix, incoming.internalId);
+      if (key != null) existingKeys[incoming.internalId] = key;
+    }
+    final existingRecords = await _readRecords(box, existingKeys);
 
-      if (existingKey != null) {
-        existingRecord = await _readRecord(box, existingKey);
-        if (existingRecord != null) {
-          final existing = _decode(
-            existingRecord,
-            existingKey,
-            scopedAssetId: assetId,
+    for (final incoming in transactions) {
+      final existingKey = existingKeys[incoming.internalId];
+      final existingRecord = existingRecords[incoming.internalId];
+      var merged = incoming;
+
+      if (existingKey != null && existingRecord != null) {
+        final existing = _decode(
+          existingRecord,
+          existingKey,
+          scopedAssetId: assetId,
+        );
+        if (existing != null) {
+          merged = TransactionMergeUtils.mergeTransactionFields(
+            existing,
+            incoming,
           );
-          if (existing != null) {
-            merged = TransactionMergeUtils.mergeTransactionFields(
-              existing,
-              incoming,
-            );
-          }
         }
       }
 
@@ -444,19 +452,54 @@ class HiveTransactionStorage
     return prefix;
   }
 
+  /// Reads [keys] concurrently, preserving their order.
+  ///
+  /// One `await` per row put a page's worth of round trips on the path that
+  /// paints the asset details list. That is invisible on the VM, where a read
+  /// is a file offset, and very visible on web, where every `LazyBox.get` is
+  /// its own IndexedDB transaction. Issuing them together lets the backend
+  /// pipeline them, so a page costs one round trip's latency rather than N.
+  ///
+  /// [_readRecord] contains its own failures, so a single unreadable row still
+  /// yields `null` here instead of failing the whole page.
   Future<List<Transaction>> _readAll(
     LazyBox<String> box,
     List<String> keys, {
     AssetId? scopedAssetId,
   }) async {
+    if (keys.isEmpty) return const [];
+    final records = await Future.wait(
+      keys.map((key) => _readRecord(box, key)),
+    );
+
     final transactions = <Transaction>[];
-    for (final key in keys) {
-      final record = await _readRecord(box, key);
+    for (var i = 0; i < keys.length; i++) {
+      final record = records[i];
       if (record == null) continue;
-      final transaction = _decode(record, key, scopedAssetId: scopedAssetId);
+      final transaction = _decode(
+        record,
+        keys[i],
+        scopedAssetId: scopedAssetId,
+      );
       if (transaction != null) transactions.add(transaction);
     }
     return transactions;
+  }
+
+  /// Reads the records behind [keysById] concurrently, keyed by the same ids.
+  Future<Map<String, String>> _readRecords(
+    LazyBox<String> box,
+    Map<String, String> keysById,
+  ) async {
+    if (keysById.isEmpty) return const {};
+    final ids = keysById.keys.toList();
+    final records = await Future.wait(
+      ids.map((id) => _readRecord(box, keysById[id]!)),
+    );
+    return {
+      for (var i = 0; i < ids.length; i++)
+        if (records[i] != null) ids[i]: records[i]!,
+    };
   }
 
   Future<String?> _readRecord(LazyBox<String> box, String key) async {
