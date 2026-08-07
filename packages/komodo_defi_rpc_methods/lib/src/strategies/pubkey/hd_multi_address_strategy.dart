@@ -7,7 +7,23 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 mixin HDWalletMixin on PubkeyStrategy {
   KdfUser get kdfUser;
 
-  int get _gapLimit => 20;
+  /// The gap KDF enforces when *creating* an address, and the basis for how
+  /// many more addresses the UI offers.
+  ///
+  /// Deliberately NOT the scan gap. `task::get_new_address` refuses once there
+  /// are already `gap_limit` unused addresses in a row
+  /// (`mm2src/coins/rpc_command/get_new_address.rs:615-617`), so lowering this
+  /// would cap how many unused addresses a user may hold - at
+  /// `HdGapLimit.newlyGeneratedFirstSignIn` they could create exactly one and
+  /// then be refused. Address creation is a user action with no node-load
+  /// problem; the repeating scan is the one that needed bounding.
+  int get _gapLimit => HdGapLimit.hardware;
+
+  /// The gap used when *scanning* for addresses that already exist on chain.
+  ///
+  /// Supplied per wallet - see [HdGapLimit]. Defaults to the full BIP-44 gap so
+  /// a strategy constructed without one never silently narrows discovery.
+  int get scanGapLimit => HdGapLimit.hardware;
   Duration get _scanPollInterval => const Duration(milliseconds: 250);
   Duration get _scanTimeout => const Duration(seconds: 20);
   Duration get _accountBalancePollInterval => const Duration(milliseconds: 100);
@@ -39,7 +55,7 @@ mixin HDWalletMixin on PubkeyStrategy {
     final initResponse = await client.rpc.hdWallet.scanForNewAddressesInit(
       assetId.id,
       accountId: 0,
-      gapLimit: _gapLimit,
+      gapLimit: scanGapLimit,
     );
 
     final startedAt = DateTime.now();
@@ -143,10 +159,16 @@ mixin HDWalletMixin on PubkeyStrategy {
 
 /// HD wallet strategy for context private key wallets
 class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
-  ContextPrivKeyHDWalletStrategy({required this.kdfUser});
+  ContextPrivKeyHDWalletStrategy({
+    required this.kdfUser,
+    this.scanGapLimit = HdGapLimit.hardware,
+  });
 
   @override
   final KdfUser kdfUser;
+
+  @override
+  final int scanGapLimit;
 
   @override
   /// Get the new address for the given asset ID and client.
@@ -194,6 +216,9 @@ class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
 
 /// HD wallet strategy for Trezor wallets
 class TrezorHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
+  /// No `scanGapLimit` parameter: hardware wallets always use the full BIP-44
+  /// gap. Their seed is expected to have been used by other software, which is
+  /// exactly the history a short gap fails to find.
   TrezorHDWalletStrategy({required this.kdfUser});
 
   @override

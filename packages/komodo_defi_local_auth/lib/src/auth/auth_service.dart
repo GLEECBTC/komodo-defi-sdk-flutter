@@ -138,6 +138,13 @@ class KdfAuthService implements IAuthService {
   int _authStateGeneration = 0;
   Timer? _healthCheckTimer;
 
+  /// Compound ids of wallets this session created without an imported mnemonic.
+  ///
+  /// Never persisted: the whole meaning is "first sign-in", and a value that
+  /// outlived the session would keep telling the address scan there is nothing
+  /// to find long after the wallet could have received funds.
+  final Set<String> _walletsGeneratedThisSession = <String>{};
+
   /// Rolling cost of [getActiveUser]; see [_recordActiveUserCall].
   int _activeUserCalls = 0;
   int _activeUserQueuedMs = 0;
@@ -338,6 +345,14 @@ class KdfAuthService implements IAuthService {
         late final KdfUser currentUser;
         try {
           currentUser = await _registerNewUser(config, options, isImported);
+          if (!isImported) {
+            // A wallet created here has no on-chain history by construction:
+            // the seed did not exist a moment ago. Recorded per session so the
+            // HD gap scan can be told so on this sign-in only.
+            _walletsGeneratedThisSession.add(
+              currentUser.walletId.compoundId,
+            );
+          }
         } catch (_) {
           await _clearFailedAuthenticatedKdfWithinWriteLock();
           rethrow;
@@ -347,9 +362,10 @@ class KdfAuthService implements IAuthService {
           '[$_sessionId] register: registration write path completed in '
           '${writePathStopwatch.elapsedMilliseconds}ms',
         );
-        _emitAuthStateChange(currentUser);
+        final sessionUser = _stampSessionFlags(currentUser)!;
+        _emitAuthStateChange(sessionUser);
         _invalidateUsersCache();
-        return currentUser;
+        return sessionUser;
       });
     } finally {
       registerStopwatch.stop();
@@ -455,7 +471,7 @@ class KdfAuthService implements IAuthService {
       queued.stop();
       final held = Stopwatch()..start();
       try {
-        return await _resolveActiveUserWithinWriteLock();
+        return _stampSessionFlags(await _resolveActiveUserWithinWriteLock());
       } catch (_) {
         await _clearFailedAuthenticatedKdfWithinWriteLock();
         rethrow;
@@ -467,6 +483,22 @@ class KdfAuthService implements IAuthService {
         );
       }
     });
+  }
+
+  /// Re-applies session-scoped facts that are not persisted with the user.
+  ///
+  /// [KdfUser.isGeneratedThisSession] lives only in [_walletsGeneratedThisSession],
+  /// so a user read back from secure storage has it false. Stamped on the way
+  /// out of [getActiveUser] rather than written into storage, because the whole
+  /// meaning is "this session created it": a persisted value would keep telling
+  /// the HD address scan there is nothing to find long after the wallet could
+  /// have received funds.
+  KdfUser? _stampSessionFlags(KdfUser? user) {
+    if (user == null) return null;
+    if (!_walletsGeneratedThisSession.contains(user.walletId.compoundId)) {
+      return user;
+    }
+    return user.copyWith(isGeneratedThisSession: true);
   }
 
   /// Accumulates [getActiveUser] cost and reports it at INFO, rate-limited.

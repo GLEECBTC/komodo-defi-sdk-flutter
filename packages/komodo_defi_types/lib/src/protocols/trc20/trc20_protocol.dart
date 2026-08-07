@@ -68,6 +68,9 @@ class Trc20Protocol extends ProtocolClass {
   @override
   Trc20ActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
+    // Ignored: TRON is deliberately out of scope for the activation-time gap
+    // policy. Its SDK-side scan still follows it, via the pubkey strategy.
+    int? gapLimit,
   }) {
     return Trc20ActivationParams.fromJsonConfig(
       config,

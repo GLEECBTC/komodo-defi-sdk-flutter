@@ -20,6 +20,22 @@ abstract class IPubkeyManager {
   /// trust a persisted or in-memory address snapshot.
   Future<AssetPubkeys> getFreshPubkeys(Asset asset);
 
+  /// Fetch pubkeys from KDF, bypassing the in-memory cache, and store the
+  /// result as the new cached value.
+  ///
+  /// [getPubkeys] returns `_pubkeysCache[asset.id]` verbatim whenever it is
+  /// populated, and that cache has no TTL - it is written by a fresh fetch or
+  /// by hydration and cleared only on wallet reset or dispose. So a caller that
+  /// polls `getPubkeys` in order to *observe a change* observes nothing, for
+  /// the rest of the session, with no error surfaced. This is the method such
+  /// callers want.
+  ///
+  /// Distinct from [getFreshPubkeys], which deliberately neither reads nor
+  /// writes the caches and does not join in-flight requests. This one does
+  /// both, so a refresh and a concurrent [getPubkeys] miss share one round trip
+  /// and agree on the result.
+  Future<AssetPubkeys> refreshPubkeys(Asset asset);
+
   /// Watch pubkeys for a given asset, emitting the initial state if available
   /// and polling for updates at a fixed interval. Optionally activates asset.
   Stream<AssetPubkeys> watchPubkeys(
@@ -72,7 +88,9 @@ class PubkeyManager implements IPubkeyManager {
     this._auth,
     this._activationCoordinator, {
     PubkeysStorage? storage,
-  }) : _storage = storage ?? HivePubkeysStorage() {
+    DateTime Function()? now,
+  }) : _storage = storage ?? HivePubkeysStorage(),
+       _now = now ?? DateTime.now {
     _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
     _logger.fine('Initialized');
   }
@@ -82,6 +100,13 @@ class PubkeyManager implements IPubkeyManager {
   final KomodoDefiLocalAuth _auth;
   final SharedActivationCoordinator _activationCoordinator;
   final PubkeysStorage _storage;
+
+  /// Wall clock, injectable so the scan interval below is testable.
+  ///
+  /// `fakeAsync` fakes timers and microtasks but not `DateTime.now()`, so a
+  /// test that elapses six hours of timer time still sees no wall-clock
+  /// movement - and a guard keyed on wall time would look permanent.
+  final DateTime Function() _now;
 
   // Internal state for watching pubkeys per asset
   final Map<AssetId, AssetPubkeys> _pubkeysCache = {};
@@ -99,11 +124,44 @@ class PubkeyManager implements IPubkeyManager {
   final Map<String, DateTime> _hdAddressScanRetryAfter = {};
   static const Duration _hdAddressScanRetryCooldown = Duration(minutes: 2);
 
-  /// `wallet:asset` keys whose address scan was satisfied by activation.
+  /// When the address gap was last walked, per `wallet:asset`.
   ///
-  /// Cleared by [_resetState] with everything else, so a wallet switch or a
-  /// fresh sign-in scans again.
-  final Set<String> _hdAddressScanDone = <String>{};
+  /// This is the guard on the *repeat*, and it is the only thing standing
+  /// between the app and a full gap walk every [_defaultPollingInterval] for
+  /// the life of the session. See [_hdAddressScanInterval].
+  ///
+  /// Keyed exactly like [_hdAddressScanRetryAfter] so the existing bulk clears
+  /// in [_resetState] and [dispose] already cover it - a wallet switch must not
+  /// leak one wallet's suppression into the next.
+  final Map<String, DateTime> _hdAddressScanCompletedAt = {};
+
+  /// `wallet:asset` keys that have consumed their one post-activation skip.
+  ///
+  /// Separate from [_hdAddressScanCompletedAt] because the two mean different
+  /// things: this records "we chose not to scan because activation was
+  /// supposed to", which is not evidence that a gap was actually walked.
+  final Set<String> _hdAddressScanCredit = <String>{};
+
+  /// How long a completed address scan stands before another is worth issuing.
+  ///
+  /// A scan is `task::scan_for_new_addresses`, which on an empty wallet probes
+  /// `gap_limit + 1` candidate addresses (see `HdGapLimit` for how that limit
+  /// is chosen per wallet). For EVM each probe costs `1 + 1 + N` node RPCs on
+  /// an *unused* address - `eth_getTransactionCount`, `eth_getBalance`, then
+  /// one `eth_call balanceOf` per registered ERC-20
+  /// (`mm2src/coins/eth/eth_hd_wallet.rs:125-150`, `mm2src/coins/eth.rs:5107`).
+  /// The nonce short-circuit only fires on addresses that *are* used, so a gap
+  /// walk pays the full price every time. At the full BIP-44 gap, GLEEC with
+  /// its six GRC-20 tokens is 21 x 8 = 168 requests per scan; at one scan per
+  /// 30s tick that was ~336 requests a minute against an endpoint measured at
+  /// ~20 req/s, forever.
+  ///
+  /// An HD address set cannot change without an on-chain transaction to an
+  /// address this wallet has not derived yet, which in practice means the seed
+  /// being used somewhere else at the same time. Six hours bounds the discovery
+  /// latency for that while making the steady-state cost negligible. It is
+  /// deliberately not "once per session": a session can outlive a day.
+  static const Duration _hdAddressScanInterval = Duration(hours: 6);
 
   StreamSubscription<KdfUser?>? _authSubscription;
   WalletId? _currentWalletId;
@@ -214,6 +272,21 @@ class PubkeyManager implements IPubkeyManager {
     return pubkeys;
   }
 
+  @override
+  Future<AssetPubkeys> refreshPubkeys(Asset asset) async {
+    if (_isDisposed) {
+      throw StateError('PubkeyManager has been disposed');
+    }
+
+    // Capture first, exactly as [getPubkeys] does: this is what proactively
+    // detects a wallet switch the auth stream has not delivered yet and clears
+    // the caches, so the fetch below cannot commit into the wrong wallet.
+    final walletContext = await _captureWalletContext();
+    final pubkeys = await _fetchFreshPubkeys(asset, walletContext);
+    await _requireWalletContextCurrent(walletContext);
+    return pubkeys;
+  }
+
   bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
     if (previous == null || current == null) return previous == current;
     return isSameStableWallet(previous, current);
@@ -317,7 +390,17 @@ class PubkeyManager implements IPubkeyManager {
     if (currentUser == null) {
       throw AuthException.notSignedIn();
     }
-    return asset.pubkeyStrategy(kdfUser: currentUser);
+    return asset.pubkeyStrategy(
+      kdfUser: currentUser,
+      scanGapLimit: HdGapLimit.resolve(
+        privKeyPolicy: currentUser.walletId.authOptions.privKeyPolicy,
+        // Session-scoped, so this is true only on the sign-in that created the
+        // wallet. A later sign-in of the same generated wallet gets the normal
+        // software gap, because by then it could have received funds at an
+        // address this app never derived.
+        isNewlyGeneratedFirstSignIn: currentUser.isGeneratedThisSession,
+      ),
+    );
   }
 
   // Perform a fresh network fetch for pubkeys, deduplicated per asset
@@ -769,14 +852,41 @@ class PubkeyManager implements IPubkeyManager {
   }
 
   /// Whether this session's activation of [asset] already walked the address
-  /// gap, making [_scanForNewHdAddressesIfNeeded] a duplicate of it.
+  /// gap, making the *immediately following* [_scanForNewHdAddressesIfNeeded] a
+  /// duplicate of it.
   ///
   /// Both conditions matter. The activation must have actually happened this
   /// session (a warm re-login finds the asset already enabled and scans
   /// nothing), and the protocol's activation params must carry a scanning
-  /// policy - `UtxoProtocol` sends `scan_policy: scan_if_new_wallet`, whereas
-  /// the ETH-family params have no `scan_policy` field at all, so their HD
-  /// address discovery is *not* covered by activation and must still scan.
+  /// policy - `UtxoProtocol` sends `scan_policy: scan_if_new_wallet`.
+  ///
+  /// The ETH-family params carry no `scan_policy` field, and this deliberately
+  /// still returns false for them - but **not** for the reason that used to be
+  /// written here. The old comment concluded that ETH-family "HD address
+  /// discovery is *not* covered by activation and must still scan". The premise
+  /// is true of the Dart; the conclusion is false, and it is what made a gap
+  /// walk on every 30-second poll look intentional.
+  ///
+  /// What KDF actually does: `EthActivationV2Request` carries
+  /// `#[serde(flatten)] pub enable_params: EnabledCoinBalanceParams`
+  /// (`mm2src/coins/eth/v2_activation.rs:249-250`), so an absent `scan_policy`
+  /// takes its serde default, and that default is `ScanIfNewWallet`, not
+  /// `DoNotScan` (`mm2src/coins/coin_balance.rs:159-178`). So ETH-family
+  /// activation *does* walk the gap - but only down one of two branches:
+  ///
+  ///  * HD account **absent** from KDF's wallet storage (a first-ever
+  ///    activation of this coin for this wallet): `coin_balance.rs:532-535`
+  ///    accepts `ScanIfNewWallet` and walks.
+  ///  * HD account **present** (every activation after that; accounts persist
+  ///    to sqlite/IndexedDB): `coin_balance.rs:577` requires `Scan`, so the
+  ///    default does *not* walk.
+  ///
+  /// The SDK cannot see which branch KDF took, and guessing wrong in the
+  /// "already scanned" direction would silently disable address discovery on
+  /// every warm re-login. So the redundant post-activation walk on a first-ever
+  /// activation is knowingly left in place - it costs one scan, once - and the
+  /// repeat is bounded by [_hdAddressScanInterval] instead, which is where
+  /// essentially all of the cost was.
   bool _activationAlreadyScanned(Asset asset) {
     if (!_activationCoordinator.wasFreshlyActivated(asset.id)) return false;
     try {
@@ -799,13 +909,22 @@ class PubkeyManager implements IPubkeyManager {
     }
 
     final scanKey = '${walletContext.walletId.compoundId}:${asset.id.id}';
+    final now = _now();
 
-    // Skip the walk KDF has just done. Recorded rather than simply returned so
-    // a *later* fetch on the same asset - after new addresses could plausibly
-    // have been used - still scans; only the redundant back-to-back one is
-    // dropped.
-    if (alreadyScannedByActivation && !_hdAddressScanDone.contains(scanKey)) {
-      _hdAddressScanDone.add(scanKey);
+    // Skip the walk KDF has just done - once.
+    //
+    // Deliberately does *not* arm [_hdAddressScanInterval]. This branch only
+    // knows that the protocol asked KDF to scan, not that KDF actually walked:
+    // `scan_policy: scan_if_new_wallet` walks only when KDF has no stored HD
+    // account for the coin (`mm2src/coins/coin_balance.rs:519-535`), so on
+    // every launch after the first, activation runs, this credit is granted,
+    // and nothing was walked. Arming a six-hour interval off that would delay
+    // real address discovery on every warm re-login.
+    //
+    // So the credit is consumed once and the *next* fetch does a real scan,
+    // which is what arms the interval. That is one scan per session rather
+    // than one every 30 seconds, and it is bounded from then on.
+    if (alreadyScannedByActivation && _hdAddressScanCredit.add(scanKey)) {
       _logger.info(
         'Skipping HD address scan for ${asset.id.id}: activation already '
         'scanned with the same gap limit',
@@ -813,8 +932,19 @@ class PubkeyManager implements IPubkeyManager {
       return;
     }
 
+    // The repeat guard. `watchPubkeys` calls `_fetchFreshPubkeys` on every
+    // 30-second tick and nothing else bounds a *successful* scan -
+    // `_hdAddressScanRetryAfter` below is a failure-only cooldown and is
+    // cleared on success, and `_inFlightPubkeyRequests` only joins concurrent
+    // fetches, never sequential ones.
+    final completedAt = _hdAddressScanCompletedAt[scanKey];
+    if (completedAt != null &&
+        now.difference(completedAt) < _hdAddressScanInterval) {
+      return;
+    }
+
     final retryAfter = _hdAddressScanRetryAfter[scanKey];
-    if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
+    if (retryAfter != null && now.isBefore(retryAfter)) {
       return;
     }
 
@@ -822,13 +952,16 @@ class PubkeyManager implements IPubkeyManager {
       await strategy.scanForNewAddresses(asset.id, _client);
       await _requireWalletContextCurrent(walletContext);
       _hdAddressScanRetryAfter.remove(scanKey);
+      // Stamped after the await, not before: a scan that threw must not arm
+      // the interval, or one failure would suppress retries for six hours.
+      _hdAddressScanCompletedAt[scanKey] = _now();
     } catch (error, stackTrace) {
       if (!await _isWalletContextCurrent(walletContext)) {
         throw const WalletChangedDisconnectException(
           'Wallet changed while scanning for pubkeys',
         );
       }
-      _hdAddressScanRetryAfter[scanKey] = DateTime.now().add(
+      _hdAddressScanRetryAfter[scanKey] = _now().add(
         _hdAddressScanRetryCooldown,
       );
       _logger.warning(
@@ -857,7 +990,8 @@ class PubkeyManager implements IPubkeyManager {
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
-    _hdAddressScanDone.clear();
+    _hdAddressScanCompletedAt.clear();
+    _hdAddressScanCredit.clear();
     _watchedAssets.clear();
 
     // Cancel all active watchers concurrently
@@ -937,7 +1071,8 @@ class PubkeyManager implements IPubkeyManager {
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
-    _hdAddressScanDone.clear();
+    _hdAddressScanCompletedAt.clear();
+    _hdAddressScanCredit.clear();
 
     // Collect all async cleanup operations and run them concurrently.
     final List<Future<void>> pending = <Future<void>>[];

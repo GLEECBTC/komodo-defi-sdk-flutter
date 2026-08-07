@@ -127,7 +127,7 @@ void main() {
       );
     });
 
-    test('an HD sign-in scans for addresses before reading balances', () async {
+    test('an HD sign-in reads balances without re-walking the gap', () async {
       final fixture = KdfWalletFixture()
         ..enableUtxo(_utxoTicker)
         ..balance(_utxoTicker, spendable: '3');
@@ -142,10 +142,22 @@ void main() {
       // The HD branch had no coverage anywhere in either repo before this
       // harness, and the address scan is the cost that only HD pays - the
       // difference a cold-vs-warm web measurement is meant to expose.
+      //
+      // This used to assert `greaterThan(0)`, which encoded a defect rather
+      // than a contract. A fresh UTXO activation sends
+      // `scan_policy: scan_if_new_wallet` with `gap_limit: 20`, so KDF has
+      // *already* walked the gap by the time pubkeys are resolved (the premise
+      // is pinned in komodo_defi_sdk's `hd_scan_skip_test.dart`). The SDK
+      // skipped the first duplicate walk but nothing bounded the rest, so a
+      // second `_fetchFreshPubkeys` re-walked it - and that second walk is what
+      // this assertion was observing.
       expect(
         script.callsTo('task::scan_for_new_addresses::init'),
-        greaterThan(0),
-        reason: 'HD pubkey resolution must scan for new addresses',
+        lessThanOrEqualTo(1),
+        reason:
+            'the post-activation duplicate is skipped once and one real scan '
+            'then arms the interval - so this is bounded per session rather '
+            'than issued on every 30s poll',
       );
       expect(
         script.callsTo('task::account_balance::init'),

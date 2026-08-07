@@ -553,6 +553,17 @@ class ActivationManager {
 
         final gaslessProvider = _gaslessProviderFor(group);
 
+        // Hardware keeps the full BIP-44 gap; a wallet this session generated
+        // has no on-chain history to find, so its first sign-in walks the
+        // minimum. Resolved here because this is the one place that already
+        // holds the current user.
+        final hdGapLimit = currentUser == null
+            ? null
+            : HdGapLimit.resolve(
+                privKeyPolicy: privKeyPolicy,
+                isNewlyGeneratedFirstSignIn: currentUser.isGeneratedThisSession,
+              );
+
         // Create activator with the user's privKeyPolicy
         final activator = ActivationStrategyFactory.createStrategy(
           _client,
@@ -560,6 +571,7 @@ class ActivationManager {
           _configService,
           _activatedAssetsCache,
           tronGaslessProvider: gaslessProvider,
+          hdGapLimit: hdGapLimit,
         );
 
         var completionHandled = false;

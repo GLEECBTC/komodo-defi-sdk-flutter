@@ -7,11 +7,18 @@ import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class UtxoActivationStrategy extends ProtocolActivationStrategy {
-  const UtxoActivationStrategy(super.client, this.privKeyPolicy);
+  const UtxoActivationStrategy(
+    super.client,
+    this.privKeyPolicy, {
+    this.hdGapLimit,
+  });
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
+
+  /// The HD address gap KDF should walk during activation. See `HdGapLimit`.
+  final int? hdGapLimit;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -42,7 +49,10 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
         additionalInfo: {
           'chainType': protocol.subClass.formatted,
           'mode': protocol
-              .defaultActivationParams(privKeyPolicy: privKeyPolicy)
+              .defaultActivationParams(
+                privKeyPolicy: privKeyPolicy,
+                gapLimit: hdGapLimit,
+              )
               .mode
               ?.rpc,
           'txVersion': protocol.txVersion,
@@ -63,6 +73,7 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
 
       final activationParams = protocol.defaultActivationParams(
         privKeyPolicy: privKeyPolicy,
+        gapLimit: hdGapLimit,
       );
 
       // Debug logging for UTXO/Electrum activation
