@@ -22,10 +22,16 @@ abstract class IBalanceManager {
   /// the balance will typically be pre-cached and return immediately. However,
   /// this should not be relied upon as a way to check activation status.
   ///
+  /// Reads through [IPubkeyManager.getPubkeys], whose in-memory cache has no
+  /// TTL, so by default this returns "whatever we last saw" and is only as
+  /// fresh as the last thing that wrote that cache. Pass [forceRefresh] on any
+  /// path whose purpose is to *notice a change* - polling, staleness checks -
+  /// or it will re-read the same value forever and report success.
+  ///
   /// Throws [AuthException] if user is not signed in.
   /// Throws [ArgumentError] if asset is not found.
   /// May throw [TimeoutException] if balance fetch times out.
-  Future<BalanceInfo> getBalance(AssetId assetId);
+  Future<BalanceInfo> getBalance(AssetId assetId, {bool forceRefresh = false});
 
   /// Gets a stream of balance updates for an asset.
   /// The stream will emit the current balance immediately if available,
@@ -315,6 +321,36 @@ class BalanceManager implements IBalanceManager {
 
   bool _supportsBalanceStreaming(Asset asset) => asset.supportsBalanceStreaming;
 
+  /// The coin whose KDF balance streamer already reports [asset]'s balance, or
+  /// null when [asset] needs a streamer of its own.
+  ///
+  /// For an EVM token this is its platform coin. KDF's `EthBalanceEventStreamer`
+  /// polls `all_addresses()` x (its own ticker plus every token registered on
+  /// it) every 10s, and tokens register onto the platform coin - so a streamer
+  /// enabled on the token re-polls the identical address set for a balance the
+  /// platform streamer already carries. With `N` known addresses and `T`
+  /// tokens the platform streamer does `N x (1 + T)` requests per tick and is
+  /// sufficient; the per-token streamers add another `N x T` on top. On one
+  /// idle wallet with 5 used addresses and 6 tokens that is 65 requests per 10s
+  /// where 35 would do - and it is the only *permanent* background load the
+  /// wallet puts on an EVM node.
+  ///
+  /// Deliberately EVM-only:
+  ///  * TRON is excluded even though its payload has the same shape. Gas-free
+  ///    TRC-20 balances live at a derived custody address rather than the
+  ///    account's own, so whether the platform streamer's `all_addresses()`
+  ///    covers a token's balance is a separate question with its own answer.
+  ///    Folding it in here would couple that to this change.
+  ///  * QRC-20 children never reach this code - `supportsBalanceStreaming` is
+  ///    already false for them.
+  AssetId? _balanceStreamerHostFor(Asset asset) {
+    final parentId = asset.id.parentId;
+    if (parentId == null) return null;
+    if (!evmCoinSubClasses.contains(asset.id.subClass)) return null;
+    if (!evmCoinSubClasses.contains(parentId.subClass)) return null;
+    return parentId;
+  }
+
   /// Handle authentication state changes
   Future<void> _handleAuthStateChanged(KdfUser? user) async {
     if (_isDisposed) return;
@@ -516,7 +552,10 @@ class BalanceManager implements IBalanceManager {
   }
 
   @override
-  Future<BalanceInfo> getBalance(AssetId assetId) async {
+  Future<BalanceInfo> getBalance(
+    AssetId assetId, {
+    bool forceRefresh = false,
+  }) async {
     if (_isDisposed) {
       throw StateError('BalanceManager has been disposed');
     }
@@ -534,9 +573,12 @@ class BalanceManager implements IBalanceManager {
     }
 
     try {
-      final balance = await _pubkeyManager!
-          .getPubkeys(asset)
-          .then((pubkeys) => pubkeys.balance);
+      final pubkeyManager = _pubkeyManager!;
+      final balance =
+          await (forceRefresh
+                  ? pubkeyManager.refreshPubkeys(asset)
+                  : pubkeyManager.getPubkeys(asset))
+              .then((pubkeys) => pubkeys.balance);
       await _requireWalletContextCurrent(walletContext);
       // Update cache with the latest balance
       _balanceCache[assetId] = balance;
@@ -995,9 +1037,26 @@ class BalanceManager implements IBalanceManager {
         return;
       }
 
-      _logger.fine('Subscribing to balance stream for ${assetId.id}');
+      final streamerHost = _balanceStreamerHostFor(asset);
+      if (streamerHost == null) {
+        _logger.fine('Subscribing to balance stream for ${assetId.id}');
+      } else {
+        _logger.fine(
+          'Subscribing to balance stream for ${assetId.id} via its platform '
+          'coin ${streamerHost.id}, whose streamer already reports it',
+        );
+      }
+      // A token subscribes against its platform coin's streamer key, so the
+      // manager's existing reference counting collapses the platform's own
+      // watcher and every one of its tokens onto a single KDF registration.
+      // Whichever of them subscribes first enables it - a token whose platform
+      // coin has no watcher of its own still gets one, and the last cancel
+      // still disables it.
       final balanceStreamSubscription = await _eventStreamingManager
-          .subscribeToBalance(coin: assetId.id);
+          .subscribeToBalance(
+            coin: assetId.id,
+            streamerCoin: streamerHost?.id,
+          );
       if (!await _isWalletContextCurrent(walletContext)) {
         await balanceStreamSubscription.cancel();
         return;
@@ -1159,7 +1218,12 @@ class BalanceManager implements IBalanceManager {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
 
         if (isActive) {
-          final balance = await getBalance(assetId);
+          // `forceRefresh` is what makes this a poll rather than a cache read.
+          // This path is reached when the KDF balance stream has died - which
+          // is exactly when nothing else is refreshing the pubkey cache - so
+          // without it the "fallback" reports the frozen last-known balance
+          // every tick, indefinitely, and looks healthy doing it.
+          final balance = await getBalance(assetId, forceRefresh: true);
           if (!await _isWalletContextCurrent(walletContext)) return null;
           if (enableDebugLogging) {
             _logger.info(
@@ -1279,7 +1343,7 @@ class BalanceManager implements IBalanceManager {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
 
-        final latest = await getBalance(assetId);
+        final latest = await getBalance(assetId, forceRefresh: true);
         if (!await _isWalletContextCurrent(walletContext)) return;
         final previous = _balanceCache[assetId];
         final changed =
@@ -1303,7 +1367,7 @@ class BalanceManager implements IBalanceManager {
       try {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
-        final latest = await getBalance(assetId);
+        final latest = await getBalance(assetId, forceRefresh: true);
         if (!await _isWalletContextCurrent(walletContext)) return;
         final previous = _balanceCache[assetId];
         final changed =
@@ -1422,7 +1486,7 @@ class BalanceManager implements IBalanceManager {
     if (!_pendingFastRefresh.contains(assetId)) return;
 
     try {
-      final refreshed = await getBalance(assetId);
+      final refreshed = await getBalance(assetId, forceRefresh: true);
       if (!await _isWalletContextCurrent(walletContext)) return;
       _balanceCache[assetId] = refreshed;
       if (!controller.isClosed) {

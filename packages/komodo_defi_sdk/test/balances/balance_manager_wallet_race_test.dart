@@ -167,6 +167,9 @@ void main() {
       when(() => pubkeys.getPubkeys(asset)).thenAnswer(
         (_) async => _pubkeys(asset, currentUser == _walletA ? '5' : '9'),
       );
+      when(() => pubkeys.refreshPubkeys(asset)).thenAnswer(
+        (_) async => _pubkeys(asset, currentUser == _walletA ? '5' : '9'),
+      );
       when(
         () => pubkeys.watchPubkeys(asset),
       ).thenAnswer((_) => const Stream.empty());
@@ -234,6 +237,9 @@ void main() {
         () => assetHistory.getWalletAssets(_walletB.walletId),
       ).thenAnswer((_) async => {asset.id.id});
       when(() => pubkeys.getPubkeys(asset)).thenAnswer(
+        (_) async => _pubkeys(asset, currentUser == _walletA ? '5' : '9'),
+      );
+      when(() => pubkeys.refreshPubkeys(asset)).thenAnswer(
         (_) async => _pubkeys(asset, currentUser == _walletA ? '5' : '9'),
       );
       when(
@@ -322,6 +328,12 @@ void main() {
           currentUser?.walletId.pubkeyHash == 'hash-b' ? '9' : '5',
         ),
       );
+      when(() => pubkeys.refreshPubkeys(asset)).thenAnswer(
+        (_) async => _pubkeys(
+          asset,
+          currentUser?.walletId.pubkeyHash == 'hash-b' ? '9' : '5',
+        ),
+      );
 
       final manager = BalanceManager(
         assetLookup: assetLookup,
@@ -381,6 +393,9 @@ void main() {
       ).thenAnswer((_) async => true);
       when(
         () => pubkeys.getPubkeys(asset),
+      ).thenAnswer((_) async => _pubkeys(asset, '5'));
+      when(
+        () => pubkeys.refreshPubkeys(asset),
       ).thenAnswer((_) async => _pubkeys(asset, '5'));
       when(
         () => pubkeys.watchPubkeys(asset),
