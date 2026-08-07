@@ -17,7 +17,6 @@
     "source_urls": [
       "https://kdf-dev-builds.nitride.app",
       "https://nitride-kdf-builds.web.app",
-      "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
       "https://devbuilds.gleec.com",
       "https://nebula.decker.im"
     ],
@@ -77,7 +76,7 @@
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "f64e6d5ef3129bc722f942497994d2b56eb88c4e",
+    "bundled_coins_repo_commit": "ac3172cc0e3b349e94db469bf49990a788b5b4a0",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
     "coins_repo_branch": "master",

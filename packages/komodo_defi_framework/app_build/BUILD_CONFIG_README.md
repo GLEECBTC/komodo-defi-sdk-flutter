@@ -80,11 +80,16 @@ so changing or relabelling an extracted library also fails before linking.
 
 ```
 "source_urls": [
-    "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
+    "https://kdf-dev-builds.nitride.app",
     "https://devbuilds.gleec.com",
     "https://nebula.decker.im"
 ]
 ```
+
+- A `https://api.github.com/repos/<owner>/<repo>` entry selects the GitHub
+  release downloader instead of a mirror. KDF now lives in the private
+  `GLEECBTC/kdf-internal`, whose branches are not reachable without a token, so
+  no GitHub entry is configured by default.
 
 - The downloader expects branch-scoped directory listings (e.g.,
   `.../dev/`) on both devbuilds and Nebula mirrors and falls back to the base

@@ -36,11 +36,14 @@ jobs:
 
       - name: Determine branch from config
         id: determine-branch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           BRANCH=$(cat packages/komodo_defi_framework/app_build/build_config.json | jq -r '.api.branch')
           # If workflow dispatch provided a branch, use that instead
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.branch }}" ]]; then
-            BRANCH="${{ github.event.inputs.branch }}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$INPUT_BRANCH" ]]; then
+            BRANCH="$INPUT_BRANCH"
           fi
           echo "Using branch: $BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
@@ -63,12 +66,29 @@ jobs:
         run: |
           BRANCH="${{ steps.determine-branch.outputs.branch }}"
           CURRENT_COMMIT="${{ steps.current-details.outputs.commit }}"
+          SOURCE_URLS='${{ steps.get-source-urls.outputs.source_urls }}'
 
-          # Get latest commit for the branch
-          TOKEN=${{ secrets.GITHUB_TOKEN }}
-          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
-            "https://api.github.com/repos/GLEECBTC/komodo-defi-framework/commits/$BRANCH")
-          NEW_COMMIT=$(echo $RESPONSE | jq -r '.sha')
+          # KDF lives in the private GLEECBTC/kdf-internal repo, so a branch tip
+          # cannot be resolved through the GitHub API without a PAT. The dev-build
+          # mirrors publish a per-branch manifest carrying the commit each artefact
+          # was built from, which is the thing we actually roll to.
+          SAFE_BRANCH="${BRANCH//\//-}"
+          NEW_COMMIT=""
+          for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
+            MANIFEST="${SOURCE_URL%/}/$SAFE_BRANCH/manifest.json"
+            echo "Checking manifest: $MANIFEST"
+            CANDIDATE=$(curl -sf --max-time 30 "$MANIFEST" | jq -r '.commit // empty')
+            if [[ -n "$CANDIDATE" ]]; then
+              NEW_COMMIT="$CANDIDATE"
+              echo "Resolved $NEW_COMMIT from $SOURCE_URL"
+              break
+            fi
+          done
+
+          if [[ -z "$NEW_COMMIT" ]]; then
+            echo "::error::No mirror published a manifest for branch $BRANCH ($SAFE_BRANCH)."
+            exit 1
+          fi
 
           echo "Current commit: $CURRENT_COMMIT"
           echo "Latest commit: $NEW_COMMIT"
