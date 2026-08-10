@@ -15,6 +15,11 @@ class TransactionHistoryStrategyFactory {
            strategies ??
            [
              EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
+             // Ordered after the proxy strategy so chains the proxy already
+             // serves keep using it, and before the legacy strategy so the
+             // chains it does not serve stop falling through to a KDF history
+             // store that activation leaves disabled for every EVM asset.
+             BlockscoutTransactionStrategy(pubkeyManager: pubkeyManager),
              TronGridTransactionStrategy(
                pubkeyManager: pubkeyManager,
                includeGaslessCustody: includeGaslessCustody,

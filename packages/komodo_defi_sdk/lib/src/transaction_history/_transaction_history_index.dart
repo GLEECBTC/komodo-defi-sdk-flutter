@@ -4,6 +4,7 @@
 library _transaction_history;
 
 export 'hive_transaction_storage.dart';
+export 'strategies/blockscout_transaction_history_strategy.dart';
 export 'strategies/etherscan_transaction_history_strategy.dart';
 export 'strategies/fixed_scale_decimal_string.dart';
 export 'strategies/tron_grid_address_codec.dart';
