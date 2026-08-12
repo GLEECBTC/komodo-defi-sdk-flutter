@@ -48,6 +48,13 @@ class KomodoDefiRpcMethods {
 
   // Trading and DeFi namespaces
   TradingMethodsNamespace get trading => TradingMethodsNamespace(_client);
+
+  /// Routed (aggregator-executed) swaps. Separate from [trading], which is the
+  /// atomic-swap orderbook — the two are different liquidity sources with
+  /// different lifecycles, and KDF keeps their history separate too.
+  RoutedSwapMethodsNamespace get routedSwap =>
+      RoutedSwapMethodsNamespace(_client);
+
   OrderbookMethodsNamespace get orderbook => OrderbookMethodsNamespace(_client);
   LightningMethodsNamespace get lightning => LightningMethodsNamespace(_client);
 

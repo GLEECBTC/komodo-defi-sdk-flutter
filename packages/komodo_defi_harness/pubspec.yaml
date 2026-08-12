@@ -33,4 +33,8 @@ dependencies:
   path_provider_platform_interface: any
 
 dev_dependencies:
+  # Test-only: the routed-swap round-trip parses the scripted fake's responses
+  # with the real SDK request/response models, so the two halves of the
+  # contract cannot drift apart unnoticed.
+  komodo_defi_rpc_methods: any
   very_good_analysis: any
