@@ -22,36 +22,51 @@ typedef RoutedSwapTaskNudges = Stream<void> Function(int taskId);
 /// cancellation, or a terminal read, and is the wrong thing for callers to
 /// hold. [uuid] is the durable handle and is resolved before this object is
 /// handed out.
-class RoutedSwapHandle {
-  RoutedSwapHandle._({
-    required this.uuid,
-    required Stream<RoutedSwapProgress> progress,
-    required Future<void> Function() cancel,
-  }) : _progress = progress,
-       _cancel = cancel;
-
+abstract interface class RoutedSwapHandle {
   /// The durable swap id.
-  final String uuid;
-
-  final Stream<RoutedSwapProgress> _progress;
-  final Future<void> Function() _cancel;
+  String get uuid;
 
   /// Progress updates until the swap reaches a terminal state.
   ///
   /// Broadcast: several listeners may follow the same swap, and a screen that
   /// subscribes late still receives every update from that point on. Missed
   /// and duplicate observations are already reconciled internally.
-  Stream<RoutedSwapProgress> get progress => _progress;
+  Stream<RoutedSwapProgress> get progress;
 
   /// Resolves with the terminal snapshot.
-  Future<RoutedSwapProgress> get result async =>
-      _progress.firstWhere((p) => p.isTerminal);
+  Future<RoutedSwapProgress> get result;
 
   /// Stops the swap, if it has not been broadcast.
   ///
   /// Throws [RoutedSwapNotCancellableException] once the transaction has been
   /// handed to the network. An approval already confirmed on-chain cannot be
   /// undone, so the user may still have spent gas.
+  Future<void> cancel();
+}
+
+/// The handle backed by a live session or a persisted record.
+class _RoutedSwapHandle implements RoutedSwapHandle {
+  _RoutedSwapHandle({
+    required this.uuid,
+    required Stream<RoutedSwapProgress> progress,
+    required Future<void> Function() cancel,
+  }) : _progress = progress,
+       _cancel = cancel;
+
+  @override
+  final String uuid;
+
+  final Stream<RoutedSwapProgress> _progress;
+  final Future<void> Function() _cancel;
+
+  @override
+  Stream<RoutedSwapProgress> get progress => _progress;
+
+  @override
+  Future<RoutedSwapProgress> get result async =>
+      _progress.firstWhere((p) => p.isTerminal);
+
+  @override
   Future<void> cancel() => _cancel();
 }
 
@@ -179,7 +194,7 @@ class RoutedSwapManager {
     );
     _sessions[session.uuid] = session;
 
-    return RoutedSwapHandle._(
+    return _RoutedSwapHandle(
       uuid: session.uuid,
       progress: session.stream,
       cancel: session.cancel,
@@ -196,7 +211,7 @@ class RoutedSwapManager {
   Future<RoutedSwapHandle> watch(String uuid) async {
     final live = _sessions[uuid];
     if (live != null && !live.isClosed) {
-      return RoutedSwapHandle._(
+      return _RoutedSwapHandle(
         uuid: uuid,
         progress: live.stream,
         cancel: live.cancel,
@@ -212,7 +227,7 @@ class RoutedSwapManager {
         ? _historyPollingStream(uuid)
         : Stream<RoutedSwapProgress>.value(_progressFromRecord(record));
 
-    return RoutedSwapHandle._(
+    return _RoutedSwapHandle(
       uuid: uuid,
       progress: replay,
       cancel: () async => throw RoutedSwapNotCancellableException(
