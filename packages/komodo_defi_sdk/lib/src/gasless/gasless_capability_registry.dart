@@ -276,7 +276,32 @@ class GaslessCapabilityRegistry {
   }
 
   /// Maps typed KDF account-status failures without parsing error messages.
-  bool markAccountStatusError(AssetId assetId, Object error) {
+  ///
+  /// [allowTransientDowngrade] must be false for callers that probe account
+  /// status opportunistically rather than to answer "may this rail be used?" -
+  /// today that is the transaction-history poller. A verdict about the
+  /// *provider or token* (security mismatch, unsupported, not configured) is
+  /// still recorded, because those are properties of the rail and must fail
+  /// closed no matter who observed them. A verdict about *this probe's own
+  /// round trip* (`TronRpcUnavailable`, `ProviderError`, `InternalError`) is
+  /// not: it says the caller's request failed, not that a capability another
+  /// subsystem verified seconds ago has stopped being ready.
+  ///
+  /// Downgrading on those made a passive 30-second poll flip the shared
+  /// capability to `temporarilyUnavailable` behind the coin page's back. The
+  /// page reads [canReceiveGasless] synchronously while building, so the next
+  /// unrelated rebuild swapped its "Gas-free" rail for the paused banner until
+  /// the page's own refresh reversed it - a banner that oscillated with no
+  /// state change to explain it. See `GaslessTransferException`'s `retryable`
+  /// flag for the same distinction on the send path.
+  ///
+  /// Returns whether [error] was a typed status failure this registry
+  /// understands, regardless of whether it changed the recorded state.
+  bool markAccountStatusError(
+    AssetId assetId,
+    Object error, {
+    bool allowTransientDowngrade = true,
+  }) {
     if (error is FormatException || error is ArgumentError) {
       markSecurityMismatch(assetId);
       return true;
@@ -300,7 +325,7 @@ class GaslessCapabilityRegistry {
       case GaslessAccountStatusErrorType.tronRpcUnavailable:
       case GaslessAccountStatusErrorType.providerError:
       case GaslessAccountStatusErrorType.internalError:
-        markTemporarilyUnavailable(assetId);
+        if (allowTransientDowngrade) markTemporarilyUnavailable(assetId);
         return true;
     }
   }

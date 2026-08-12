@@ -398,6 +398,134 @@ void main() {
     }
   });
 
+  group('passive observers cannot downgrade a verified capability', () {
+    // The transaction-history poller probes account status every 30 seconds to
+    // notice a custody balance delta. Letting its own failed round trip demote
+    // the shared capability made the coin page's gas-free rail flip to the
+    // paused banner - and the migrate page's gate to "checking" - until the
+    // page's own refresh reversed it, with no state change to explain it.
+    for (final transient in <GaslessAccountStatusErrorType>[
+      GaslessAccountStatusErrorType.tronRpcUnavailable,
+      GaslessAccountStatusErrorType.providerError,
+      GaslessAccountStatusErrorType.internalError,
+    ]) {
+      test('${transient.wireValue} leaves a ready capability ready', () {
+        final asset = token();
+        final capabilities = registry();
+        capabilities.recordAccountStatus(
+          asset,
+          identity(asset),
+          _status(GaslessAccountAvailability.available),
+        );
+        expect(capabilities.canReceiveGasless(asset.id), isTrue);
+
+        expect(
+          capabilities.markAccountStatusError(
+            asset.id,
+            GaslessAccountStatusException(type: transient, message: 'redacted'),
+            allowTransientDowngrade: false,
+          ),
+          isTrue,
+          reason: 'the error is still recognised as a typed status failure',
+        );
+
+        expect(capabilities.canReceiveGasless(asset.id), isTrue);
+        expect(
+          capabilities.capabilityFor(asset).state,
+          GaslessCapabilityState.ready,
+        );
+      });
+    }
+
+    for (final verdict
+        in <(GaslessAccountStatusErrorType, GaslessCapabilityState)>[
+          (
+            GaslessAccountStatusErrorType.providerIdentityMismatch,
+            GaslessCapabilityState.securityMismatch,
+          ),
+          (
+            GaslessAccountStatusErrorType.gasfreeAddressMismatch,
+            GaslessCapabilityState.securityMismatch,
+          ),
+          (
+            GaslessAccountStatusErrorType.tokenDecimalMismatch,
+            GaslessCapabilityState.securityMismatch,
+          ),
+          (
+            GaslessAccountStatusErrorType.coinNotSupported,
+            GaslessCapabilityState.unsupported,
+          ),
+          (
+            GaslessAccountStatusErrorType.gaslessNotConfigured,
+            GaslessCapabilityState.disabled,
+          ),
+        ]) {
+      test('${verdict.$1.wireValue} still fails closed', () {
+        final asset = token();
+        final capabilities = registry();
+        capabilities.recordAccountStatus(
+          asset,
+          identity(asset),
+          _status(GaslessAccountAvailability.available),
+        );
+
+        capabilities.markAccountStatusError(
+          asset.id,
+          GaslessAccountStatusException(type: verdict.$1, message: 'redacted'),
+          allowTransientDowngrade: false,
+        );
+
+        expect(capabilities.canReceiveGasless(asset.id), isFalse);
+        expect(capabilities.capabilityFor(asset).state, verdict.$2);
+      });
+    }
+
+    test('a malformed response still fails closed', () {
+      final asset = token();
+      final capabilities = registry();
+      capabilities.recordAccountStatus(
+        asset,
+        identity(asset),
+        _status(GaslessAccountAvailability.available),
+      );
+
+      capabilities.markAccountStatusError(
+        asset.id,
+        const FormatException('unparseable'),
+        allowTransientDowngrade: false,
+      );
+
+      expect(capabilities.canReceiveGasless(asset.id), isFalse);
+      expect(
+        capabilities.capabilityFor(asset).state,
+        GaslessCapabilityState.securityMismatch,
+      );
+    });
+
+    test('owning callers keep the transient downgrade by default', () {
+      final asset = token();
+      final capabilities = registry();
+      capabilities.recordAccountStatus(
+        asset,
+        identity(asset),
+        _status(GaslessAccountAvailability.available),
+      );
+
+      capabilities.markAccountStatusError(
+        asset.id,
+        const GaslessAccountStatusException(
+          type: GaslessAccountStatusErrorType.providerError,
+          message: 'redacted',
+        ),
+      );
+
+      expect(
+        capabilities.capabilityFor(asset).state,
+        GaslessCapabilityState.temporarilyUnavailable,
+      );
+    });
+  });
+
   test('ignores exact-looking error types from generic RPC envelopes', () {
     final asset = token();
     final capabilities = registry();

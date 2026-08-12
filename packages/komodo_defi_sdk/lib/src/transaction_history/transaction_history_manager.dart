@@ -1000,7 +1000,18 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           capabilities.sessionGeneration != capabilitySession) {
         return false;
       }
-      capabilities.markAccountStatusError(asset.id, error);
+      // History syncing is a passive observer of the GasFree rail: it asks for
+      // account status to notice a custody balance delta, not to decide
+      // whether the rail may be used. A failed round trip here therefore must
+      // not demote a capability the coin page (or activation) verified moments
+      // ago - the UI reads that capability while building, so a demotion from
+      // this poll surfaced as a "GasFree paused" banner that reverted on the
+      // page's own refresh. Security and configuration verdicts still land.
+      capabilities.markAccountStatusError(
+        asset.id,
+        error,
+        allowTransientDowngrade: false,
+      );
       return false;
     }
   }
