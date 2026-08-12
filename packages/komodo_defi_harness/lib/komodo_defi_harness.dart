@@ -12,4 +12,5 @@ export 'src/kdf_process_requirements.dart';
 export 'src/kdf_script.dart';
 export 'src/process_kdf_operations.dart';
 export 'src/replay_kdf_operations.dart';
+export 'src/routed_swap_fixture.dart';
 export 'src/secret.dart';
