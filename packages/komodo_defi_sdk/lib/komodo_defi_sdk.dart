@@ -42,6 +42,9 @@ export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
+export 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_manager.dart'
+    show RoutedSwapHandle, RoutedSwapManager;
+export 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_types.dart';
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
 export 'package:komodo_defi_types/komodo_defi_types.dart'
