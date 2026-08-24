@@ -4,6 +4,7 @@ import 'package:komodo_defi_local_auth/src/auth/auth_state.dart';
 import 'package:komodo_defi_local_auth/src/trezor/trezor_connection_status.dart';
 import 'package:komodo_defi_local_auth/src/trezor/trezor_exception.dart';
 import 'package:komodo_defi_local_auth/src/trezor/trezor_initialization_state.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Manages Trezor hardware wallet initialization and operations
@@ -106,7 +107,7 @@ class TrezorRepository {
         } catch (e) {
           if (!controller!.isClosed) {
             controller.addError(
-              TrezorException('Status check failed', e.toString()),
+              TrezorException('Status check failed', _errorDetail(e)),
             );
             await controller.close();
           }
@@ -187,7 +188,7 @@ class TrezorRepository {
 
       return response.result == 'success';
     } catch (e) {
-      throw TrezorException('Failed to cancel initialization', e.toString());
+      throw TrezorException('Failed to cancel initialization', _errorDetail(e));
     }
   }
 
@@ -263,4 +264,23 @@ class TrezorRepository {
 
     _activeInitializations.clear();
   }
+}
+
+/// A human-readable detail line for [TrezorException], preferring typed fields.
+///
+/// `GeneralErrorResponse.toString()` is deliberately reduced to its
+/// `error_type` so that `error_data` - which can carry request payloads - never
+/// reaches a log line. That makes it useless as a user-facing detail: a device
+/// that reports "Device not ready" would surface as
+/// `GeneralErrorResponse(errorType: ...)`.
+///
+/// So read the message off the typed field instead, exactly as
+/// `error_response.dart` intends ("preserves stable error_type and error_data
+/// fields instead of forcing callers to parse toString()"). `error_data` is
+/// still never included.
+String _errorDetail(Object error) {
+  if (error is! GeneralErrorResponse) return error.toString();
+  final message = error.error;
+  if (message != null && message.isNotEmpty) return message;
+  return error.errorType ?? error.toString();
 }

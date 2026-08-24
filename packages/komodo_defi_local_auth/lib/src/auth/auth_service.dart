@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
@@ -472,7 +473,16 @@ class KdfAuthService implements IAuthService {
       final held = Stopwatch()..start();
       try {
         return _stampSessionFlags(await _resolveActiveUserWithinWriteLock());
-      } catch (_) {
+      } catch (error) {
+        // Clearing authentication here is the right response to an identity we
+        // cannot trust - KDF answering with a different wallet, or a malformed
+        // identity. It is the wrong response to not having been able to ask.
+        //
+        // This is a read-shaped accessor: `isSignedIn()` and six managers call
+        // it, some on a poll. Treating a dropped socket or a timeout as proof
+        // of a bad identity turns one transient blip on the loopback RPC into
+        // `kdfStop()` plus a forced sign-out, losing the whole session.
+        if (_isKdfUnreachable(error)) rethrow;
         await _clearFailedAuthenticatedKdfWithinWriteLock();
         rethrow;
       } finally {

@@ -414,17 +414,49 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
+  /// Whether [error] means KDF could not be *reached*, in either the raw or the
+  /// already-wrapped form.
+  ///
+  /// Deliberately narrower than [_shouldRecoverStartupSensitiveRpc], and
+  /// deliberately not delegating to it: that one also retries a non-permanent
+  /// `GeneralErrorResponse`, which means KDF answered. This decides whether to
+  /// tear down the runtime and sign the user out, so it must mean transport
+  /// only.
+  ///
+  /// The wrapped form is the one that fires in practice.
+  /// [_runStartupSensitiveRpc] retries the raw types and then gives up by
+  /// throwing `AuthException(apiConnectionError)`, so a caller matching only
+  /// the raw types would silently never fire.
+  /// [_ensureAuthenticatedWalletIdentity] keys off the same pair.
+  bool _isKdfUnreachable(Object error) {
+    if (error is AuthException) {
+      return error.type == AuthExceptionType.apiConnectionError;
+    }
+    return error is TimeoutException ||
+        error is ClientException ||
+        error is SocketException ||
+        error is HttpException ||
+        error is HandshakeException;
+  }
+
   /// Whether a startup-sensitive RPC failure is worth one retry.
   ///
-  /// The first four are transport faults. The fifth covers KDF answering *with*
-  /// an error while it is still coming up or is saturated - on web a
-  /// single-threaded WASM instance sharing the Flutter isolate with a login's
-  /// activation fan-out. Without it, one such response on the very first
-  /// attempt makes [_ensureAuthenticatedWalletIdentity] fall straight through
-  /// to a name-only identity with no retry, and that downgrade is emitted on
-  /// the auth stream to every wallet-scoped consumer.
+  /// The transport faults below, plus KDF answering *with* an error while it is
+  /// still coming up or is saturated - on web a single-threaded WASM instance
+  /// sharing the Flutter isolate with a login's activation fan-out. Without
+  /// that last clause, one such response on the very first attempt makes
+  /// [_ensureAuthenticatedWalletIdentity] fall straight through to a name-only
+  /// identity with no retry, and that downgrade is emitted on the auth stream
+  /// to every wallet-scoped consumer.
+  ///
+  /// `ClientException` is the transport type that actually fires: the RPC path
+  /// runs through `package:http` (`kdf_operations_native.dart`) and
+  /// `http_extensions.dart` raises it directly, so a loopback failure arrives
+  /// as that rather than as the `dart:io` types. Those are kept for the paths
+  /// that bypass `package:http`.
   bool _shouldRecoverStartupSensitiveRpc(Object error) {
     return error is TimeoutException ||
+        error is ClientException ||
         error is SocketException ||
         error is HttpException ||
         error is HandshakeException ||
