@@ -82,9 +82,26 @@ class SharedActivationCoordinator {
   /// to stay above [evmActivationTimeout].
   ///
   /// This is a backstop against a *wedged* activation, not a UX deadline, so it
-  /// has to sit above the slowest activation that legitimately completes. On a
-  /// fresh HD wallet, measured against the KDF this SDK pins:
-  /// BTC-segwit 8.2s, KMD 6.1s (`docs/KDF_LATENCY_REPORT.md`).
+  /// has to sit above the slowest activation that legitimately completes.
+  ///
+  /// The 8.2s BTC-segwit / 6.1s KMD figures this used to cite were measured
+  /// against the concurrent HD gap scan, which is **not** in the pinned KDF -
+  /// it is `407cf6c0a` / `ba4b3996e`, kdf-internal PR #18, still unmerged. The
+  /// pin (`main`, `f3efd2c`) walks the gap one address at a time, where the
+  /// same runs measured BTC-segwit 121.2s and KMD 46.9s
+  /// (`docs/KDF_LATENCY_REPORT.md`, `docs/KDF_PERF_STACK_DESCOPE.md`).
+  ///
+  /// Three minutes still holds for **software** wallets, because those numbers
+  /// were taken at `gap_limit: 20` and `HdGapLimit.resolve` sends
+  /// `software` = 3 (`newlyGeneratedFirstSignIn` = 1) for them, so the walk is
+  /// ~4 probes rather than 21 at a measured ~2.1s per gap unit.
+  ///
+  /// **Trezor is the exception and has the least headroom.** `HdGapLimit.resolve`
+  /// returns `hardware` = 20 for `PrivateKeyPolicy.trezor()`, so a hardware
+  /// wallet still walks the full gap - 121.2s of this 180s bound on BTC-segwit,
+  /// ~1.5x, not 6x. It is a backstop rather than a budget, so that is survivable,
+  /// but it is the number to re-measure before anyone shrinks this bound, and it
+  /// is why the bound must not shrink at all while the pin lacks PR #18.
   static const Duration defaultActivationTimeout = Duration(minutes: 3);
 
   /// The EVM family is far slower than everything else: `enable_eth_with_tokens`
