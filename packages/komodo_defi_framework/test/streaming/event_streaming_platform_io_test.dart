@@ -33,7 +33,14 @@ void main() {
           eventStreamGets++;
           liveEventStream = request.response
             ..statusCode = HttpStatus.ok
-            ..headers.contentType = ContentType('text', 'event-stream');
+            ..headers.contentType = ContentType('text', 'event-stream')
+            // dart:io holds the response headers back until something is
+            // written, so a bodyless flush() never puts them on the wire and
+            // the client waits on a handshake that never arrives. A real SSE
+            // server opens the stream immediately; emit the conventional
+            // no-op comment to do the same. The client ignores comments, so
+            // `messages` stays empty.
+            ..write(':ok\n\n');
           await request.response.flush();
         }
       });
