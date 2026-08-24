@@ -399,8 +399,32 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
+  /// Whether [error] means KDF could not be reached, in either the raw or the
+  /// already-wrapped form.
+  ///
+  /// [_runStartupSensitiveRpc] retries the transport types below and then
+  /// gives up by throwing `AuthException(apiConnectionError)`, so by the time a
+  /// transport failure reaches a caller it is usually the wrapped form. Callers
+  /// that only match the raw types silently never fire.
+  /// [_ensureAuthenticatedWalletIdentity] already keys off the same pair.
+  bool _isKdfUnreachable(Object error) {
+    if (error is AuthException) {
+      return error.type == AuthExceptionType.apiConnectionError;
+    }
+    return _shouldRecoverStartupSensitiveRpc(error);
+  }
+
+  /// Whether [error] means "could not reach KDF", as opposed to "KDF answered
+  /// and the answer was bad".
+  ///
+  /// `ClientException` is the one that actually fires in practice. The RPC path
+  /// runs through `package:http` (`kdf_operations_native.dart`), and
+  /// `http_extensions.dart` raises `http.ClientException` directly, so a
+  /// loopback failure arrives as that rather than as the `dart:io` types below.
+  /// Those are kept for the paths that bypass `package:http`.
   bool _shouldRecoverStartupSensitiveRpc(Object error) {
     return error is TimeoutException ||
+        error is ClientException ||
         error is SocketException ||
         error is HttpException ||
         error is HandshakeException;

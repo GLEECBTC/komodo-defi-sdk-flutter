@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
@@ -303,6 +304,41 @@ void main() {
       );
       expect(await service.getActiveUser(), isNull);
     });
+
+    test(
+      'a transport failure does not stop KDF or sign the user out',
+      () async {
+        // getActiveUser() is read-shaped - isSignedIn() and several managers
+        // call it, some on a poll. It used to clear authentication on ANY
+        // throw, so one dropped loopback socket meant kdfStop() plus a forced
+        // sign-out. Failing to *ask* is not evidence of a bad identity.
+        final user = _testUser();
+        FlutterSecureStorage.setMockInitialValues(<String, String>{
+          'user_${user.walletId.name}': jsonEncode(user.toJson()),
+        });
+        _FakeKdfOperations? captured;
+        final service = _createService(
+          walletNamesResponseHandler: () =>
+              Future<Map<String, dynamic>>.error(
+                ClientException('Connection closed before full header'),
+              ),
+          onOperationsCreated: (operations) => captured = operations,
+        );
+        addTearDown(service.dispose);
+
+        await expectLater(service.getActiveUser(), throwsA(isA<Exception>()));
+
+        expect(
+          captured?.stopCount,
+          0,
+          reason: 'a transport failure must not tear down the KDF runtime',
+        );
+        final stillStored = await const FlutterSecureStorage().read(
+          key: 'user_${user.walletId.name}',
+        );
+        expect(stillStored, isNotNull);
+      },
+    );
 
     test(
       'keeps Standard access when the identity RPC is unavailable',
@@ -835,6 +871,7 @@ KdfAuthService _createService({
   String publicKeyHash = _publicKeyHash,
   Map<String, dynamic>? publicKeyHashResponse,
   Future<Map<String, dynamic>> Function()? publicKeyHashResponseHandler,
+  Future<Map<String, dynamic>> Function()? walletNamesResponseHandler,
   void Function(_FakeKdfOperations operations)? onOperationsCreated,
   SecureLocalStorage? secureStorage,
 }) {
@@ -875,6 +912,8 @@ KdfAuthService _createService({
       },
     },
     responseHandlersByMethod: {
+      if (walletNamesResponseHandler != null)
+        'get_wallet_names': walletNamesResponseHandler,
       if (publicKeyHashResponseHandler != null)
         'get_public_key_hash': publicKeyHashResponseHandler,
     },
