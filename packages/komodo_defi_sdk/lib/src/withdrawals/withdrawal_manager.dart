@@ -303,7 +303,16 @@ class WithdrawalManager {
     if (wallet == null) {
       throw StateError('GasFree requires an authenticated wallet');
     }
-    _gaslessCapabilities.ensureWalletSession(wallet.pubkeyHash);
+    // Only bind on a real hash. A name-only WalletId means the identity RPC was
+    // momentarily unavailable, not that a different wallet is present - and
+    // this runs on the withdraw path, so passing the null through resets the
+    // capability session mid-money-flow and arms the securityMismatch latch.
+    // `_requireVerifiedGaslessJournalIdentity` is what enforces the real
+    // identity requirement before anything touches the journal.
+    final pubkeyHash = wallet.pubkeyHash?.trim();
+    if (pubkeyHash != null && pubkeyHash.isNotEmpty) {
+      _gaslessCapabilities.ensureWalletSession(pubkeyHash);
+    }
     final current = _currentWalletId;
     if (current == null) {
       _currentWalletId = wallet;
@@ -2043,6 +2052,54 @@ class WithdrawalManager {
       if (traceId != null) _pendingGaslessWallets[traceId] = walletId;
     }
     return transfers;
+  }
+
+  /// Clears a GasFree journal reservation the SDK cannot resolve on its own.
+  ///
+  /// A reservation is written *before* the relay round-trip, so a process death
+  /// in that window leaves a record with `traceId == null`. Such a record is
+  /// deliberately non-terminal and non-resubmittable: without a KDF trace the
+  /// SDK cannot prove the transfer was never relayed, and
+  /// `PendingGaslessTransferRepository.reserve` refuses every later send for
+  /// the same asset + custody address to prevent a blind resubmit. Correct -
+  /// but with no way out it leaves gas-free permanently dead for that address.
+  ///
+  /// This is that way out, and it is deliberately explicit rather than a
+  /// timer or a sweep: only the user can tell, from their balance and history,
+  /// whether the original transfer actually landed. Surface the record from
+  /// [listPendingGaslessTransfers], show them what it was, and call this only
+  /// on their acknowledgement.
+  ///
+  /// Refuses a record that still carries a `traceId` - that one is
+  /// reconcilable, so [reconcilePendingGaslessTransfers] must resolve it
+  /// instead. Returns whether a record was removed.
+  Future<bool> discardPendingGaslessTransfer(String journalId) async {
+    final repository = _pendingGaslessTransfers;
+    if (repository == null || _walletIdResolver == null) return false;
+
+    final walletContext = await _captureWalletContext();
+    final walletId = walletContext.walletId;
+    _requireVerifiedGaslessJournalIdentity(walletId);
+
+    final pending = await repository.find(walletId, journalId);
+    if (pending == null) return false;
+    if (pending.traceId != null) {
+      throw GaslessTransferException(
+        kind: GaslessTransferErrorKind.capabilityNotReady,
+        code: GaslessTransferErrorCode.capabilityNotReady,
+        stage: GaslessTransferStage.recovery,
+        message:
+            'Transfer $journalId carries a relay trace and must be reconciled, '
+            'not discarded.',
+        retryable: false,
+        terminal: false,
+        localizationKey: 'sdk_errors.gasless_capability_not_ready',
+      );
+    }
+
+    await _requireWalletContextCurrent(walletContext);
+    await _removePendingGaslessTransfer(journalId);
+    return true;
   }
 
   /// Wallet-scoped journal updates for app-wide pending activity surfaces.

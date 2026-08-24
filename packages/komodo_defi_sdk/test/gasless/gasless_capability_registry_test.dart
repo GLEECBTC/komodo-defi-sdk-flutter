@@ -188,6 +188,47 @@ void main() {
     );
   });
 
+  test('an unbound identity is recoverable, not a security mismatch', () {
+    // A session reset while the asset stays active leaves `_identities` empty
+    // with the asset still configured. That is a caller-ordering condition, not
+    // evidence that anything disagrees - and `securityMismatch` is terminal
+    // (`canRefreshAccountStatus` refuses it), so latching it here used to
+    // permanently disable the gas-free rail for that asset.
+    final asset = token();
+    final capabilities = registry(provider: null);
+
+    expect(
+      capabilities.refreshAccountStatus(
+        asset,
+        _status(GaslessAccountAvailability.available),
+      ),
+      isFalse,
+      reason: 'no identity is bound, so the refresh cannot succeed',
+    );
+    expect(
+      capabilities.capabilityFor(asset).state,
+      GaslessCapabilityState.temporarilyUnavailable,
+    );
+    expect(
+      capabilities.canRefreshAccountStatus(asset),
+      isTrue,
+      reason: 'the asset must stay refreshable once an identity binds',
+    );
+
+    // And binding then recovers normally.
+    expect(
+      capabilities.bindActivatedIdentity(asset, identity(asset, provider: '')),
+      isTrue,
+    );
+    expect(
+      capabilities.refreshAccountStatus(
+        asset,
+        _status(GaslessAccountAvailability.available),
+      ),
+      isTrue,
+    );
+  });
+
   test('generic SDK accepts a non-primary KDF HD source identity', () {
     final asset = token();
     final capabilities = registry();
