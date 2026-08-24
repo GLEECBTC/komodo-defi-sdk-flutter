@@ -171,6 +171,17 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         user.walletId,
       );
       _currentWalletId = operationWalletId;
+    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+      // Same wallet, identity RPC temporarily unavailable. Keep operating - and
+      // keep keying storage - under the enriched identity already held.
+      //
+      // Without this branch a transient `get_public_key_hash` failure looks
+      // like a wallet switch: the generation bumps, streaming stops, and the
+      // history that follows is written under a name-only storage prefix. The
+      // rows under the enriched prefix are then orphaned and swept, so this is
+      // silent loss of persisted history rather than a re-walk.
+      // [BalanceManager] and [PubkeyManager] both already have this branch.
+      operationWalletId = currentWalletId;
     } else {
       // Do not wait for the auth stream to deliver before isolating the old
       // wallet's subscriptions and in-flight operations.

@@ -158,7 +158,7 @@ class GaslessCapabilityRegistry {
     final pin = _pinnedProviderAddress;
     if (!_validateIdentity(asset, identity) ||
         (pin != null && identity.providerAddress != pin)) {
-      markSecurityMismatch(asset.id);
+      markTemporarilyUnavailable(asset.id);
       return false;
     }
     final existing = _identities[asset.id];
@@ -247,7 +247,16 @@ class GaslessCapabilityRegistry {
   }) {
     final identity = _identities[asset.id];
     if (identity == null) {
-      markSecurityMismatch(asset.id);
+      // No identity bound yet. That is a caller-ordering condition - the
+      // session was reset while the asset stayed active - not evidence that
+      // anything disagrees. `securityMismatch` is terminal
+      // (`canRefreshAccountStatus` refuses it until the session is reset), so
+      // latching it here permanently disables the gas-free rail for an asset
+      // whose only problem is that it has not been bound yet.
+      //
+      // Reserve `securityMismatch` for an identity that IS bound and
+      // disagrees, which `recordAccountStatus` still enforces.
+      markTemporarilyUnavailable(asset.id);
       return false;
     }
     // Provider discovery is permitted once for the generic SDK. After the
