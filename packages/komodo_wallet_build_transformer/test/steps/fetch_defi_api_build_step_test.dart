@@ -769,6 +769,94 @@ void main() {
           ? 'Creating symbolic links requires additional Windows privileges'
           : false,
     );
+
+    test(
+      'drops the Windows proc-macro DLLs instead of installing them',
+      () async {
+        // `kdf_f3efd2c-win-x86-64.zip` (KDF main) carries three proc-macro DLLs
+        // alongside the runtime; `kdf_538724e-win-x86-64.zip` carried only
+        // kdf.exe and kdflib.dll. They are compile-time only, so they must
+        // neither be installed nor fail the extraction.
+        File('${staging.path}/kdf.exe').writeAsStringSync('new-executable');
+        File('${staging.path}/kdflib.dll').writeAsStringSync('new-library');
+        for (final residue in const [
+          'enum_derives.dll',
+          'ser_error_derive.dll',
+          'serialization_derive.dll',
+        ]) {
+          File('${staging.path}/$residue').writeAsStringSync('proc-macro');
+        }
+
+        await replaceExtractedApiArtifactAtomically(
+          platform: 'windows',
+          stagingFolder: staging.path,
+          destinationFolder: destination.path,
+          trustedRootFolder: tempDirectory.path,
+          finalizeInstall: () async {},
+        );
+
+        expect(
+          File('${destination.path}/kdf.exe').readAsStringSync(),
+          'new-executable',
+        );
+        expect(
+          File('${destination.path}/kdflib.dll').readAsStringSync(),
+          'new-library',
+        );
+        for (final residue in const [
+          'enum_derives.dll',
+          'ser_error_derive.dll',
+          'serialization_derive.dll',
+        ]) {
+          expect(
+            File('${destination.path}/$residue').existsSync(),
+            isFalse,
+            reason: '$residue is build residue and must not ship',
+          );
+        }
+      },
+    );
+
+    test(
+      'still fails closed on an unrecognised top-level Windows file',
+      () async {
+        // The discard list is a named exemption, not a relaxation: anything not
+        // on it must still stop the extraction.
+        File('${staging.path}/kdf.exe').writeAsStringSync('new-executable');
+        File('${staging.path}/payload.dll').writeAsStringSync('unexpected');
+
+        await expectLater(
+          replaceExtractedApiArtifactAtomically(
+            platform: 'windows',
+            stagingFolder: staging.path,
+            destinationFolder: destination.path,
+            trustedRootFolder: tempDirectory.path,
+            finalizeInstall: () async {},
+          ),
+          throwsA(isStateError),
+        );
+      },
+    );
+
+    test('does not discard a proc-macro DLL buried in a directory', () async {
+      // Matching on basename alone would let an archive smuggle a nested file
+      // past the owned-set check by naming it after known residue.
+      File('${staging.path}/kdf.exe').writeAsStringSync('new-executable');
+      final nested = File('${staging.path}/nested/enum_derives.dll');
+      nested.parent.createSync(recursive: true);
+      nested.writeAsStringSync('proc-macro');
+
+      await expectLater(
+        replaceExtractedApiArtifactAtomically(
+          platform: 'windows',
+          stagingFolder: staging.path,
+          destinationFolder: destination.path,
+          trustedRootFolder: tempDirectory.path,
+          finalizeInstall: () async {},
+        ),
+        throwsA(isStateError),
+      );
+    });
   });
 }
 
