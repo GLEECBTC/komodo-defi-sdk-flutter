@@ -87,6 +87,16 @@ macos/kdf
 **/.api_last_updated*
 .venv/
 
+# CMake build output. Configuring with the build directory inside the source
+# tree drops these next to the sources. A committed CMakeCache.txt is worse
+# than clutter: it pins absolute paths from the machine that generated it, and
+# CMake refuses to configure when they do not match.
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+
 # Android C++ files
 **/.cxx
 
