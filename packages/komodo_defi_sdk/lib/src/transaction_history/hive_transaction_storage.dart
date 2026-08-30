@@ -287,7 +287,8 @@ class HiveTransactionStorage
     for (final key in writes.keys) {
       // Re-keying (a pending row gaining a real timestamp) indexes the new
       // key first and deletes the old record after. A crash in between leaves
-      // a recoverable duplicate; the reverse order would lose the row.
+      // a duplicate that `rebuildFromKeys` collapses on the next open; the
+      // reverse order would lose the row.
       final displaced = _index.insert(key);
       if (displaced != null && displaced != key) staleKeys.add(displaced);
     }
@@ -635,14 +636,16 @@ class HiveTransactionStorage
     try {
       final box = await _openBoxWithRecovery();
       _box = box;
-      final unparseable = _index.rebuildFromKeys(box.keys.whereType<String>());
-      if (unparseable.isNotEmpty) {
+      // Unparseable keys, plus the stale halves of any re-key that crashed
+      // between writing the replacement and deleting the displaced record.
+      final dropped = _index.rebuildFromKeys(box.keys.whereType<String>());
+      if (dropped.isNotEmpty) {
         _onError(
-          'dropping ${unparseable.length} unparseable keys',
-          StateError('unparseable keys in $boxName'),
+          'dropping ${dropped.length} unparseable or superseded keys',
+          StateError('unindexable keys in $boxName'),
           StackTrace.current,
         );
-        await box.deleteAll(unparseable);
+        await box.deleteAll(dropped);
       }
       await _deleteSupersededBoxes();
       await _collectGarbage(box);

@@ -221,6 +221,43 @@ void main() {
     Future<LazyBox<String>> boxOf() async =>
         Hive.lazyBox<String>(HiveTransactionStorage.defaultBoxName);
 
+    test('an interrupted re-key collapses to one row on reopen', () async {
+      final storage = await openStorage();
+      final confirmed = testTransaction(
+        internalId: 'tx-0',
+        timestamp: DateTime.utc(2026, 7, 10),
+      );
+      await storage.storeTransactions([confirmed], wallet);
+
+      // Simulate the crash window in _writeBatch: the replacement row was
+      // written, but the displaced pending-timestamp record never deleted.
+      final staleKey = TransactionStorageKey.build(
+        prefix: TransactionStorageKey.prefix(wallet, asset),
+        timestamp: DateTime.utc(1970),
+        internalId: 'tx-0',
+      );
+      await (await boxOf()).put(
+        staleKey,
+        TransactionRecordCodec.encode(
+          confirmed.copyWith(timestamp: DateTime.utc(1970), confirmations: 0),
+        ),
+      );
+
+      final restored = await reopenStorage();
+      final page = await restored.getTransactions(asset, wallet);
+      expect(page.total, 1, reason: 'the duplicate must collapse');
+      expect(
+        page.transactions.single.timestamp,
+        DateTime.utc(2026, 7, 10),
+        reason: 'the newest row is the authoritative one',
+      );
+      expect(
+        (await boxOf()).containsKey(staleKey),
+        isFalse,
+        reason: 'the superseded record is evicted from disk',
+      );
+    });
+
     test('re-storing an identical row writes nothing new', () async {
       final storage = await openStorage();
       final transaction = testTransaction(internalId: 'tx-0');
