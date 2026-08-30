@@ -29,11 +29,6 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 var _activationConfigHiveInitialized = false;
 
-/// Handed from the [TransactionHistoryManager] factory to
-/// [_wireWalletDeletionPurge], which cannot reach the store through the
-/// container because the manager owns it privately. Cleared once consumed.
-HiveTransactionStorage? _transactionStorage;
-
 /// Clears every wallet-scoped cache when a wallet is deleted.
 ///
 /// `deleteWallet` removes the wallet from KDF and from secure storage, and
@@ -46,10 +41,13 @@ HiveTransactionStorage? _transactionStorage;
 /// Every purge is best-effort and independent: a cache that will not clear
 /// must not make a deleted wallet look undeleted, and must not stop the other
 /// caches from clearing.
-Future<void> _wireWalletDeletionPurge(
-  GetIt container,
-  HiveTransactionStorage? transactionStorage,
-) async {
+Future<void> _wireWalletDeletionPurge(GetIt container) async {
+  // Registered only when the SDK persists transaction history. Resolved from
+  // this container rather than a shared variable so concurrently
+  // bootstrapping SDK instances cannot hand each other their stores.
+  final transactionStorage = container.isRegistered<HiveTransactionStorage>()
+      ? container<HiveTransactionStorage>()
+      : null;
   final auth = await container.getAsync<KomodoDefiLocalAuth>();
   final assetHistory = container<AssetHistoryStorage>();
   final pubkeys = await container.getAsync<PubkeyManager>();
@@ -376,6 +374,23 @@ Future<void> bootstrap({
     return LegacyWithdrawalManager(client);
   }, dependsOn: [ApiClient]);
 
+  if (config.persistTransactionHistory) {
+    // Registered on the container - not handed around through shared state -
+    // so [_wireWalletDeletionPurge] resolves the same store this container's
+    // manager writes to, even when two SDK instances bootstrap concurrently.
+    container.registerSingletonAsync<HiveTransactionStorage>(() async {
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
+      return HiveTransactionStorage(
+        // Lets the store drop history belonging to wallets that no
+        // longer exist. Fails open: an error or an empty result means
+        // "do not know", never "delete everything".
+        knownWalletNamespaces: () async => (await auth.getUsers())
+            .map((user) => walletStorageNamespace(user.walletId))
+            .toSet(),
+      );
+    }, dependsOn: [KomodoDefiLocalAuth]);
+  }
+
   container.registerSingletonAsync<TransactionHistoryManager>(
     () async {
       final client = await container.getAsync<ApiClient>();
@@ -394,14 +409,7 @@ Future<void> bootstrap({
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
         storage: config.persistTransactionHistory
-            ? (_transactionStorage = HiveTransactionStorage(
-                // Lets the store drop history belonging to wallets that no
-                // longer exist. Fails open: an error or an empty result means
-                // "do not know", never "delete everything".
-                knownWalletNamespaces: () async => (await auth.getUsers())
-                    .map((user) => walletStorageNamespace(user.walletId))
-                    .toSet(),
-              ))
+            ? await container.getAsync<HiveTransactionStorage>()
             : InMemoryTransactionStorage(),
         assetHistoryStorage: container<AssetHistoryStorage>(),
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
@@ -414,6 +422,7 @@ Future<void> bootstrap({
       PubkeyManager,
       SharedActivationCoordinator,
       EventStreamingManager,
+      if (config.persistTransactionHistory) HiveTransactionStorage,
     ],
   );
 
@@ -483,8 +492,7 @@ Future<void> bootstrap({
   // Wait for all async singletons to initialize
   await container.allReady();
 
-  await _wireWalletDeletionPurge(container, _transactionStorage);
-  _transactionStorage = null;
+  await _wireWalletDeletionPurge(container);
 
   stopwatch.stop();
   log(

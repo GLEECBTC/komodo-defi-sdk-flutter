@@ -143,7 +143,7 @@ abstract final class TransactionStorageKey {
   }) {
     final key =
         '$prefix${encodeTimestamp(timestamp)}$separator'
-        '${_idToken(internalId)}';
+        '${idTokenFor(internalId)}';
     final byteLength = utf8.encode(key).length;
     if (byteLength > maxKeyBytes) {
       throw TransactionStorageException(
@@ -183,7 +183,13 @@ abstract final class TransactionStorageKey {
   /// Whether [key] belongs to the (wallet, asset) pair identified by [prefix].
   static bool hasPrefix(String key, String prefix) => key.startsWith(prefix);
 
-  static String _idToken(String internalId) =>
+  /// The token [build] embeds in the key for [internalId].
+  ///
+  /// An ID within [maxIdTokenBytes] is embedded verbatim; anything longer is
+  /// replaced by a `#`-prefixed SHA-256 digest. Everything that stores or
+  /// looks up by internal ID must normalise through this same function, or an
+  /// overlong ID's row can never be found again once written.
+  static String idTokenFor(String internalId) =>
       utf8.encode(internalId).length <= maxIdTokenBytes
       ? internalId
       : '$_hashedIdPrefix${sha256.convert(utf8.encode(internalId))}';

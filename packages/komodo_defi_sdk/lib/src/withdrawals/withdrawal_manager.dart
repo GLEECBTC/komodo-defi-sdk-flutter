@@ -2098,7 +2098,16 @@ class WithdrawalManager {
     }
 
     await _requireWalletContextCurrent(walletContext);
-    await _removePendingGaslessTransfer(journalId);
+    // Strict removal, not the best-effort `_removePendingGaslessTransfer`:
+    // that helper swallows storage failures, which is right for opportunistic
+    // cleanup of a resolved transfer but not here - a reservation that did
+    // not actually delete keeps blocking every later GasFree send, and this
+    // API telling the user their acknowledged discard succeeded would leave
+    // no reason to try again. Let the failure propagate instead.
+    await repository.remove(walletId, journalId);
+    // The guard above proves this record carries no traceId, so the journal
+    // id is its only correlation entry.
+    _pendingGaslessWallets.remove(journalId);
     return true;
   }
 

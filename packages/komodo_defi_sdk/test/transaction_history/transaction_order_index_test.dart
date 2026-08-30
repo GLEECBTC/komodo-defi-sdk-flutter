@@ -242,6 +242,28 @@ void main() {
       expect(index.keyForId('nope'), isNull);
     });
 
+    test('overlong ids are found by their original id', () {
+      // Over maxIdTokenBytes the key stores a digest of the id, not the id
+      // itself. Lookups and cursors must normalise the same way, or a row
+      // written under a hashed token can never be addressed again.
+      final longId = 'tx-${'a' * TransactionStorageKey.maxIdTokenBytes}';
+      final index = TransactionOrderIndex()
+        ..rebuildFromKeys([
+          keyFor(longId, timestamp: DateTime.utc(2026, 7, 10)),
+          keyFor('short', timestamp: DateTime.utc(2026, 7, 20)),
+        ]);
+
+      final hashedKey = index.keyForId(longId);
+      expect(hashedKey, isNotNull);
+      expect(TransactionStorageKey.parse(hashedKey!)!.idTokenIsHashed, isTrue);
+      expect(index.keyForPrefixedId(prefix, longId), hashedKey);
+
+      // A cursor naming the newer row pages onto the overlong row, and an
+      // overlong cursor resolves to its position instead of throwing.
+      expect(index.page(prefix, limit: 5, fromId: 'short'), [hashedKey]);
+      expect(index.page(prefix, limit: 5, fromId: longId), isEmpty);
+    });
+
     test('removing one of two same-id rows falls back to the other', () {
       // The same internal id can legitimately appear under two assets.
       final index = TransactionOrderIndex()

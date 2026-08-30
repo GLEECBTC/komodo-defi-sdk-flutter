@@ -173,7 +173,6 @@ class HiveTransactionStorage
   ) async {
     final prefix = _registerScope(walletId, assetId);
     final writes = <String, String>{};
-    final staleKeys = <String>[];
 
     // Resolve and read every row this batch will merge into up front, rather
     // than one await at a time inside the loop. The confirmations refresh
@@ -218,23 +217,46 @@ class HiveTransactionStorage
       if (key == existingKey && encoded == existingRecord) continue;
 
       writes[key] = encoded;
-      // Re-keying (a pending row gaining a real timestamp) writes the new key
-      // first and deletes the old one after. A crash in between leaves a
-      // recoverable duplicate; the reverse order would lose the row.
+    }
+
+    if (writes.isEmpty) return;
+
+    try {
+      await box.putAll(writes);
+    } on Object catch (error, stackTrace) {
+      // The rows are already with the caller; a cache write failing must not
+      // surface as a fetch failure. The index is deliberately untouched at
+      // this point: rows Hive refused must not become authoritative, or the
+      // store starts counting phantom records and reporting a latest
+      // transaction ID that was never written.
+      _onError(
+        'failed to persist ${writes.length} transactions',
+        error,
+        stackTrace,
+      );
+      return;
+    }
+
+    // Index the rows only now that Hive actually holds them.
+    final staleKeys = <String>[];
+    for (final key in writes.keys) {
+      // Re-keying (a pending row gaining a real timestamp) indexes the new
+      // key first and deletes the old record after. A crash in between leaves
+      // a recoverable duplicate; the reverse order would lose the row.
       final displaced = _index.insert(key);
       if (displaced != null && displaced != key) staleKeys.add(displaced);
     }
 
-    if (writes.isEmpty && staleKeys.isEmpty) return;
+    if (staleKeys.isEmpty) return;
 
     try {
-      if (writes.isNotEmpty) await box.putAll(writes);
-      if (staleKeys.isNotEmpty) await box.deleteAll(staleKeys);
+      await box.deleteAll(staleKeys);
     } on Object catch (error, stackTrace) {
-      // The rows are already with the caller; a cache write failing must not
-      // surface as a fetch failure.
+      // The replacement rows are stored and indexed; a displaced record that
+      // will not delete is unreachable through the index and merely wastes
+      // its bytes until the box is next compacted or collected.
       _onError(
-        'failed to persist ${writes.length} transactions',
+        'failed to delete ${staleKeys.length} displaced records',
         error,
         stackTrace,
       );

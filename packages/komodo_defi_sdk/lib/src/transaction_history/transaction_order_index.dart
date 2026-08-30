@@ -177,11 +177,16 @@ class TransactionOrderIndex {
   int count(String prefix) => _orderedByPrefix[prefix]?.length ?? 0;
 
   /// The key for [internalId] under [prefix], or `null`.
+  ///
+  /// [internalId] is normalised through [TransactionStorageKey.idTokenFor]:
+  /// the maps are keyed by the token parsed out of the Hive key, which for an
+  /// overlong ID is its digest, not the ID itself.
   String? keyForPrefixedId(String prefix, String internalId) =>
-      _keyByPrefixedId[prefix]?[internalId];
+      _keyByPrefixedId[prefix]?[TransactionStorageKey.idTokenFor(internalId)];
 
   /// The key for [internalId] anywhere in the index, or `null`.
-  String? keyForId(String internalId) => _keyByGlobalId[internalId];
+  String? keyForId(String internalId) =>
+      _keyByGlobalId[TransactionStorageKey.idTokenFor(internalId)];
 
   /// The newest transaction's key under [prefix], or `null`.
   String? latestKey(String prefix) => _orderedByPrefix[prefix]?.firstOrNull;
@@ -220,7 +225,8 @@ class TransactionOrderIndex {
 
     var start = 0;
     if (fromId != null) {
-      final cursorKey = _keyByPrefixedId[prefix]?[fromId];
+      final cursorKey =
+          _keyByPrefixedId[prefix]?[TransactionStorageKey.idTokenFor(fromId)];
       final cursorPosition = cursorKey == null
           ? null
           : _positionByKey[cursorKey];

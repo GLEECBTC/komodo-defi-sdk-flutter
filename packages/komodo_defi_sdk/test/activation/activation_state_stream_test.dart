@@ -154,9 +154,33 @@ void main() {
     expect(first[trx.id]?.isActive, isTrue);
   });
 
-  test('an empty enabled set never deactivates anything', () async {
-    // ActivatedAssetsCache returns `const []` when no user is signed in, and a
-    // wedged read looks identical. Acting on it would blank the wallet.
+  test('a signed-out empty read never deactivates anything', () async {
+    // ActivatedAssetsCache returns `const []` without an RPC when no user is
+    // signed in. Acting on that would blank the wallet mid sign-out race;
+    // the reset path owns clearing the map.
+    final manager = build();
+    when(
+      () =>
+          cache.getActivatedAssetIds(forceRefresh: any(named: 'forceRefresh')),
+    ).thenAnswer((_) async => {trx.id});
+    await manager.isAssetActive(trx.id, forceRefresh: true);
+
+    when(() => auth.currentUser).thenAnswer((_) async => null);
+    when(
+      () =>
+          cache.getActivatedAssetIds(forceRefresh: any(named: 'forceRefresh')),
+    ).thenAnswer((_) async => <AssetId>{});
+    await manager.isAssetActive(trx.id, forceRefresh: true);
+
+    expect(manager.activationStates[trx.id]?.isActive, isTrue);
+  });
+
+  test('a signed-in empty read sweeps stale actives', () async {
+    // With a user signed in, a successful empty `get_enabled_coins` is KDF's
+    // authoritative "nothing enabled" - the last coin disabled elsewhere, or
+    // an authenticated KDF restart that re-enabled nothing. Preserving the
+    // previous snapshot would leave activationStates - and everything gated
+    // on it - claiming assets that are not there.
     final manager = build();
     when(
       () =>
@@ -170,7 +194,7 @@ void main() {
     ).thenAnswer((_) async => <AssetId>{});
     await manager.isAssetActive(trx.id, forceRefresh: true);
 
-    expect(manager.activationStates[trx.id]?.isActive, isTrue);
+    expect(manager.activationStates.containsKey(trx.id), isFalse);
   });
 
   test('an asset KDF stops reporting is dropped', () async {

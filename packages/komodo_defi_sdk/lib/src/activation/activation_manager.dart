@@ -230,12 +230,10 @@ class ActivationManager {
   /// This is what makes activations performed by other SDK subsystems - and
   /// divergence on the KDF side - visible without any consumer polling.
   void _foldAuthoritativeActiveSet(Set<AssetId> enabled) {
-    // An empty set is ambiguous: ActivatedAssetsCache returns `const []` when
-    // no user is signed in, and a wedged read looks the same. Acting on it
-    // would deactivate everything mid-blip. Sign-out is handled by
-    // [resetActivationSessionState] instead.
-    if (enabled.isEmpty) return;
-
+    // An empty [enabled] is folded like any other: the caller guarantees it
+    // is KDF's authoritative "nothing enabled" - a successful read for a
+    // signed-in user - and not the signed-out cache short-circuit (see
+    // [_readActivatedAssetIds]). A failed or wedged read throws before here.
     var changed = false;
 
     for (final assetId in enabled) {
@@ -277,6 +275,19 @@ class ActivationManager {
     // Drop a result that started before a wallet change, so it cannot
     // re-seed the previous wallet's assets after the reset cleared them.
     if (generation != _activationSessionGeneration) return ids;
+    if (ids.isEmpty) {
+      // An empty set from the cache is ambiguous: it is also what a
+      // signed-out session reads (`ActivatedAssetsCache` answers `const []`
+      // without an RPC). Only a signed-in user's empty set is KDF's
+      // authoritative "nothing enabled" - the last coin disabled elsewhere,
+      // or an authenticated KDF restart that re-enabled nothing - and that
+      // one must sweep whatever this map still believes is active. Sign-out
+      // itself is handled by [resetActivationSessionState].
+      final user = await _auth.currentUser;
+      if (user == null || generation != _activationSessionGeneration) {
+        return ids;
+      }
+    }
     _foldAuthoritativeActiveSet(ids);
     return ids;
   }
@@ -1015,6 +1026,21 @@ class ActivationManager {
         completer.complete();
       }
     } else {
+      // Record the strategy's terminal failure - message and structured
+      // error - in the state map. Left on `activating`, the `finally`'s
+      // `_failGroupIfStillActivating` would replace it with the generic
+      // "ended without a terminal result", discarding the actionable error
+      // from the public [activationStates] API.
+      _setActivationStates(
+        _groupStates(
+          group,
+          (id) => AssetActivationState.failed(
+            id,
+            errorMessage: progress.errorMessage ?? 'Unknown error',
+            sdkError: progress.sdkError,
+          ),
+        ),
+      );
       if (!completer.isCompleted) {
         completer.completeError(progress.errorMessage ?? 'Unknown error');
       }
