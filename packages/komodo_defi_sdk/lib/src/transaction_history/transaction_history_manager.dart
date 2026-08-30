@@ -328,20 +328,33 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         }
       }
 
-      // First try to get from local storage
-      final localPage = await _storage.getTransactions(
-        asset.id,
-        walletContext.walletId,
-        fromId: pagination is TransactionBasedPagination
-            ? pagination.fromId
-            : null,
-        pageNumber: pagination is PagePagination ? pagination.pageNumber : null,
-        limit: pagination.limit ?? _maxBatchSize,
-      );
+      // First try to get from local storage. A TransactionBasedPagination
+      // cursor is not necessarily a stored internalId: a strategy may hand
+      // back its own opaque token as `nextPageId` (TronGrid's encoded
+      // per-address cursor), which storage rejects as an unknown starting
+      // transaction. That rejection means "not ours to serve", never a failed
+      // request - the strategy below owns the cursor and consumes it.
+      TransactionPage? localPage;
+      try {
+        localPage = await _storage.getTransactions(
+          asset.id,
+          walletContext.walletId,
+          fromId: pagination is TransactionBasedPagination
+              ? pagination.fromId
+              : null,
+          pageNumber: pagination is PagePagination
+              ? pagination.pageNumber
+              : null,
+          limit: pagination.limit ?? _maxBatchSize,
+        );
+      } on TransactionStorageException {
+        localPage = null;
+      }
       await _requireWalletContextCurrent(walletContext);
 
       // If we have enough local data and it's not a first page request, return it
-      if (localPage.transactions.isNotEmpty &&
+      if (localPage != null &&
+          localPage.transactions.isNotEmpty &&
           (pagination is PagePagination && pagination.pageNumber > 1 ||
               pagination is TransactionBasedPagination)) {
         return localPage;
