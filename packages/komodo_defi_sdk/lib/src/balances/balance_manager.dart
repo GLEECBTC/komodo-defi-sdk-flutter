@@ -1343,19 +1343,19 @@ class BalanceManager implements IBalanceManager {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
 
+        // Captured before the fetch: getBalance stores its result in
+        // _balanceCache before returning, so a read afterwards compares the
+        // fresh value with itself and the guard can never emit.
+        final previous = _balanceCache[assetId];
         final latest = await getBalance(assetId, forceRefresh: true);
         if (!await _isWalletContextCurrent(walletContext)) return;
-        final previous = _balanceCache[assetId];
         final changed =
             previous == null ||
             previous.total != latest.total ||
             previous.spendable != latest.spendable ||
             previous.unspendable != latest.unspendable;
-        if (changed) {
-          _balanceCache[assetId] = latest;
-          if (!controller.isClosed) {
-            controller.add(latest);
-          }
+        if (changed && !controller.isClosed) {
+          controller.add(latest);
         }
       } catch (_) {
         // best-effort; swallow transient errors
@@ -1367,16 +1367,16 @@ class BalanceManager implements IBalanceManager {
       try {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
+        // Pre-fetch capture, same reason as the periodic tick above.
+        final previous = _balanceCache[assetId];
         final latest = await getBalance(assetId, forceRefresh: true);
         if (!await _isWalletContextCurrent(walletContext)) return;
-        final previous = _balanceCache[assetId];
         final changed =
             previous == null ||
             previous.total != latest.total ||
             previous.spendable != latest.spendable ||
             previous.unspendable != latest.unspendable;
         if (changed && !controller.isClosed) {
-          _balanceCache[assetId] = latest;
           controller.add(latest);
         }
       } catch (_) {}
