@@ -153,11 +153,19 @@ jobs:
             fi
             
             echo "Using source type: $SOURCE_TYPE"
-            
-            # Try roll with this source
+
+            # Pin the exact commit the check job resolved and point the tool at
+            # the mirror being tried. Without --commit the tool re-resolves the
+            # branch tip on its own, so a tip that moved between the two jobs -
+            # or mirrors publishing different tips - could pin a different
+            # commit than the one this branch and PR are named for. Without
+            # --mirror-url every iteration of this loop would query the tool's
+            # default mirror rather than $SOURCE_URL.
             if dart bin/update_api_config.dart \
               --branch "$BRANCH" \
               --source "$SOURCE_TYPE" \
+              --commit "$NEW_COMMIT" \
+              --mirror-url "$SOURCE_URL" \
               --config ../komodo_defi_framework/app_build/build_config.json \
               --output-dir ../komodo_defi_framework/app_build/temp_downloads \
               --verbose; then
