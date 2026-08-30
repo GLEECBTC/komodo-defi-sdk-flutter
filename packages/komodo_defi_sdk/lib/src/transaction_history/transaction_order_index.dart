@@ -59,21 +59,28 @@ class TransactionOrderIndex {
 
   /// Discards all state and rebuilds from [keys].
   ///
-  /// Keys that do not parse are skipped and returned, so the caller can evict
-  /// them from the box.
+  /// Returns every key that must not stay in the box: keys that do not parse,
+  /// and all but the newest key where several share one (prefix, internal ID)
+  /// pair. The latter are the halves of a re-key interrupted between writing
+  /// the replacement and deleting the displaced record - indexing both would
+  /// count and return the transaction twice and leave the ID lookup on the
+  /// stale row, so the rebuild keeps the newest (matching [insert]'s
+  /// replace-on-collision at runtime; a pending row's placeholder timestamp
+  /// is older than the real one it gains) and hands the rest back for
+  /// eviction.
   List<String> rebuildFromKeys(Iterable<String> keys) {
     _orderedByPrefix.clear();
     _positionByKey.clear();
     _keyByPrefixedId.clear();
     _keyByGlobalId.clear();
 
-    final unparseable = <String>[];
+    final dropped = <String>[];
     final parsedByPrefix = <String, List<(String, TransactionKeyParts)>>{};
 
     for (final key in keys) {
       final parts = TransactionStorageKey.parse(key);
       if (parts == null) {
-        unparseable.add(key);
+        dropped.add(key);
         continue;
       }
       parsedByPrefix.putIfAbsent(parts.prefix, () => []).add((key, parts));
@@ -84,6 +91,12 @@ class TransactionOrderIndex {
       final keyList = <String>[];
       final idMap = <String, String>{};
       for (final (key, parts) in ordered) {
+        // Newest-first traversal: the first key seen for an ID token is the
+        // authoritative row, every later one a superseded duplicate.
+        if (idMap.containsKey(parts.idToken)) {
+          dropped.add(key);
+          continue;
+        }
         _positionByKey[key] = keyList.length;
         keyList.add(key);
         idMap[parts.idToken] = key;
@@ -93,7 +106,7 @@ class TransactionOrderIndex {
       _keyByPrefixedId[entry.key] = idMap;
     }
 
-    return unparseable;
+    return dropped;
   }
 
   /// Inserts [key] into the index, replacing any previous key for the same
