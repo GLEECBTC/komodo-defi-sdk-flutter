@@ -50,9 +50,16 @@ class LocalConfig extends IKdfHostConfig {
   }
 
   /// Always loopback: a local KDF is started with `rpc_local_only`.
+  ///
+  /// Always plain HTTP, whatever [https] says: the spawned KDF has no TLS
+  /// listener - `KdfStartupConfig` carries no certificate or scheme knob - so
+  /// an `https://127.0.0.1` dial-out can never connect to it. Honouring the
+  /// flag here would break startup and authentication for a configuration
+  /// that has always worked by everything hardcoding the HTTP endpoint.
+  /// [https] still describes the hosted/remote transport in
+  /// [getConnectionParams] and [toJson].
   @override
-  Uri get rpcUrl =>
-      Uri.parse('${https ? 'https' : 'http'}://127.0.0.1:$port');
+  Uri get rpcUrl => Uri.parse('http://127.0.0.1:$port');
 
   @override
   Map<String, dynamic> getConnectionParams() => {
