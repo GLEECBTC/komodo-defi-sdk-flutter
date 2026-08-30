@@ -491,7 +491,7 @@ class HiveTransactionStorage
       _acquireCount = 0;
       _acquired.remove(boxName);
     }
-    await _mutex.protect(() async {
+    final closing = _mutex.protect(() async {
       final box = _box;
       _box = null;
       _opening = null;
@@ -504,7 +504,18 @@ class HiveTransactionStorage
         _onError('failed to close $boxName', error, stackTrace);
       }
     });
+    // Recorded before the first await: the registry entry is already gone, so
+    // a concurrent acquire builds a fresh instance - whose open must wait for
+    // this handle to actually release the box rather than adopt a still-open
+    // box that is about to be closed underneath it. Never rejects; the close
+    // body contains its own failures.
+    _pendingCloseByBoxName[boxName] = closing;
+    await closing;
   }
+
+  /// The most recent in-flight (or completed) real close per box name; the
+  /// next open of that box awaits it. See [close] and [_openBoxWithRecovery].
+  static final Map<String, Future<void>> _pendingCloseByBoxName = {};
 
   Future<void> _purgeWalletPrefix(
     LazyBox<String> box,
@@ -666,6 +677,12 @@ class HiveTransactionStorage
   }
 
   Future<LazyBox<String>> _openBoxWithRecovery() async {
+    // Wait out any final close of this box still in flight. Without this, an
+    // instance acquired while the previous one was closing could adopt the
+    // still-open box through `isBoxOpen` and then have it closed underneath
+    // it, leaving a live store holding a dead box.
+    final pendingClose = _pendingCloseByBoxName[boxName];
+    if (pendingClose != null) await pendingClose;
     if (Hive.isBoxOpen(boxName)) return Hive.lazyBox<String>(boxName);
     try {
       return await _openBox();
