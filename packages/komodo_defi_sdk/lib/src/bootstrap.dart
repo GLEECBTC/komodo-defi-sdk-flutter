@@ -378,9 +378,14 @@ Future<void> bootstrap({
     // Registered on the container - not handed around through shared state -
     // so [_wireWalletDeletionPurge] resolves the same store this container's
     // manager writes to, even when two SDK instances bootstrap concurrently.
+    //
+    // Acquired rather than constructed: the Hive box behind the default name
+    // is process-global, so containers over the same box name must share one
+    // store (one order index, refcounted close) instead of each adopting the
+    // open box with an index of its own.
     container.registerSingletonAsync<HiveTransactionStorage>(() async {
       final auth = await container.getAsync<KomodoDefiLocalAuth>();
-      return HiveTransactionStorage(
+      return HiveTransactionStorage.acquire(
         // Lets the store drop history belonging to wallets that no
         // longer exist. Fails open: an error or an empty result means
         // "do not know", never "delete everything".

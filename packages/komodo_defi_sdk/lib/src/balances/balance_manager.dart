@@ -445,9 +445,13 @@ class BalanceManager implements IBalanceManager {
   Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
     if (!_isWalletContextCurrentSync(context)) return false;
     final currentUser = await _auth.currentUser;
+    // Continues-session, not same-stable: the fresh read can observe the same
+    // wallet degraded to name-only while the identity RPC is down, which the
+    // capture path deliberately admits - rejecting it here would fail the
+    // operation during the exact blip that branch tolerates.
     return currentUser != null &&
         _isWalletContextCurrentSync(context) &&
-        isSameStableWallet(context.walletId, currentUser.walletId);
+        walletIdentityContinuesSession(context.walletId, currentUser.walletId);
   }
 
   Future<void> _requireWalletContextCurrent(

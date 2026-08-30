@@ -196,6 +196,24 @@ void main() {
     },
   );
 
+  test('operations complete while the identity stays degraded', () async {
+    // Tolerating the degraded observation at capture is not enough on its
+    // own: every operation re-reads `auth.currentUser` in its post-await
+    // guards, and rejecting the same degraded identity there would throw
+    // WalletChangedDisconnectException at the first checkpoint - during the
+    // exact blip the capture branch admits the operation for.
+    final manager = build();
+    expect((await manager.getBalance(asset.id)).total, Decimal.fromInt(5));
+
+    currentUser = _degraded;
+
+    expect(
+      (await manager.getBalance(asset.id)).total,
+      Decimal.fromInt(5),
+      reason: 'a degraded identity must not fail an in-flight operation',
+    );
+  });
+
   test('a genuinely different wallet still resets state', () async {
     final manager = build();
 
