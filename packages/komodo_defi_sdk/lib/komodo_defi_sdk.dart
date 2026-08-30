@@ -24,16 +24,38 @@ export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
 // ZHTLC sync parameters
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
-    show ZhtlcSyncParams;
+    show
+        DirectlyConnectedPeer,
+        DisableCoinResponse,
+        KmdRewardInfo,
+        NftFeeDetails,
+        NftFilter,
+        NftMetadata,
+        NftOperationResponse,
+        NftTokenInfo,
+        NftTransactionDetails,
+        NftTransfer,
+        NftTransferFilter,
+        NftWithdrawType,
+        WithdrawNftData,
+        ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
 export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
     show BalanceManager;
+export 'package:komodo_defi_sdk/src/diagnostics/diagnostics_manager.dart'
+    show DiagnosticsManager;
+export 'package:komodo_defi_sdk/src/nft/nft_manager.dart'
+    show NftManager, NftTransactionDetailsProvider;
+export 'package:komodo_defi_sdk/src/rewards/rewards_manager.dart'
+    show RewardsManager;
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
+export 'package:komodo_defi_types/komodo_defi_types.dart'
+    show WithdrawResult, WithdrawalPreview, WithdrawalResult;
 
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation_config/activation_config_service.dart'

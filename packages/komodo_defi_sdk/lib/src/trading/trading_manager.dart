@@ -29,7 +29,102 @@ class TradingManager {
   static const Duration _recentSwapsCacheTtl = Duration(seconds: 2);
   static const Duration _tradePreimageCacheTtl = Duration(seconds: 2);
   static const Duration _maxTakerCacheTtl = Duration(seconds: 5);
+  static const Duration _maxMakerCacheTtl = Duration(seconds: 5);
   static const Duration _minTradingCacheTtl = Duration(seconds: 10);
+
+  /// Starts a swap using KDF's generic `start_swap` request shape.
+  Future<StartSwapResponse> startSwap({required SwapRequest swapRequest}) {
+    return _client.rpc.trading.startSwap(swapRequest: swapRequest);
+  }
+
+  /// Starts a taker sell swap.
+  Future<StartSwapResponse> sell({
+    required String base,
+    required String rel,
+    required String baseCoinAmount,
+    required String relCoinAmount,
+    MatchBy? matchBy,
+  }) {
+    return _client.rpc.trading.sell(
+      base: base,
+      rel: rel,
+      baseCoinAmount: baseCoinAmount,
+      relCoinAmount: relCoinAmount,
+      matchBy: matchBy,
+    );
+  }
+
+  /// Places a maker order using KDF's `setprice` RPC.
+  Future<SetOrderResponse> placeMakerOrder({
+    required String base,
+    required String rel,
+    required String price,
+    required String volume,
+    String? minVolume,
+    int? baseConfs,
+    bool? baseNota,
+    int? relConfs,
+    bool? relNota,
+  }) {
+    return _client.rpc.orderbook.setOrder(
+      base: base,
+      rel: rel,
+      price: price,
+      volume: volume,
+      minVolume: minVolume,
+      baseConfs: baseConfs,
+      baseNota: baseNota,
+      relConfs: relConfs,
+      relNota: relNota,
+    );
+  }
+
+  /// Alias for [placeMakerOrder] using the KDF method name.
+  Future<SetOrderResponse> setOrder({
+    required String base,
+    required String rel,
+    required String price,
+    required String volume,
+    String? minVolume,
+    int? baseConfs,
+    bool? baseNota,
+    int? relConfs,
+    bool? relNota,
+  }) {
+    return placeMakerOrder(
+      base: base,
+      rel: rel,
+      price: price,
+      volume: volume,
+      minVolume: minVolume,
+      baseConfs: baseConfs,
+      baseNota: baseNota,
+      relConfs: relConfs,
+      relNota: relNota,
+    );
+  }
+
+  /// Cancels a specific order.
+  Future<CancelOrderResponse> cancelOrder({required String uuid}) {
+    return _client.rpc.orderbook.cancelOrder(uuid: uuid);
+  }
+
+  /// Cancels all orders, or the subset specified by [cancelType].
+  Future<CancelAllOrdersResponse> cancelAllOrders({
+    CancelOrdersType? cancelType,
+  }) {
+    return _client.rpc.orderbook.cancelAllOrders(cancelType: cancelType);
+  }
+
+  /// Lists orders created by the current wallet.
+  Future<MyOrdersResponse> myOrders() {
+    return _client.rpc.orderbook.myOrders();
+  }
+
+  /// Gets status for a maker or taker order.
+  Future<OrderStatusResponse> orderStatus({required String uuid}) {
+    return _client.rpc.orderbook.orderStatus(uuid: uuid);
+  }
 
   /// Fetches a single orderbook snapshot.
   Future<OrderbookResponse> getOrderbook({
@@ -41,6 +136,28 @@ class TradingManager {
       ttl: _orderbookCacheTtl,
       request: () => _client.rpc.orderbook.orderbook(base: base, rel: rel),
     );
+  }
+
+  /// Finds best orders for a requested trade side and amount mode.
+  Future<BestOrdersResponse> bestOrders({
+    required String coin,
+    required OrderType action,
+    required RequestBy requestBy,
+    bool? excludeMine,
+  }) {
+    return _client.rpc.orderbook.bestOrders(
+      coin: coin,
+      action: action,
+      requestBy: requestBy,
+      excludeMine: excludeMine,
+    );
+  }
+
+  /// Retrieves orderbook depth for multiple pairs.
+  Future<OrderbookDepthResponse> orderbookDepth({
+    required List<OrderbookPair> pairs,
+  }) {
+    return _client.rpc.orderbook.orderbookDepth(pairs: pairs);
   }
 
   /// Watches orderbook updates using stream events and a polling fallback.
@@ -151,6 +268,26 @@ class TradingManager {
       ttl: _swapStatusCacheTtl,
       request: () => _client.rpc.trading.swapStatus(uuid: uuid),
     );
+  }
+
+  /// Retrieves currently active swaps.
+  Future<ActiveSwapsResponse> activeSwaps({String? coin, bool? includeStatus}) {
+    return _client.rpc.trading.activeSwaps(
+      coin: coin,
+      includeStatus: includeStatus,
+    );
+  }
+
+  /// Cancels an active swap.
+  Future<CancelSwapResponse> cancelSwap({required String uuid}) {
+    return _client.rpc.trading.cancelSwap(uuid: uuid);
+  }
+
+  /// Attempts to recover funds for a swap that requires recovery.
+  Future<RecoverFundsOfSwapResponse> recoverFundsOfSwap({
+    required String uuid,
+  }) {
+    return _client.rpc.trading.recoverFundsOfSwap(uuid: uuid);
   }
 
   /// Watches updates for a single swap UUID using stream events and a polling
@@ -294,6 +431,16 @@ class TradingManager {
     return response;
   }
 
+  /// Cached wrapper for `max_maker_vol`.
+  Future<MaxMakerVolumeResponse> maxMakerVolume({required String coin}) async {
+    final response = await _requestCache.getOrCreate<MaxMakerVolumeResponse>(
+      'max_maker_vol:$coin',
+      ttl: _maxMakerCacheTtl,
+      request: () => _client.rpc.trading.maxMakerVolume(coin: coin),
+    );
+    return response;
+  }
+
   /// Cached wrapper for `min_trading_vol`.
   Future<MinTradingVolumeResponse> minTradingVolume({
     required String coin,
@@ -338,6 +485,27 @@ class TradingManager {
         toTimestamp: toTimestamp,
       ),
     );
+  }
+
+  /// Imports swap records into KDF.
+  Future<ImportSwapsResponse> importSwaps({List<dynamic> swaps = const []}) {
+    return _client.rpc.trading.importSwaps(swaps: swaps);
+  }
+
+  /// Starts the simple market maker bot.
+  Future<MarketMakerBotResponse> startSimpleMarketMakerBot({
+    required int id,
+    required MarketMakerBotParameters parameters,
+  }) {
+    return _client.rpc.trading.startSimpleMarketMakerBot(
+      id: id,
+      parameters: parameters,
+    );
+  }
+
+  /// Stops the simple market maker bot.
+  Future<MarketMakerBotResponse> stopSimpleMarketMakerBot({required int id}) {
+    return _client.rpc.trading.stopSimpleMarketMakerBot(id: id);
   }
 
   OrderbookResponse _mapOrderbookEventToResponse(OrderbookEvent event) {

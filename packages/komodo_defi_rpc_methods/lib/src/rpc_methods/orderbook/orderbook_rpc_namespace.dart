@@ -112,7 +112,7 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   ///
   /// - [coin]: The coin to trade
   /// - [action]: Whether to buy or sell
-  /// - [volume]: The desired trade volume
+  /// - [requestBy]: The desired trade volume or value request
   /// - [rpcPass]: Optional RPC password override
   ///
   /// Returns a [Future] that completes with a [BestOrdersResponse]
@@ -150,7 +150,7 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   /// - [rel]: The rel/quote coin to trade
   /// - [price]: The price per unit of base coin in rel coin
   /// - [volume]: The amount of base coin to trade
-  /// - [minVolume]: Optional minimum acceptable volume for partial fills (string numeric)
+  /// - [minVolume]: Optional minimum acceptable volume for partial fills
   /// - [baseConfs]: Optional required confirmations for base coin (int)
   /// - [baseNota]: Optional NOTA requirement for base coin (bool)
   /// - [relConfs]: Optional required confirmations for rel coin (int)
@@ -265,5 +265,15 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   /// - Detailed status and configuration for each order
   Future<MyOrdersResponse> myOrders({String? rpcPass}) {
     return execute(MyOrdersRequest(rpcPass: rpcPass ?? this.rpcPass ?? ''));
+  }
+
+  /// Retrieves status for a maker or taker order.
+  Future<OrderStatusResponse> orderStatus({
+    required String uuid,
+    String? rpcPass,
+  }) {
+    return execute(
+      OrderStatusRequest(rpcPass: rpcPass ?? this.rpcPass ?? '', uuid: uuid),
+    );
   }
 }

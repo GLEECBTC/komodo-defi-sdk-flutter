@@ -1,3 +1,4 @@
+// Bootstrap registration reads more clearly as direct GetIt calls.
 // ignore_for_file: cascade_invocations
 
 import 'dart:developer';
@@ -90,7 +91,8 @@ Future<void> bootstrap({
     () async => KomodoAssetsUpdateManager(),
   );
 
-  // Activation configuration service (must be available before ActivationManager)
+  // Activation configuration service must be available before
+  // ActivationManager.
   container.registerSingletonAsync<ActivationConfigService>(() async {
     await _ensureActivationConfigHiveInitialized();
     final auth = await container.getAsync<KomodoDefiLocalAuth>();
@@ -130,14 +132,16 @@ Future<void> bootstrap({
     );
   }, dependsOn: [ApiClient, KomodoDefiLocalAuth, AssetManager]);
 
-  // Register BalanceManager BEFORE ActivationManager to avoid circular dependency
+  // Register BalanceManager before ActivationManager to avoid a circular
+  // dependency.
   container.registerSingletonAsync<BalanceManager>(() async {
     final assets = await container.getAsync<AssetManager>();
     final auth = await container.getAsync<KomodoDefiLocalAuth>();
     final eventStreamingManager = await container
         .getAsync<EventStreamingManager>();
 
-    // Create BalanceManager without its dependencies on SharedActivationCoordinator and PubkeyManager initially
+    // Create BalanceManager without its SharedActivationCoordinator and
+    // PubkeyManager dependencies initially.
     return BalanceManager(
       activationCoordinator:
           null, // Will be set after SharedActivationCoordinator is created
@@ -277,6 +281,24 @@ Future<void> bootstrap({
     );
   }, dependsOn: [ApiClient, EventStreamingManager]);
 
+  container.registerSingletonAsync<NftManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    return NftManager(
+      client: client,
+      transactionDetailsProvider: config.nftTransactionDetailsProvider,
+    );
+  }, dependsOn: [ApiClient]);
+
+  container.registerSingletonAsync<DiagnosticsManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    final activatedAssetsCache = await container
+        .getAsync<ActivatedAssetsCache>();
+    return DiagnosticsManager(
+      client,
+      activatedAssetsCache: activatedAssetsCache,
+    );
+  }, dependsOn: [ApiClient, ActivatedAssetsCache]);
+
   container.registerSingletonAsync<LegacyWithdrawalManager>(() async {
     final client = await container.getAsync<ApiClient>();
     return LegacyWithdrawalManager(client);
@@ -338,6 +360,12 @@ Future<void> bootstrap({
     ],
   );
 
+  container.registerSingletonAsync<RewardsManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    final withdrawalManager = await container.getAsync<WithdrawalManager>();
+    return RewardsManager(client: client, withdrawalManager: withdrawalManager);
+  }, dependsOn: [ApiClient, WithdrawalManager]);
+
   container.registerSingletonAsync<SecurityManager>(
     () async {
       final client = await container.getAsync<ApiClient>();
@@ -365,7 +393,8 @@ Future<void> bootstrap({
 
   stopwatch.stop();
   log(
-    'Bootstrap: Dependency injection setup completed in ${stopwatch.elapsedMilliseconds}ms',
+    'Bootstrap: Dependency injection setup completed '
+    'in ${stopwatch.elapsedMilliseconds}ms',
     name: 'Bootstrap',
   );
 }

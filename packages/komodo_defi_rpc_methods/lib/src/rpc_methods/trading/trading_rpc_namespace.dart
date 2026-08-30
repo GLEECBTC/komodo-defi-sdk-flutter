@@ -49,7 +49,8 @@ class TradingMethodsNamespace extends BaseRpcMethodNamespace {
   /// parameters. The swap can be initiated as either a maker (placing an order)
   /// or a taker (taking an existing order).
   ///
-  /// - [swapRequest]: The swap configuration including coins, amounts, and method
+  /// - [swapRequest]: The swap configuration including coins, amounts, and
+  ///   method
   /// - [rpcPass]: Optional RPC password override
   ///
   /// Returns a [Future] that completes with a [StartSwapResponse] containing
@@ -73,6 +74,28 @@ class TradingMethodsNamespace extends BaseRpcMethodNamespace {
       StartSwapRequest(
         rpcPass: rpcPass ?? this.rpcPass ?? '',
         swapRequest: swapRequest,
+      ),
+    );
+  }
+
+  /// Starts a taker sell swap.
+  Future<StartSwapResponse> sell({
+    required String base,
+    required String rel,
+    required String baseCoinAmount,
+    required String relCoinAmount,
+    MatchBy? matchBy,
+    String? rpcPass,
+  }) {
+    return startSwap(
+      rpcPass: rpcPass,
+      swapRequest: SwapRequest(
+        base: base,
+        rel: rel,
+        baseCoinAmount: baseCoinAmount,
+        relCoinAmount: relCoinAmount,
+        method: SwapMethod.sell,
+        matchBy: matchBy,
       ),
     );
   }
@@ -198,6 +221,19 @@ class TradingMethodsNamespace extends BaseRpcMethodNamespace {
     );
   }
 
+  /// Attempts to recover funds for a swap that failed or requires recovery.
+  Future<RecoverFundsOfSwapResponse> recoverFundsOfSwap({
+    required String uuid,
+    String? rpcPass,
+  }) {
+    return execute(
+      RecoverFundsOfSwapRequest(
+        rpcPass: rpcPass ?? this.rpcPass ?? '',
+        uuid: uuid,
+      ),
+    );
+  }
+
   /// Calculates fees and validates parameters for a potential trade.
   ///
   /// This method performs a dry-run calculation of a trade, providing
@@ -276,6 +312,16 @@ class TradingMethodsNamespace extends BaseRpcMethodNamespace {
     );
   }
 
+  /// Calculates the maximum maker volume for a coin.
+  Future<MaxMakerVolumeResponse> maxMakerVolume({
+    required String coin,
+    String? rpcPass,
+  }) {
+    return execute(
+      MaxMakerVolumeRequest(rpcPass: rpcPass ?? this.rpcPass ?? '', coin: coin),
+    );
+  }
+
   /// Retrieves the minimum trading volume for a coin.
   ///
   /// This method returns the minimum amount of a coin that can be
@@ -299,6 +345,46 @@ class TradingMethodsNamespace extends BaseRpcMethodNamespace {
       MinTradingVolumeRequest(
         rpcPass: rpcPass ?? this.rpcPass ?? '',
         coin: coin,
+      ),
+    );
+  }
+
+  /// Imports swap records into KDF.
+  Future<ImportSwapsResponse> importSwaps({
+    List<dynamic> swaps = const [],
+    String? rpcPass,
+  }) {
+    return execute(
+      ImportSwapsRequest(rpcPass: rpcPass ?? this.rpcPass ?? '', swaps: swaps),
+    );
+  }
+
+  /// Starts the simple market maker bot.
+  Future<MarketMakerBotResponse> startSimpleMarketMakerBot({
+    required int id,
+    required MarketMakerBotParameters parameters,
+    String? rpcPass,
+  }) {
+    return execute(
+      MarketMakerBotRequest(
+        rpcPass: rpcPass ?? this.rpcPass ?? '',
+        id: id,
+        methodType: MarketMakerBotMethod.start,
+        botParameters: parameters,
+      ),
+    );
+  }
+
+  /// Stops the simple market maker bot.
+  Future<MarketMakerBotResponse> stopSimpleMarketMakerBot({
+    required int id,
+    String? rpcPass,
+  }) {
+    return execute(
+      MarketMakerBotRequest(
+        rpcPass: rpcPass ?? this.rpcPass ?? '',
+        id: id,
+        methodType: MarketMakerBotMethod.stop,
       ),
     );
   }

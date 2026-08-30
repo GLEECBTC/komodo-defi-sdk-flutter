@@ -1,150 +1,137 @@
-// import 'package:komodo_defi_rpc_methods/src/common_structures/nft/nft_metadata.dart';
+import 'package:komodo_defi_rpc_methods/src/common_structures/nft/nft_metadata.dart';
+import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
-// class NftInfo {
-//   NftInfo({
-//     required this.chain,
-//     required this.tokenAddress,
-//     required this.tokenId,
-//     required this.amount,
-//     required this.ownerOf,
-//     required this.tokenHash,
-//     required this.blockNumberMinted,
-//     required this.blockNumber,
-//     required this.contractType,
-//     required this.lastTokenUriSync,
-//     required this.lastMetadataSync,
-//     required this.minterAddress,
-//     required this.possibleSpam,
-//     required this.possiblePhishing,
-//     required this.uriMeta,
-//     this.name,
-//     this.symbol,
-//     this.tokenUri,
-//     this.tokenDomain,
-//     this.metadata,
-//   });
+/// NFT token information returned by `get_nft_list`.
+class NftTokenInfo {
+  const NftTokenInfo({
+    required this.chain,
+    required this.tokenAddress,
+    required this.tokenId,
+    required this.amount,
+    required this.ownerOf,
+    required this.contractType,
+    this.tokenHash,
+    this.blockNumberMinted,
+    this.blockNumber,
+    this.name,
+    this.symbol,
+    this.tokenUri,
+    this.tokenDomain,
+    this.metadata,
+    this.lastTokenUriSync,
+    this.lastMetadataSync,
+    this.minterAddress,
+    this.possibleSpam,
+    this.possiblePhishing,
+    this.uriMeta,
+  });
 
-//   factory NftInfo.fromJson(Map<String, dynamic> json) => NftInfo(
-//         chain: json['chain'],
-//         tokenAddress: json['token_address'],
-//         tokenId: json['token_id'],
-//         amount: json['amount'],
-//         ownerOf: json['owner_of'],
-//         tokenHash: json['token_hash'],
-//         blockNumberMinted: json['block_number_minted'],
-//         blockNumber: json['block_number'],
-//         contractType: json['contract_type'],
-//         name: json['name'],
-//         symbol: json['symbol'],
-//         tokenUri: json['token_uri'],
-//         tokenDomain: json['token_domain'],
-//         metadata: json['metadata'],
-//         lastTokenUriSync: json['last_token_uri_sync'],
-//         lastMetadataSync: json['last_metadata_sync'],
-//         minterAddress: json['minter_address'],
-//         possibleSpam: json['possible_spam'],
-//         possiblePhishing: json['possible_phishing'],
-//         uriMeta: NftMetadata.fromJson(json['uri_meta']),
-//       );
+  factory NftTokenInfo.fromJson(JsonMap json) {
+    final uriMetaJson = json.valueOrNull<JsonMap>('uri_meta');
+    return NftTokenInfo(
+      chain: json.value<String>('chain'),
+      tokenAddress: json.value<String>('token_address'),
+      tokenId: json.value<String>('token_id'),
+      amount: json.value<String>('amount'),
+      ownerOf: json.value<String>('owner_of'),
+      contractType: json.value<String>('contract_type'),
+      tokenHash: json.valueOrNull<String>('token_hash'),
+      blockNumberMinted: json.valueOrNull<int>('block_number_minted'),
+      blockNumber: json.valueOrNull<int>('block_number'),
+      name: json.valueOrNull<String>('name'),
+      symbol: json.valueOrNull<String>('symbol'),
+      tokenUri: json.valueOrNull<String>('token_uri'),
+      tokenDomain: json.valueOrNull<String>('token_domain'),
+      metadata: json.valueOrNull<String>('metadata'),
+      lastTokenUriSync: json.valueOrNull<String>('last_token_uri_sync'),
+      lastMetadataSync: json.valueOrNull<String>('last_metadata_sync'),
+      minterAddress: json.valueOrNull<String>('minter_address'),
+      possibleSpam: json.valueOrNull<bool>('possible_spam'),
+      possiblePhishing: json.valueOrNull<bool>('possible_phishing'),
+      uriMeta: uriMetaJson == null ? null : NftMetadata.fromJson(uriMetaJson),
+    );
+  }
 
-//   final String chain;
-//   final String tokenAddress;
-//   final String tokenId;
-//   final String amount;
-//   final String ownerOf;
-//   final String tokenHash;
-//   final int blockNumberMinted;
-//   final int blockNumber;
-//   final String contractType;
-//   final String? name;
-//   final String? symbol;
-//   final String? tokenUri;
-//   final String? tokenDomain;
-//   final String? metadata;
-//   final String lastTokenUriSync;
-//   final String lastMetadataSync;
-//   final String minterAddress;
-//   final bool possibleSpam;
-//   final bool possiblePhishing;
-//   final NftMetadata uriMeta;
+  /// NFT chain identifier, for example `ETH` or `POLYGON`.
+  final String chain;
 
-//   Map<String, dynamic> toJson() => {
-//         'chain': chain,
-//         'token_address': tokenAddress,
-//         'token_id': tokenId,
-//         'amount': amount,
-//         'owner_of': ownerOf,
-//         'token_hash': tokenHash,
-//         'block_number_minted': blockNumberMinted,
-//         'block_number': blockNumber,
-//         'contract_type': contractType,
-//         if (name != null) 'name': name,
-//         if (symbol != null) 'symbol': symbol,
-//         if (tokenUri != null) 'token_uri': tokenUri,
-//         if (tokenDomain != null) 'token_domain': tokenDomain,
-//         if (metadata != null) 'metadata': metadata,
-//         'last_token_uri_sync': lastTokenUriSync,
-//         'last_metadata_sync': lastMetadataSync,
-//         'minter_address': minterAddress,
-//         'possible_spam': possibleSpam,
-//         'possible_phishing': possiblePhishing,
-//         'uri_meta': uriMeta.toJson(),
-//       };
-// }
+  /// Token contract address.
+  final String tokenAddress;
 
-// class NftFilter {
-//   NftFilter({
-//     this.excludeSpam,
-//     this.excludePhishing,
-//   });
-//   final bool? excludeSpam;
-//   final bool? excludePhishing;
+  /// Token id.
+  final String tokenId;
 
-//   Map<String, dynamic> toJson() => {
-//         if (excludeSpam != null) 'exclude_spam': excludeSpam,
-//         if (excludePhishing != null) 'exclude_phishing': excludePhishing,
-//       };
-// }
+  /// Token amount as a string numeric.
+  final String amount;
 
-// class NftTransferFilter {
-//   NftTransferFilter({
-//     this.status,
-//     this.fromTimestamp,
-//     this.toTimestamp,
-//   });
-//   final String? status;
-//   final int? fromTimestamp;
-//   final int? toTimestamp;
+  /// Owner address.
+  final String ownerOf;
 
-//   Map<String, dynamic> toJson() => {
-//         if (status != null) 'status': status,
-//         if (fromTimestamp != null) 'from_timestamp': fromTimestamp,
-//         if (toTimestamp != null) 'to_timestamp': toTimestamp,
-//       };
-// }
+  /// NFT contract type, for example `ERC721` or `ERC1155`.
+  final String contractType;
 
-// class WithdrawNftData {
-//   WithdrawNftData({
-//     required this.chain,
-//     required this.to,
-//     required this.tokenAddress,
-//     required this.tokenId,
-//     this.max,
-//     this.amount,
-//   });
-//   final String chain;
-//   final String to;
-//   final String tokenAddress;
-//   final String tokenId;
-//   final bool? max;
-//   final String? amount;
+  /// Token hash if provided by the NFT indexer.
+  final String? tokenHash;
 
-//   Map<String, dynamic> toJson() => {
-//         'chain': chain,
-//         'to': to,
-//         'token_address': tokenAddress,
-//         'token_id': tokenId,
-//         if (max != null) 'max': max,
-//         if (amount != null) 'amount': amount,
-//       };
-// }
+  /// Mint block number.
+  final int? blockNumberMinted;
+
+  /// Latest block number associated with this token.
+  final int? blockNumber;
+
+  /// Collection or token name from KDF.
+  final String? name;
+
+  /// Token symbol.
+  final String? symbol;
+
+  /// Token URI.
+  final String? tokenUri;
+
+  /// Token URI domain.
+  final String? tokenDomain;
+
+  /// Raw metadata string returned by KDF.
+  final String? metadata;
+
+  /// Last token URI sync timestamp/string returned by KDF.
+  final String? lastTokenUriSync;
+
+  /// Last metadata sync timestamp/string returned by KDF.
+  final String? lastMetadataSync;
+
+  /// Minter address.
+  final String? minterAddress;
+
+  /// Whether the token is flagged as possible spam.
+  final bool? possibleSpam;
+
+  /// Whether the token is flagged as possible phishing.
+  final bool? possiblePhishing;
+
+  /// Parsed URI metadata.
+  final NftMetadata? uriMeta;
+
+  Map<String, dynamic> toJson() => {
+    'chain': chain,
+    'token_address': tokenAddress,
+    'token_id': tokenId,
+    'amount': amount,
+    'owner_of': ownerOf,
+    'contract_type': contractType,
+    if (tokenHash != null) 'token_hash': tokenHash,
+    if (blockNumberMinted != null) 'block_number_minted': blockNumberMinted,
+    if (blockNumber != null) 'block_number': blockNumber,
+    if (name != null) 'name': name,
+    if (symbol != null) 'symbol': symbol,
+    if (tokenUri != null) 'token_uri': tokenUri,
+    if (tokenDomain != null) 'token_domain': tokenDomain,
+    if (metadata != null) 'metadata': metadata,
+    if (lastTokenUriSync != null) 'last_token_uri_sync': lastTokenUriSync,
+    if (lastMetadataSync != null) 'last_metadata_sync': lastMetadataSync,
+    if (minterAddress != null) 'minter_address': minterAddress,
+    if (possibleSpam != null) 'possible_spam': possibleSpam,
+    if (possiblePhishing != null) 'possible_phishing': possiblePhishing,
+    if (uriMeta != null) 'uri_meta': uriMeta!.toJson(),
+  };
+}
