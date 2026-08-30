@@ -141,9 +141,11 @@ class KdfAuthService implements IAuthService {
 
   /// Compound ids of wallets this session created without an imported mnemonic.
   ///
-  /// Never persisted: the whole meaning is "first sign-in", and a value that
-  /// outlived the session would keep telling the address scan there is nothing
-  /// to find long after the wallet could have received funds.
+  /// Never persisted, and consumed when the wallet's first authenticated
+  /// session ends ([_stopKdf]) or the wallet is deleted ([deleteWallet]): the
+  /// whole meaning is "first sign-in", and a value that outlived it would keep
+  /// telling the address scan there is nothing to find long after the wallet
+  /// could have received funds - including on a re-import under the same name.
   final Set<String> _walletsGeneratedThisSession = <String>{};
 
   /// Rolling cost of [getActiveUser]; see [_recordActiveUserCall].
@@ -665,6 +667,12 @@ class KdfAuthService implements IAuthService {
           password: password,
         );
         await _secureStorage.deleteUser(walletName);
+        // A wallet re-imported under this name is not the wallet this session
+        // generated - it may have any amount of history - so the marker must
+        // not outlive the deletion. Compound ids are `name` or `name:<hash>`.
+        _walletsGeneratedThisSession.removeWhere(
+          (id) => id == walletName || id.startsWith('$walletName:'),
+        );
         _invalidateUsersCache();
       } on MmRpcException catch (e) {
         throw _mapDeleteWalletRpcError(e);

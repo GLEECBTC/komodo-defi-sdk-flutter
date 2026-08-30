@@ -185,6 +185,11 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _stopKdf() async {
     await _shutdownSubscription?.cancel();
     _shutdownSubscription = null;
+    // Every authenticated session ends through here, and "generated this
+    // session" means "first sign-in": once that sign-in is over the marker
+    // must not keep telling the HD gap scan there is nothing to find. A later
+    // sign-in to the same wallet gets the standard gap.
+    _walletsGeneratedThisSession.clear();
     await _kdfFramework.kdfStop();
     _kdfFramework.resetHttpClient();
     _emitAuthStateChange(null);
