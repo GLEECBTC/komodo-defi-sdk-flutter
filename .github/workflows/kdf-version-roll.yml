@@ -87,9 +87,10 @@ jobs:
 
           # No manifest is published for every branch - `main` has none on any
           # mirror, and that is not expected to change. Fall back to the branch
-          # directory listing, which names each artefact `kdf_<short>-<target>.zip`.
-          # That yields a SHORT sha only, so it can tell us a *newer build
-          # exists* but cannot satisfy `require_full_commit_hash` on its own.
+          # directory listing, which names each artefact `kdf_<sha>-<target>.zip`.
+          # A 40-character name IS the full sha and rolls exactly like the
+          # manifest path; a short name can only prove a *newer build exists*,
+          # because it cannot satisfy `require_full_commit_hash` on its own.
           NEW_SHORT=""
           if [[ -z "$NEW_COMMIT" ]]; then
             for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
@@ -98,9 +99,10 @@ jobs:
               # not chronological (`a1b2c3d` would sort before an older
               # `f3efd2c`). If a mirror ignores the query it falls back to its
               # default ordering, which is name-ascending and may pick the
-              # wrong build - that only ever costs a spurious "new build
-              # available" note, never an automatic roll, because this path
-              # cannot roll at all.
+              # wrong build - a spurious "new build available" note for a
+              # short name, or a roll PR naming the wrong build for a full
+              # 40-char name. Rolls only ever open a PR, so a wrong pick is
+              # reviewed, not landed.
               LISTING="${SOURCE_URL%/}/$SAFE_BRANCH/?sort=time&order=desc"
               echo "No manifest; reading listing: $LISTING"
               CANDIDATE=$(curl -sf --max-time 30 "$LISTING" \
@@ -108,8 +110,15 @@ jobs:
                 | sed -E 's/^kdf_([0-9a-f]+)-wasm\.zip$/\1/' \
                 | head -n 1)
               if [[ -n "$CANDIDATE" ]]; then
-                NEW_SHORT="$CANDIDATE"
-                echo "Resolved short sha $NEW_SHORT from $SOURCE_URL"
+                if [[ "${#CANDIDATE}" -eq 40 ]]; then
+                  # Already the full sha: promote it and let the roll job run
+                  # instead of parking on the report-only path below.
+                  NEW_COMMIT="$CANDIDATE"
+                  echo "Resolved full sha $NEW_COMMIT from the listing on $SOURCE_URL"
+                else
+                  NEW_SHORT="$CANDIDATE"
+                  echo "Resolved short sha $NEW_SHORT from $SOURCE_URL"
+                fi
                 break
               fi
             done
