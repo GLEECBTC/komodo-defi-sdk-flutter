@@ -364,6 +364,66 @@ void main() {
       expect(response.fromId, isNull);
     });
 
+    test('"No transactions found" with a non-list result is still empty', () async {
+      final asset = _gleec();
+      stubPubkeys(asset, [_myAddress]);
+      // Some Etherscan-compatible deployments answer the no-history case
+      // with a null result instead of an empty list.
+      final api = _FakeApi(
+        (_) => jsonEncode({
+          'message': 'No transactions found',
+          'status': '0',
+          'result': null,
+        }),
+      );
+
+      final response =
+          await BlockscoutTransactionStrategy(
+            pubkeyManager: pubkeyManager,
+            httpClient: api.client,
+          ).fetchTransactionHistory(
+            _MockApiClient(),
+            asset,
+            const PagePagination(pageNumber: 1, itemsPerPage: 50),
+          );
+
+      expect(response.transactions, isEmpty);
+      expect(response.total, 0);
+    });
+
+    test('an error envelope throws instead of reading as no history', () async {
+      final asset = _gleec();
+      stubPubkeys(asset, [_myAddress]);
+      // The Etherscan error shape: HTTP 200, `status: "0"`, and the detail as
+      // a string in `result`. Mapping this to an empty list would show a
+      // rate-limited user "no transactions" and suppress retry handling.
+      final api = _FakeApi(
+        (_) => jsonEncode({
+          'message': 'NOTOK',
+          'status': '0',
+          'result': 'Max rate limit reached',
+        }),
+      );
+
+      await expectLater(
+        BlockscoutTransactionStrategy(
+          pubkeyManager: pubkeyManager,
+          httpClient: api.client,
+        ).fetchTransactionHistory(
+          _MockApiClient(),
+          asset,
+          const PagePagination(pageNumber: 1, itemsPerPage: 50),
+        ),
+        throwsA(
+          isA<HttpException>().having(
+            (e) => e.message,
+            'message',
+            contains('Max rate limit reached'),
+          ),
+        ),
+      );
+    });
+
     test('maps an incoming native transfer, charging no fee', () async {
       final asset = _gleec();
       stubPubkeys(asset, [_myAddress]);
