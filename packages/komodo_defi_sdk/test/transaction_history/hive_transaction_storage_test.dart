@@ -404,6 +404,70 @@ void main() {
     });
   });
 
+  group('HiveTransactionStorage unreadable rows', () {
+    final wallet = testWallet();
+    final asset = testAssetId();
+
+    test('a row that fails to read leaves no phantom in the index', () async {
+      final storage = await openStorage();
+      await storage.storeTransactions([
+        testTransaction(internalId: 'tx-0'),
+      ], wallet);
+      expect((await storage.getTransactions(asset, wallet)).total, 1);
+
+      // Close the box behind the storage's back so every `LazyBox.get`
+      // throws the way a corrupt or unreadable backend would.
+      await Hive.lazyBox<String>(HiveTransactionStorage.defaultBoxName).close();
+
+      // The failed read is contained and must also drop the key from the
+      // index - a key left behind is a phantom the process keeps counting.
+      final broken = await storage.getTransactions(asset, wallet);
+      expect(broken.transactions, isEmpty);
+
+      final after = await storage.getTransactions(asset, wallet);
+      expect(after.total, 0, reason: 'the unreadable key must not be counted');
+      expect(await storage.getLatestTransactionId(asset, wallet), isNull);
+    });
+  });
+
+  group('HiveTransactionStorage shared acquisition', () {
+    final wallet = testWallet();
+    final asset = testAssetId();
+
+    test('acquire shares one instance and close is refcounted', () async {
+      final first = HiveTransactionStorage.acquire();
+      final second = HiveTransactionStorage.acquire();
+      // Failure-safe drains: extra closes on a released instance are no-ops.
+      addTearDown(first.close);
+      addTearDown(second.close);
+
+      expect(
+        identical(first, second),
+        isTrue,
+        reason: 'containers over one box name must share one store and index',
+      );
+
+      await first.storeTransactions([
+        testTransaction(internalId: 'tx-0'),
+      ], wallet);
+
+      // Releasing one acquirer must not close the box under the other.
+      await first.close();
+      await second.storeTransactions([
+        testTransaction(internalId: 'tx-1'),
+      ], wallet);
+      expect((await second.getTransactions(asset, wallet)).total, 2);
+
+      // The last release really closes; a later acquire starts fresh over
+      // the same persisted data.
+      await second.close();
+      final third = HiveTransactionStorage.acquire();
+      addTearDown(third.close);
+      expect(identical(third, first), isFalse);
+      expect((await third.getTransactions(asset, wallet)).total, 2);
+    });
+  });
+
   group('HiveTransactionStorage degraded mode', () {
     final wallet = testWallet();
     final asset = testAssetId();

@@ -77,6 +77,51 @@ class HiveTransactionStorage
        _cipher = cipher,
        _onError = onError ?? _logError;
 
+  /// Returns the live store for [boxName], creating it on first acquisition.
+  ///
+  /// Hive boxes are process-global, so two SDK containers each constructing
+  /// their own store over the same (default) box name would adopt one
+  /// underlying box while maintaining independent order indexes - writes
+  /// through one invisible to the other - and either container's dispose
+  /// would close the box underneath the survivor. Acquiring shares a single
+  /// instance, so every acquirer sees one index and one owner, and [close]
+  /// releases the box only when the last acquirer lets go.
+  ///
+  /// [knownWalletNamespaces] and the other tuning parameters take effect only
+  /// on the call that creates the instance; later acquirers share the first
+  /// caller's configuration. The plain constructor stays for standalone,
+  /// single-owner use (tests, custom wiring) and does not consult this
+  /// registry.
+  factory HiveTransactionStorage.acquire({
+    String boxName = defaultBoxName,
+    Future<Set<String>> Function()? knownWalletNamespaces,
+    CompactionStrategy? compactionStrategy,
+    HiveCipher? cipher,
+    void Function(String message, Object error, StackTrace stackTrace)? onError,
+  }) {
+    final existing = _acquired[boxName];
+    if (existing != null) {
+      existing._acquireCount++;
+      return existing;
+    }
+    final created = HiveTransactionStorage(
+      boxName: boxName,
+      knownWalletNamespaces: knownWalletNamespaces,
+      compactionStrategy: compactionStrategy,
+      cipher: cipher,
+      onError: onError,
+    ).._acquireCount = 1;
+    _acquired[boxName] = created;
+    return created;
+  }
+
+  /// Live [acquire]d instances by box name.
+  static final Map<String, HiveTransactionStorage> _acquired = {};
+
+  /// How many [acquire] calls this instance must outlive; 0 for instances
+  /// built directly, whose [close] always really closes.
+  int _acquireCount = 0;
+
   /// Box name for the current key layout.
   ///
   /// The version suffix tracks the *key* scheme; the record schema is versioned
@@ -435,6 +480,16 @@ class HiveTransactionStorage
 
   @override
   Future<void> close() async {
+    // A shared instance closes only with its last acquirer; earlier releases
+    // must not shut the box underneath the containers still using it.
+    if (_acquireCount > 1) {
+      _acquireCount--;
+      return;
+    }
+    if (_acquireCount == 1) {
+      _acquireCount = 0;
+      _acquired.remove(boxName);
+    }
     await _mutex.protect(() async {
       final box = _box;
       _box = null;
@@ -529,6 +584,11 @@ class HiveTransactionStorage
       return await box.get(key);
     } on Object catch (error, stackTrace) {
       _onError('failed to read a stored transaction', error, stackTrace);
+      // Out of the index first, like the decode-failure path: a key left
+      // behind is a phantom the process keeps counting - short pages, wrong
+      // totals, a latestKey that reads as null - while the eviction below is
+      // only best-effort.
+      _index.remove(key);
       unawaited(_evict(box, key));
       return null;
     }
