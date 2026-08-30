@@ -120,13 +120,13 @@ void main() {
         reason: 'the pubkey cache should be populated by sign-in',
       );
 
+      // No settling delay after this: the purge runs as an awaited
+      // deleteWallet hook, so the caches must already be clear when the call
+      // returns - that immediacy is part of what this test asserts.
       await harness.sdk.auth.deleteWallet(
         walletName: user.walletId.name,
         password: password,
       );
-
-      // The purge is driven by a stream listener, so let the event settle.
-      await Future<void>.delayed(const Duration(milliseconds: 250));
 
       // A fresh instance, deliberately: the order index is per-instance and
       // rebuilt at open, so the reader above still holds the pre-deletion view.
@@ -184,7 +184,6 @@ void main() {
         walletName: user.walletId.name,
         password: password,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 250));
 
       expect(
         (await otherStorage.getTransactions(asset.id, other)).total,

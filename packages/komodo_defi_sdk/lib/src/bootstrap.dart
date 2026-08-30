@@ -41,6 +41,12 @@ var _activationConfigHiveInitialized = false;
 /// Every purge is best-effort and independent: a cache that will not clear
 /// must not make a deleted wallet look undeleted, and must not stop the other
 /// caches from clearing.
+///
+/// Registered as an awaited [KomodoDefiAuth.onWalletDeletion] hook rather
+/// than a [KomodoDefiAuth.walletDeletions] listener: `deleteWallet` must not
+/// return while these purges are still running, or a caller that promptly
+/// recreates the same wallet has its freshly persisted caches swept away by
+/// the tail of the previous deletion.
 Future<void> _wireWalletDeletionPurge(GetIt container) async {
   // Registered only when the SDK persists transaction history. Resolved from
   // this container rather than a shared variable so concurrently
@@ -53,7 +59,7 @@ Future<void> _wireWalletDeletionPurge(GetIt container) async {
   final pubkeys = await container.getAsync<PubkeyManager>();
   final activationConfig = await container.getAsync<ActivationConfigService>();
 
-  auth.walletDeletions.listen((walletId) async {
+  auth.onWalletDeletion((walletId) async {
     for (final purge in <(String, Future<void> Function())>[
       (
         'transaction history',
