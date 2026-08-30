@@ -90,6 +90,24 @@ bool isDegradedWalletIdentity(WalletId previous, WalletId current) {
       previous.name == current.name;
 }
 
+/// Whether an operation captured under [previous] may continue when the
+/// freshly observed identity is [current].
+///
+/// True for the same stable wallet, and for a transient identity-RPC
+/// degradation of it ([isDegradedWalletIdentity]). The capture paths already
+/// tolerate a degraded observation and keep the enriched identity, so the
+/// post-await guards must extend the same tolerance - otherwise an operation
+/// admitted under a degraded identity dies at its first checkpoint, during
+/// the exact blip the tolerance exists for. A real wallet switch still fails
+/// this check: it always passes through a `null` user or a different
+/// name/hash/options first.
+///
+/// Asymmetric like [isSameStableWallet]: pass the previously accepted
+/// identity first and the newly observed identity second.
+bool walletIdentityContinuesSession(WalletId previous, WalletId current) =>
+    isSameStableWallet(previous, current) ||
+    isDegradedWalletIdentity(previous, current);
+
 /// Accepts [current] as the latest compatible wallet identity.
 ///
 /// A name-only identity may be enriched, but an enriched identity may never be
