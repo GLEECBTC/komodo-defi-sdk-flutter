@@ -503,6 +503,31 @@ void main() {
       expect(identical(third, first), isFalse);
       expect((await third.getTransactions(asset, wallet)).total, 2);
     });
+
+    test('an acquire during the final close waits for the release', () async {
+      final first = HiveTransactionStorage.acquire();
+      addTearDown(first.close);
+      await first.storeTransactions([
+        testTransaction(internalId: 'tx-0'),
+      ], wallet);
+
+      // Deliberately not awaited: the registry entry is gone but the box is
+      // still releasing when the next acquire arrives.
+      final closing = first.close();
+      final second = HiveTransactionStorage.acquire();
+      addTearDown(second.close);
+      expect(identical(second, first), isFalse);
+
+      // The replacement must not adopt the closing box - its open waits for
+      // the release and reopens - so reads and writes keep working instead
+      // of landing on a box closed underneath it.
+      expect((await second.getTransactions(asset, wallet)).total, 1);
+      await second.storeTransactions([
+        testTransaction(internalId: 'tx-1'),
+      ], wallet);
+      expect((await second.getTransactions(asset, wallet)).total, 2);
+      await closing;
+    });
   });
 
   group('HiveTransactionStorage degraded mode', () {
