@@ -9,6 +9,7 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/bootstrap.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart';
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
@@ -324,18 +325,51 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   BalanceManager get balances =>
       _assertSdkInitialized(_container<BalanceManager>());
 
+  /// Current fail-closed GasFree availability for [asset].
+  ///
+  /// A ready result is wallet/session specific and is granted only after KDF
+  /// activation configuration plus an authoritative provider status check.
+  GaslessCapability gaslessCapability(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().capabilityFor(asset),
+  );
+
+  /// Whether the current typed KDF status permits an authoritative GasFree
+  /// preview. This is true only for a ready, `available` capability.
+  bool canAttemptGaslessPreview(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().canAttemptAuthoritativePreview(
+      asset.id,
+    ),
+  );
+
+  /// Whether this wallet may expose a new GasFree custody receive address.
+  bool canReceiveGasless(Asset asset) => _assertSdkInitialized(
+    _container<GaslessCapabilityRegistry>().canReceiveGasless(asset.id),
+  );
+
   /// The event streaming service instance.
   ///
   /// Provides access to SSE (Server-Sent Events) connection lifecycle management
   /// for real-time balance and transaction history updates.
   ///
-  /// Use [KdfEventStreamingService.connectIfNeeded] to establish SSE connection
-  /// after authentication, and [KdfEventStreamingService.disconnect] to clean up
-  /// on sign-out.
+  /// Use [connectStreaming] after authentication and [disconnectStreaming] on
+  /// sign-out so managed KDF registrations are disabled before the transport
+  /// is closed.
   ///
   /// Throws [StateError] if accessed before initialization.
   KdfEventStreamingService get streaming =>
       _assertSdkInitialized(_container<KomodoDefiFramework>().streaming);
+
+  /// Connects the authenticated KDF event session.
+  void connectStreaming() => streaming.connectIfNeeded();
+
+  /// Disconnects the KDF event session and invalidates every managed streamer.
+  ///
+  /// Subsequent subscriptions reconnect and issue fresh `stream::*::enable`
+  /// requests; no registration from the signed-out session is reused.
+  Future<void> disconnectStreaming() {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.disconnect();
+  }
 
   /// Subscribes to a managed orderbook stream for a trading pair.
   ///
@@ -364,6 +398,18 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   Future<StreamSubscription<OrderStatusEvent>> subscribeToOrderStatus() {
     final manager = _assertSdkInitialized(_container<EventStreamingManager>());
     return manager.subscribeToOrderStatus();
+  }
+
+  /// Subscribes to GasFree lifecycle and provider-error events for [coin].
+  ///
+  /// Most applications should consume withdrawal progress instead. This
+  /// lower-level stream is exposed for recovery and diagnostics that already
+  /// own a KDF trace identifier.
+  Future<StreamSubscription<KdfEvent>> subscribeToGaslessTrace({
+    required String coin,
+  }) {
+    final manager = _assertSdkInitialized(_container<EventStreamingManager>());
+    return manager.subscribeToGaslessTrace(coin: coin);
   }
 
   /// Public stream of framework logs.

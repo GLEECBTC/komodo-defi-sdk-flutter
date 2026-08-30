@@ -54,6 +54,9 @@ Map<String, dynamic> _erc20Config() => {
     'protocol_data': {'chain_id': 1},
   },
   'nodes': <Map<String, dynamic>>[],
+  // Required by Erc20Protocol config validation (real ETH config values).
+  'swap_contract_address': '0x61EEC68Cf64d1b31e41EA713356De2563fB6D3F1',
+  'fallback_swap_contract': '0x24ABE4c71FC658C91313b6552cd40cD808b3Ea80',
 };
 
 void main() {

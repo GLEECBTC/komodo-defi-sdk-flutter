@@ -11,8 +11,11 @@ abstract class CoinConfigDataFactory {
     CoinConfigTransformer transformer,
   );
 
-  /// Creates a local asset-backed provider using the given [config].
-  CoinConfigProvider createLocalProvider(AssetRuntimeUpdateConfig config);
+  /// Creates a local asset-backed provider using [config] and [transformer].
+  CoinConfigProvider createLocalProvider(
+    AssetRuntimeUpdateConfig config,
+    CoinConfigTransformer transformer,
+  );
 }
 
 /// Default production implementation.
@@ -29,7 +32,13 @@ class DefaultCoinConfigDataFactory implements CoinConfigDataFactory {
   }
 
   @override
-  CoinConfigProvider createLocalProvider(AssetRuntimeUpdateConfig config) {
-    return LocalAssetCoinConfigProvider.fromConfig(config);
+  CoinConfigProvider createLocalProvider(
+    AssetRuntimeUpdateConfig config,
+    CoinConfigTransformer transformer,
+  ) {
+    return LocalAssetCoinConfigProvider.fromConfig(
+      config,
+      transformer: transformer,
+    );
   }
 }

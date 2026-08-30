@@ -22,6 +22,14 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// [TransactionBasedPagination.fromId] on the next call. When `fromId` is
 /// `null`, there are no more pages.
 ///
+/// **GasFree custody addresses:** for gasless TRC-20 assets each pubkey's EOA
+/// is queried together with its GasFree custody address
+/// ([PubkeyInfo.gasfreeAddress]) so custody deposits and gasless sends appear
+/// in history. The pair is fetched as one group within a single call — early
+/// yielding never splits a group — so both views of an EOA→custody
+/// consolidation merge into a single net-zero transaction (rows of the same
+/// hash fetched on a later call are not re-merged with stored ones).
+///
 /// See [TRX transactions](https://developers.tron.network/reference/get-transaction-info-by-account-address)
 /// and [TRC-20 transfers](https://developers.tron.network/reference/trc20-transaction-information-by-account-address).
 class TronGridTransactionStrategy extends TransactionHistoryStrategy {
@@ -31,9 +39,11 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     http.Client? httpClient,
     this.tronProApiKey,
     String? apiHostOverride,
+    bool Function(AssetId assetId)? includeGaslessCustody,
   }) : _client = httpClient ?? http.Client(),
        _ownsClient = httpClient == null,
-       _apiHostOverride = apiHostOverride;
+       _apiHostOverride = apiHostOverride,
+       _includeGaslessCustody = includeGaslessCustody;
 
   /// Rows per TRONGrid API request (their maximum).
   static const int _gridPageSize = 200;
@@ -48,7 +58,6 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   /// up to this many TRONGrid pages per [fetchTransactionHistory] call so a
   /// single invocation still returns a meaningful batch.
   static const int _maxInternalPages = 3;
-
   static const int _maxHttpAttempts = 6;
 
   /// Minimum gap between HTTP requests to stay within 3 RPS.
@@ -57,6 +66,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   final http.Client _client;
   final bool _ownsClient;
   final String? _apiHostOverride;
+  final bool Function(AssetId assetId)? _includeGaslessCustody;
 
   /// Provides public-key / address data for the asset being queried.
   final PubkeyManager pubkeyManager;
@@ -65,6 +75,10 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   final String? tronProApiKey;
 
   DateTime _lastRequestTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Tail of the throttle chain; serializes concurrent callers (see
+  /// [_throttle]).
+  Future<void> _throttleTail = Future<void>.value();
 
   @override
   bool get usesOpaquePaginationCursor => true;
@@ -79,7 +93,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   @override
   bool supportsAsset(Asset asset) => switch (asset.protocol) {
     TrxProtocol() => true,
-    Trc20Protocol(:final platform) => platform == 'TRX',
+    Trc20Protocol(:final platform) => platform == 'TRX' || platform == 'TRXT',
     _ => false,
   };
 
@@ -102,7 +116,7 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     validatePagination(pagination);
 
     final host = _apiHostOverride ?? _defaultApiHost(asset.protocol);
-    final addresses = await _getAssetPubkeys(asset);
+    final groups = await _getQueryAddressGroups(asset);
     final limit = pagination.limit ?? 50;
 
     // Decode per-address cursors. On the first call (PagePagination) the map
@@ -118,60 +132,65 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
     final nextCursors = <String, String>{};
 
     try {
-      for (var i = 0; i < addresses.length; i++) {
-        final addr = addresses[i].address;
+      for (var g = 0; g < groups.length; g++) {
+        for (final addr in groups[g]) {
+          // On a continuation call, skip addresses already exhausted (absent
+          // from the cursor map). The empty-key wildcard ('') from the single-
+          // address fast path matches any address.
+          if (cursors.isNotEmpty &&
+              !cursors.containsKey(addr) &&
+              !cursors.containsKey('')) {
+            continue;
+          }
 
-        // On a continuation call, skip addresses already exhausted (absent
-        // from the cursor map). The empty-key wildcard ('') from the single-
-        // address fast path matches any address.
-        if (cursors.isNotEmpty &&
-            !cursors.containsKey(addr) &&
-            !cursors.containsKey('')) {
-          continue;
-        }
+          // Resolve fingerprint: exact address key first, then wildcard ('').
+          // The _kPending marker means "not yet started" — treat as null.
+          var fp = cursors[addr] ?? cursors[''];
+          if (fp == _kPending) fp = null;
 
-        // Resolve fingerprint: exact address key first, then wildcard ('').
-        // The _kPending marker means "not yet started" — treat as null.
-        var fp = cursors[addr] ?? cursors[''];
-        if (fp == _kPending) fp = null;
+          final result = switch (asset.protocol) {
+            TrxProtocol() => await _fetchTrxPage(
+              host: host,
+              address: addr,
+              asset: asset,
+              fingerprint: fp,
+              limit: limit,
+            ),
+            Trc20Protocol() => await _fetchTrc20Page(
+              host: host,
+              address: addr,
+              asset: asset,
+              fingerprint: fp,
+            ),
+            _ => const _PageResult(transactions: []),
+          };
 
-        final result = switch (asset.protocol) {
-          TrxProtocol() => await _fetchTrxPage(
-            host: host,
-            address: addr,
-            asset: asset,
-            fingerprint: fp,
-            limit: limit,
-          ),
-          Trc20Protocol() => await _fetchTrc20Page(
-            host: host,
-            address: addr,
-            asset: asset,
-            fingerprint: fp,
-          ),
-          _ => const _PageResult(transactions: []),
-        };
+          for (final tx in result.transactions) {
+            final h = tx.txHash;
+            final existing = byHash[h];
+            byHash[h] = existing == null
+                ? tx
+                : _mergeTransactionInfo(existing, tx);
+          }
 
-        for (final tx in result.transactions) {
-          final h = tx.txHash;
-          final existing = byHash[h];
-          byHash[h] = existing == null
-              ? tx
-              : _mergeTransactionInfo(existing, tx);
-        }
-
-        if (result.nextFingerprint != null) {
-          nextCursors[addr] = result.nextFingerprint!;
+          if (result.nextFingerprint != null) {
+            nextCursors[addr] = result.nextFingerprint!;
+          }
         }
 
         // Yield results early: if we already have transactions and there are
-        // remaining addresses, encode them as pending in the cursor so the
-        // manager's streaming loop fetches them on the next call.
-        if (byHash.isNotEmpty && i < addresses.length - 1) {
-          for (var j = i + 1; j < addresses.length; j++) {
-            final pending = addresses[j].address;
-            if (!nextCursors.containsKey(pending)) {
-              nextCursors[pending] = cursors[pending] ?? _kPending;
+        // remaining groups, encode their addresses as pending in the cursor so
+        // the manager's streaming loop fetches them on the next call. Breaking
+        // is only allowed at group boundaries: rows of the same hash fetched
+        // on a later call are not re-merged with stored ones, so splitting an
+        // EOA from its custody address would render a consolidation as a
+        // directional transfer instead of net zero.
+        if (byHash.isNotEmpty && g < groups.length - 1) {
+          for (var j = g + 1; j < groups.length; j++) {
+            for (final pending in groups[j]) {
+              if (!nextCursors.containsKey(pending)) {
+                nextCursors[pending] = cursors[pending] ?? _kPending;
+              }
             }
           }
           break;
@@ -339,6 +358,37 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
 
   Future<List<PubkeyInfo>> _getAssetPubkeys(Asset asset) async {
     return (await pubkeyManager.getPubkeys(asset)).keys;
+  }
+
+  /// Ordered address groups to query. For gasless TRC-20 assets each group
+  /// is `[eoa, custodyAddress]` so both views of a consolidation transfer
+  /// are fetched (and merged by hash) within a single call; otherwise one
+  /// EOA per group. Deduplicated across groups.
+  Future<List<List<String>>> _getQueryAddressGroups(Asset asset) async {
+    final pubkeys = await _getAssetPubkeys(asset);
+    final hasRetainedCustody = pubkeys.any(
+      (pubkey) => (pubkey.gasfreeAddress ?? '').isNotEmpty,
+    );
+    final includeCustody =
+        asset.protocol is Trc20Protocol &&
+        ((_includeGaslessCustody?.call(asset.id) ?? false) ||
+            hasRetainedCustody);
+    final seen = <String>{};
+    final groups = <List<String>>[];
+
+    for (final pubkey in pubkeys) {
+      final group = <String>[if (seen.add(pubkey.address)) pubkey.address];
+      final custody = pubkey.gasfreeAddress;
+      if (includeCustody &&
+          custody != null &&
+          custody.isNotEmpty &&
+          seen.add(custody)) {
+        group.add(custody);
+      }
+      if (group.isNotEmpty) groups.add(group);
+    }
+
+    return groups;
   }
 
   String _defaultApiHost(ProtocolClass protocol) {
@@ -547,12 +597,19 @@ class TronGridTransactionStrategy extends TransactionHistoryStrategy {
   // Rate limiter — keeps requests within TRONGrid's 3 RPS budget
   // ---------------------------------------------------------------------------
 
-  Future<void> _throttle() async {
-    final elapsed = DateTime.now().difference(_lastRequestTime);
-    if (elapsed < _minRequestInterval) {
-      await Future<void>.delayed(_minRequestInterval - elapsed);
-    }
-    _lastRequestTime = DateTime.now();
+  /// Serialized across concurrent callers (per-asset poll timers can fire on
+  /// the same tick) so two fetches cannot both observe a stale
+  /// [_lastRequestTime] and burst past TRONGrid's 3 RPS budget.
+  Future<void> _throttle() {
+    final gate = _throttleTail.then((_) async {
+      final elapsed = DateTime.now().difference(_lastRequestTime);
+      if (elapsed < _minRequestInterval) {
+        await Future<void>.delayed(_minRequestInterval - elapsed);
+      }
+      _lastRequestTime = DateTime.now();
+    });
+    _throttleTail = gate;
+    return gate;
   }
 
   // ---------------------------------------------------------------------------

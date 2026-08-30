@@ -17,7 +17,7 @@ dependencies:
   freezed_annotation: ^3.0.0
   json_annotation: ^4.9.0
 
-  komodo_defi_types: ^0.4.1
+  komodo_defi_types: '>=0.4.1 <2.0.0'
 
   # Approved via https://github.com/GLEECBTC/gleec-wallet/pull/1106
   hive_ce: ^2.2.3+ce # Changed from hive to hive_ce for Hive CE compatibility

@@ -18,6 +18,49 @@ class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
+Asset _trc20Asset() {
+  final trx = Asset.fromJson(const {
+    'coin': 'TRX',
+    'type': 'TRX',
+    'name': 'TRON',
+    'fname': 'TRON',
+    'wallet_only': true,
+    'mm2': 1,
+    'decimals': 6,
+    'required_confirmations': 1,
+    'derivation_path': "m/44'/195'",
+    'protocol': {
+      'type': 'TRX',
+      'protocol_data': {'network': 'Mainnet'},
+    },
+    'nodes': <Map<String, dynamic>>[],
+  }, knownIds: const {});
+  return Asset.fromJson(
+    const {
+      'coin': 'USDT-TRC20',
+      'type': 'TRC-20',
+      'name': 'Tether',
+      'fname': 'Tether',
+      'wallet_only': true,
+      'mm2': 1,
+      'decimals': 6,
+      'required_confirmations': 1,
+      'derivation_path': "m/44'/195'",
+      'protocol': {
+        'type': 'TRC20',
+        'protocol_data': {
+          'platform': 'TRX',
+          'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        },
+      },
+      'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      'parent_coin': 'TRX',
+      'nodes': <Map<String, dynamic>>[],
+    },
+    knownIds: {trx.id},
+  );
+}
+
 void main() {
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
@@ -123,6 +166,7 @@ void main() {
       required String coin,
       Decimal? total,
       Decimal? unspendable,
+      String? gasfreeAddress,
     }) {
       when(() => client.executeRpc(any())).thenAnswer((invocation) async {
         final req =
@@ -134,6 +178,7 @@ void main() {
             'balance': (total ?? Decimal.zero).toString(),
             'unspendable_balance': (unspendable ?? Decimal.zero).toString(),
             'coin': coin,
+            if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
           };
         }
         if (method == 'unban_pubkeys') {
@@ -163,6 +208,33 @@ void main() {
         expect(result.assetId, tendermintAsset.id);
         expect(result.keys, hasLength(1));
         expect(result.keys.first.address, 'cosmos1abc');
+      },
+    );
+
+    test(
+      'fresh pubkeys do not inherit a cached GasFree custody address',
+      () async {
+        final asset = _trc20Asset();
+        final user = nonHdUser();
+        when(() => auth.currentUser).thenAnswer((_) async => user);
+        await stubActivationAlwaysActive(asset);
+        stubWalletMyBalance(
+          address: 'TStandardAddress',
+          coin: asset.id.id,
+          gasfreeAddress: 'TCachedCustodyAddress',
+        );
+
+        final cached = await manager.getPubkeys(asset);
+        expect(cached.keys.single.gasfreeAddress, 'TCachedCustodyAddress');
+
+        stubWalletMyBalance(address: 'TStandardAddress', coin: asset.id.id);
+        final refreshed = await manager
+            .watchPubkeys(asset)
+            .firstWhere((pubkeys) => pubkeys.keys.single.gasfreeAddress == null)
+            .timeout(const Duration(seconds: 2));
+
+        expect(refreshed.keys.single.address, 'TStandardAddress');
+        expect(refreshed.keys.single.gasfreeAddress, isNull);
       },
     );
 

@@ -10,8 +10,12 @@ export 'package:komodo_cex_market_data/komodo_cex_market_data.dart'
 export 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show
         BalanceEvent,
+        GaslessTraceErrorEvent,
+        GaslessTraceEvent,
+        GaslessTraceEventState,
         HeartbeatEvent,
         IKdfHostConfig,
+        KdfEvent,
         LocalConfig,
         NetworkEvent,
         OrderStatusEvent,
@@ -22,18 +26,36 @@ export 'package:komodo_defi_framework/komodo_defi_framework.dart'
         TxHistoryEvent;
 export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
     show AuthenticationState, AuthenticationStatus;
-// ZHTLC sync parameters
+// ZHTLC sync parameters + GasFree custody account status
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
-    show ZhtlcSyncParams;
+    show
+        GaslessAccountAvailability,
+        GaslessAccountStatusResponse,
+        GaslessTraceState,
+        ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
 export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
     show BalanceManager;
+export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
+    show MarketDataManager;
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
     show SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
+export 'package:komodo_defi_types/komodo_defi_types.dart'
+    show
+        GaslessCapability,
+        GaslessCapabilityState,
+        GaslessTransferErrorCode,
+        GaslessTransferErrorKind,
+        GaslessTransferException,
+        GaslessTransferStage,
+        GaslessTransferState,
+        PendingGaslessTransfer,
+        WithdrawalSubmission,
+        WithdrawalSubmissionType;
 
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation_config/activation_config_service.dart'
@@ -64,8 +86,17 @@ export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
 export 'src/transaction_history/transaction_merge_utils.dart'
     show TransactionListReconciler, TransactionMergeUtils;
 export 'src/widgets/asset_balance_text.dart';
+export 'src/withdrawals/pending_gasless_transfer_repository.dart'
+    show
+        GaslessTransferKeyDiscovery,
+        GaslessTransferKeyValueStorage,
+        GaslessTransferLegacyResolutionException,
+        GaslessTransferStorageFormatException,
+        GaslessTransferStorageReadException,
+        PendingGaslessTransferRepository,
+        SecureGaslessTransferStorage,
+        SecurePendingGaslessTransferRepository;
 export 'src/zcash_params/models/download_progress.dart';
 export 'src/zcash_params/models/download_result.dart';
 export 'src/zcash_params/zcash_params_downloader.dart';
-// Zcash parameters download functionality
 export 'src/zcash_params/zcash_params_downloader_factory.dart';

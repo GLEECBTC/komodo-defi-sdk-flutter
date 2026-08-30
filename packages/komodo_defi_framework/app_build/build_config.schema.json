@@ -1,256 +1,191 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "type": "object",
-    "properties": {
-        "api": {
-            "type": "object",
-            "properties": {
-                "api_commit_hash": {
-                    "type": "string"
-                },
-                "branch": {
-                    "type": "string"
-                },
-                "fetch_at_build_enabled": {
-                    "type": "boolean"
-                },
-                "source_urls": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "format": "uri"
-                    }
-                },
-                "platforms": {
-                    "type": "object",
-                    "properties": {
-                        "web": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "ios": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "macos": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "windows": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "android-armv7": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "android-aarch64": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        },
-                        "linux": {
-                            "type": "object",
-                            "properties": {
-                                "matching_keyword": {
-                                    "type": "string"
-                                },
-                                "valid_zip_sha256_checksums": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                    }
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "matching_keyword",
-                                "valid_zip_sha256_checksums",
-                                "path"
-                            ]
-                        }
-                    },
-                    "additionalProperties": false
-                }
-            },
-            "required": [
-                "api_commit_hash",
-                "branch",
-                "fetch_at_build_enabled",
-                "source_urls",
-                "platforms"
-            ]
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "api_commit_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
         },
-        "coins": {
-            "type": "object",
-            "properties": {
-                "update_commit_on_build": {
-                    "type": "boolean"
-                },
-                "bundled_coins_repo_commit": {
-                    "type": "string"
-                },
-                "coins_repo_api_url": {
-                    "type": "string",
-                    "format": "uri"
-                },
-                "coins_repo_content_url": {
-                    "type": "string",
-                    "format": "uri"
-                },
-                "coins_repo_branch": {
-                    "type": "string"
-                },
-                "runtime_updates_enabled": {
-                    "type": "boolean"
-                },
-                "mapped_files": {
-                    "type": "object",
-                    "patternProperties": {
-                        ".*": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "mapped_folders": {
-                    "type": "object",
-                    "patternProperties": {
-                        ".*": {
-                            "type": "string"
-                        }
-                    }
-                }
-            },
-            "required": [
-                "update_commit_on_build",
-                "bundled_coins_repo_commit",
-                "coins_repo_api_url",
-                "coins_repo_content_url",
-                "coins_repo_branch",
-                "runtime_updates_enabled",
-                "mapped_files",
-                "mapped_folders"
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fetch_at_build_enabled": {
+          "type": "boolean"
+        },
+        "concurrent_downloads_enabled": {
+          "type": "boolean"
+        },
+        "require_full_commit_hash": {
+          "const": true
+        },
+        "required_platforms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "web",
+              "ios",
+              "macos",
+              "android-armv7",
+              "android-aarch64",
+              "linux",
+              "windows"
             ]
+          },
+          "allOf": [
+            {
+              "contains": { "const": "web" }
+            },
+            {
+              "contains": { "const": "ios" }
+            },
+            {
+              "contains": { "const": "macos" }
+            },
+            {
+              "contains": { "const": "android-armv7" }
+            },
+            {
+              "contains": { "const": "android-aarch64" }
+            },
+            {
+              "contains": { "const": "linux" }
+            },
+            {
+              "contains": { "const": "windows" }
+            }
+          ]
+        },
+        "source_urls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "platforms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "web": { "$ref": "#/definitions/platform" },
+            "ios": { "$ref": "#/definitions/platform" },
+            "macos": { "$ref": "#/definitions/platform" },
+            "android-armv7": { "$ref": "#/definitions/platform" },
+            "android-aarch64": { "$ref": "#/definitions/platform" },
+            "linux": { "$ref": "#/definitions/platform" },
+            "windows": { "$ref": "#/definitions/platform" }
+          },
+          "required": [
+            "web",
+            "ios",
+            "macos",
+            "android-armv7",
+            "android-aarch64",
+            "linux",
+            "windows"
+          ]
         }
+      },
+      "required": [
+        "api_commit_hash",
+        "branch",
+        "fetch_at_build_enabled",
+        "concurrent_downloads_enabled",
+        "require_full_commit_hash",
+        "required_platforms",
+        "source_urls",
+        "platforms"
+      ]
     },
-    "required": [
-        "api",
-        "coins"
-    ]
+    "coins": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fetch_at_build_enabled": { "type": "boolean" },
+        "update_commit_on_build": { "type": "boolean" },
+        "bundled_coins_repo_commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "coins_repo_api_url": { "type": "string", "format": "uri" },
+        "coins_repo_content_url": { "type": "string", "format": "uri" },
+        "coins_repo_branch": { "type": "string", "minLength": 1 },
+        "runtime_updates_enabled": { "type": "boolean" },
+        "mapped_files": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "mapped_folders": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "concurrent_downloads_enabled": { "type": "boolean" },
+        "cdn_branch_mirrors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "required": [
+        "fetch_at_build_enabled",
+        "update_commit_on_build",
+        "bundled_coins_repo_commit",
+        "coins_repo_api_url",
+        "coins_repo_content_url",
+        "coins_repo_branch",
+        "runtime_updates_enabled",
+        "mapped_files",
+        "mapped_folders",
+        "concurrent_downloads_enabled"
+      ]
+    }
+  },
+  "required": ["api", "coins"],
+  "definitions": {
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "matching_keyword": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matching_pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matching_preference": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "valid_zip_sha256_checksums": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["valid_zip_sha256_checksums", "path"],
+      "oneOf": [
+        { "required": ["matching_keyword"] },
+        { "required": ["matching_pattern"] }
+      ]
+    }
+  }
 }

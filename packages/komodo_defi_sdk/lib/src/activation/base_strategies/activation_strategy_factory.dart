@@ -17,17 +17,30 @@ class ActivationStrategyFactory {
     ApiClient client,
     PrivateKeyPolicy privKeyPolicy,
     ActivationConfigService configService,
-    ActivatedAssetsCache activatedAssetsCache,
-  ) {
+    ActivatedAssetsCache activatedAssetsCache, {
+    TronGaslessProviderConfig? tronGaslessProvider,
+  }) {
     return SmartAssetActivator(
       client,
       CompositeAssetActivator(client, [
         // BCH strategy needs to be before UTXO strategy to handle the special case
         // BchActivationStrategy(client),
         UtxoActivationStrategy(client, privKeyPolicy),
-        EthTaskActivationStrategy(client, privKeyPolicy),
-        EthWithTokensActivationStrategy(client, privKeyPolicy),
-        Erc20ActivationStrategy(client, privKeyPolicy),
+        EthTaskActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
+        EthWithTokensActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
+        Erc20ActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
         // SlpActivationStrategy(client),
         // Tendermint strategies follow same pattern as ETH: task -> platform -> tokens
         TendermintTaskActivationStrategy(client, privKeyPolicy),
@@ -36,7 +49,10 @@ class ActivationStrategyFactory {
         QtumActivationStrategy(client, privKeyPolicy),
         SiaActivationStrategy(client),
         ZhtlcActivationStrategy(client, privKeyPolicy, configService),
-        CustomErc20ActivationStrategy(client),
+        CustomErc20ActivationStrategy(
+          client,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
       ]),
       activatedAssetsCache,
     );

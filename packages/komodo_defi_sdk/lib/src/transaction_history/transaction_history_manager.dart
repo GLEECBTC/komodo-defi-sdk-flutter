@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show BalanceEvent;
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
-import 'package:komodo_defi_sdk/src/activation/activation_exceptions.dart';
-import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -53,28 +54,32 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     required EventStreamingManager eventStreamingManager,
     TransactionStorage? storage,
     AssetHistoryStorage? assetHistoryStorage,
+    GaslessCapabilityRegistry? gaslessCapabilities,
+    List<TransactionHistoryStrategy>? transactionHistoryStrategies,
   }) : _storage = storage ?? TransactionStorage.defaultForPlatform(),
+       _pubkeyManager = pubkeyManager,
        _strategyFactory = TransactionHistoryStrategyFactory(
          pubkeyManager,
          _auth,
+         strategies: transactionHistoryStrategies,
+         includeGaslessCustody: gaslessCapabilities?.canAccessExistingCustody,
        ),
        _eventStreamingManager = eventStreamingManager,
+       _gaslessCapabilities = gaslessCapabilities,
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
     // Subscribe to auth changes directly in constructor
-    _authSubscription = _auth.authStateChanges.listen((user) {
-      if (user == null) {
-        _stopAllStreaming();
-      }
-    });
+    _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
   }
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
+  final PubkeyManager _pubkeyManager;
   final IAssetProvider _assetProvider;
   final SharedActivationCoordinator _activationCoordinator;
   final TransactionStorage _storage;
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
+  final GaslessCapabilityRegistry? _gaslessCapabilities;
 
   final _streamControllers = <AssetId, StreamController<Transaction>>{};
   final _txHistorySubscriptions = <AssetId, StreamSubscription<dynamic>>{};
@@ -84,7 +89,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   final _balanceFallbackSubscriptions =
       <AssetId, StreamSubscription<BalanceEvent>>{};
   final _lastBalanceForPolling = <AssetId, BalanceInfo>{};
-  final _syncInProgress = <AssetId>{};
+  final _lastCustodyBalanceForPolling = <AssetId, Decimal>{};
+  final _syncInProgress = <(AssetId, int)>{};
   final _rateLimiter = _RateLimiter(const Duration(milliseconds: 500));
 
   static const _defaultPollingInterval = Duration(seconds: 30);
@@ -98,6 +104,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   bool _isDisposed = false;
   StreamSubscription<KdfUser?>? _authSubscription;
+  WalletId? _currentWalletId;
+  int _walletGeneration = 0;
 
   final TransactionHistoryStrategyFactory _strategyFactory;
 
@@ -106,6 +114,93 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   bool _supportsTxHistoryStreaming(Asset asset) =>
       asset.supportsTxHistoryStreaming;
+
+  void _handleAuthStateChanged(KdfUser? user) {
+    if (_isDisposed) return;
+    final nextWallet = user?.walletId;
+    final currentWalletId = _currentWalletId;
+    if (_sameOptionalWallet(currentWalletId, nextWallet)) {
+      if (currentWalletId != null && nextWallet != null) {
+        _currentWalletId = preferEnrichedWalletIdentity(
+          currentWalletId,
+          nextWallet,
+        );
+      }
+      return;
+    }
+
+    // Invalidate first: cancellation is best-effort and queued callbacks may
+    // still complete after a wallet switch.
+    _walletGeneration++;
+    _currentWalletId = nextWallet;
+    _lastBalanceForPolling.clear();
+    _lastCustodyBalanceForPolling.clear();
+    _syncInProgress.clear();
+    _stopAllStreaming();
+  }
+
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
+  }
+
+  Future<WalletOperationContext> _captureWalletContext() async {
+    final user = await _auth.currentUser;
+    if (user == null) throw StateError('User is not logged in');
+
+    final currentWalletId = _currentWalletId;
+    late final WalletId operationWalletId;
+    if (currentWalletId == null) {
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      operationWalletId = preferEnrichedWalletIdentity(
+        currentWalletId,
+        user.walletId,
+      );
+      _currentWalletId = operationWalletId;
+    } else {
+      // Do not wait for the auth stream to deliver before isolating the old
+      // wallet's subscriptions and in-flight operations.
+      _walletGeneration++;
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+      _lastBalanceForPolling.clear();
+      _lastCustodyBalanceForPolling.clear();
+      _syncInProgress.clear();
+      _stopAllStreaming();
+    }
+
+    return WalletOperationContext(
+      walletId: operationWalletId,
+      generation: _walletGeneration,
+    );
+  }
+
+  bool _isWalletContextCurrentSync(WalletOperationContext context) {
+    final current = _currentWalletId;
+    return !_isDisposed &&
+        context.generation == _walletGeneration &&
+        current != null &&
+        isSameStableWallet(context.walletId, current);
+  }
+
+  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
+    if (!_isWalletContextCurrentSync(context)) return false;
+    final user = await _auth.currentUser;
+    return user != null &&
+        _isWalletContextCurrentSync(context) &&
+        isSameStableWallet(context.walletId, user.walletId);
+  }
+
+  Future<void> _requireWalletContextCurrent(
+    WalletOperationContext context,
+  ) async {
+    if (await _isWalletContextCurrent(context)) return;
+    throw const WalletChangedDisconnectException(
+      'Wallet changed while fetching transaction history',
+    );
+  }
 
   void _stopAllStreaming() {
     if (_isDisposed) return;
@@ -150,6 +245,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       if (_isDisposed) {
         throw StateError('TransactionHistoryManager has been disposed');
       }
+      final walletContext = await _captureWalletContext();
 
       // Default to first page if no pagination specified
       pagination ??= const PagePagination(
@@ -160,10 +256,12 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // Optimization: Check if this is a newly created wallet (not imported)
       final user = await _auth.currentUser;
       if (user != null &&
+          isSameStableWallet(walletContext.walletId, user.walletId) &&
           pagination is PagePagination &&
           pagination.pageNumber == 1) {
         final previouslyEnabledAssets = await _assetHistoryStorage
-            .getWalletAssets(user.walletId);
+            .getWalletAssets(walletContext.walletId);
+        await _requireWalletContextCurrent(walletContext);
         final isFirstTimeEnabling = !previouslyEnabledAssets.contains(
           asset.id.id,
         );
@@ -171,19 +269,27 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         // Check metadata to determine if this was an imported wallet
         // Only optimize for genuinely new wallets, not imported ones
         final isImported = user.metadata['isImported'] == true;
-        final isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+        var isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+        if (isNewWallet) {
+          final hasAmbiguousLegacyHistory = await _assetHistoryStorage
+              .hasAmbiguousLegacyHistory(walletContext.walletId);
+          await _requireWalletContextCurrent(walletContext);
+          isNewWallet = !hasAmbiguousLegacyHistory;
+        }
 
         // For newly created wallets (not imported) on first-time asset enablement,
         // assume empty transaction history to reduce RPC spam
         if (isFirstTimeEnabling && isNewWallet) {
           // Still need to activate the asset
           await _ensureAssetActivated(asset);
+          await _requireWalletContextCurrent(walletContext);
 
           // Mark asset as seen after activation
           await _assetHistoryStorage.addAssetToWallet(
-            user.walletId,
+            walletContext.walletId,
             asset.id.id,
           );
+          await _requireWalletContextCurrent(walletContext);
 
           return TransactionPage(
             transactions: const [],
@@ -197,13 +303,14 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // First try to get from local storage
       final localPage = await _storage.getTransactions(
         asset.id,
-        await _getCurrentWalletId(),
+        walletContext.walletId,
         fromId: pagination is TransactionBasedPagination
             ? pagination.fromId
             : null,
         pageNumber: pagination is PagePagination ? pagination.pageNumber : null,
         limit: pagination.limit ?? _maxBatchSize,
       );
+      await _requireWalletContextCurrent(walletContext);
 
       // If we have enough local data and it's not a first page request, return it
       if (localPage.transactions.isNotEmpty &&
@@ -219,6 +326,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
       if (!hasLocalHistory) {
         await _ensureAssetActivated(asset);
+        await _requireWalletContextCurrent(walletContext);
       }
 
       // Get appropriate strategy for the asset
@@ -233,6 +341,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         asset,
         pagination,
       );
+      await _requireWalletContextCurrent(walletContext);
 
       // Convert API response to domain model
       final transactions = response.transactions
@@ -240,7 +349,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           .toList();
 
       // Store in local storage efficiently
-      await _batchStoreTransactions(transactions);
+      await _batchStoreTransactions(transactions, walletContext);
 
       return TransactionPage(
         transactions: transactions,
@@ -250,7 +359,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         totalPages: response.totalPages,
       );
     } catch (e) {
-      if (e is TransactionStorageException) {
+      if (e is TransactionStorageException ||
+          e is WalletChangedDisconnectException) {
         // Propagate storage-specific errors
         rethrow;
       }
@@ -268,11 +378,14 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     if (_assetProvider.fromId(asset.id) == null) {
       throw ArgumentError('Asset ${asset.id.name} not found');
     }
+    final walletContext = await _captureWalletContext();
 
     try {
       await _ensureAssetActivated(asset);
+      await _requireWalletContextCurrent(walletContext);
     } catch (e) {
-      if (e is ActivationFailedException) {
+      if (e is ActivationFailedException ||
+          e is WalletChangedDisconnectException) {
         rethrow;
       } else {
         // Wrap other errors in ActivationFailedException for consistency
@@ -289,9 +402,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     // First try to get any cached transactions
     final localPage = await _storage.getTransactions(
       asset.id,
-      await _getCurrentWalletId(),
+      walletContext.walletId,
       limit: _maxBatchSize,
     );
+    await _requireWalletContextCurrent(walletContext);
 
     if (localPage.transactions.isNotEmpty) {
       yield localPage.transactions;
@@ -303,7 +417,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     const maxRetries = 3;
     var consecutiveEmptyPages = 0;
 
-    while (hasMore && !_isDisposed) {
+    while (hasMore && _isWalletContextCurrentSync(walletContext)) {
       try {
         final response = await strategy.fetchTransactionHistory(
           _client,
@@ -318,6 +432,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
                   itemsPerPage: _maxBatchSize,
                 ),
         );
+        await _requireWalletContextCurrent(walletContext);
 
         if (response.transactions.isEmpty) {
           if (response.fromId != null) {
@@ -339,7 +454,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
             .map((tx) => tx.asTransaction(asset.id))
             .toList();
 
-        await _batchStoreTransactions(transactions);
+        await _batchStoreTransactions(transactions, walletContext);
         yield transactions;
 
         fromId = response.fromId;
@@ -348,6 +463,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           hasMore = false;
         }
       } catch (_) {
+        if (!_isWalletContextCurrentSync(walletContext)) return;
         retryCount++;
         if (retryCount >= maxRetries) {
           hasMore = false;
@@ -405,9 +521,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           }
         },
         onCancel: () async {
-          if (!_streamControllers[asset.id]!.hasListener) {
+          final activeController = _streamControllers[asset.id];
+          if (activeController == null || !activeController.hasListener) {
             _stopStreaming(asset.id);
-            await _streamControllers[asset.id]?.close();
+            await activeController?.close();
             _streamControllers.remove(asset.id);
           }
         },
@@ -419,22 +536,27 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   @override
   Future<void> syncTransactionHistory(Asset asset) async {
-    if (_isDisposed || _syncInProgress.contains(asset.id)) return;
-    _syncInProgress.add(asset.id);
+    if (_isDisposed) return;
+    final walletContext = await _captureWalletContext();
+    final syncIdentity = (asset.id, walletContext.generation);
+    if (_syncInProgress.contains(syncIdentity)) return;
+    _syncInProgress.add(syncIdentity);
 
     try {
       final strategy = _strategyFactory.forAsset(asset);
       final latestStoredId = await _storage.getLatestTransactionId(
         asset.id,
-        await _getCurrentWalletId(),
+        walletContext.walletId,
       );
+      await _requireWalletContextCurrent(walletContext);
       if (strategy.usesOpaquePaginationCursor && latestStoredId != null) {
         final newTransactions = await _fetchOpaqueCursorTransactionsSince(
           asset,
           strategy: strategy,
           latestStoredId: latestStoredId,
+          walletContext: walletContext,
         );
-        await _batchStoreTransactions(newTransactions);
+        await _batchStoreTransactions(newTransactions, walletContext);
         return;
       }
 
@@ -442,8 +564,9 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       var hasMore = true;
       var consecutiveEmptyPages = 0;
 
-      while (hasMore && !_isDisposed) {
+      while (hasMore && _isWalletContextCurrentSync(walletContext)) {
         await _rateLimiter.throttle();
+        await _requireWalletContextCurrent(walletContext);
 
         final response = await strategy.fetchTransactionHistory(
           _client,
@@ -458,6 +581,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
                   itemsPerPage: _maxBatchSize,
                 ),
         );
+        await _requireWalletContextCurrent(walletContext);
 
         if (response.transactions.isEmpty) {
           if (response.fromId != null) {
@@ -479,7 +603,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
             .map((tx) => tx.asTransaction(asset.id))
             .toList();
 
-        await _batchStoreTransactions(transactions);
+        await _batchStoreTransactions(transactions, walletContext);
         fromId = response.fromId;
 
         if (fromId == null) {
@@ -487,7 +611,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         }
       }
     } finally {
-      _syncInProgress.remove(asset.id);
+      _syncInProgress.remove(syncIdentity);
     }
   }
 
@@ -495,13 +619,14 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     Asset asset, {
     required TransactionHistoryStrategy strategy,
     required String latestStoredId,
+    required WalletOperationContext walletContext,
   }) async {
     String? fromId;
     var hasMore = true;
     var consecutiveEmptyPages = 0;
     final newTransactions = <Transaction>[];
 
-    while (hasMore && !_isDisposed) {
+    while (hasMore && _isWalletContextCurrentSync(walletContext)) {
       final response = await strategy.fetchTransactionHistory(
         _client,
         asset,
@@ -512,6 +637,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
               )
             : const PagePagination(pageNumber: 1, itemsPerPage: _maxBatchSize),
       );
+      await _requireWalletContextCurrent(walletContext);
 
       if (response.transactions.isEmpty) {
         if (response.fromId != null) {
@@ -553,8 +679,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   @override
   Future<void> clearTransactionHistory(Asset asset) async {
     if (_isDisposed) return;
+    final walletContext = await _captureWalletContext();
 
-    await _storage.clearTransactions(asset.id, await _getCurrentWalletId());
+    await _requireWalletContextCurrent(walletContext);
+    await _storage.clearTransactions(asset.id, walletContext.walletId);
+    await _requireWalletContextCurrent(walletContext);
     _stopStreaming(asset.id);
     await _streamControllers[asset.id]?.close();
     _streamControllers.remove(asset.id);
@@ -572,22 +701,21 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
   }
 
-  Future<WalletId> _getCurrentWalletId() async {
-    final currentUser = await _auth.currentUser;
-    if (currentUser == null) {
-      throw StateError('User is not logged in');
-    }
-    return currentUser.walletId;
-  }
-
-  Future<void> _batchStoreTransactions(List<Transaction> transactions) async {
+  Future<void> _batchStoreTransactions(
+    List<Transaction> transactions,
+    WalletOperationContext walletContext,
+  ) async {
     if (transactions.isEmpty) return;
 
     try {
-      await _storage.storeTransactions(
-        transactions,
-        await _getCurrentWalletId(),
-      );
+      // Resolve and validate the wallet before the storage write. Never resolve
+      // "current wallet" after the network fetch: that writes wallet A's
+      // response under wallet B when a switch happens during the await.
+      await _requireWalletContextCurrent(walletContext);
+      await _storage.storeTransactions(transactions, walletContext.walletId);
+      await _requireWalletContextCurrent(walletContext);
+    } on WalletChangedDisconnectException {
+      rethrow;
     } catch (e) {
       throw Exception('Failed to store transactions batch: $e');
     }
@@ -596,10 +724,17 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   Future<void> _startStreaming(Asset asset) async {
     // Ensure we don't duplicate subscriptions
     _stopStreaming(asset.id);
+    final WalletOperationContext walletContext;
+    try {
+      walletContext = await _captureWalletContext();
+    } catch (_) {
+      return;
+    }
 
     // Ensure asset is activated before subscribing
     try {
       await _ensureAssetActivated(asset);
+      await _requireWalletContextCurrent(walletContext);
     } catch (e) {
       final controller = _streamControllers[asset.id];
       if (controller != null && !controller.isClosed) {
@@ -624,11 +759,15 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     try {
       // Gate by KDF capability to avoid unsupported streaming RPCs
       if (!_supportsTxHistoryStreaming(asset)) {
-        await _startPolling(asset);
+        await _startPolling(asset, walletContext);
         return;
       }
       final txHistoryStreamSubscription = await _eventStreamingManager
           .subscribeToTxHistory(coin: asset.id.id);
+      if (!await _isWalletContextCurrent(walletContext)) {
+        await txHistoryStreamSubscription.cancel();
+        return;
+      }
 
       // Check again to avoid race condition: only store if not already present
       if (_txHistorySubscriptions.containsKey(asset.id)) {
@@ -642,7 +781,9 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         Object? error,
         StackTrace? stackTrace,
       }) async {
-        if (hasFallenBack || _isDisposed) return;
+        if (hasFallenBack || !_isWalletContextCurrentSync(walletContext)) {
+          return;
+        }
         hasFallenBack = true;
 
         if (_txHistorySubscriptions[asset.id] == txHistoryStreamSubscription) {
@@ -653,12 +794,12 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           await txHistoryStreamSubscription.cancel();
         } catch (_) {}
 
-        await _startPolling(asset);
+        await _startPolling(asset, walletContext);
       }
 
       _txHistorySubscriptions[asset.id] = txHistoryStreamSubscription
         ..onData((txHistoryEvent) async {
-          if (_isDisposed) return;
+          if (!_isWalletContextCurrentSync(walletContext)) return;
 
           // Verify the event is for the correct coin
           if (txHistoryEvent.coin != asset.id.id) return;
@@ -671,7 +812,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           if (transactions.isEmpty) return;
 
           // Store transactions in local storage
-          await _batchStoreTransactions(transactions);
+          await _batchStoreTransactions(transactions, walletContext);
+          if (!_isWalletContextCurrentSync(walletContext)) return;
 
           // Emit each transaction to listeners
           final controller = _streamControllers[asset.id];
@@ -695,9 +837,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         });
 
       // Keep confirmations fresh even while the stream is healthy
-      _startConfirmationsRefresh(asset);
+      _startConfirmationsRefresh(asset, walletContext);
     } catch (_) {
-      await _startPolling(asset);
+      if (_isWalletContextCurrentSync(walletContext)) {
+        await _startPolling(asset, walletContext);
+      }
     }
   }
 
@@ -724,10 +868,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   Future<void> _syncHistoryIfBalanceChanged(
     Asset asset, {
+    required WalletOperationContext walletContext,
     BalanceInfo? balance,
     bool force = false,
   }) async {
-    if (_isDisposed) return;
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     if (!_isPollingActive(asset.id)) return;
 
     var shouldSync = force;
@@ -739,40 +884,118 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
     if (!shouldSync) return;
 
-    await _pollNewTransactions(asset);
+    await _pollNewTransactions(asset, walletContext);
   }
 
   Future<void> _pollBalanceAndSyncHistory(
     Asset asset, {
+    required WalletOperationContext walletContext,
     bool force = false,
   }) async {
-    if (_isDisposed) return;
+    if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
       await _ensureAssetActivated(asset);
+      await _requireWalletContextCurrent(walletContext);
       final response = await _client.rpc.wallet.myBalance(coin: asset.id.id);
+      await _requireWalletContextCurrent(walletContext);
+      final custodyChanged = await _custodyBalanceChanged(asset, walletContext);
       await _syncHistoryIfBalanceChanged(
         asset,
         balance: response.balance,
-        force: force,
+        force: force || custodyChanged,
+        walletContext: walletContext,
       );
     } catch (_) {
-      if (force) {
-        await _pollNewTransactions(asset);
+      if (force && _isWalletContextCurrentSync(walletContext)) {
+        await _pollNewTransactions(asset, walletContext);
       }
     }
   }
 
-  Future<void> _pollNewTransactions(Asset asset, [int retryCount = 0]) async {
-    if (_isDisposed) return;
+  /// Whether [asset] is a gasless TRC-20 (any pubkey carries a GasFree
+  /// custody address). Custody balance changes are invisible to KDF EOA
+  /// balance events, so these assets need custody-aware polling.
+  Future<bool> _isGaslessTrc20(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
+    if (asset.protocol is! Trc20Protocol) return false;
+    final capabilities = _gaslessCapabilities;
+    if (capabilities?.canAccessExistingCustody(asset.id) == true) return true;
+    try {
+      final pubkeys =
+          _pubkeyManager.lastKnownForWallet(asset.id, walletContext.walletId) ??
+          await _pubkeyManager.getPubkeys(asset);
+      if (!await _isWalletContextCurrent(walletContext)) return false;
+      return pubkeys.keys.any((key) => (key.gasfreeAddress ?? '').isNotEmpty);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Detects GasFree custody balance changes for gasless TRC-20 assets via
+  /// the per-coin gasless account status RPC. Returns false for other assets
+  /// or when the status call fails (provider unreachable), so history syncing
+  /// falls back to EOA balance gating alone.
+  ///
+  /// Note: [_fetchOpaqueCursorTransactionsSince] stops at the stored head, so
+  /// custody transactions older than the head are not backfilled mid-session;
+  /// storage is in-memory and [getTransactionsStreamed] re-fetches from page 1
+  /// on every coin-details open, so the gap self-heals.
+  ///
+  /// The new balance is committed before the triggered sync runs (mirroring
+  /// [_updateLastKnownBalance] for EOA balances), so a sync whose retries all
+  /// fail drops that one trigger; the next custody movement or a coin-details
+  /// reopen (page-1 refetch) recovers.
+  Future<bool> _custodyBalanceChanged(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
+    if (!await _isGaslessTrc20(asset, walletContext)) return false;
+    final capabilities = _gaslessCapabilities;
+    if (capabilities == null || !capabilities.canRefreshAccountStatus(asset)) {
+      return false;
+    }
+    final capabilitySession = capabilities.sessionGeneration;
+    try {
+      final status = await _client.rpc.withdraw.gaslessAccountStatus(
+        coin: asset.id.id,
+      );
+      if (!await _isWalletContextCurrent(walletContext) ||
+          capabilities.sessionGeneration != capabilitySession) {
+        return false;
+      }
+      if (!capabilities.refreshAccountStatus(asset, status)) return false;
+      final previous = _lastCustodyBalanceForPolling[asset.id];
+      _lastCustodyBalanceForPolling[asset.id] = status.onChainBalance;
+      return previous == null || previous != status.onChainBalance;
+    } catch (error) {
+      if (!_isWalletContextCurrentSync(walletContext) ||
+          capabilities.sessionGeneration != capabilitySession) {
+        return false;
+      }
+      capabilities.markAccountStatusError(asset.id, error);
+      return false;
+    }
+  }
+
+  Future<void> _pollNewTransactions(
+    Asset asset,
+    WalletOperationContext walletContext, [
+    int retryCount = 0,
+  ]) async {
+    if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
       await _ensureAssetActivated(asset);
+      await _requireWalletContextCurrent(walletContext);
       final strategy = _strategyFactory.forAsset(asset);
       final latestId = await _storage.getLatestTransactionId(
         asset.id,
-        await _getCurrentWalletId(),
+        walletContext.walletId,
       );
+      await _requireWalletContextCurrent(walletContext);
 
       if (!_isPollingActive(asset.id)) return;
 
@@ -782,6 +1005,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
               asset,
               strategy: strategy,
               latestStoredId: latestId,
+              walletContext: walletContext,
             )
           : (await strategy.fetchTransactionHistory(
               _client,
@@ -796,9 +1020,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
                       itemsPerPage: _maxBatchSize,
                     ),
             )).transactions.map((tx) => tx.asTransaction(asset.id)).toList();
+      await _requireWalletContextCurrent(walletContext);
 
       if (newTransactions.isNotEmpty) {
-        await _batchStoreTransactions(newTransactions);
+        await _batchStoreTransactions(newTransactions, walletContext);
 
         final controller = _streamControllers[asset.id];
         if (controller != null && !controller.isClosed) {
@@ -808,57 +1033,84 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         }
       }
     } catch (_) {
-      if (!_pollingTimers.containsKey(asset.id)) return;
+      if (!_pollingTimers.containsKey(asset.id) ||
+          !_isWalletContextCurrentSync(walletContext)) {
+        return;
+      }
 
       if (retryCount < _maxPollingRetries) {
         final delaySeconds = math.pow(2, retryCount).toInt();
         await Future<void>.delayed(
           Duration(seconds: delaySeconds),
-          () => _pollNewTransactions(asset, retryCount + 1),
+          () => _pollNewTransactions(asset, walletContext, retryCount + 1),
         );
       }
     }
   }
 
-  Future<void> _startPolling(Asset asset) async {
+  Future<void> _startPolling(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
     _stopPolling(asset.id);
+    if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
-      // Prefer balance event stream when supported; otherwise, use timer polling
-      if (!_supportsBalanceStreaming(asset)) {
-        _startTimerPolling(asset);
+      // Prefer balance event stream when supported; otherwise, use timer
+      // polling. ALL TRC-20 assets go straight to timer polling: gasless
+      // custody activity never fires KDF EOA balance events (a dead end for
+      // custody-first users), and detecting gasless-ness from pubkeys here is
+      // unreliable at startup (stale hydrated cache, transient activation
+      // errors) — timer polling degrades gracefully for non-gasless TRC-20,
+      // while a misrouted gasless asset would never see its history update.
+      // _custodyBalanceChanged re-evaluates gasless-ness on every tick.
+      if (!_supportsBalanceStreaming(asset) ||
+          await _isGaslessTrc20(asset, walletContext)) {
+        _startTimerPolling(asset, walletContext);
         return;
       }
 
       final balanceSubscription = await _eventStreamingManager
           .subscribeToBalance(coin: asset.id.id);
+      if (!await _isWalletContextCurrent(walletContext)) {
+        await balanceSubscription.cancel();
+        return;
+      }
 
       _balanceFallbackSubscriptions[asset.id] = balanceSubscription
         ..onData((balanceEvent) {
-          if (_isDisposed) return;
+          if (!_isWalletContextCurrentSync(walletContext)) return;
           if (balanceEvent.coin != asset.id.id) return;
 
           _syncHistoryIfBalanceChanged(
             asset,
             balance: balanceEvent.balance,
+            walletContext: walletContext,
           ).ignore();
         })
         ..onError((Object error, StackTrace stackTrace) {
-          _startTimerPolling(asset);
+          _startTimerPolling(asset, walletContext);
         })
         ..onDone(() {
-          _startTimerPolling(asset);
+          _startTimerPolling(asset, walletContext);
         });
 
       // Initial sync to ensure we have the latest data without
       // immediately resorting to history polling on every interval.
-      unawaited(_pollBalanceAndSyncHistory(asset, force: true));
+      unawaited(
+        _pollBalanceAndSyncHistory(
+          asset,
+          force: true,
+          walletContext: walletContext,
+        ),
+      );
     } catch (_) {
-      _startTimerPolling(asset);
+      _startTimerPolling(asset, walletContext);
     }
   }
 
-  void _startTimerPolling(Asset asset) {
+  void _startTimerPolling(Asset asset, WalletOperationContext walletContext) {
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     final balanceSub = _balanceFallbackSubscriptions.remove(asset.id);
     if (balanceSub != null) {
       balanceSub.cancel().ignore();
@@ -866,9 +1118,16 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _pollingTimers[asset.id]?.cancel();
     _pollingTimers[asset.id] = Timer.periodic(
       _defaultPollingInterval,
-      (_) => _pollBalanceAndSyncHistory(asset).ignore(),
+      (_) => _pollBalanceAndSyncHistory(
+        asset,
+        walletContext: walletContext,
+      ).ignore(),
     );
-    _pollBalanceAndSyncHistory(asset, force: true).ignore();
+    _pollBalanceAndSyncHistory(
+      asset,
+      force: true,
+      walletContext: walletContext,
+    ).ignore();
   }
 
   void _stopPolling(AssetId assetId) {
@@ -881,20 +1140,24 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     _lastBalanceForPolling.remove(assetId);
+    _lastCustodyBalanceForPolling.remove(assetId);
   }
 
   // Periodically refresh the most recent transactions to update confirmations
-  void _startConfirmationsRefresh(Asset asset) {
+  void _startConfirmationsRefresh(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) {
     // Cancel any existing timer first
     _confirmationsTimers[asset.id]?.cancel();
 
     _confirmationsTimers[asset.id] = Timer.periodic(
       _defaultPollingInterval,
-      (_) => _refreshRecentConfirmations(asset),
+      (_) => _refreshRecentConfirmations(asset, walletContext),
     );
 
     // Kick off an immediate refresh
-    _refreshRecentConfirmations(asset).ignore();
+    _refreshRecentConfirmations(asset, walletContext).ignore();
   }
 
   void _stopConfirmationsRefresh(AssetId assetId) {
@@ -902,15 +1165,20 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _confirmationsTimers.remove(assetId);
   }
 
-  Future<void> _refreshRecentConfirmations(Asset asset) async {
-    if (_isDisposed) return;
+  Future<void> _refreshRecentConfirmations(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
+    if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
       // Avoid hammering the backend
       await _rateLimiter.throttle();
+      await _requireWalletContextCurrent(walletContext);
 
       // Ensure asset is active (no-op if already active)
       await _ensureAssetActivated(asset);
+      await _requireWalletContextCurrent(walletContext);
 
       final strategy = _strategyFactory.forAsset(asset);
       // Fetch the first page to update the most recent txs' confirmations
@@ -919,8 +1187,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         asset,
         const PagePagination(pageNumber: 1, itemsPerPage: _maxBatchSize),
       );
-
-      if (_isDisposed) return;
+      await _requireWalletContextCurrent(walletContext);
 
       if (response.transactions.isEmpty) return;
 
@@ -928,7 +1195,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
           .map((tx) => tx.asTransaction(asset.id))
           .toList();
 
-      await _batchStoreTransactions(transactions);
+      await _batchStoreTransactions(transactions, walletContext);
 
       final controller = _streamControllers[asset.id];
       if (controller != null && !controller.isClosed) {
@@ -944,6 +1211,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
+    _walletGeneration++;
 
     await _authSubscription?.cancel();
 

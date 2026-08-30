@@ -1,4 +1,5 @@
 import 'dart:async' show StreamSubscription;
+import 'dart:collection' show UnmodifiableMapView;
 
 import 'package:flutter/foundation.dart' show ValueGetter;
 import 'package:komodo_coins/komodo_coins.dart';
@@ -135,9 +136,24 @@ class AssetManager implements IAssetProvider {
   /// Default assets (configured in [KomodoDefiSdkConfig]) appear first,
   /// followed by other assets in alphabetical order.
   /// The filtering and ordering is handled by the underlying coin_config_manager.
+  ///
+  /// Returns an unmodifiable, `==`/`hashCode`-keyed snapshot.
+  ///
+  /// This getter is on hot paths - every [fromId], [findAssetsByConfigId] and
+  /// [childAssetsOf] call, and those run once per enabled coin on every
+  /// activated-assets refresh. `Map.unmodifiable` copies, so the previous
+  /// implementation rebuilt the whole ~800-entry catalogue on each access,
+  /// dozens of times during login.
+  ///
+  /// [CoinConfigManager.filteredAssets] now memoises that snapshot and
+  /// invalidates it on every mutation, so this is O(1) without changing the
+  /// map's lookup semantics. Note that it must stay a hash-keyed map: the
+  /// filter caches are `SplayTreeMap`s whose comparator is *not* consistent
+  /// with [AssetId] equality, so exposing one directly silently misses on ids
+  /// that are `==` a stored key but stringify differently.
   @override
   Map<AssetId, Asset> get available =>
-      Map.unmodifiable(_coins.filteredAssets(_currentFilterStrategy));
+      UnmodifiableMapView(_coins.filteredAssets(_currentFilterStrategy));
 
   /// Returns currently activated assets for the signed-in user.
   ///

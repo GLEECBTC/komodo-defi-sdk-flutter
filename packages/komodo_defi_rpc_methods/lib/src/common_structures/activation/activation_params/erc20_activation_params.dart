@@ -36,7 +36,7 @@ class Erc20ActivationParams extends ActivationParams {
 
   @override
   JsonMap toRpcParams() => super.toRpcParams().deepMerge({
-    // Align with KDF API which expects node objects (url/gui_auth), not plain strings
+    // Align with KDF API which expects node objects, not plain strings.
     'nodes': nodes.map((e) => e.toJson()).toList(),
     'swap_contract_address': swapContractAddress,
     'fallback_swap_contract': fallbackSwapContract,

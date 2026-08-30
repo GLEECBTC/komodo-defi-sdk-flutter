@@ -25028,10 +25028,7 @@ abstract final class KdfErrorRegistry {
   /// [rpcMethodHint] disambiguates types in [_ambiguousErrorTypes] that share
   /// the same `error_type` string across RPC namespaces (e.g. withdraw vs
   /// delegation `NotSufficientBalance`).
-  static MmRpcException? tryParse(
-    JsonMap json, {
-    String? rpcMethodHint,
-  }) {
+  static MmRpcException? tryParse(JsonMap json, {String? rpcMethodHint}) {
     final errorType = json['error_type'] as String?;
     if (errorType == null) return null;
 

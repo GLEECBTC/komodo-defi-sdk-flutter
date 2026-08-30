@@ -25,23 +25,39 @@ abstract class CoinConfigTransform {
 /// respective classes.
 class CoinConfigTransformer {
   /// Creates a new [CoinConfigTransformer] with the provided transforms.
-  /// If [transforms] is omitted, a default set is used.
-  const CoinConfigTransformer({List<CoinConfigTransform>? transforms})
-    : _transforms =
-          transforms ??
-          const [
-            WssWebsocketTransform(),
-            SslElectrumTransform(),
-            ZhtlcLightWalletTransform(),
-            ParentCoinTransform(),
-          ];
+  ///
+  /// If [transforms] is omitted, the built-in normalization set is used.
+  /// [additionalTransforms] always runs after that set so an application can
+  /// amend the normalized asset configuration without replacing SDK defaults.
+  const CoinConfigTransformer({
+    List<CoinConfigTransform>? transforms,
+    this.additionalTransforms = const [],
+  }) : _transforms =
+           transforms ??
+           const [
+             WssWebsocketTransform(),
+             SslElectrumTransform(),
+             ZhtlcLightWalletTransform(),
+             TronQuickNodeTransform(),
+             ParentCoinTransform(),
+           ];
 
   final List<CoinConfigTransform> _transforms;
 
+  /// Application-supplied transforms applied after [_transforms].
+  final List<CoinConfigTransform> additionalTransforms;
+
   /// Applies all necessary transforms to the given coin configuration.
   JsonMap apply(JsonMap config) {
-    final neededTransforms = _transforms.where((t) => t.needsTransform(config));
+    final normalized = _applyTransforms(config, _transforms);
+    return _applyTransforms(normalized, additionalTransforms);
+  }
 
+  JsonMap _applyTransforms(
+    JsonMap config,
+    List<CoinConfigTransform> transforms,
+  ) {
+    final neededTransforms = transforms.where((t) => t.needsTransform(config));
     if (neededTransforms.isEmpty) {
       return config;
     }
@@ -255,6 +271,82 @@ class WssWebsocketTransform implements CoinConfigTransform {
 
 /// Specifies which type of Electrum servers to retain
 enum ElectrumServerType { wssOnly, nonWssOnly }
+
+/// Adds Gleec's QuickNode proxy as the preferred mainnet TRON RPC endpoint.
+///
+/// The generated coins config can be refreshed from the upstream coins repo, so
+/// this runtime transform keeps TRX and TRC20 assets pointed at the Gleec proxy
+/// while preserving upstream fallback nodes.
+class TronQuickNodeTransform implements CoinConfigTransform {
+  const TronQuickNodeTransform();
+
+  static const quickNodeUrl = 'https://quicknode.gleec.com/';
+
+  @override
+  bool needsTransform(JsonMap config) =>
+      _isMainnetTronConfig(config) &&
+      !_nodes(config).any(_isConfiguredQuickNodeNode);
+
+  @override
+  JsonMap transform(JsonMap config) {
+    final result = JsonMap.of(config);
+    if (!_isMainnetTronConfig(config)) return result;
+
+    final nodes = _nodes(config);
+    final hasQuickNode = nodes.any(_isQuickNodeNode);
+
+    result['nodes'] = [
+      if (!hasQuickNode) _quickNodeNode(),
+      ...nodes.map(
+        (node) => _isQuickNodeNode(node) ? _quickNodeNode() : JsonMap.of(node),
+      ),
+    ];
+
+    return result;
+  }
+
+  static JsonMap _quickNodeNode() =>
+      JsonMap.of({'url': quickNodeUrl, 'komodo_proxy': true});
+
+  static JsonList _nodes(JsonMap config) =>
+      JsonList.of(config.valueOrNull<JsonList>('nodes') ?? const []);
+
+  static bool _isQuickNodeNode(JsonMap node) =>
+      node.valueOrNull<String>('url') == quickNodeUrl;
+
+  static bool _isConfiguredQuickNodeNode(JsonMap node) =>
+      _isQuickNodeNode(node) && node.valueOrNull<bool>('komodo_proxy') == true;
+
+  static bool _isMainnetTronConfig(JsonMap config) {
+    final type = _normaliseType(
+      config.valueOrNull<String>('type') ??
+          config.valueOrNull<String>('protocol', 'type'),
+    );
+    final protocolType = _normaliseType(
+      config.valueOrNull<String>('protocol', 'type'),
+    );
+
+    final isTrx = type == 'TRX' || protocolType == 'TRX';
+    if (isTrx) {
+      final network = config.valueOrNull<String>(
+        'protocol',
+        'protocol_data',
+        'network',
+      );
+      return network == null || network.toLowerCase() == 'mainnet';
+    }
+
+    final platform = config.valueOrNull<String>(
+      'protocol',
+      'protocol_data',
+      'platform',
+    );
+    return type == 'TRC20' && platform == 'TRX';
+  }
+
+  static String? _normaliseType(String? value) =>
+      value?.replaceAll('-', '').toUpperCase();
+}
 
 /// Filters out insecure connections on non-web platforms, emulating the
 /// filtering applied to the coins_config_ssl.json file in GLEECBTC/coins

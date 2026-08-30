@@ -103,6 +103,10 @@ mixin class SecureRpcPasswordMixin {
 
   /// Android-specific options for secure storage.
   AndroidOptions _getAndroidOptions() => const AndroidOptions(
-        encryptedSharedPreferences: true,
-      );
+    encryptedSharedPreferences: true,
+    // A Keystore/decryption error must be surfaced. Automatically wiping
+    // the shared secure-storage preferences can erase an unresolved
+    // GasFree journal and make a blind resubmission appear safe.
+    resetOnError: false,
+  );
 }

@@ -56,12 +56,14 @@ class PubkeyInfo extends NewAddressInfo {
     required String? chain,
     required BalanceInfo balance,
     required String coinTicker,
+    String? gasfreeAddress,
     this.name,
   }) : super(
          address: address,
          derivationPath: derivationPath,
          chain: chain,
          balances: {coinTicker: balance},
+         gasfreeAddress: gasfreeAddress,
        );
 
   final String? name;
@@ -81,6 +83,7 @@ class PubkeyInfo extends NewAddressInfo {
     return {
       ...super.toJson(),
       'address': address,
+      if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
       'derivationPath': derivationPath,
       'chain': chain,
       'balance': balance.toJson(),

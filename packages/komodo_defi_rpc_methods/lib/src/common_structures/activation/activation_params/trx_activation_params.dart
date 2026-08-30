@@ -1,5 +1,6 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class TrxWithTokensActivationParams extends ActivationParams {
   TrxWithTokensActivationParams({
@@ -7,6 +8,7 @@ class TrxWithTokensActivationParams extends ActivationParams {
     required this.tokenRequests,
     required this.txHistory,
     this.mm2,
+    this.tronGaslessProvider,
     required super.privKeyPolicy,
     super.requiredConfirmations,
     super.requiresNotarization = false,
@@ -14,6 +16,7 @@ class TrxWithTokensActivationParams extends ActivationParams {
 
   factory TrxWithTokensActivationParams.fromJson(JsonMap json) {
     final base = ActivationParams.fromConfigJson(json);
+    final gaslessProvider = json.valueOrNull<JsonMap>('tron_gasless_provider');
 
     return TrxWithTokensActivationParams(
       nodes: json.value<List<JsonMap>>('nodes').map(EvmNode.fromJson).toList(),
@@ -28,6 +31,9 @@ class TrxWithTokensActivationParams extends ActivationParams {
       privKeyPolicy: base.privKeyPolicy,
       txHistory: json.valueOrNull<bool>('tx_history'),
       mm2: json.valueOrNull<int>('mm2'),
+      tronGaslessProvider: gaslessProvider == null
+          ? null
+          : TronGaslessProviderConfig.fromJson(gaslessProvider),
     );
   }
 
@@ -35,6 +41,10 @@ class TrxWithTokensActivationParams extends ActivationParams {
   final List<TokensRequest> tokenRequests;
   final bool? txHistory;
   final int? mm2;
+
+  /// Optional Tron GasFree provider config. When set, gas-free (gasless) TRC20
+  /// transfers become available for tokens activated under this platform.
+  final TronGaslessProviderConfig? tronGaslessProvider;
 
   TrxWithTokensActivationParams copyWith({
     List<EvmNode>? nodes,
@@ -44,6 +54,7 @@ class TrxWithTokensActivationParams extends ActivationParams {
     PrivateKeyPolicy? privKeyPolicy,
     bool? txHistory,
     int? mm2,
+    TronGaslessProviderConfig? tronGaslessProvider,
   }) {
     return TrxWithTokensActivationParams(
       nodes: nodes ?? this.nodes,
@@ -54,6 +65,7 @@ class TrxWithTokensActivationParams extends ActivationParams {
       privKeyPolicy: privKeyPolicy ?? this.privKeyPolicy,
       txHistory: txHistory ?? this.txHistory,
       mm2: mm2 ?? this.mm2,
+      tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
     );
   }
 
@@ -65,6 +77,8 @@ class TrxWithTokensActivationParams extends ActivationParams {
       'erc20_tokens_requests': tokenRequests.map((e) => e.toJson()).toList(),
       if (txHistory != null) 'tx_history': txHistory,
       if (mm2 != null) 'mm2': mm2,
+      if (tronGaslessProvider != null)
+        'tron_gasless_provider': tronGaslessProvider!.toJson(),
       'priv_key_policy':
           (privKeyPolicy ?? const PrivateKeyPolicy.contextPrivKey()).toJson(),
     };

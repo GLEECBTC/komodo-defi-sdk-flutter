@@ -10,11 +10,15 @@ class TransactionHistoryStrategyFactory {
     PubkeyManager pubkeyManager,
     KomodoDefiLocalAuth auth, {
     List<TransactionHistoryStrategy>? strategies,
+    bool Function(AssetId assetId)? includeGaslessCustody,
   }) : _strategies =
            strategies ??
            [
              EtherscanTransactionStrategy(pubkeyManager: pubkeyManager),
-             TronGridTransactionStrategy(pubkeyManager: pubkeyManager),
+             TronGridTransactionStrategy(
+               pubkeyManager: pubkeyManager,
+               includeGaslessCustody: includeGaslessCustody,
+             ),
              V2TransactionStrategy(auth),
              const LegacyTransactionStrategy(),
              const ZhtlcTransactionStrategy(),

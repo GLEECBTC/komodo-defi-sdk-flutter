@@ -37,7 +37,9 @@ class GithubArtefactDownloader implements ArtefactDownloader {
     final fullHash = apiCommitHash;
     final shortHash = apiCommitHash.substring(0, 7);
 
-    _log.info('Looking for release files with hash $fullHash or $shortHash');
+    _log
+      ..info('Looking for release files with hash $fullHash or $shortHash')
+      ..info('Searching for commit hash match');
 
     // TODO! Try to find exact version release first
     // if (version != null && version!.isNotEmpty) {
@@ -62,20 +64,18 @@ class GithubArtefactDownloader implements ArtefactDownloader {
     // }
 
     // If no exact version match found, try matching by commit hash
-    _log.info('Searching for commit hash match');
     final candidates = <String, String>{}; // fileName -> url
     for (final release in releases) {
       for (final asset in release.assets) {
-        final fileName = path.basename(asset.browserDownloadUrl);
+        final fileName = apiArtifactFilenameFromUrl(asset.browserDownloadUrl);
 
-        if (matchingConfig.matches(fileName)) {
-          if (fileName.contains(fullHash) || fileName.contains(shortHash)) {
-            final commitHash = await githubApiProvider.getLatestCommitHash(
-              branch: release.tagName,
-            );
-            if (commitHash == apiCommitHash) {
-              candidates[fileName] = asset.browserDownloadUrl;
-            }
+        if (matchingConfig.matches(fileName) &&
+            apiArtifactFilenameMatchesCommit(fileName, apiCommitHash)) {
+          final commitHash = await githubApiProvider.getLatestCommitHash(
+            branch: release.tagName,
+          );
+          if (commitHash == apiCommitHash) {
+            candidates[fileName] = asset.browserDownloadUrl;
           }
         }
       }
@@ -117,7 +117,7 @@ class GithubArtefactDownloader implements ArtefactDownloader {
     final response = await http.get(Uri.parse(url));
     response.throwIfNotSuccessResponse();
 
-    final zipFileName = path.basename(url);
+    final zipFileName = apiArtifactFilenameFromUrl(url);
     final zipFilePath = path.join(destinationPath, zipFileName);
 
     final directory = Directory(destinationPath);

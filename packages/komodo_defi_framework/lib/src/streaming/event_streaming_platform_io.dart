@@ -5,12 +5,15 @@ import 'dart:io';
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
-typedef EventStreamUnsubscribe = void Function();
+typedef EventStreamUnsubscribe = Future<void> Function();
 
 // Default client ID used for SSE connections
 const int _kDefaultClientId = 0;
 
-Uri _buildEventsUrl(IKdfHostConfig hostConfig, {int clientId = _kDefaultClientId}) {
+Uri _buildEventsUrl(
+  IKdfHostConfig hostConfig, {
+  int clientId = _kDefaultClientId,
+}) {
   if (hostConfig is RemoteConfig) {
     final Uri base = hostConfig.rpcUrl;
     return base.replace(
@@ -43,17 +46,17 @@ Future<bool> _preflightCheck(IKdfHostConfig cfg) async {
       final uri = cfg is RemoteConfig
           ? cfg.rpcUrl
           : Uri(scheme: 'http', host: '127.0.0.1', port: 7783);
-      
+
       final request = await client.postUrl(uri);
       request.headers.set('Content-Type', 'application/json');
-      
+
       // Simple version check to verify KDF is responding
       final payload = jsonEncode({
         'userpass': cfg.rpcPassword,
         'method': 'version',
       });
       request.write(payload);
-      
+
       final response = await request.close().timeout(
         const Duration(seconds: 5),
         onTimeout: () {
@@ -61,14 +64,14 @@ Future<bool> _preflightCheck(IKdfHostConfig cfg) async {
           throw TimeoutException('KDF version check timeout');
         },
       );
-      
+
       if (response.statusCode == 200) {
         _log('Preflight: KDF is ready (status ${response.statusCode})');
-        await response.drain();
+        await response.drain<void>();
         return true;
       } else {
         _log('Preflight: KDF returned status ${response.statusCode}');
-        await response.drain();
+        await response.drain<void>();
         return false;
       }
     } finally {
@@ -86,13 +89,13 @@ Future<bool> _verifyHandshake(HttpClientResponse response) async {
     _log('Handshake: Failed - HTTP ${response.statusCode}');
     return false;
   }
-  
+
   final contentType = response.headers.contentType?.toString() ?? '';
   if (!contentType.contains('text/event-stream')) {
     _log('Handshake: Failed - Invalid content-type: $contentType');
     return false;
   }
-  
+
   _log('Handshake: Success - HTTP 200, content-type: $contentType');
   return true;
 }
@@ -100,21 +103,42 @@ Future<bool> _verifyHandshake(HttpClientResponse response) async {
 EventStreamUnsubscribe connectEventStream({
   required void Function(Object? data) onMessage,
   required void Function() onFirstByte,
+  required void Function({required bool registrationsMayPersist})
+  onDisconnected,
   IKdfHostConfig? hostConfig,
   int clientId = _kDefaultClientId,
 }) {
   final IKdfHostConfig cfg = hostConfig!;
   final Uri url = _buildEventsUrl(cfg, clientId: clientId);
   bool isClosed = false;
-  bool firstByteReceived = false;
+  bool unexpectedDisconnectNotified = false;
   HttpClient? httpClient;
   HttpClientRequest? request;
   StreamSubscription<String>? streamSubscription;
-  int retryCount = 0;
-  const int maxRetries = 3;
-  const Duration retryDelay = Duration(seconds: 2);
+  Future<void>? cleanupFuture;
 
   _log('SSE Start: Initializing connection to $url (client_id=$clientId)');
+
+  Future<void> cleanup() => cleanupFuture ??= () async {
+    request?.abort();
+    await streamSubscription?.cancel();
+    httpClient?.close(force: true);
+  }();
+
+  void notifyUnexpectedDisconnect(String reason) {
+    if (isClosed || unexpectedDisconnectNotified) return;
+    unexpectedDisconnectNotified = true;
+    _log(reason);
+    // A native SSE close drops KDF's client-scoped stream registrations.
+    // Notify before cleanup/reconnect so the SDK invalidates its generation
+    // and never submits against a stale streamer.
+    try {
+      onDisconnected(registrationsMayPersist: false);
+    } catch (error) {
+      _log('SSE disconnect callback failed: $error');
+    }
+    unawaited(cleanup());
+  }
 
   Future<void> start() async {
     if (isClosed) return;
@@ -122,49 +146,62 @@ EventStreamUnsubscribe connectEventStream({
     try {
       // Step 1: Preflight RPC check
       final preflightOk = await _preflightCheck(cfg);
+      if (isClosed) return;
       if (!preflightOk) {
-        _log('SSE Start: Preflight check failed, retrying in ${retryDelay.inSeconds}s...');
-        if (retryCount < maxRetries && !isClosed) {
-          retryCount++;
-          await Future.delayed(retryDelay);
-          unawaited(start());
-        } else {
-          _log('SSE Start: Max retries ($maxRetries) reached, giving up');
-        }
+        notifyUnexpectedDisconnect('SSE Start: Preflight check failed');
         return;
       }
 
       // Step 2: Open SSE connection with proper handshake verification
-      httpClient = HttpClient();
-      httpClient!.connectionTimeout = const Duration(seconds: 10);
-      
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 10);
+      if (isClosed) {
+        client.close(force: true);
+        return;
+      }
+      httpClient = client;
+
       _log('SSE Start: Opening connection to $url...');
-      request = await httpClient!.getUrl(url);
-      request!.headers.set('Accept', 'text/event-stream');
-      request!.headers.set('Cache-Control', 'no-cache');
-      request!.headers.set('Connection', 'keep-alive');
-      
-      final response = await request!.close();
-      
+      final pendingRequest = await client.getUrl(url);
+      if (isClosed) {
+        pendingRequest.abort();
+        client.close(force: true);
+        return;
+      }
+      request = pendingRequest
+        ..headers.set('Accept', 'text/event-stream')
+        ..headers.set('Cache-Control', 'no-cache')
+        ..headers.set('Connection', 'keep-alive');
+
+      final response = await pendingRequest.close();
+      if (isClosed) {
+        client.close(force: true);
+        return;
+      }
+
       // Step 3: Verify handshake
       final handshakeOk = await _verifyHandshake(response);
+      if (isClosed) {
+        client.close(force: true);
+        return;
+      }
       if (!handshakeOk) {
-        _log('SSE Start: Handshake verification failed, retrying...');
-        await response.drain();
-        if (retryCount < maxRetries && !isClosed) {
-          retryCount++;
-          await Future.delayed(retryDelay);
-          unawaited(start());
-        } else {
-          _log('SSE Start: Max retries ($maxRetries) reached, giving up');
-        }
+        await response.drain<void>();
+        if (isClosed) return;
+        notifyUnexpectedDisconnect('SSE Start: Handshake verification failed');
         return;
       }
 
       // Step 4: Connection established, start listening to events
-      _log('SSE Connected: Successfully connected to $url (client_id=$clientId)');
-      _log('SSE Connected: Waiting for first byte from stream...');
-      
+      _log(
+        'SSE Connected: Successfully connected to $url (client_id=$clientId)',
+      );
+      // HTTP 200 + text/event-stream means KDF has registered this client.
+      // Waiting for an application event deadlocks a clean runtime because no
+      // streamer can emit until its enable RPC is sent.
+      onFirstByte();
+      _log('SSE Connected: KDF client registration is ready');
+
       // Parse SSE stream
       final StringBuffer buffer = StringBuffer();
       streamSubscription = response
@@ -173,14 +210,7 @@ EventStreamUnsubscribe connectEventStream({
           .listen(
             (line) {
               if (isClosed) return;
-              
-              // Signal first byte received (any line, including comments/keepalives)
-              if (!firstByteReceived) {
-                firstByteReceived = true;
-                _log('SSE First Byte: Received first line from stream - server is flowing');
-                onFirstByte();
-              }
-              
+
               if (line.startsWith('data: ')) {
                 final data = line.substring(6).trim();
                 if (data.isNotEmpty) {
@@ -196,46 +226,19 @@ EventStreamUnsubscribe connectEventStream({
                 buffer.clear();
               }
             },
-            onError: (error) {
-              if (!isClosed) {
-                _log('SSE Error: $error');
-                // Attempt reconnection on error
-                if (retryCount < maxRetries) {
-                  retryCount++;
-                  _log('SSE Error: Reconnecting (attempt $retryCount/$maxRetries)...');
-                  Future.delayed(retryDelay, start);
-                }
-              }
+            onError: (Object error) {
+              notifyUnexpectedDisconnect('SSE Error: $error');
             },
             onDone: () {
-              if (!isClosed) {
-                _log('SSE Done: Connection closed by server');
-                // Attempt reconnection if not manually closed
-                if (retryCount < maxRetries) {
-                  retryCount++;
-                  _log('SSE Done: Reconnecting (attempt $retryCount/$maxRetries)...');
-                  Future.delayed(retryDelay, start);
-                }
-              }
+              notifyUnexpectedDisconnect(
+                'SSE Done: Connection closed by server',
+              );
             },
             cancelOnError: false,
           );
-      
-      // Reset retry count on successful connection
-      retryCount = 0;
-      
     } catch (e) {
-      if (!isClosed) {
-        _log('SSE Start: Exception - $e');
-        if (retryCount < maxRetries) {
-          retryCount++;
-          _log('SSE Start: Retrying (attempt $retryCount/$maxRetries)...');
-          await Future.delayed(retryDelay);
-          unawaited(start());
-        } else {
-          _log('SSE Start: Max retries ($maxRetries) reached, giving up');
-        }
-      }
+      if (isClosed) return;
+      notifyUnexpectedDisconnect('SSE Start: Exception - $e');
     }
   }
 
@@ -247,8 +250,7 @@ EventStreamUnsubscribe connectEventStream({
     isClosed = true;
     _log('SSE Disconnect: Closing connection (client_id=$clientId)');
     try {
-      await streamSubscription?.cancel();
-      httpClient?.close(force: true);
+      await cleanup();
     } catch (e) {
       _log('SSE Disconnect: Error during cleanup - $e');
     }

@@ -15,7 +15,7 @@ class AddressOperations {
   }) async {
     try {
       final response = await _client.rpc.address.validateAddress(
-        coin: asset.id.id,
+        coin: _validationCoinFor(asset),
         address: address,
       );
 
@@ -33,6 +33,15 @@ class AddressOperations {
         asset: asset,
       );
     }
+  }
+
+  String _validationCoinFor(Asset asset) {
+    final protocol = asset.protocol;
+    if (protocol is Trc20Protocol) {
+      return protocol.platform;
+    }
+
+    return asset.id.id;
   }
 
   /// Converts an address to a specified format

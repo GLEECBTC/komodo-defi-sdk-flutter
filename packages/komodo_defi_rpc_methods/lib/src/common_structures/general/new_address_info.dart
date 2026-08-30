@@ -8,6 +8,7 @@ class NewAddressInfo extends Equatable {
     required this.derivationPath,
     required this.chain,
     required this.balances,
+    this.gasfreeAddress,
   });
 
   factory NewAddressInfo.fromJson(Map<String, dynamic> json) {
@@ -23,9 +24,11 @@ class NewAddressInfo extends Equatable {
       derivationPath: json.valueOrNull<String>('derivation_path'),
       chain: json.valueOrNull<String>('chain'),
       balances: balances,
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
   final String address;
+  final String? gasfreeAddress;
   final Map<String, BalanceInfo> balances;
 
   /// Get balance for a specific coin ticker
@@ -58,9 +61,16 @@ class NewAddressInfo extends Equatable {
       'derivation_path': derivationPath,
       'chain': chain,
       'balance': balanceMap,
+      if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
     };
   }
 
   @override
-  List<Object?> get props => [address, derivationPath, chain, balances];
+  List<Object?> get props => [
+    address,
+    gasfreeAddress,
+    derivationPath,
+    chain,
+    balances,
+  ];
 }

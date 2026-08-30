@@ -17,7 +17,9 @@ class CoinConfigRepository implements CoinConfigStorage {
     this.settingsBoxName = 'coins_settings',
     this.coinsCommitKey = 'coins_commit',
     AssetParser assetParser = const AssetParser(),
-  }) : _assetParser = assetParser;
+    CoinConfigTransformer transformer = const CoinConfigTransformer(),
+  }) : _assetParser = assetParser,
+       _transformer = transformer;
 
   /// Convenience factory that derives a provider from a runtime config and
   /// uses default Hive boxes (`assets`, `coins_settings`).
@@ -34,7 +36,8 @@ class CoinConfigRepository implements CoinConfigStorage {
          githubToken: githubToken,
          transformer: transformer,
        ),
-       _assetParser = assetParser;
+       _assetParser = assetParser,
+       _transformer = transformer ?? const CoinConfigTransformer();
   static final Logger _log = Logger('CoinConfigRepository');
 
   /// The provider that fetches the coins and coin configs.
@@ -53,6 +56,7 @@ class CoinConfigRepository implements CoinConfigStorage {
   final String coinsCommitKey;
 
   final AssetParser _assetParser;
+  final CoinConfigTransformer _transformer;
 
   /// Fetches the latest commit from the provider, downloads assets for that
   /// commit, and upserts them in local storage along with the commit hash.
@@ -122,9 +126,15 @@ class CoinConfigRepository implements CoinConfigStorage {
         .where((a) => !excludedAssets.contains(a.id.id))
         .toList();
 
-    return _assetParser.rebuildParentChildRelationships(
-      rawAssets,
-      logContext: 'from storage',
+    final transformedConfigs = <String, Map<String, dynamic>>{
+      for (final asset in rawAssets)
+        asset.id.symbol.assetConfigId: _transformer.apply(
+          Map<String, dynamic>.from(asset.protocol.config),
+        ),
+    };
+    return _assetParser.parseAssetsFromConfig(
+      transformedConfigs,
+      logContext: 'from transformed storage',
     );
   }
 
@@ -136,7 +146,11 @@ class CoinConfigRepository implements CoinConfigStorage {
   Future<Asset?> getAsset(AssetId assetId) async {
     _log.fine('Retrieving asset ${assetId.id}');
     final a = await (await _openAssetsBox()).get(assetId.id);
-    return a;
+    if (a == null) return null;
+    final transformed = _transformer.apply(
+      Map<String, dynamic>.from(a.protocol.config),
+    );
+    return Asset.fromJsonWithId(transformed, assetId: a.id);
   }
 
   // Explicit coin config retrieval removed; derive from [Asset] if needed.

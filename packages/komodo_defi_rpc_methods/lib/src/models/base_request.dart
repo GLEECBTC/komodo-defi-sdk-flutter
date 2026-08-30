@@ -11,8 +11,16 @@ extension BaseRequestApiClientExtension on ApiClient {
   ) async {
     final response = await executeRpc(request.toJson());
 
-    if (GeneralErrorResponse.isErrorResponse(response)) {
-      // Try to parse into a typed KDF exception first
+    if (GeneralErrorResponse.isErrorResponse(response) &&
+        !request.shouldParseErrorAsResponse(response)) {
+      // Endpoint-scoped errors are more precise than the global registry,
+      // where common wire names such as CoinNotFound are intentionally
+      // ambiguous.
+      final customError = request.parseCustomErrorResponse(response);
+      if (customError != null) {
+        throw customError;
+      }
+
       final typedException = _tryParseTypedException(
         response,
         rpcMethodHint: request.method,
@@ -20,6 +28,7 @@ extension BaseRequestApiClientExtension on ApiClient {
       if (typedException != null) {
         throw typedException;
       }
+
       throw GeneralErrorResponse.parse(response);
     }
 
@@ -91,31 +100,33 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
     return parseResponse(jsonEncode(response));
   }
 
-  /// Parse response from JSON. This method should handle both success and error responses.
+  /// Parse a response, handling both success and error envelopes.
   /// Subclasses should override [parse] method for success responses instead.
   ///
   /// Error handling order:
-  /// 1. Try to parse into a typed [MmRpcException] using [KdfErrorRegistry]
-  /// 2. Allow subclasses to handle specific error types via [parseCustomErrorResponse]
+  /// 1. Allow subclasses to handle endpoint-specific error types via
+  ///    [parseCustomErrorResponse]
+  /// 2. Try to parse into a typed [MmRpcException] using [KdfErrorRegistry]
   /// 3. Fall back to [GeneralErrorResponse] via [parseGeneralErrorResponse]
   T parseResponse(String responseBody) {
     final json = jsonFromString(responseBody);
 
     // First check if this is an error response
-    if (GeneralErrorResponse.isErrorResponse(json)) {
-      // Try to parse into a typed KDF exception first
+    if (GeneralErrorResponse.isErrorResponse(json) &&
+        !shouldParseErrorAsResponse(json)) {
+      // Endpoint-scoped errors disambiguate common wire names before the
+      // global registry gets a chance to parse them.
+      final customError = parseCustomErrorResponse(json);
+      if (customError != null) {
+        throw customError;
+      }
+
       final typedException = _tryParseTypedException(
         json,
         rpcMethodHint: method,
       );
       if (typedException != null) {
         throw typedException;
-      }
-
-      // Allow subclasses to handle specific error types
-      final customError = parseCustomErrorResponse(json);
-      if (customError != null) {
-        throw customError;
       }
 
       // Fall back to general error handling
@@ -146,8 +157,16 @@ abstract class BaseRequest<T extends BaseResponse, E extends Exception> {
   }
 
   /// Override this method to provide custom error handling for specific error
-  /// types. Return null if the error is not of a type that this request can handle.
+  /// types. Return null when this request does not recognize the error type.
   E? parseCustomErrorResponse(JsonMap json) => null;
+
+  /// Whether an error-shaped envelope is a typed endpoint response.
+  ///
+  /// Task status methods may return `result.status: "Error"` as their normal
+  /// terminal response. Such endpoints can opt into parsing that envelope in
+  /// [parse] instead of having the base layer throw it first.
+  @protected
+  bool shouldParseErrorAsResponse(JsonMap json) => false;
 
   /// Handles general error responses. This is a fallback for when
   /// [parseCustomErrorResponse] returns null.

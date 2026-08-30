@@ -1,3 +1,18 @@
+## 1.0.0
+
+> Note: This release has breaking GasFree withdrawal interfaces.
+
+ - **BREAKING** **FEAT**(gasfree): align provider activation, fee preview,
+   signed relay, submission, and receipt models with the final KDF contract.
+ - **BREAKING** **FIX**(gasfree): obtain accepted trace identity and final fee
+   from submission/trace status instead of preview or provider echoes.
+ - **BREAKING** **FIX**(withdraw): enforce mutually exclusive explicit-amount
+   and maximum request modes, omitting `amount` whenever `max` is true.
+ - **SECURITY**(gasfree): persist only wallet-scoped journal and trace recovery
+   data, never signed authorization material or provider credentials.
+ - **FEAT**(gasfree): rename the local reservation identity to `journalId`;
+   migrate trace-backed records and keep trace-less records outcome-unknown.
+
 ## 0.4.1
 
  - **FIX**(tron): support TRON explorer URL templates and correct TRC20 badge classification (#338, #344).

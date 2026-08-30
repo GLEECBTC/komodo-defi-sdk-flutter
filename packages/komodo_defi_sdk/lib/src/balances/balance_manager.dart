@@ -7,6 +7,7 @@ import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -93,6 +94,7 @@ class BalanceManager implements IBalanceManager {
   final KomodoDefiLocalAuth _auth;
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
+
   StreamSubscription<KdfUser?>? _authSubscription;
   final Duration _defaultPollingInterval = const Duration(seconds: 30);
 
@@ -113,8 +115,20 @@ class BalanceManager implements IBalanceManager {
   /// Stale-guard timers to periodically refresh balances even while streaming
   final Map<AssetId, Timer> _staleBalanceTimers = {};
 
+  /// Pending deferred watcher teardowns, keyed by asset. See the `onCancel`
+  /// hook in [watchBalance].
+  final Map<AssetId, Timer> _watcherTeardownTimers = {};
+
+  /// How long a per-asset watcher survives after its last listener leaves.
+  /// Long enough to absorb an unsubscribe/resubscribe within the same frame or
+  /// two, short enough that a genuinely closed page stops polling promptly.
+  static const Duration _watcherTeardownGrace = Duration(milliseconds: 500);
+
   /// Current wallet ID being tracked
   WalletId? _currentWalletId;
+
+  /// Invalidates every in-flight fetch as soon as authentication changes.
+  int _walletGeneration = 0;
 
   /// Flag indicating if the manager has been disposed
   bool _isDisposed = false;
@@ -166,10 +180,82 @@ class BalanceManager implements IBalanceManager {
     _logger.fine(
       'Auth state changed. wallet: $_currentWalletId -> $newWalletId',
     );
-    if (_currentWalletId != newWalletId) {
-      await _resetState();
-      _currentWalletId = newWalletId;
+    final currentWalletId = _currentWalletId;
+    if (_sameOptionalWallet(currentWalletId, newWalletId)) {
+      if (currentWalletId != null && newWalletId != null) {
+        _currentWalletId = preferEnrichedWalletIdentity(
+          currentWalletId,
+          newWalletId,
+        );
+      }
+      return;
     }
+
+    // Change identity before awaiting cleanup so an already-completing RPC
+    // cannot commit into the next wallet's cache in the reset window.
+    _walletGeneration++;
+    _currentWalletId = newWalletId;
+    await _resetState();
+  }
+
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
+  }
+
+  Future<WalletOperationContext> _captureWalletContext() async {
+    final user = await _auth.currentUser;
+    if (user == null) throw AuthException.notSignedIn();
+
+    final currentWalletId = _currentWalletId;
+    late final WalletId operationWalletId;
+    if (currentWalletId == null) {
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      operationWalletId = preferEnrichedWalletIdentity(
+        currentWalletId,
+        user.walletId,
+      );
+      _currentWalletId = operationWalletId;
+    } else {
+      // Auth streams are asynchronous. Proactively invalidate here too so a
+      // caller cannot observe the prior wallet's cache before the event lands.
+      _walletGeneration++;
+      _currentWalletId = user.walletId;
+      operationWalletId = user.walletId;
+      await _resetState();
+    }
+
+    return WalletOperationContext(
+      walletId: operationWalletId,
+      generation: _walletGeneration,
+    );
+  }
+
+  bool _isWalletContextCurrentSync(WalletOperationContext context) {
+    final current = _currentWalletId;
+    return !_isDisposed &&
+        context.generation == _walletGeneration &&
+        current != null &&
+        isSameStableWallet(context.walletId, current);
+  }
+
+  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
+    if (!_isWalletContextCurrentSync(context)) return false;
+    final currentUser = await _auth.currentUser;
+    return currentUser != null &&
+        _isWalletContextCurrentSync(context) &&
+        isSameStableWallet(context.walletId, currentUser.walletId);
+  }
+
+  Future<void> _requireWalletContextCurrent(
+    WalletOperationContext context,
+  ) async {
+    if (await _isWalletContextCurrent(context)) return;
+    throw const WalletChangedDisconnectException(
+      'Wallet changed while fetching balance',
+    );
   }
 
   /// Reset all internal state when wallet changes
@@ -177,15 +263,30 @@ class BalanceManager implements IBalanceManager {
     _logger.fine('Resetting state');
     final stopwatch = Stopwatch()..start();
 
+    // Clear wallet-owned values before awaiting cancellation. This prevents a
+    // newly signed-in caller from observing the previous wallet during cleanup.
+    _balanceCache.clear();
+    _pendingFastRefresh.clear();
+
     final List<Future<void>> cleanupFutures = <Future<void>>[];
     final List<StreamSubscription<dynamic>> watcherSubs = _activeWatchers.values
         .toList();
     _activeWatchers.clear();
+    final List<StreamSubscription<AssetPubkeys>> pubkeyHintSubs =
+        _pubkeyHintWatchers.values.toList();
+    _pubkeyHintWatchers.clear();
 
     for (final subscription in watcherSubs) {
       cleanupFutures.add(
         subscription.cancel().catchError((Object e, StackTrace s) {
           _logger.warning('Error cancelling balance watcher', e, s);
+        }),
+      );
+    }
+    for (final subscription in pubkeyHintSubs) {
+      cleanupFutures.add(
+        subscription.cancel().catchError((Object e, StackTrace s) {
+          _logger.warning('Error cancelling pubkey hint watcher', e, s);
         }),
       );
     }
@@ -195,6 +296,12 @@ class BalanceManager implements IBalanceManager {
       timer.cancel();
     }
     _staleBalanceTimers.clear();
+
+    // Deferred teardowns are meaningless once the controllers are discarded.
+    for (final timer in _watcherTeardownTimers.values) {
+      timer.cancel();
+    }
+    _watcherTeardownTimers.clear();
 
     final List<StreamController<BalanceInfo>> controllers = _balanceControllers
         .values
@@ -222,11 +329,11 @@ class BalanceManager implements IBalanceManager {
       await Future.wait(cleanupFutures);
     }
 
-    _balanceCache.clear();
     stopwatch.stop();
     _logger.fine(
       'State reset completed in ${stopwatch.elapsedMilliseconds}ms '
-      '(${watcherSubs.length} subscriptions, ${controllers.length} controllers)',
+      '(${watcherSubs.length + pubkeyHintSubs.length} subscriptions, '
+      '${controllers.length} controllers)',
     );
   }
 
@@ -241,11 +348,7 @@ class BalanceManager implements IBalanceManager {
       throw StateError('PubkeyManager is not initialized');
     }
 
-    // Check if user is authenticated
-    final user = await _auth.currentUser;
-    if (user == null) {
-      throw AuthException.notSignedIn();
-    }
+    final walletContext = await _captureWalletContext();
 
     final asset = _assetLookup.fromId(assetId);
     if (asset == null) {
@@ -256,9 +359,12 @@ class BalanceManager implements IBalanceManager {
       final balance = await _pubkeyManager!
           .getPubkeys(asset)
           .then((pubkeys) => pubkeys.balance);
+      await _requireWalletContextCurrent(walletContext);
       // Update cache with the latest balance
       _balanceCache[assetId] = balance;
       return balance;
+    } on WalletChangedDisconnectException {
+      rethrow;
     } catch (e) {
       // Rethrow with more context
       throw StateError('Failed to get balance for ${assetId.name}: $e');
@@ -274,26 +380,77 @@ class BalanceManager implements IBalanceManager {
       throw StateError('BalanceManager has been disposed');
     }
 
-    final lastKnownBalance = lastKnown(assetId);
+    final walletContext = await _captureWalletContext();
+    final lastKnownBalance = lastKnownForWallet(
+      assetId,
+      walletContext.walletId,
+    );
     if (lastKnownBalance != null) {
+      await _requireWalletContextCurrent(walletContext);
       yield lastKnownBalance;
+      await _requireWalletContextCurrent(walletContext);
     }
 
-    final controller = _balanceControllers.putIfAbsent(
-      assetId,
-      () => StreamController<BalanceInfo>.broadcast(
+    await _requireWalletContextCurrent(walletContext);
+    final controller = _balanceControllers.putIfAbsent(assetId, () {
+      late final StreamController<BalanceInfo> createdController;
+      createdController = StreamController<BalanceInfo>.broadcast(
         onListen: () {
+          // Claim the pending teardown only once this controller is known to
+          // be the live one. `_watcherTeardownTimers` is keyed by asset, not
+          // by controller, so cancelling before these guards would let a
+          // listener on a stale controller swallow the *current* controller's
+          // teardown - leaking its KDF subscription and stale guard. A timer
+          // left pending is harmless: _stopWatchingBalance re-checks identity.
+          if (!_isWalletContextCurrentSync(walletContext) ||
+              !identical(_balanceControllers[assetId], createdController)) {
+            return;
+          }
+
+          // A pending teardown means the last listener left within the grace
+          // window - typically a widget rebuild handing StreamBuilder a new
+          // stream object. Keep the live watcher instead of restarting it.
+          final pendingTeardown = _watcherTeardownTimers.remove(assetId);
+          pendingTeardown?.cancel();
+
+          if (pendingTeardown != null && _activeWatchers.containsKey(assetId)) {
+            _logger.fine('onListen: ${assetId.name} reused live watcher');
+            return;
+          }
           _logger.fine(
             'onListen: ${assetId.name}, activateIfNeeded: $activateIfNeeded',
           );
           _startWatchingBalance(assetId, activateIfNeeded);
         },
         onCancel: () {
-          _logger.fine('onCancel: ${assetId.name}');
-          _stopWatchingBalance(assetId);
+          // A stale controller must not replace the live controller's
+          // asset-keyed teardown timer.
+          if (!_isWalletContextCurrentSync(walletContext) ||
+              !identical(_balanceControllers[assetId], createdController)) {
+            return;
+          }
+
+          // Defer the teardown. Broadcast controllers fire onCancel on every
+          // 1->0 listener transition, so an unsubscribe/resubscribe flap would
+          // otherwise cancel the KDF subscription and stale guard and pay the
+          // full restart cost (storage read, activation check, getPubkeys,
+          // subscribe_to_balance) to end up exactly where it started.
+          _watcherTeardownTimers[assetId]?.cancel();
+          _watcherTeardownTimers[assetId] = Timer(_watcherTeardownGrace, () {
+            _watcherTeardownTimers.remove(assetId);
+            if (createdController.isClosed || createdController.hasListener) {
+              return;
+            }
+            _logger.fine('onCancel: ${assetId.name} (grace elapsed)');
+            _stopWatchingBalance(
+              assetId,
+              expectedController: createdController,
+            );
+          });
         },
-      ),
-    );
+      );
+      return createdController;
+    });
 
     yield* controller.stream;
   }
@@ -346,8 +503,8 @@ class BalanceManager implements IBalanceManager {
     }
 
     // Cancel any existing watcher for this asset
-    await _activeWatchers[assetId]?.cancel();
-    _activeWatchers.remove(assetId);
+    final previousWatcher = _activeWatchers.remove(assetId);
+    await previousWatcher?.cancel();
 
     final asset = _assetLookup.fromId(assetId);
     if (asset == null) {
@@ -357,33 +514,51 @@ class BalanceManager implements IBalanceManager {
       return;
     }
 
-    // Check if user is authenticated
-    final user = await _auth.currentUser;
-    if (user == null) {
+    final WalletOperationContext walletContext;
+    try {
+      walletContext = await _captureWalletContext();
+    } on AuthException {
       // Don't throw an error, just wait for authentication
       _logger.fine(
         'Delaying balance watcher start for ${assetId.name}: unauthenticated',
       );
       return;
     }
-
-    // Keep track of the wallet ID this balance is for
-    _currentWalletId = user.walletId;
+    if (controller.isClosed ||
+        !identical(_balanceControllers[assetId], controller) ||
+        !_isWalletContextCurrentSync(walletContext)) {
+      return;
+    }
+    final user = await _auth.currentUser;
+    if (user == null ||
+        !isSameStableWallet(walletContext.walletId, user.walletId)) {
+      return;
+    }
     _logger.fine('Starting balance watcher for ${assetId.name}');
 
     // Optimization: Check if this is a newly created wallet (not imported)
     final previouslyEnabledAssets = await _assetHistoryStorage.getWalletAssets(
-      user.walletId,
+      walletContext.walletId,
     );
+    if (!await _isWalletContextCurrent(walletContext)) return;
     final isFirstTimeEnabling = !previouslyEnabledAssets.contains(assetId.id);
 
     // Check metadata to determine if this was an imported wallet
     // Only optimize for genuinely new wallets, not imported ones
     final isImported = user.metadata['isImported'] == true;
-    final isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+    var isNewWallet = previouslyEnabledAssets.isEmpty && !isImported;
+    if (isNewWallet) {
+      final hasAmbiguousLegacyHistory = await _assetHistoryStorage
+          .hasAmbiguousLegacyHistory(walletContext.walletId);
+      if (!await _isWalletContextCurrent(walletContext)) return;
+      isNewWallet = !hasAmbiguousLegacyHistory;
+    }
 
     // Emit the last known balance immediately if available
-    final maybeKnownBalance = lastKnown(assetId);
+    final maybeKnownBalance = lastKnownForWallet(
+      assetId,
+      walletContext.walletId,
+    );
     if (maybeKnownBalance != null) {
       controller.add(maybeKnownBalance);
       _logger.fine('Emitted initial balance for ${assetId.name}');
@@ -405,6 +580,7 @@ class BalanceManager implements IBalanceManager {
     try {
       // Ensure asset is activated if needed
       final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
+      if (!await _isWalletContextCurrent(walletContext)) return;
 
       // If activation was requested but failed, emit error
       if (activateIfNeeded && !isActive) {
@@ -430,12 +606,14 @@ class BalanceManager implements IBalanceManager {
           assetId: assetId,
           controller: controller,
           activateIfNeeded: activateIfNeeded,
+          walletContext: walletContext,
         );
         await _startBalancePolling(
           asset: asset,
           assetId: assetId,
           controller: controller,
           activateIfNeeded: activateIfNeeded,
+          walletContext: walletContext,
         );
         return;
       }
@@ -443,29 +621,38 @@ class BalanceManager implements IBalanceManager {
       // Mark asset as seen after successful activation
       if (isActive && isFirstTimeEnabling) {
         await _assetHistoryStorage.addAssetToWallet(user.walletId, assetId.id);
+        if (!await _isWalletContextCurrent(walletContext)) return;
 
         // Fetch real balance (will update from zero for new wallets)
         final balance = await getBalance(assetId);
-        if (!controller.isClosed) controller.add(balance);
+        if (_isWalletContextCurrentSync(walletContext) &&
+            !controller.isClosed) {
+          controller.add(balance);
+        }
       } else if (isActive) {
         // If active but not first time, still get balance
         final balance = await getBalance(assetId);
-        if (!controller.isClosed) controller.add(balance);
+        if (_isWalletContextCurrentSync(walletContext) &&
+            !controller.isClosed) {
+          controller.add(balance);
+        }
       }
 
-      // Subscribe to balance event stream for real-time updates
+      // Subscribe to balance event stream for real-time updates.
       if (!_supportsBalanceStreaming(asset)) {
         _attachPubkeyHintListener(
           asset: asset,
           assetId: assetId,
           controller: controller,
           activateIfNeeded: activateIfNeeded,
+          walletContext: walletContext,
         );
         await _startBalancePolling(
           asset: asset,
           assetId: assetId,
           controller: controller,
           activateIfNeeded: activateIfNeeded,
+          walletContext: walletContext,
         );
         return;
       }
@@ -473,6 +660,10 @@ class BalanceManager implements IBalanceManager {
       _logger.fine('Subscribing to balance stream for ${assetId.id}');
       final balanceStreamSubscription = await _eventStreamingManager
           .subscribeToBalance(coin: assetId.id);
+      if (!await _isWalletContextCurrent(walletContext)) {
+        await balanceStreamSubscription.cancel();
+        return;
+      }
 
       var hasFallenBack = false;
       Future<void> fallbackToPolling({
@@ -503,6 +694,7 @@ class BalanceManager implements IBalanceManager {
             assetId: assetId,
             controller: controller,
             activateIfNeeded: activateIfNeeded,
+            walletContext: walletContext,
           );
         }
 
@@ -517,7 +709,7 @@ class BalanceManager implements IBalanceManager {
 
       _activeWatchers[assetId] = balanceStreamSubscription
         ..onData((balanceEvent) {
-          if (_isDisposed) return;
+          if (!_isWalletContextCurrentSync(walletContext)) return;
 
           // Verify the event is for the correct coin
           if (balanceEvent.coin != assetId.id) return;
@@ -574,6 +766,7 @@ class BalanceManager implements IBalanceManager {
         assetId: assetId,
         controller: controller,
         activateIfNeeded: activateIfNeeded,
+        walletContext: walletContext,
       );
     } catch (e, s) {
       _logger.warning(
@@ -586,6 +779,7 @@ class BalanceManager implements IBalanceManager {
         assetId: assetId,
         controller: controller,
         activateIfNeeded: activateIfNeeded,
+        walletContext: walletContext,
       );
     }
   }
@@ -595,20 +789,24 @@ class BalanceManager implements IBalanceManager {
     required AssetId assetId,
     required StreamController<BalanceInfo> controller,
     required bool activateIfNeeded,
+    required WalletOperationContext walletContext,
   }) async {
-    if (_isDisposed || controller.isClosed) return;
+    if (controller.isClosed ||
+        !identical(_balanceControllers[assetId], controller) ||
+        !_isWalletContextCurrentSync(walletContext)) {
+      return;
+    }
 
     _logger.fine('Starting balance polling fallback for ${assetId.name}');
 
     Future<BalanceInfo?> fetchLatestBalance() async {
-      if (_isDisposed) return null;
+      if (!_isWalletContextCurrentSync(walletContext)) return null;
 
       if (_activationCoordinator == null || _pubkeyManager == null) {
         return null;
       }
 
-      final currentUser = await _auth.currentUser;
-      if (currentUser == null || currentUser.walletId != _currentWalletId) {
+      if (!await _isWalletContextCurrent(walletContext)) {
         return null;
       }
 
@@ -624,6 +822,7 @@ class BalanceManager implements IBalanceManager {
 
         if (isActive) {
           final balance = await getBalance(assetId);
+          if (!await _isWalletContextCurrent(walletContext)) return null;
           if (enableDebugLogging) {
             _logger.info(
               '[POLLING] Balance fetched for ${assetId.name}: '
@@ -642,24 +841,30 @@ class BalanceManager implements IBalanceManager {
         }
       }
 
-      return lastKnown(assetId);
+      if (!_isWalletContextCurrentSync(walletContext)) return null;
+      return lastKnownForWallet(assetId, walletContext.walletId);
     }
 
     // Kick off an immediate refresh so polling fallback can recover quickly
     // after startup races without waiting for the first periodic tick.
     unawaited(() async {
       final balance = await fetchLatestBalance();
-      if (balance != null && !controller.isClosed) {
+      if (balance != null &&
+          !controller.isClosed &&
+          _isWalletContextCurrentSync(walletContext)) {
         controller.add(balance);
       }
     }());
 
     final periodicStream = Stream<void>.periodic(_defaultPollingInterval);
-    final subscription = periodicStream
+    late final StreamSubscription<BalanceInfo?> subscription;
+    subscription = periodicStream
         .asyncMap<BalanceInfo?>((_) => fetchLatestBalance())
         .listen(
           (balance) {
-            if (balance != null && !controller.isClosed) {
+            if (balance != null &&
+                !controller.isClosed &&
+                _isWalletContextCurrentSync(walletContext)) {
               controller.add(balance);
             }
           },
@@ -674,18 +879,32 @@ class BalanceManager implements IBalanceManager {
             );
           },
           onDone: () {
-            _stopWatchingBalance(assetId);
+            _stopWatchingBalance(assetId, expected: subscription);
             _logger.fine('Balance polling closed for ${assetId.name}');
           },
           cancelOnError: false,
         );
 
-    _activeWatchers[assetId] = subscription;
+    if (_isWalletContextCurrentSync(walletContext) &&
+        identical(_balanceControllers[assetId], controller)) {
+      _activeWatchers[assetId] = subscription;
+    } else {
+      await subscription.cancel();
+    }
   }
 
   /// Stop watching the balance for a specific asset
-  void _stopWatchingBalance(AssetId assetId) {
+  void _stopWatchingBalance(
+    AssetId assetId, {
+    StreamSubscription<dynamic>? expected,
+    StreamController<BalanceInfo>? expectedController,
+  }) {
+    if (expectedController != null &&
+        !identical(_balanceControllers[assetId], expectedController)) {
+      return;
+    }
     final watcher = _activeWatchers[assetId];
+    if (expected != null && !identical(watcher, expected)) return;
     if (watcher != null) {
       watcher.cancel();
       _activeWatchers.remove(assetId);
@@ -702,19 +921,28 @@ class BalanceManager implements IBalanceManager {
     required AssetId assetId,
     required StreamController<BalanceInfo> controller,
     required bool activateIfNeeded,
+    required WalletOperationContext walletContext,
   }) {
+    if (controller.isClosed ||
+        !identical(_balanceControllers[assetId], controller) ||
+        !_isWalletContextCurrentSync(walletContext)) {
+      return;
+    }
     // Cancel any existing timer first
     _staleBalanceTimers[assetId]?.cancel();
 
     _staleBalanceTimers[assetId] = Timer.periodic(_defaultPollingInterval, (
       _,
     ) async {
-      if (_isDisposed || controller.isClosed) return;
+      if (controller.isClosed || !_isWalletContextCurrentSync(walletContext)) {
+        return;
+      }
       try {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
 
         final latest = await getBalance(assetId);
+        if (!await _isWalletContextCurrent(walletContext)) return;
         final previous = _balanceCache[assetId];
         final changed =
             previous == null ||
@@ -738,6 +966,7 @@ class BalanceManager implements IBalanceManager {
         final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
         if (!isActive) return;
         final latest = await getBalance(assetId);
+        if (!await _isWalletContextCurrent(walletContext)) return;
         final previous = _balanceCache[assetId];
         final changed =
             previous == null ||
@@ -762,12 +991,19 @@ class BalanceManager implements IBalanceManager {
     required AssetId assetId,
     required StreamController<BalanceInfo> controller,
     required bool activateIfNeeded,
+    required WalletOperationContext walletContext,
   }) {
     final pubkeyManager = _pubkeyManager;
-    if (pubkeyManager == null || _isDisposed) return;
+    if (pubkeyManager == null ||
+        _isDisposed ||
+        controller.isClosed ||
+        !identical(_balanceControllers[assetId], controller) ||
+        !_isWalletContextCurrentSync(walletContext)) {
+      return;
+    }
 
-    _pubkeyHintWatchers[assetId]?.cancel();
-    _pubkeyHintWatchers[assetId] = pubkeyManager
+    _pubkeyHintWatchers.remove(assetId)?.cancel();
+    final subscription = pubkeyManager
         .watchPubkeys(asset, activateIfNeeded: activateIfNeeded)
         .listen(
           (AssetPubkeys pubkeys) {
@@ -777,6 +1013,7 @@ class BalanceManager implements IBalanceManager {
                 assetId: assetId,
                 controller: controller,
                 pubkeys: pubkeys,
+                walletContext: walletContext,
               ),
             );
           },
@@ -788,6 +1025,12 @@ class BalanceManager implements IBalanceManager {
             );
           },
         );
+    if (_isWalletContextCurrentSync(walletContext) &&
+        identical(_balanceControllers[assetId], controller)) {
+      _pubkeyHintWatchers[assetId] = subscription;
+    } else {
+      subscription.cancel();
+    }
   }
 
   void _stopPubkeyHintListener(AssetId assetId) {
@@ -799,8 +1042,12 @@ class BalanceManager implements IBalanceManager {
     required AssetId assetId,
     required StreamController<BalanceInfo> controller,
     required AssetPubkeys pubkeys,
+    required WalletOperationContext walletContext,
   }) async {
-    if (_isDisposed || _supportsBalanceStreaming(asset)) return;
+    if (!_isWalletContextCurrentSync(walletContext) ||
+        _supportsBalanceStreaming(asset)) {
+      return;
+    }
 
     final latest = pubkeys.balance;
     final previous = _balanceCache[assetId];
@@ -822,6 +1069,7 @@ class BalanceManager implements IBalanceManager {
         asset: asset,
         assetId: assetId,
         controller: controller,
+        walletContext: walletContext,
       ),
     );
   }
@@ -830,12 +1078,14 @@ class BalanceManager implements IBalanceManager {
     required Asset asset,
     required AssetId assetId,
     required StreamController<BalanceInfo> controller,
+    required WalletOperationContext walletContext,
   }) async {
-    if (_isDisposed) return;
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     if (!_pendingFastRefresh.contains(assetId)) return;
 
     try {
       final refreshed = await getBalance(assetId);
+      if (!await _isWalletContextCurrent(walletContext)) return;
       _balanceCache[assetId] = refreshed;
       if (!controller.isClosed) {
         controller.add(refreshed);
@@ -847,7 +1097,9 @@ class BalanceManager implements IBalanceManager {
         stackTrace,
       );
     } finally {
-      _pendingFastRefresh.remove(assetId);
+      if (_isWalletContextCurrentSync(walletContext)) {
+        _pendingFastRefresh.remove(assetId);
+      }
     }
   }
 
@@ -859,10 +1111,29 @@ class BalanceManager implements IBalanceManager {
     return _balanceCache[assetId];
   }
 
+  /// Returns a cached balance only when [walletId] owns the active generation.
+  BalanceInfo? lastKnownForWallet(AssetId assetId, WalletId walletId) {
+    if (_isDisposed) {
+      throw StateError('BalanceManager has been disposed');
+    }
+    final current = _currentWalletId;
+    if (current == null || !isSameStableWallet(current, walletId)) {
+      return null;
+    }
+    return _balanceCache[assetId];
+  }
+
   @override
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
+    _walletGeneration++;
+    _pendingFastRefresh.clear();
+
+    for (final timer in _watcherTeardownTimers.values) {
+      timer.cancel();
+    }
+    _watcherTeardownTimers.clear();
 
     // Take snapshots to avoid concurrent modification while cancelling/closing
     final StreamSubscription<KdfUser?>? authSub = _authSubscription;
@@ -896,12 +1167,16 @@ class BalanceManager implements IBalanceManager {
     final List<StreamSubscription<AssetPubkeys>> pubkeyHintSubs =
         List<StreamSubscription<AssetPubkeys>>.from(_pubkeyHintWatchers.values);
     _pubkeyHintWatchers.clear();
+    final List<Future<void>> hintCancelFutures = <Future<void>>[];
     for (final StreamSubscription<AssetPubkeys> sub in pubkeyHintSubs) {
-      cancelFutures.add(
+      hintCancelFutures.add(
         sub.cancel().catchError((Object e, StackTrace s) {
           _logger.warning('Error cancelling pubkey hint watcher', e, s);
         }),
       );
+    }
+    if (hintCancelFutures.isNotEmpty) {
+      await Future.wait(hintCancelFutures);
     }
 
     final List<StreamController<BalanceInfo>> controllers =
@@ -944,8 +1219,12 @@ class BalanceManager implements IBalanceManager {
       return;
     }
 
-    final user = await _auth.currentUser;
-    if (user == null) return;
+    final WalletOperationContext walletContext;
+    try {
+      walletContext = await _captureWalletContext();
+    } on AuthException {
+      return;
+    }
 
     // Retry logic to handle timing issues after activation
     const maxRetries = 3;
@@ -955,7 +1234,8 @@ class BalanceManager implements IBalanceManager {
       try {
         final balance = await _pubkeyManager!
             .getPubkeys(asset)
-            .then((pubkeys) => pubkeys.balance);
+            .then<BalanceInfo>((pubkeys) => pubkeys.balance);
+        if (!await _isWalletContextCurrent(walletContext)) return;
         _balanceCache[asset.id] = balance;
 
         // If there's an active stream controller for this asset, emit the balance
@@ -978,6 +1258,7 @@ class BalanceManager implements IBalanceManager {
             'Balance pre-cache retry ${attempt + 1}: ${asset.id.name} not yet available',
           );
           await Future<void>.delayed(baseDelay * (attempt + 1));
+          if (!await _isWalletContextCurrent(walletContext)) return;
           continue;
         }
 

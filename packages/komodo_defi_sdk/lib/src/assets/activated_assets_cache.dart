@@ -119,10 +119,28 @@ class ActivatedAssetsCache {
 
     final assets = <Asset>[];
     final seen = <AssetId>{};
+
+    void addAsset(Asset asset) {
+      if (seen.add(asset.id)) {
+        assets.add(asset);
+      }
+    }
+
     for (final coin in response.result) {
       for (final asset in _assetLookup.findAssetsByConfigId(coin.ticker)) {
-        if (seen.add(asset.id)) {
-          assets.add(asset);
+        addAsset(asset);
+
+        // A token can only be enabled in KDF if its platform coin is already
+        // active. KDF may omit the platform from `get_enabled_coins` for some
+        // protocols (observed for the TRON TRX platform), so derive it from the
+        // token's parent to keep the activated set — and thus `isAssetActive` —
+        // consistent for platform coins.
+        final parentId = asset.id.parentId;
+        if (parentId != null) {
+          final parent = _assetLookup.fromId(parentId);
+          if (parent != null) {
+            addAsset(parent);
+          }
         }
       }
     }

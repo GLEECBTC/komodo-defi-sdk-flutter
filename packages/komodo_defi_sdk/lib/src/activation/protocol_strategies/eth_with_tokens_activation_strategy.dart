@@ -9,11 +9,20 @@ import 'package:komodo_defi_sdk/src/transaction_history/strategies/etherscan_tra
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
-  const EthWithTokensActivationStrategy(super.client, this.privKeyPolicy);
+  const EthWithTokensActivationStrategy(
+    super.client,
+    this.privKeyPolicy, {
+    this.tronGaslessProvider,
+  });
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
+
+  /// Optional Tron GasFree provider config. Attached to TRX platform
+  /// activations so the platform's TRC20 tokens can use gas-free transfers.
+  /// Ignored for non-TRX (EVM) protocols.
+  final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -105,8 +114,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
               asset,
             );
 
-      final tokenRequests =
-          children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ?? [];
+      final tokenRequests = _tokenRequestsFor(asset, children);
       final activationParams = switch (asset.protocol) {
         final Erc20Protocol _ =>
           EthWithTokensActivationParams.fromJson(
@@ -123,6 +131,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
             tokenRequests: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
+            tronGaslessProvider: tronGaslessProvider,
           ),
         _ => throw UnsupportedError(
           'Unsupported platform protocol for batch activation: '
@@ -139,7 +148,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          '[RPC] Activation summary: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'gasless_provider_configured': tronGaslessProvider != null, 'priv_key_policy': privKeyPolicy.runtimeType.toString()})}',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -186,5 +195,29 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
         stepCount: 3,
       );
     }
+  }
+
+  List<TokensRequest> _tokenRequestsFor(Asset asset, List<Asset>? children) {
+    final enableTronGasless =
+        asset.protocol is TrxProtocol && tronGaslessProvider != null;
+
+    return children?.map((child) {
+          final isTrc20 = child.protocol is Trc20Protocol;
+          final configuredGasless = isTrc20
+              ? Trc20ActivationParams.fromJsonConfig(
+                  child.protocol.config,
+                ).gasless
+              : null;
+          return TokensRequest(
+            ticker: child.id.id,
+            gasless:
+                enableTronGasless &&
+                    isTrc20 &&
+                    configuredGasless?.enabled == true
+                ? configuredGasless
+                : null,
+          );
+        }).toList() ??
+        [];
   }
 }

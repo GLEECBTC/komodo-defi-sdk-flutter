@@ -24,6 +24,7 @@ class MyBalanceResponse extends BaseResponse {
     required this.address,
     required this.balance,
     required this.coin,
+    this.gasfreeAddress,
   });
 
   factory MyBalanceResponse.parse(Map<String, dynamic> json) {
@@ -32,10 +33,12 @@ class MyBalanceResponse extends BaseResponse {
       address: json.value<String>('address'),
       balance: BalanceInfo.fromJson(json),
       coin: json.value<String>('coin'),
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
 
   final String address;
+  final String? gasfreeAddress;
   final BalanceInfo balance;
   final String coin;
 
@@ -44,6 +47,7 @@ class MyBalanceResponse extends BaseResponse {
     return {
       'mmrpc': mmrpc,
       'address': address,
+      if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
       'balance': balance.total,
       'unspendable_balance': balance.unspendable,
       'coin': coin,

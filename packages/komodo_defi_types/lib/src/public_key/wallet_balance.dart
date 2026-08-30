@@ -2,10 +2,7 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class WalletBalance {
-  const WalletBalance({
-    required this.walletType,
-    required this.accounts,
-  });
+  const WalletBalance({required this.walletType, required this.accounts});
 
   factory WalletBalance.fromJson(JsonMap json) {
     return WalletBalance(
@@ -21,9 +18,9 @@ class WalletBalance {
   final List<WalletAccount> accounts;
 
   JsonMap toJson() => {
-        'wallet_type': walletType,
-        'accounts': accounts.map((e) => e.toJson()).toList(),
-      };
+    'wallet_type': walletType,
+    'accounts': accounts.map((e) => e.toJson()).toList(),
+  };
 }
 
 class WalletAccount {
@@ -54,11 +51,11 @@ class WalletAccount {
   final List<WalletAddress> addresses;
 
   JsonMap toJson() => {
-        'account_index': accountIndex,
-        'derivation_path': derivationPath,
-        'total_balance': totalBalance.toJson(),
-        'addresses': addresses.map((e) => e.toJson()).toList(),
-      };
+    'account_index': accountIndex,
+    'derivation_path': derivationPath,
+    'total_balance': totalBalance.toJson(),
+    'addresses': addresses.map((e) => e.toJson()).toList(),
+  };
 }
 
 class WalletAddress {
@@ -67,6 +64,7 @@ class WalletAddress {
     required this.derivationPath,
     required this.chain,
     required this.balance,
+    this.gasfreeAddress,
   });
 
   factory WalletAddress.fromJson(JsonMap json) {
@@ -74,9 +72,8 @@ class WalletAddress {
       address: json.value<String>('address'),
       derivationPath: json.value<String>('derivation_path'),
       chain: json.value<String>('chain'),
-      balance: TokenBalanceMap.fromJson(
-        json.value<JsonMap>('balance'),
-      ),
+      balance: TokenBalanceMap.fromJson(json.value<JsonMap>('balance')),
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
 
@@ -84,11 +81,13 @@ class WalletAddress {
   final String derivationPath;
   final String chain;
   final TokenBalanceMap balance;
+  final String? gasfreeAddress;
 
   JsonMap toJson() => {
-        'address': address,
-        'derivation_path': derivationPath,
-        'chain': chain,
-        'balance': balance.toJson(),
-      };
+    'address': address,
+    'derivation_path': derivationPath,
+    'chain': chain,
+    'balance': balance.toJson(),
+    if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
+  };
 }

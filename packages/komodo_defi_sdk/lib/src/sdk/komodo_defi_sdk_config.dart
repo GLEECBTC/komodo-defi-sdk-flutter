@@ -1,5 +1,13 @@
 // sdk_config.dart
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+/// Application-owned amendment of one normalized asset configuration.
+///
+/// The callback runs before the SDK parses the configuration into an [Asset].
+/// It must return a new map and should preserve fields it does not own.
+typedef AssetConfigTransform = JsonMap Function(JsonMap config);
 
 class KomodoDefiSdkConfig {
   const KomodoDefiSdkConfig({
@@ -12,6 +20,8 @@ class KomodoDefiSdkConfig {
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
     this.marketDataConfig = const MarketDataConfig(),
     this.tronProApiKey,
+    this.tronGaslessProvider,
+    this.assetConfigTransform,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -43,6 +53,19 @@ class KomodoDefiSdkConfig {
   /// API key. Retained for backward compatibility.
   final String? tronProApiKey;
 
+  /// Optional Tron GasFree provider config. When set, TRX platform activations
+  /// enable gas-free (gasless) TRC20 transfers where the fee is paid in the
+  /// token. Held in memory only — never persisted.
+  final TronGaslessProviderConfig? tronGaslessProvider;
+
+  /// Optional application policy applied to each normalized asset config
+  /// before it enters the SDK asset registry.
+  ///
+  /// Product allowlists belong here rather than in generic SDK capability
+  /// logic. SDK bootstrap applies the transform to bundled, remote, and cached
+  /// registry views without persisting its result.
+  final AssetConfigTransform? assetConfigTransform;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -53,6 +76,8 @@ class KomodoDefiSdkConfig {
     Duration? activatedAssetsCacheTtl,
     MarketDataConfig? marketDataConfig,
     String? tronProApiKey,
+    TronGaslessProviderConfig? tronGaslessProvider,
+    AssetConfigTransform? assetConfigTransform,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -69,6 +94,8 @@ class KomodoDefiSdkConfig {
           activatedAssetsCacheTtl ?? this.activatedAssetsCacheTtl,
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
+      tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
+      assetConfigTransform: assetConfigTransform ?? this.assetConfigTransform,
     );
   }
 }

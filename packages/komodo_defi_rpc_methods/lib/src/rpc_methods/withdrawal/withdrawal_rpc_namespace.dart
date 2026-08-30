@@ -19,6 +19,8 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
         memo: params.memo,
         max: params.isMax ?? false,
         ibcSourceChannel: params.ibcSourceChannel,
+        feeMethod: params.feeMethod,
+        gaslessOptions: params.gaslessOptions,
       ),
     );
   }
@@ -57,6 +59,7 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
     required String coin,
     String? txHex,
     Map<String, dynamic>? txJson,
+    TronGasfreeRelayPayload? gaslessRelayPayload,
     WithdrawalSource? from,
   }) {
     return execute(
@@ -65,7 +68,33 @@ class WithdrawMethodsNamespace extends BaseRpcMethodNamespace {
         coin: coin,
         txHex: txHex,
         txJson: txJson,
+        gaslessRelayPayload: gaslessRelayPayload,
       ),
+    );
+  }
+
+  /// Fetch a one-shot gas-free (gasless) trace status for reconciliation.
+  Future<GaslessTraceStatusResponse> gaslessTraceStatus({
+    required String coin,
+    required String traceId,
+  }) {
+    return execute(
+      GaslessTraceStatusRequest(
+        rpcPass: rpcPass ?? '',
+        coin: coin,
+        traceId: traceId,
+      ),
+    );
+  }
+
+  /// Fetch the GasFree custody account status (custody address, on-chain
+  /// balance, activation state, fees, and max gaslessly-sendable amount) for a
+  /// gasless-enabled TRC-20 token.
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus({
+    required String coin,
+  }) {
+    return execute(
+      GaslessAccountStatusRequest(rpcPass: rpcPass ?? '', coin: coin),
     );
   }
 }

@@ -15,6 +15,10 @@ const String _base58Alphabet =
 bool tronAddressesEqual(String a, String b) =>
     normalizeTronAddressToHex(a) == normalizeTronAddressToHex(b);
 
+/// Whether [address] is a checksum-valid Base58Check or canonical TRON hex.
+bool isValidTronAddress(String address) =>
+    RegExp(r'^41[0-9a-f]{40}$').hasMatch(normalizeTronAddressToHex(address));
+
 /// Lowercase hex `41…` (42 chars) for a TRON address in hex or Base58Check.
 String normalizeTronAddressToHex(String address) {
   if (address.isEmpty) return address;
@@ -62,7 +66,14 @@ String? _base58CheckPayloadToHex(String base58) {
     }
     hex = '00' * leadingOnes + hex;
 
-    if (hex.length < 50) return null;
+    if (hex.length != 50) return null;
+    final full = _hexToBytes(hex);
+    final payload = full.sublist(0, 21);
+    if (payload.first != 0x41) return null;
+    final expected = sha256.convert(sha256.convert(payload).bytes).bytes;
+    for (var i = 0; i < 4; i++) {
+      if (full[21 + i] != expected[i]) return null;
+    }
     return hex.substring(0, 42);
   } on Object {
     return null;

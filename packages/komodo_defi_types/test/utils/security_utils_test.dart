@@ -186,8 +186,7 @@ void main() {
       );
     });
 
-    test(
-        'Passwords with three or more consecutive identical '
+    test('Passwords with three or more consecutive identical '
         'characters should fail', () {
       expect(
         SecurityUtils.checkPasswordRequirements('Strong111Security!'),
@@ -241,21 +240,22 @@ void main() {
     });
 
     test(
-        'Valid passwords with two consecutive identical characters should pass',
-        () {
-      expect(
-        SecurityUtils.checkPasswordRequirements('Strong11Secured!'),
-        PasswordValidationError.none,
-      );
-      expect(
-        SecurityUtils.checkPasswordRequirements('Strong!!Secured1'),
-        PasswordValidationError.none,
-      );
-      expect(
-        SecurityUtils.checkPasswordRequirements('aaStrong1!Secured'),
-        PasswordValidationError.none,
-      );
-    });
+      'Valid passwords with two consecutive identical characters should pass',
+      () {
+        expect(
+          SecurityUtils.checkPasswordRequirements('Strong11Secured!'),
+          PasswordValidationError.none,
+        );
+        expect(
+          SecurityUtils.checkPasswordRequirements('Strong!!Secured1'),
+          PasswordValidationError.none,
+        );
+        expect(
+          SecurityUtils.checkPasswordRequirements('aaStrong1!Secured'),
+          PasswordValidationError.none,
+        );
+      },
+    );
 
     test('Special case - passwords with unicode characters', () {
       expect(
@@ -482,7 +482,8 @@ void main() {
 
     test('Limited fuzzy testing', () {
       final random = Random();
-      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123'
+      const chars =
+          'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123'
           r'456789!@#$%^&*()';
 
       for (int i = 0; i < 10; i++) {
@@ -586,39 +587,45 @@ void main() {
       expect(passwords.length, equals(10));
     });
 
-    test('Generated passwords should pass checkPasswordRequirements validation',
-        () {
-      for (var i = 0; i < 10; i++) {
-        final password = SecurityUtils.generatePasswordSecure(12);
-        final validationResult =
-            SecurityUtils.checkPasswordRequirements(password);
-        expect(validationResult, equals(PasswordValidationError.none));
-      }
+    test(
+      'Generated passwords should pass checkPasswordRequirements validation',
+      () {
+        for (var i = 0; i < 10; i++) {
+          final password = SecurityUtils.generatePasswordSecure(12);
+          final validationResult = SecurityUtils.checkPasswordRequirements(
+            password,
+          );
+          expect(validationResult, equals(PasswordValidationError.none));
+        }
 
-      // Test with extended characters too
-      for (var i = 0; i < 10; i++) {
-        final password = SecurityUtils.generatePasswordSecure(
-          12,
-          extendedSpecialCharacters: true,
-        );
-        final validationResult =
-            SecurityUtils.checkPasswordRequirements(password);
-        expect(validationResult, equals(PasswordValidationError.none));
-      }
-    });
+        // Test with extended characters too
+        for (var i = 0; i < 10; i++) {
+          final password = SecurityUtils.generatePasswordSecure(
+            12,
+            extendedSpecialCharacters: true,
+          );
+          final validationResult = SecurityUtils.checkPasswordRequirements(
+            password,
+          );
+          expect(validationResult, equals(PasswordValidationError.none));
+        }
+      },
+    );
 
-    test('Should not generate passwords with consecutive identical characters',
-        () {
-      // Generate multiple passwords and confirm none have 3+ consecutive identical characters
-      for (var i = 0; i < 20; i++) {
-        final password = SecurityUtils.generatePasswordSecure(32);
+    test(
+      'Should not generate passwords with consecutive identical characters',
+      () {
+        // Generate multiple passwords and confirm none have 3+ consecutive identical characters
+        for (var i = 0; i < 20; i++) {
+          final password = SecurityUtils.generatePasswordSecure(32);
 
-        // Check for consecutive identical characters with regular expressions
-        final hasConsecutiveChars = RegExp(r'(.)\1{2,}').hasMatch(password);
+          // Check for consecutive identical characters with regular expressions
+          final hasConsecutiveChars = RegExp(r'(.)\1{2,}').hasMatch(password);
 
-        expect(hasConsecutiveChars, isFalse);
-      }
-    });
+          expect(hasConsecutiveChars, isFalse);
+        }
+      },
+    );
 
     test('Should generate valid passwords at minimum length (8)', () {
       final password = SecurityUtils.generatePasswordSecure(8);
@@ -639,29 +646,118 @@ void main() {
     });
 
     test(
-        'Should generate exact length password with extended special characters',
-        () {
-      final password12 = SecurityUtils.generatePasswordSecure(
-        12,
-        extendedSpecialCharacters: true,
-      );
-      final password16 = SecurityUtils.generatePasswordSecure(
-        16,
-        extendedSpecialCharacters: true,
-      );
-      final password24 = SecurityUtils.generatePasswordSecure(
-        24,
-        extendedSpecialCharacters: true,
-      );
+      'Should generate exact length password with extended special characters',
+      () {
+        final password12 = SecurityUtils.generatePasswordSecure(
+          12,
+          extendedSpecialCharacters: true,
+        );
+        final password16 = SecurityUtils.generatePasswordSecure(
+          16,
+          extendedSpecialCharacters: true,
+        );
+        final password24 = SecurityUtils.generatePasswordSecure(
+          24,
+          extendedSpecialCharacters: true,
+        );
 
-      expect(password12.length, equals(12));
-      expect(password16.length, equals(16));
-      expect(password24.length, equals(24));
+        expect(password12.length, equals(12));
+        expect(password16.length, equals(16));
+        expect(password24.length, equals(24));
 
+        expect(
+          SecurityUtils.checkPasswordRequirements(password12),
+          equals(PasswordValidationError.none),
+        );
+      },
+    );
+  });
+
+  group('Diagnostic JSON redaction', () {
+    test('recursively removes credentials and signed relay payloads', () {
+      final request = <String, dynamic>{
+        'method': 'send_raw_transaction',
+        'userpass': 'rpc-password-value',
+        'tx_hex': 'signed-standard-transaction',
+        'tx_json': <String, dynamic>{
+          'request_id': 'safe-request-id',
+          'from_address': 'private-wallet-address',
+          'authorization_fingerprint': 'safe-fingerprint',
+          'signed_authorization': <String, dynamic>{
+            'sig': 'signed-gasfree-payload',
+            'receiver': 'private-recipient',
+          },
+        },
+        'providers': <Object?>[
+          <String, dynamic>{
+            'api_key': 'provider-api-key',
+            'api_secret': 'provider-api-secret',
+          },
+          <Object?>[
+            <String, dynamic>{'access_token': 'nested-access-token'},
+          ],
+        ],
+        'expected_authorization': <String, dynamic>{
+          'account': 'private-account',
+          'amount': '5000000',
+        },
+      };
+
+      final redacted = request.censored();
+      final encoded = redacted.toJsonString();
+
+      for (final secret in <String>[
+        'rpc-password-value',
+        'signed-standard-transaction',
+        'private-wallet-address',
+        'signed-gasfree-payload',
+        'private-recipient',
+        'provider-api-key',
+        'provider-api-secret',
+        'nested-access-token',
+        'private-account',
+        '5000000',
+      ]) {
+        expect(encoded, isNot(contains(secret)));
+      }
+      expect(redacted['userpass'], '<redacted>');
+      expect(redacted['tx_hex'], '<redacted>');
       expect(
-        SecurityUtils.checkPasswordRequirements(password12),
-        equals(PasswordValidationError.none),
+        (redacted['tx_json'] as Map<String, dynamic>)['signed_authorization'],
+        '<redacted>',
       );
+      expect(redacted['expected_authorization'], '<redacted>');
+      expect(
+        (redacted['tx_json'] as Map<String, dynamic>)['request_id'],
+        'safe-request-id',
+      );
+      expect(
+        (redacted['tx_json']
+            as Map<String, dynamic>)['authorization_fingerprint'],
+        'safe-fingerprint',
+      );
+
+      // Logging must not mutate the request that is subsequently sent to KDF.
+      expect(request['userpass'], 'rpc-password-value');
+      expect(
+        ((request['tx_json'] as Map<String, dynamic>)['signed_authorization']
+            as Map<String, dynamic>)['sig'],
+        'signed-gasfree-payload',
+      );
+    });
+
+    test('normalizes case and separators in sensitive keys', () {
+      final redacted = <String, dynamic>{
+        'API-SECRET': 'secret-one',
+        'walletPassword': 'not-matched-camel-case',
+        'service_password': 'secret-two',
+        'provider-signature': 'secret-three',
+      }.censored();
+
+      expect(redacted['API-SECRET'], '<redacted>');
+      expect(redacted['service_password'], '<redacted>');
+      expect(redacted['provider-signature'], '<redacted>');
+      expect(redacted['walletPassword'], '<redacted>');
     });
   });
 }

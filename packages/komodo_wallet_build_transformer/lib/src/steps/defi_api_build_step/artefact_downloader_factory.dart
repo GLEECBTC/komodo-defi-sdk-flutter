@@ -35,14 +35,14 @@ class ArtefactDownloaderFactory {
     String? githubToken,
   }) {
     final apiProvider = GithubApiProvider.withBaseUrl(
-      baseUrl: buildConfig.sourceUrls.first,
+      baseUrl: sourceUrl,
       branch: buildConfig.branch,
       token: githubToken,
     );
     return GithubArtefactDownloader(
       apiCommitHash: buildConfig.apiCommitHash,
       apiBranch: buildConfig.branch,
-      sourceUrl: buildConfig.sourceUrls.first,
+      sourceUrl: sourceUrl,
       githubApiProvider: apiProvider,
     );
   }

@@ -51,10 +51,14 @@ Run (direct):
 
 ```sh
 dart run packages/komodo_wallet_cli/bin/update_api_config.dart \
-  --branch dev \
+  --branch feat/tron-gasfree \
+  --commit bd413dcfea73c9de2e85903323946a378b180fa7 \
   --source mirror \
+  --mirror-url https://devbuilds.gleec.com \
+  --platform all \
   --config packages/komodo_defi_framework/app_build/build_config.json \
   --output-dir packages/komodo_defi_framework/app_build/temp_downloads \
+  --strict \
   --verbose
 ```
 
@@ -66,16 +70,24 @@ komodo_wallet_cli update_api_config --branch dev --source mirror --config packag
 
 Options:
 
-- `-b, --branch <name>` – Branch to fetch commit from (default: master)
+- `-b, --branch <name>` – Branch to fetch commit from (default: main)
 - `--repo <owner/repo>` – Repository (default: GLEECBTC/komodo-defi-framework)
 - `-c, --config <path>` – Path to build_config.json (default: build_config.json)
 - `-o, --output-dir <dir>` – Temp download dir (default: temp_downloads)
 - `-t, --token <token>` – GitHub token (or env `GITHUB_API_PUBLIC_READONLY_TOKEN`)
 - `-p, --platform <name|all>` – Specific platform to update or `all` (default: all)
+- `-m, --commit <sha>` – Commit to pin; short SHAs are resolved remotely and
+  only a full 40-character lowercase SHA is written
 - `-s, --source <github|mirror>` – Source for artifacts (default: github)
 - `--mirror-url <url>` – Mirror base URL (default: https://devbuilds.gleec.com)
+- `--strict` / `--no-strict` – Require exact commit-matching artifacts or
+  permit fallback (default: strict)
 - `-v, --verbose` – Verbose logging
 - `-h, --help` – Show help
+
+Because the manifest has one global KDF commit, changing that commit requires
+`--platform all`. A named `--platform` may only add a checksum while retaining
+the existing commit.
 
 ### 3) Upgrade nested Flutter projects (`flutter_upgrade_nested` executable)
 

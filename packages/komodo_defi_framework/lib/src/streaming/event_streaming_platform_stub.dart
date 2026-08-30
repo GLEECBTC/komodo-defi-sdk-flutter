@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 
-typedef EventStreamUnsubscribe = void Function();
+typedef EventStreamUnsubscribe = Future<void> Function();
 
 EventStreamUnsubscribe connectEventStream({
-  IKdfHostConfig? hostConfig,
   required void Function(Object? data) onMessage,
   required void Function() onFirstByte,
+  required void Function({required bool registrationsMayPersist})
+  onDisconnected,
+  IKdfHostConfig? hostConfig,
 }) {
   // No-op default implementation; actual logic provided by IO/Web variants
-  return () {};
+  scheduleMicrotask(() => onDisconnected(registrationsMayPersist: false));
+  return () async {};
 }

@@ -61,7 +61,7 @@ class StartupCoinsProvider {
       final factory = dataFactory ?? const DefaultCoinConfigDataFactory();
       final xform = transformer ?? const CoinConfigTransformer();
       final repository = factory.createRepository(runtimeConfig, xform);
-      final localProvider = factory.createLocalProvider(runtimeConfig);
+      final localProvider = factory.createLocalProvider(runtimeConfig, xform);
 
       final sources = <CoinConfigSource>[
         StorageCoinConfigSource(repository: repository),

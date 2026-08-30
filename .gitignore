@@ -47,6 +47,7 @@ migrate_working_dir/
 web/dist/*.js
 web/dist/*.wasm
 web/dist/*LICENSE.txt
+/web/kdf/
 web/src/mm2/
 web/src/kdf/
 
