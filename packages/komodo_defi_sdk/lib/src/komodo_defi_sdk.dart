@@ -516,7 +516,17 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     // A backstop behind the stream: anything the activation state cannot see
     // on its own can still resolve the wait from KDF's enabled-asset set, and
     // the read folds that answer back into the state map.
+    //
+    // Single-flight. A forced read that outlives the backstop interval must
+    // not be joined by the next tick's - the cache only coalesces forced
+    // reads started within its join window, so each extra probe would
+    // supersede the pending fetch and start another real `get_enabled_coins`
+    // against a KDF that is already slow, stacking up to fetch-timeout /
+    // interval concurrent requests per wait.
+    var probing = false;
     Future<void> probe() async {
+      if (probing) return;
+      probing = true;
       try {
         final enabled = await activatedAssetsCache.getActivatedAssetIds(
           forceRefresh: true,
@@ -527,6 +537,8 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
         // threshold yet" so [timeout] governs the outcome.
       } on Object {
         // Same: a failed read is not a verdict.
+      } finally {
+        probing = false;
       }
     }
 
