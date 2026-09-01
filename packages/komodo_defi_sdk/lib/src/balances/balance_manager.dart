@@ -890,8 +890,18 @@ class BalanceManager implements IBalanceManager {
       return;
     }
     final user = await _auth.currentUser;
+    // Continues-session, not same-stable. [_captureWalletContext] deliberately
+    // admits a degraded (name-only) observation of this wallet and keeps the
+    // enriched identity it already holds, so this immediate re-read disagrees
+    // for as long as `get_public_key_hash` is unavailable. Returning here
+    // leaves a subscribed controller with no producer, and because the start
+    // only gets a fixed retry budget the row stays "loading" for the rest of
+    // the session over a blip the capture path exists to tolerate.
     if (user == null ||
-        !isSameStableWallet(walletContext.walletId, user.walletId)) {
+        !walletIdentityContinuesSession(
+          walletContext.walletId,
+          user.walletId,
+        )) {
       return;
     }
     _logger.fine('Starting balance watcher for ${assetId.name}');
