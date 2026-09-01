@@ -74,10 +74,21 @@ jobs:
           # was built from, which is the thing we actually roll to.
           SAFE_BRANCH="${BRANCH//\//-}"
           NEW_COMMIT=""
+          # `|| true` on every network probe below is load-bearing, and stays
+          # so even though the step currently survives without it. A missing
+          # manifest is an EXPECTED outcome here, not an error, and both probes
+          # are pipelines inside a command substitution: with `set -e` alone the
+          # pipeline reports its last command's status, so a 404 from curl is
+          # masked by jq (or by head) exiting 0. The moment anything adds
+          # `shell: bash` to this step or a `defaults.run.shell`, pipefail turns
+          # on, the masked failure surfaces, and the step dies here - before the
+          # next mirror, before the listing fallback, before the warning-only
+          # path. `flutter-tests.yml` in this repo already declares `shell: bash`,
+          # so that is one edit away. Keep these guards.
           for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
             MANIFEST="${SOURCE_URL%/}/$SAFE_BRANCH/manifest.json"
             echo "Checking manifest: $MANIFEST"
-            CANDIDATE=$(curl -sf --max-time 30 "$MANIFEST" | jq -r '.commit // empty')
+            CANDIDATE=$(curl -sf --max-time 30 "$MANIFEST" | jq -r '.commit // empty' || true)
             if [[ -n "$CANDIDATE" ]]; then
               NEW_COMMIT="$CANDIDATE"
               echo "Resolved $NEW_COMMIT from $SOURCE_URL"
@@ -105,10 +116,14 @@ jobs:
               # reviewed, not landed.
               LISTING="${SOURCE_URL%/}/$SAFE_BRANCH/?sort=time&order=desc"
               echo "No manifest; reading listing: $LISTING"
+              # Guarded for the same reason as the manifest probe above, and
+              # this one has a second failure mode: `grep` exits 1 when a
+              # listing simply has no artefact yet, so under pipefail even a
+              # successful fetch would kill the step.
               CANDIDATE=$(curl -sf --max-time 30 "$LISTING" \
                 | grep -oE 'kdf_[0-9a-f]{7,40}-wasm\.zip' \
                 | sed -E 's/^kdf_([0-9a-f]+)-wasm\.zip$/\1/' \
-                | head -n 1)
+                | head -n 1 || true)
               if [[ -n "$CANDIDATE" ]]; then
                 if [[ "${#CANDIDATE}" -eq 40 ]]; then
                   # Already the full sha: promote it and let the roll job run
