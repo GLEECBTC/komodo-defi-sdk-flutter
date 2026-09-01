@@ -6,6 +6,7 @@ description: >-
   with no binary and no network.
 version: 0.1.0
 publish_to: none
+repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

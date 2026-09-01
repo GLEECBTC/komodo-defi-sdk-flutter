@@ -3,6 +3,314 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2026-09-01
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - [`komodo_defi_sdk` - `v0.7.0`](#komodo_defi_sdk---v070)
+ - [`komodo_defi_types` - `v0.5.0`](#komodo_defi_types---v050)
+ - [`komodo_defi_rpc_methods` - `v0.6.0`](#komodo_defi_rpc_methods---v060)
+ - [`komodo_defi_framework` - `v0.5.0`](#komodo_defi_framework---v050)
+ - [`komodo_wallet_build_transformer` - `v0.5.0`](#komodo_wallet_build_transformer---v050)
+ - [`komodo_wallet_cli` - `v0.6.0`](#komodo_wallet_cli---v060)
+ - [`komodo_coins` - `v0.4.0`](#komodo_coins---v040)
+
+Packages with other changes:
+
+ - [`komodo_defi_local_auth` - `v0.5.0`](#komodo_defi_local_auth---v050)
+ - [`komodo_coin_updates` - `v2.1.0`](#komodo_coin_updates---v210)
+ - [`komodo_ui` - `v0.3.3`](#komodo_ui---v033)
+ - [`komodo_legacy_wallet_migration` - `v0.1.1`](#komodo_legacy_wallet_migration---v011)
+ - [`komodo_cex_market_data` - `v0.1.0+2`](#komodo_cex_market_data---v0102)
+
+Packages with dependency updates only:
+
+> Packages listed below depend on other packages in this workspace that have had changes. Their versions have been incremented to bump the minimum dependency versions of the packages they depend upon in this project.
+
+ - `komodo_cex_market_data` - `v0.1.0+2`
+
+---
+
+#### `komodo_defi_sdk` - `v0.7.0`
+
+> Note: This release has breaking GasFree activation and withdrawal behavior.
+
+ - **BREAKING** **FEAT**(gasfree): derive token enrollment only from activated
+   TRC20 `gasless.enabled` configuration and require an authoritative
+   account-status check before custody balance or sends become available.
+   Applications may amend normalized asset configuration before SDK parsing
+   through `assetConfigTransform`.
+ - **BREAKING** **FEAT**(gasfree): configure the documented
+   `tron_gasless_provider` and per-token `gasless` fields during ordinary TRON
+   activation. Remove runtime `gasless::configure`, its restart fallback, and
+   the legacy V0/V1/bound compatibility contracts.
+ - **BREAKING** **FEAT**(gasfree): adopt the required four-state account status
+   contract (`available`, `pending_transfer`, `token_unsupported`, and
+   `provider_unreachable`) with endpoint-typed provider, custody-address, and
+   token-decimal errors.
+ - **SECURITY**(gasfree): persist a wallet-scoped local `journalId` before
+   submission, never serialize it to KDF, retain unknown outcomes without
+   resubmitting, and migrate accepted records with a trace ID into trace
+   recovery.
+ - **FEAT**(gasfree): subscribe to `GASLESS_TRACE:<coin>` before submission,
+   persist KDF's accepted `trace_id`, reconcile it once immediately, and follow
+   matching success/error stream events. Restart and disconnect recovery use a
+   one-shot `gasless::trace_status` request.
+ - **BREAKING** **FIX**(gasfree): serialize only KDF's documented withdrawal and
+   relay fields, report the actual Standard/GasFree submission rail, and obtain
+   final fee and finality from trace status rather than preview metadata.
+ - **FIX**(gasfree): treat account-status `max_withdrawable` as an advisory
+   status value and delegate maximum sends to KDF with `max: true` and no
+   amount.
+ - **FIX**(gasfree): retain custody/recovery access during provider outages,
+   preserve KDF-compatible Iguana, software-HD, and hardware-HD activation
+   identities, preserve cross-page address perspectives, and expose final fee
+   plus confirmation metadata without enabling resubmission.
+ - **FIX**(pubkeys): migrate legacy address metadata conservatively so funded
+   and previously used Standard addresses remain visible.
+ - **FIX**(gasfree): keep KDF's fresh custody total distinct from provider
+   spendability and Standard balances; remove external custody-balance and
+   finality readers.
+ - **FEAT**(activation): expose per-asset activation state through
+   `activationStates`, `watchActivationStates` and `watchActivationStateOf`,
+   and reach a terminal state on every path - a progress stream that never
+   emits and never closes no longer strands the caller past its deadline.
+ - **FEAT**(transaction-history): persist transaction history to disk. A coin's
+   history is served from local storage on a cold start and the network walk
+   that follows is a refresh rather than a first fetch. On by default, with
+   unbounded retention; `KomodoDefiSdkConfig` gates it.
+ - **FEAT**(transaction-history): add a Blockscout strategy so GLEEC and GRC-20
+   report history instead of returning an empty list.
+ - **FEAT**(balances): paint balances from local storage before activation
+   completes, and keep the balance watcher alive across a transport blip or a
+   degraded wallet identity rather than emitting nothing at all.
+ - **PERF**(pubkeys): scale the HD address gap scan through `HdGapLimit` -
+   3 addresses, or 1 on a newly generated wallet's first sign-in, against KDF's
+   default of 20 - and skip the redundant post-activation scan. Hardware
+   wallets keep the full gap of 20. Measured single-coin HD activation falls
+   from 46.9s to roughly 13.1s.
+ - **PERF**(auth): cut the identity RPCs issued on every sign-in and stop
+   activation precaching from blocking first paint.
+ - **FIX**(wallets): purge wallet-scoped caches - derived addresses, activation
+   config, enabled assets, transaction history - inside `deleteWallet` via the
+   new `KomodoDefiAuth.onWalletDeletion` hook, so deleting and immediately
+   recreating a wallet cannot race a still-running purge.
+ - **FIX**(balances): read cached public keys only after the undelivered
+   wallet-switch check, so a balance cannot be painted from the previous wallet.
+ - **FIX**(gasfree): discard an untraced pending transfer under a single lock,
+   so a reservation belonging to an accepted transfer can no longer be stripped
+   between the lookup and the removal.
+ - **FIX**(deps): declare `meta`, which `activation_strategy_base.dart`
+   imports, and the `flutter_test` and `plugin_platform_interface` dev
+   dependencies the tests import. They resolved only through the workspace, so
+   `dart pub publish` rejected the package.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
+
+#### `komodo_defi_types` - `v0.5.0`
+
+> Note: This release has breaking GasFree withdrawal interfaces.
+
+ - **BREAKING** **FEAT**(gasfree): align provider activation, fee preview,
+   signed relay, submission, and receipt models with the final KDF contract.
+ - **BREAKING** **FIX**(gasfree): obtain accepted trace identity and final fee
+   from submission/trace status instead of preview or provider echoes.
+ - **BREAKING** **FIX**(withdraw): enforce mutually exclusive explicit-amount
+   and maximum request modes, omitting `amount` whenever `max` is true.
+ - **SECURITY**(gasfree): persist only wallet-scoped journal and trace recovery
+   data, never signed authorization material or provider credentials.
+ - **FEAT**(gasfree): rename the local reservation identity to `journalId`;
+   migrate trace-backed records and keep trace-less records outcome-unknown.
+ - **BREAKING** **REFACTOR**(activation): remove `BatchActivationProgress`.
+   Multi-asset progress is now tracked by the SDK's activation coordinator and
+   surfaced as `AssetActivationState`; `ActivationProgress` itself is unchanged.
+ - **FEAT**(activation): add `AssetActivationState` and `AssetActivationStatus`
+   for per-asset activation state with a guaranteed terminal value.
+ - **FEAT**(pubkeys): add `HdGapLimit`, which resolves the HD address gap to
+   scan - 3 by default, 1 on a newly generated wallet's first sign-in, and the
+   full 20 for hardware wallets.
+ - **FIX**(transactions): make transaction identity and ordering stable enough
+   to persist and re-read, so a stored history round-trips without duplicates.
+ - **SECURITY**(logging): replace the log-censoring key list with a set that
+   also covers authorization headers, bearer/API tokens, cookies and GasFree
+   authorization material, and redact to `<redacted>` rather than a run of
+   asterisks that leaked the value's length.
+ - **FIX**(deps): declare the `flutter_test` dev dependency that
+   `sia_protocol_test.dart` imports.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
+
+#### `komodo_defi_rpc_methods` - `v0.6.0`
+
+> Note: This release has breaking GasFree relay response interfaces.
+
+ - **BREAKING** **FEAT**(gasfree): adopt the final activation, four-state account
+   status, signed relay, submission, and trace settlement contracts.
+ - **FEAT**(gasfree): add typed `stream::gasless_trace::enable` success and
+   error events for coin-scoped trace reconciliation.
+ - **SECURITY**(gasfree): remove request/fingerprint/expected-authorization
+   compatibility fields and reject undocumented relay generations.
+ - **FIX**(gasfree): generate endpoint-scoped account, withdrawal, trace, and
+   streaming exceptions from the pinned KDF Rust error enums.
+ - **FIX**(gasfree): serialize maximum withdrawals with `max: true` and no
+   `amount`, and serialize only documented GasFree withdrawal options.
+ - **FEAT**(activation): send the HD address `gap_limit` on the wire for the
+   activation methods that accept it, so callers can scan fewer addresses than
+   KDF's default of 20.
+ - **FEAT**(activation): add WebSocket expansion of EVM node entries, gated off
+   on both web and native for this release: KDF `main` panics on a `wss://`
+   reply that lands after the caller's timeout, so only HTTP nodes are sent.
+ - **FIX**(requests): encode request bodies through a single encodable path so
+   nested parameter objects serialize consistently.
+
+#### `komodo_defi_framework` - `v0.5.0`
+
+> Note: This release rolls the bundled KDF to the `3.1.0-beta` line.
+
+ - **BREAKING** **BUILD**(kdf): pin the bundled artefact to KDF `main`
+   `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`) for all
+   seven native/WASM targets. This reprices EVM swap gas under the
+   Amsterdam/Bogota fork rules and is visible in fee estimates.
+ - **BREAKING** **BUILD**(kdf): require a full 40-character commit hash and
+   declare `required_platforms`, so a partial or missing platform fails the
+   build instead of shipping a stale artefact.
+ - **FEAT**(build): resolve artefacts from the Gleec and Nitride dev-build
+   mirrors. `source_urls[0]` is load-bearing - only `devbuilds.gleec.com`
+   serves `main/`, and CI passes the first entry as its single mirror.
+ - **FEAT**(streaming): add typed `GASLESS_TRACE` events and rework the web and
+   IO event-stream transports around a single service lifecycle.
+ - **FEAT**(config): allow an `IKdfOperations` implementation to be injected,
+   and export `KdfExecutableFinder` and `KdfOperationsLocalExecutable` so a test
+   harness can drive the real binary through the framework's own lifecycle.
+ - **FIX**(android): align native LOAD segments to 16 KB pages (#355).
+ - **SECURITY**(logging): stop logging full activation parameters, and suppress
+   verbose RPC logging for GasFree requests, whose bodies carry provider
+   credentials and signed authorization material.
+ - **CHORE**(build): drop the committed `CMakeCache.txt`, `Makefile` and
+   `cmake_install.cmake`. The cache recorded absolute paths from the machine
+   that generated it, and CMake refuses to configure a directory whose cache
+   came from elsewhere (#362).
+
+#### `komodo_wallet_build_transformer` - `v0.5.0`
+
+ - **BREAKING** **FEAT**(build): write and verify artefact provenance markers
+   next to each extracted KDF artefact. A marker is authoritative only when it
+   identifies the pinned commit, the downloaded archive, the extracted core
+   artefact and the complete platform runtime set; legacy partial markers fail
+   closed and force a re-fetch.
+ - **FEAT**(build): support `require_full_commit_hash` and `required_platforms`
+   in the API build config, so an incomplete pin fails the build.
+ - **FIX**(build): discard the Rust proc-macro DLLs that KDF's Windows archive
+   ships, which the owned-runtime guard otherwise rejected - failing every
+   `flutter test` that runs the transformer.
+ - **FIX**(assets): decide whether a platform asset needs recopying by
+   comparing SHA-256 content rather than modification time, which a checkout or
+   a restored cache can reorder.
+
+#### `komodo_wallet_cli` - `v0.6.0`
+
+ - **BREAKING** **FEAT**(update-api-config): default to the `main` branch of the
+   private `GLEECBTC/kdf-internal` repository. `--source github` against it now
+   needs a `--token` with read access.
+ - **FEAT**(update-api-config): resolve short commit SHAs remotely and write
+   only a full 40-character lowercase SHA; add `--strict` to require
+   exact commit-matching artefacts, `--mirror-url` to pin the mirror, and a
+   platform update scope that only lets `--platform all` change the pinned
+   commit.
+ - **FIX**(update-api-config): match a mirror listing's links by the artefact
+   filename contract applied to the href's basename, so bare filenames,
+   relative paths and absolute URLs all resolve alike.
+ - **FIX**(update-api-config): keep an independently trusted checksum set
+   unchanged when the pinned commit has not moved, rather than replacing it
+   with whatever the current download calculated.
+
+#### `komodo_defi_local_auth` - `v0.5.0`
+
+ - **FEAT**(auth): add `KomodoDefiAuth.onWalletDeletion`, an awaited hook that
+   runs inside `deleteWallet` after KDF and secure storage have forgotten the
+   wallet but before the call returns. Wallet-scoped cache owners register here
+   so deleting and immediately recreating the same wallet cannot race a
+   still-running purge; the `walletDeletions` stream remains for passive
+   observers.
+ - **FIX**(auth): stop treating a transient transport failure as an
+   authentication failure - a brief network drop no longer ends the session.
+ - **FIX**(auth): resolve the deleted wallet's identity before deletion, since
+   it cannot be recovered afterwards.
+ - **FIX**(trezor): surface the device's own message in `TrezorException`
+   instead of `GeneralErrorResponse.toString()`, which is deliberately reduced
+   to its `error_type` to keep request payloads out of logs and so read as
+   `GeneralErrorResponse(errorType: ...)` to the user. `error_data` is still
+   never included.
+ - **FIX**(storage): open Android secure storage with `resetOnError: false`, so
+   a read failure surfaces instead of silently clearing stored credentials.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
+
+#### `komodo_coins` - `v0.4.0`
+
+ - **BREAKING** **FIX**(assets): return `filteredAssets` as an ordered snapshot
+   keyed by `AssetId` equality rather than the live `SplayTreeMap` behind the
+   filter cache. The tree's comparator orders on `AssetId.toString()`, which
+   omits the chain id and includes the parent, so lookups on it missed ids that
+   were `==` to a stored key - every child-token id parsed without known
+   parents, as `Transaction.fromJson` does. The returned map is now a stable,
+   unmodifiable snapshot, so it is also safe to iterate across an await.
+ - **PERF**(assets): memoise the filtered snapshot per strategy, invalidating it
+   with the underlying cache. `filteredAssets` is on every `available` read.
+ - **FIX**(tests): correct long-stale expectations - a `type: 'UTXO'` fixture is
+   tagged `CoinSubClass.utxo`, not `smartChain`, since #244, and a custom token
+   colliding with a bundled asset takes over its slot rather than being stored
+   beside it under a renamed id.
+
+#### `komodo_coin_updates` - `v2.1.0`
+
+ - **FEAT**(config): add `CoinConfigTransformer.additionalTransforms`, applied
+   after the built-in normalization set so an application can amend normalized
+   asset configuration without replacing SDK defaults.
+ - **FEAT**(tron): add `TronQuickNodeTransform`, keeping mainnet TRX and TRC20
+   assets pointed at the Gleec proxy while preserving upstream fallback nodes.
+ - **FIX**(custom-tokens): stop rejecting a re-store of an existing custom token
+   as a contract collision. Assets read back through `AssetAdapter` are rebuilt
+   without known parent ids, so the stored copy never carries a `parentId`;
+   comparing that absence against a live parsed parent made every `upsert` and
+   `addCustomTokenIfNotExists` on an existing token throw. Parents are now only
+   compared when both sides carry one - a differing contract address still
+   conflicts.
+
+#### `komodo_ui` - `v0.3.3`
+
+ - **FEAT**(withdraw): render GasFree fees - provider, transfer fee and optional
+   account-activation fee - in `FeeInfoDisplay`.
+ - **FEAT**(withdraw): parameterise the withdrawal amount field's labels so host
+   applications can localise them, and rework its max/send-maximum controls to
+   stay usable at large text scales.
+ - **FIX**(addresses): correct address selection and formatting in the address
+   select input and recipient/source fields.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
+
+#### `komodo_legacy_wallet_migration` - `v0.1.1`
+
+ - **FIX**(android): open legacy encrypted shared preferences with
+   `resetOnError: false`, so a read failure surfaces instead of silently
+   clearing the legacy wallet data the migration exists to read.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
+
+#### `komodo_cex_market_data` - `v0.1.0+2`
+
+ - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
+   imports. It resolved only through the workspace, so `dart pub publish`
+   rejected the package.
+ - Update a dependency to the latest release.
+
 ## 2026-05-02
 
 ### Changes

@@ -1,3 +1,10 @@
+## 0.1.0+2
+
+ - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
+   imports. It resolved only through the workspace, so `dart pub publish`
+   rejected the package.
+ - Update a dependency to the latest release.
+
 ## 0.1.0+1
 
  - **FIX**(coingecko): add a failure cooldown to avoid repeated failing requests (#346).

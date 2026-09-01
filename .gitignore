@@ -41,6 +41,9 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Anchored above, so package build output needs its own entry - this is what
+# let `packages/komodo_defi_framework` accumulate committed CMake output.
+packages/**/build/
 **/.plugin_symlinks/*
 
 # Web related

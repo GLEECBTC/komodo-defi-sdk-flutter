@@ -1,4 +1,4 @@
-## 1.0.0
+## 0.5.0
 
 > Note: This release has breaking GasFree withdrawal interfaces.
 
@@ -12,6 +12,24 @@
    data, never signed authorization material or provider credentials.
  - **FEAT**(gasfree): rename the local reservation identity to `journalId`;
    migrate trace-backed records and keep trace-less records outcome-unknown.
+ - **BREAKING** **REFACTOR**(activation): remove `BatchActivationProgress`.
+   Multi-asset progress is now tracked by the SDK's activation coordinator and
+   surfaced as `AssetActivationState`; `ActivationProgress` itself is unchanged.
+ - **FEAT**(activation): add `AssetActivationState` and `AssetActivationStatus`
+   for per-asset activation state with a guaranteed terminal value.
+ - **FEAT**(pubkeys): add `HdGapLimit`, which resolves the HD address gap to
+   scan - 3 by default, 1 on a newly generated wallet's first sign-in, and the
+   full 20 for hardware wallets.
+ - **FIX**(transactions): treat an absent `received_by_me` or `spent_by_me` as
+   zero when converting a KDF transaction, rather than parsing null.
+ - **SECURITY**(logging): replace the log-censoring key list with a set that
+   also covers authorization headers, bearer/API tokens, cookies and GasFree
+   authorization material, and redact to `<redacted>` rather than a run of
+   asterisks that leaked the value's length.
+ - **FIX**(deps): declare the `flutter_test` dev dependency that
+   `sia_protocol_test.dart` imports.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
 ## 0.4.1
 

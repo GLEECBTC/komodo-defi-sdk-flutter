@@ -483,7 +483,7 @@ Future<T?> showDropdownSearch<T>(
 
   void clearOverlay() {
     if (scrollPosition != null && scrollListener != null) {
-      scrollPosition!.removeListener(scrollListener!);
+      scrollPosition.removeListener(scrollListener);
     }
     _overlayEntry?.remove();
     _overlayEntry = null;
@@ -501,7 +501,7 @@ Future<T?> showDropdownSearch<T>(
   if (scrollable != null) {
     scrollPosition = scrollable.position;
     scrollListener = () => onItemSelected(null);
-    scrollPosition!.addListener(scrollListener!);
+    scrollPosition.addListener(scrollListener);
   }
   _overlayEntry = OverlayEntry(
     builder: (context) {

@@ -1,3 +1,15 @@
+## 0.3.3
+
+ - **FEAT**(withdraw): render GasFree fees - provider, transfer fee and optional
+   account-activation fee - in `FeeInfoDisplay`.
+ - **FEAT**(withdraw): parameterise the withdrawal amount field's labels so host
+   applications can localise them, and rework its max/send-maximum controls to
+   stay usable at large text scales.
+ - **FIX**(addresses): correct address selection and formatting in the address
+   select input and recipient/source fields.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
+
 ## 0.3.2
 
  - **FIX**(asset-icons): avoid duplicate icon precache requests (#345).

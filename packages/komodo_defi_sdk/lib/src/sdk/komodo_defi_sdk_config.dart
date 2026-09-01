@@ -45,12 +45,11 @@ class KomodoDefiSdkConfig {
   /// cache is derived state and is always refreshed from the network, so
   /// disabling this costs latency rather than correctness.
   ///
-  /// Two caveats worth knowing. Cached history survives sign-out, and no
-  /// SDK-wide purge runs on wallet deletion yet, so a deleted wallet's history
-  /// stays on disk until something calls
-  /// `HiveTransactionStorage.purgeWallet`; the same is already true of the
-  /// pubkey cache, the activation config store and the wallet asset list. And
-  /// the store is unbounded, mirroring the in-memory behaviour it replaces.
+  /// Two caveats worth knowing. Cached history survives sign-out - deleting
+  /// the wallet is what clears it, through the `onWalletDeletion` purge that
+  /// `bootstrap` registers alongside the pubkey cache, the activation config
+  /// store and the wallet asset list. And the store is unbounded, mirroring
+  /// the in-memory behaviour it replaces.
   final bool persistTransactionHistory;
 
   /// Maximum number of retry attempts for pre-activation

@@ -1,3 +1,19 @@
+## 0.4.0
+
+ - **BREAKING** **FIX**(assets): return `filteredAssets` as an ordered snapshot
+   keyed by `AssetId` equality rather than the live `SplayTreeMap` behind the
+   filter cache. The tree's comparator orders on `AssetId.toString()`, which
+   omits the chain id and includes the parent, so lookups on it missed ids that
+   were `==` to a stored key - every child-token id parsed without known
+   parents, as `Transaction.fromJson` does. The returned map is now a stable,
+   unmodifiable snapshot, so it is also safe to iterate across an await.
+ - **PERF**(assets): memoise the filtered snapshot per strategy, invalidating it
+   with the underlying cache. `filteredAssets` is on every `available` read.
+ - **FIX**(tests): correct long-stale expectations - a `type: 'UTXO'` fixture is
+   tagged `CoinSubClass.utxo`, not `smartChain`, since #244, and a custom token
+   colliding with a bundled asset takes over its slot rather than being stored
+   beside it under a renamed id.
+
 ## 0.3.2+1
 
  - Update a dependency to the latest release.
