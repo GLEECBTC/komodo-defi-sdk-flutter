@@ -1,10 +1,18 @@
 name: komodo_defi_sdk
 description: A high-level opinionated library that provides a simple way to
   build cross-platform Komodo Defi Framework applications (primarily focused on
-  wallets). This package seves as the entry point for the packages in this
+  wallets). This package serves as the entry point for the packages in this
   repository.
 version: 1.0.0
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - defi
+  - wallet
+  - blockchain
+  - cryptocurrency
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

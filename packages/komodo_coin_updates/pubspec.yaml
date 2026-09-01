@@ -1,7 +1,15 @@
 name: komodo_coin_updates
-description: Runtime coin config update coin updates.
+description: Coin configuration storage and runtime updates for Komodo
+  DeFi SDK applications.
 version: 2.0.1
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - defi
+  - blockchain
+  - configuration
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

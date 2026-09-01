@@ -3,6 +3,13 @@ description: A high-level widget catalog relevant to building Flutter UI apps
   which consume Komodo DeFi Framework
 version: 0.3.2
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - defi
+  - wallet
+  - widgets
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

@@ -3,6 +3,13 @@ description: A package responsible for managing and abstracting out an
   authentication service on top of the API's methods
 version: 0.4.1
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - defi
+  - authentication
+  - wallet
 
 environment:
   sdk: ">=3.9.0 <4.0.0"
