@@ -605,6 +605,22 @@ class ActivationManager {
             if (!primaryCompleter.isCompleted) {
               primaryCompleter.completeError(cancellationError);
             }
+            // Cancellation is a terminal path of its own, so it has to write
+            // the state map like the error path below does. Leaving the group
+            // on `activating` hands it to `_failGroupIfStillActivating` in the
+            // `finally`, which overwrites the caller's reason with the generic
+            // 'Activation ended without a terminal result' - so the progress
+            // event and the published state would disagree about why this
+            // asset stopped.
+            _setActivationStates(
+              _groupStates(
+                group,
+                (id) => AssetActivationState.failed(
+                  id,
+                  errorMessage: cancellation.reason,
+                ),
+              ),
+            );
             yield ActivationProgress.error(
               message: cancellation.reason,
               errorCode: 'ACTIVATION_CANCELLED',
