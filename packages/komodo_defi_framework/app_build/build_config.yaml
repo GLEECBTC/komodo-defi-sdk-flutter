@@ -3,9 +3,9 @@
 # Reference mirror of build_config.json. The JSON file remains canonical.
 
 api:
-  api_commit_hash: "bd413dcfea73c9de2e85903323946a378b180fa7"
+  api_commit_hash: "f3efd2ca10420f2982fa127dde84dcc17891f577"
 
-  branch: "feat/tron-gasfree"
+  branch: "main"
 
   fetch_at_build_enabled: true
   concurrent_downloads_enabled: true
@@ -21,21 +21,22 @@ api:
     - "windows"
 
   source_urls:
-    - "https://nitride-kdf-builds.web.app"
     - "https://devbuilds.gleec.com"
+    - "https://kdf-dev-builds.nitride.app"
+    - "https://nitride-kdf-builds.web.app"
     - "https://nebula.decker.im"
 
   platforms:
     web:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$"
       valid_zip_sha256_checksums:
-        - "9242cbba06eda6e82fc057897781cea2adf85f67f0cf5710f4feaf0a5e6d844c"
+        - "e21dee475c8d627b13b7acf2e7e8eb0edc31982868b46370991dd07472278103"
       path: "web/kdf/bin"
 
     ios:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "0cc494a8ff7b3f926cebc6956cda61c9928c7366624d592c71e29f080a3255bd"
+        - "26011d626a687aa34c1bc430bbdfc753febcd074afdc9c0921863ca09cd44efb"
       path: "ios"
 
     macos:
@@ -44,37 +45,37 @@ api:
         - "kdf-macos-universal2-"
         - "mac-universal"
       valid_zip_sha256_checksums:
-        - "f1d8a52c7c34d9721761733586f7262177b5362f911d8a220b2550e1f9844bbe"
+        - "07dca2c3d99812e45c8955e97e9c4485970170f2791b281273042af8d28bf789"
       path: "macos/bin"
 
     android-armv7:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "929d57312908544c9e6ae94d660d8ae14c21fb84547821ba0e0aba26c4daf29a"
+        - "ffe017a1f93b4cf411717637a77c7ef83ea4f38686eb3a4c17e3861d4da71cee"
       path: "android/app/src/main/cpp/libs/armeabi-v7a"
 
     android-aarch64:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "9953572e03956a751dcef365df76b6b84a3675800323220d50409dbd8175f037"
+        - "048872d8cead82f9e1912a56ffba098d383b8042daa4cb0aaab6dc27eed0396e"
       path: "android/app/src/main/cpp/libs/arm64-v8a"
 
     linux:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$"
       valid_zip_sha256_checksums:
-        - "ec5e2c801520e00ed1fd18c82c0edc0ade30716c6a4fb8aab453f265ce6afb33"
+        - "9b400f8cc7bdd18a7557a237d0666fc7ea0db8966b0c6494e6b3e23bbeababe2"
       path: "linux/bin"
 
     windows:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$"
       valid_zip_sha256_checksums:
-        - "04062cf1a271888eab9a757fa1a19e41038beea15b19484a21e5731d4dfc05e0"
+        - "a61e70e3e16568d5c28619384157eacbca0514284183c233e584d14778dccfff"
       path: "windows/bin"
-      
+
 coins:
   fetch_at_build_enabled: true
   update_commit_on_build: true
-  bundled_coins_repo_commit: "2997add793e16eaca4c39c13c5f2a379b916d93a"
+  bundled_coins_repo_commit: "0b46220b53cbd96d8ae712eafa6ff6145dc9a88c"
   coins_repo_api_url: "https://api.github.com/repos/GLEECBTC/coins"
   coins_repo_content_url: "https://raw.githubusercontent.com/GLEECBTC/coins"
   coins_repo_branch: "master"

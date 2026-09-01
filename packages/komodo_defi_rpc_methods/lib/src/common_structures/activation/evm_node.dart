@@ -8,9 +8,45 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 /// is folded away at compile time and the unused list never ships.
 const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
 
+/// Whether to send `ws_url` endpoints to KDF on web builds.
+///
+/// **Off while the wallet ships KDF `main`.** The ws transport on `main` panics
+/// on an ordinary late response, and on wasm a panic takes the whole MM2
+/// instance down with it:
+///
+///  * `eth_rpc.rs:23`/`:41` abandon a call at `TRY_RPC_NODE_TIMEOUT_S` = 10s,
+///    dropping the receiver.
+///  * `websocket_transport.rs:153` keeps the notifier registered for
+///    `WEB3_REQUEST_TIMEOUT_S` = 30s (`eth.rs:222`).
+///  * A response landing in that 10-30s window reaches
+///    `websocket_transport.rs:207`,
+///    `notifier.send(res_bytes).expect("receiver channel must be alive")`.
+///  * `mm2_wasm_lib.rs:129` says outright that it cannot wrap the async entry
+///    in `catch_unwind`, so nothing contains it.
+///
+/// Verified in the shipped binary: `strings kdf_f3efd2c-mac-universal` carries
+/// six `receiver channel must be alive` and zero `web3_pool` symbols.
+///
+/// The fix is not ours to make app-side - it is KDF `d2c16fc29` (kdf-internal
+/// PR #18, `.expect` to `let _ =`) plus `7d4e1872c` (PR #20, generation-stamped
+/// `Close` and a spawn reservation). Both are unmerged. **Flip this back to
+/// `true` once the pinned KDF contains them**, i.e. once
+/// `build_config.json`'s `api_commit_hash` is a commit carrying `d2c16fc29`.
+/// Nothing else about the expansion needs to change: [_webUnusableWsEndpoints]
+/// and [_deadWsEndpoints] still hold, and [EvmNode.toRpcNodeList] stays
+/// additive.
+///
+/// What web gives up in the meantime is what the rollout bought: every EVM POST
+/// there carries a CORS preflight, the endpoint's 429 response arrives without
+/// an `Access-Control-Allow-Origin` header and so is unrecoverable, and a
+/// WebSocket replaced the whole burst with one HTTP Upgrade - outside the
+/// per-request rate limiter and outside the CORS model entirely.
+const bool _kSendWsNodesOnWeb = false;
+
 /// Whether to send `ws_url` endpoints to KDF on native builds.
 ///
-/// **Currently web-only, deliberately.** The rollout is a measured win on web:
+/// **Was web-only, deliberately** - see [_kSendWsNodesOnWeb] for why web is
+/// currently off too. The rollout was a measured win on web:
 /// every EVM POST there carries a CORS preflight, the endpoint's 429 response
 /// arrives without an `Access-Control-Allow-Origin` header and so is
 /// unrecoverable, and a WebSocket replaces the whole burst with one HTTP
@@ -127,6 +163,7 @@ class EvmNode {
     if (wsUrl == null || wsUrl.isEmpty) return null;
     if (_deadWsEndpoints.containsKey(wsUrl)) return null;
     if (isWeb) {
+      if (!_kSendWsNodesOnWeb) return null;
       return _webUnusableWsEndpoints.containsKey(wsUrl) ? null : wsUrl;
     }
     return _kSendWsNodesOnNative ? wsUrl : null;

@@ -12,9 +12,21 @@ import 'package:test/test.dart';
 /// to find out that we failed to is a test, because the failure mode is silent
 /// on both sides.
 ///
-/// The web/native split is a compile-time `const`, so these tests assert the
-/// behaviour of *this* build. Under `dart test` that is the native branch.
-const bool _isWeb = bool.fromEnvironment('dart.library.js_interop');
+/// Whether *this* build ships ws entries at all.
+///
+/// The shipping policy is a pair of compile-time `const`s, so these tests
+/// assert the behaviour of the build that runs them. Both are currently off:
+/// `_kSendWsNodesOnNative` because the native rollout is unmeasured, and
+/// `_kSendWsNodesOnWeb` because the pinned KDF (`main`, `f3efd2c`) still panics
+/// at `websocket_transport.rs:207` on a response that lands after the caller's
+/// 10s timeout but inside the 30s notifier window - and a wasm panic takes the
+/// whole instance down. See `docs/KDF_PERF_STACK_DESCOPE.md`.
+///
+/// So the expansion is inert on every platform until one of those gates flips.
+/// These tests state that rather than asserting `hasLength(1)` outright, so
+/// that flipping a gate back on turns them into real assertions again instead
+/// of silently passing.
+const bool _wsShippedOnThisBuild = false;
 
 JsonMap _ethConfig(List<JsonMap> nodes) => {
   'coin': 'GLEEC',
@@ -76,12 +88,12 @@ void main() {
         ),
       ]);
 
-      if (_isWeb) {
+      if (_wsShippedOnThisBuild) {
         expect(expanded, hasLength(2));
         expect(expanded.first['url'], 'https://evm-rpc.gleec.com');
         expect(expanded.last['url'], 'wss://evm-ws.gleec.com');
       } else {
-        // Native is deliberately HTTP-only for now; see _kSendWsNodesOnNative.
+        // Both gates are off; see _kSendWsNodesOnWeb / _kSendWsNodesOnNative.
         expect(expanded, hasLength(1));
         expect(expanded.single['url'], 'https://evm-rpc.gleec.com');
       }
@@ -108,9 +120,9 @@ void main() {
         EvmNode(url: 'https://eth1.cipig.net:18555'),
       ];
 
-      final urls = EvmNode.toRpcNodeList(nodes)
-          .map((node) => node['url'] as String)
-          .toList();
+      final urls = EvmNode.toRpcNodeList(
+        nodes,
+      ).map((node) => node['url'] as String).toList();
 
       // This is the property that matters most. GLEEC, EWT, GLMR, MATIC and
       // MOVR have no http-only node, so a bug that substituted rather than
@@ -179,22 +191,29 @@ void main() {
     const dead = 'wss://polygon.gateway.tenderly.co';
     const originRefusing = 'wss://rpc.energyweb.org/ws';
 
-    test('web ships a healthy endpoint', () {
+    test('web ships a healthy endpoint only when its gate is on', () {
       expect(
         EvmNode.shippableWsUrlFor(healthy, isWeb: true),
-        healthy,
-        reason: 'this is the entire point of the change',
+        _wsShippedOnThisBuild ? healthy : isNull,
+        reason:
+            'a healthy endpoint is refused on web for exactly one reason - '
+            '_kSendWsNodesOnWeb, held off while the pinned KDF still carries '
+            'the websocket_transport.rs:207 panic (kdf-internal PR #18 / #20). '
+            'Nothing about the endpoint itself may exclude it here.',
       );
     });
 
     test('web refuses the Origin-refusing endpoint, native keeps it', () {
       expect(EvmNode.shippableWsUrlFor(originRefusing, isWeb: true), isNull);
-      // Native's answer is gated by _kSendWsNodesOnNative, but it must never
-      // be excluded for the *Origin* reason - that reason does not apply there.
+      // Both platform answers are gated, but an Origin-refusing endpoint must
+      // never be excluded on native for the *Origin* reason - that reason does
+      // not apply there. Comparing against a healthy endpoint's answer keeps
+      // this honest whichever way the gates are set.
       expect(
         EvmNode.shippableWsUrlFor(originRefusing, isWeb: false),
         EvmNode.shippableWsUrlFor(healthy, isWeb: false),
-        reason: 'on native an Origin-refusing endpoint is as usable as any '
+        reason:
+            'on native an Origin-refusing endpoint is as usable as any '
             'other; only the native rollout flag may exclude it',
       );
     });
@@ -225,8 +244,10 @@ void main() {
 
       final urls = _urlsOf(params.toRpcParams());
       expect(urls, contains('https://evm-rpc.gleec.com'));
-      expect(urls, hasLength(_isWeb ? 2 : 1));
-      if (_isWeb) expect(urls, contains('wss://evm-ws.gleec.com'));
+      expect(urls, hasLength(_wsShippedOnThisBuild ? 2 : 1));
+      if (_wsShippedOnThisBuild) {
+        expect(urls, contains('wss://evm-ws.gleec.com'));
+      }
     });
 
     test('Erc20ActivationParams expands its nodes', () {
@@ -241,8 +262,10 @@ void main() {
 
       final urls = _urlsOf(params.toRpcParams());
       expect(urls, contains('https://evm-rpc.gleec.com'));
-      expect(urls, hasLength(_isWeb ? 2 : 1));
-      if (_isWeb) expect(urls, contains('wss://evm-ws.gleec.com'));
+      expect(urls, hasLength(_wsShippedOnThisBuild ? 2 : 1));
+      if (_wsShippedOnThisBuild) {
+        expect(urls, contains('wss://evm-ws.gleec.com'));
+      }
     });
 
     test('TRON activation params are left alone', () {
