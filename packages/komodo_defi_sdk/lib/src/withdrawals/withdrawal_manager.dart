@@ -2081,22 +2081,6 @@ class WithdrawalManager {
     final walletId = walletContext.walletId;
     _requireVerifiedGaslessJournalIdentity(walletId);
 
-    final pending = await repository.find(walletId, journalId);
-    if (pending == null) return false;
-    if (pending.traceId != null) {
-      throw GaslessTransferException(
-        kind: GaslessTransferErrorKind.capabilityNotReady,
-        code: GaslessTransferErrorCode.capabilityNotReady,
-        stage: GaslessTransferStage.recovery,
-        message:
-            'Transfer $journalId carries a relay trace and must be reconciled, '
-            'not discarded.',
-        retryable: false,
-        terminal: false,
-        localizationKey: 'sdk_errors.gasless_capability_not_ready',
-      );
-    }
-
     await _requireWalletContextCurrent(walletContext);
     // Strict removal, not the best-effort `_removePendingGaslessTransfer`:
     // that helper swallows storage failures, which is right for opportunistic
@@ -2104,11 +2088,37 @@ class WithdrawalManager {
     // not actually delete keeps blocking every later GasFree send, and this
     // API telling the user their acknowledged discard succeeded would leave
     // no reason to try again. Let the failure propagate instead.
-    await repository.remove(walletId, journalId);
-    // The guard above proves this record carries no traceId, so the journal
-    // id is its only correlation entry.
-    _pendingGaslessWallets.remove(journalId);
-    return true;
+    //
+    // Inspecting the record and deleting it must also be one step. Reading it
+    // here and removing it in a second call leaves a window in which a live
+    // submission - already past `reserve`, not yet at
+    // `_persistAcceptedGaslessTransfer` - has its relay trace attached in
+    // between. The delete would then strip an accepted transfer's reservation
+    // and let a second send go out for the same custody address, while the
+    // original submission re-creates its journal entry behind it.
+    final outcome = await repository.discardUntraced(walletId, journalId);
+    switch (outcome) {
+      case GaslessJournalDiscardOutcome.notFound:
+        return false;
+      case GaslessJournalDiscardOutcome.hasTrace:
+        throw GaslessTransferException(
+          kind: GaslessTransferErrorKind.capabilityNotReady,
+          code: GaslessTransferErrorCode.capabilityNotReady,
+          stage: GaslessTransferStage.recovery,
+          message:
+              'Transfer $journalId carries a relay trace and must be '
+              'reconciled, not discarded.',
+          retryable: false,
+          terminal: false,
+          localizationKey: 'sdk_errors.gasless_capability_not_ready',
+        );
+      case GaslessJournalDiscardOutcome.discarded:
+        // The repository proved this record carried no traceId under the same
+        // lock that removed it, so the journal id is its only correlation
+        // entry.
+        _pendingGaslessWallets.remove(journalId);
+        return true;
+    }
   }
 
   /// Wallet-scoped journal updates for app-wide pending activity surfaces.

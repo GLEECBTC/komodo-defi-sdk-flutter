@@ -364,6 +364,79 @@ void main() {
     expect(await repository.findByTraceId(_wallet, 'trace-accepted'), accepted);
   });
 
+  test('discarding an untraced record removes it', () async {
+    final repository = SecurePendingGaslessTransferRepository(
+      storage: _MemoryStorage(),
+    );
+    final reserved = _transfer(traceId: null);
+    expect(await repository.reserve(_wallet, reserved), isTrue);
+
+    expect(
+      await repository.discardUntraced(_wallet, reserved.journalId),
+      GaslessJournalDiscardOutcome.discarded,
+    );
+    expect(await repository.list(_wallet), isEmpty);
+  });
+
+  test('discarding refuses a record that carries a relay trace', () async {
+    final repository = SecurePendingGaslessTransferRepository(
+      storage: _MemoryStorage(),
+    );
+    final accepted = _transfer(traceId: 'trace-accepted');
+    await repository.upsert(_wallet, accepted);
+
+    expect(
+      await repository.discardUntraced(_wallet, accepted.journalId),
+      GaslessJournalDiscardOutcome.hasTrace,
+    );
+    expect(
+      await repository.discardUntraced(_wallet, 'trace-accepted'),
+      GaslessJournalDiscardOutcome.hasTrace,
+      reason: 'the trace correlates to the same protected record',
+    );
+    expect(await repository.list(_wallet), [accepted]);
+  });
+
+  test('discarding an unknown journal reports no record', () async {
+    final repository = SecurePendingGaslessTransferRepository(
+      storage: _MemoryStorage(),
+    );
+
+    expect(
+      await repository.discardUntraced(_wallet, 'no-such-journal'),
+      GaslessJournalDiscardOutcome.notFound,
+    );
+  });
+
+  test('a discard racing its own acceptance never strips the '
+      'reservation', () async {
+    // The user discards a reservation that looks abandoned at the exact moment
+    // the relay answers the original submission. Reading the record and
+    // deleting it in two calls left a window between them: the delete landed
+    // on a record that had just gained a trace, dropping an *accepted*
+    // transfer's protection and re-opening the custody address to a second
+    // send. Whichever way the lock is granted, the accepted record must
+    // survive.
+    final storage = _MemoryStorage();
+    final discarding = SecurePendingGaslessTransferRepository(storage: storage);
+    final relay = SecurePendingGaslessTransferRepository(storage: storage);
+
+    final reserved = _transfer(traceId: null);
+    final accepted = _transfer(traceId: 'trace-accepted');
+    expect(await discarding.reserve(_wallet, reserved), isTrue);
+
+    await Future.wait([
+      discarding.discardUntraced(_wallet, reserved.journalId),
+      relay.upsert(_wallet, accepted),
+    ]);
+
+    expect(
+      await discarding.list(_wallet),
+      [accepted],
+      reason: 'the accepted transfer must keep its journal entry',
+    );
+  });
+
   test(
     'ambiguous legacy data blocks normal reads and reservations before proof',
     () async {

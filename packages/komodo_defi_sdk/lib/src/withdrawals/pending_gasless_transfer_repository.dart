@@ -173,6 +173,32 @@ abstract interface class PendingGaslessTransferRepository {
 
   /// Removes the transfer correlated with [identity].
   Future<void> remove(WalletId walletId, String identity);
+
+  /// Removes the transfer correlated with [identity], but only while it still
+  /// carries no relay trace.
+  ///
+  /// The inspection and the delete run under one journal lock. Callers cannot
+  /// get that by pairing [find] with [remove]: a submission that is past
+  /// `reserve` and still short of its accepted-transfer write can have a trace
+  /// attached between the two calls, and the delete would then drop an
+  /// accepted transfer's reservation and re-open the custody address to a
+  /// second send.
+  Future<GaslessJournalDiscardOutcome> discardUntraced(
+    WalletId walletId,
+    String identity,
+  );
+}
+
+/// What [PendingGaslessTransferRepository.discardUntraced] did.
+enum GaslessJournalDiscardOutcome {
+  /// The record existed, carried no trace, and was removed.
+  discarded,
+
+  /// No record is correlated with the requested identity.
+  notFound,
+
+  /// The record carries a relay trace, so it is reconcilable, not discardable.
+  hasTrace,
 }
 
 final class _DecodedPendingTransfers {
@@ -428,6 +454,28 @@ class SecurePendingGaslessTransferRepository
   @override
   Future<void> remove(WalletId walletId, String identity) {
     return _protect(() => _removeUnlocked(walletId, identity));
+  }
+
+  @override
+  Future<GaslessJournalDiscardOutcome> discardUntraced(
+    WalletId walletId,
+    String identity,
+  ) {
+    return _protect(() async {
+      // Same correlation rule as [find], so an identity that names an accepted
+      // transfer by its trace still reports [hasTrace] rather than silently
+      // finding nothing.
+      final pending = (await _readUnlocked(walletId))
+          .where(
+            (transfer) =>
+                transfer.journalId == identity || transfer.traceId == identity,
+          )
+          .firstOrNull;
+      if (pending == null) return GaslessJournalDiscardOutcome.notFound;
+      if (pending.traceId != null) return GaslessJournalDiscardOutcome.hasTrace;
+      await _removeUnlocked(walletId, identity);
+      return GaslessJournalDiscardOutcome.discarded;
+    });
   }
 
   Future<T> _protect<T>(Future<T> Function() operation) {

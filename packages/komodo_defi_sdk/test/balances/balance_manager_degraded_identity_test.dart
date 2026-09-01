@@ -241,4 +241,35 @@ void main() {
 
     expect(manager.lastKnownForWallet(asset.id, _enriched.walletId), isNull);
   });
+
+  test('a balance watcher starts while the identity is degraded', () async {
+    // The watcher start captures the wallet context - which admits the
+    // degraded observation and keeps the enriched identity - and then
+    // immediately re-reads `auth.currentUser`. Comparing those two with
+    // same-stable rules fails for as long as the identity RPC is down, and
+    // the start returns before registering a producer. `onListen` fires only
+    // on a 0->1 listener transition, so nothing emits at all: no cached
+    // paint, no fetch, and the row stays "loading" until the retry budget
+    // runs out.
+    final manager = build();
+
+    // Establish the enriched identity *without* caching a balance: the stream
+    // attachment replays `lastKnownForWallet` on subscribe, so a primed cache
+    // would emit a value even when no watcher ever starts.
+    authChanges.add(_enriched);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    // The RPC blips before the UI subscribes to this asset.
+    currentUser = _degraded;
+
+    expect(
+      (await manager
+              .watchBalance(asset.id)
+              .first
+              .timeout(const Duration(seconds: 5)))
+          .total,
+      Decimal.fromInt(5),
+      reason: 'the watcher must start during the blip capture already admits',
+    );
+  });
 }
