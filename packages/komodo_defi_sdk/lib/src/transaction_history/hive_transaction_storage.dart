@@ -385,13 +385,19 @@ class HiveTransactionStorage
     await _mutex.protect(() async {
       final prefix = TransactionStorageKey.prefix(walletId, assetId);
       final keys = _index.keysFor(prefix);
-      _index.removePrefix(prefix);
-      if (keys.isEmpty) return;
-      try {
-        await box.deleteAll(keys);
-      } on Object catch (error, stackTrace) {
-        _onError('failed to clear ${assetId.id}', error, stackTrace);
+      if (keys.isNotEmpty) {
+        try {
+          await box.deleteAll(keys);
+        } on Object catch (error, stackTrace) {
+          // Keep the index: `_onError` swallows this, so dropping the entries
+          // first would report a successful clear while the rows survive on
+          // disk. They are re-indexed on the next open, and the history the
+          // caller believes it deleted comes back.
+          _onError('failed to clear ${assetId.id}', error, stackTrace);
+          return;
+        }
       }
+      _index.removePrefix(prefix);
     });
   }
 
@@ -491,19 +497,31 @@ class HiveTransactionStorage
       _acquireCount = 0;
       _acquired.remove(boxName);
     }
-    final closing = _mutex.protect(() async {
-      final box = _box;
-      _box = null;
-      _opening = null;
-      if (box == null) return;
-      try {
-        // A no-op on web, where the backend reports no compaction support.
-        await box.compact();
-        await box.close();
-      } on Object catch (error, stackTrace) {
-        _onError('failed to close $boxName', error, stackTrace);
-      }
-    });
+    final closing = () async {
+      // `_open` installs `_box` only after its own await, so a null `_box`
+      // here can mean "not opened yet" rather than "nothing to release".
+      // Treating that as released strands the handle the in-flight open is
+      // about to assign: the registry entry is already gone, so the next
+      // acquire builds a fresh instance, adopts the same process-global box
+      // through `Hive.isBoxOpen`, and drives it from an index that never saw
+      // the other instance's writes. `_open` reports its own failures and
+      // never rejects, so this cannot throw past the pending-close record.
+      final opening = _opening;
+      if (opening != null) await opening;
+      await _mutex.protect(() async {
+        final box = _box;
+        _box = null;
+        _opening = null;
+        if (box == null) return;
+        try {
+          // A no-op on web, where the backend reports no compaction support.
+          await box.compact();
+          await box.close();
+        } on Object catch (error, stackTrace) {
+          _onError('failed to close $boxName', error, stackTrace);
+        }
+      });
+    }();
     // Recorded before the first await: the registry entry is already gone, so
     // a concurrent acquire builds a fresh instance - whose open must wait for
     // this handle to actually release the box rather than adopt a still-open
@@ -525,14 +543,17 @@ class HiveTransactionStorage
       for (final prefix in _index.prefixes.toList())
         if (prefix.startsWith(walletPrefix)) ..._index.keysFor(prefix),
     ];
+    if (keys.isNotEmpty) {
+      try {
+        await box.deleteAll(keys);
+      } on Object catch (error, stackTrace) {
+        // Index intact on failure, for the reason given in [clearTransactions].
+        _onError('failed to purge a wallet', error, stackTrace);
+        return;
+      }
+    }
     _index.removeWallet(walletPrefix);
     _sessionScopes.removeWhere((prefix, _) => prefix.startsWith(walletPrefix));
-    if (keys.isEmpty) return;
-    try {
-      await box.deleteAll(keys);
-    } on Object catch (error, stackTrace) {
-      _onError('failed to purge a wallet', error, stackTrace);
-    }
   }
 
   String _registerScope(WalletId walletId, AssetId assetId) {
@@ -644,8 +665,10 @@ class HiveTransactionStorage
   }
 
   Future<LazyBox<String>?> _open() async {
+    LazyBox<String>? opened;
     try {
       final box = await _openBoxWithRecovery();
+      opened = box;
       _box = box;
       // Unparseable keys, plus the stale halves of any re-key that crashed
       // between writing the replacement and deleting the displaced record.
@@ -668,6 +691,22 @@ class HiveTransactionStorage
         error,
         stackTrace,
       );
+      // The throw can come from a step *after* the open succeeded - dropping
+      // superseded keys, garbage collection - and a Hive box is process-global.
+      // Clearing `_box` without closing it puts the handle beyond the reach of
+      // `close()` for good, and the next `_openBoxWithRecovery` then adopts it
+      // through `Hive.isBoxOpen` in whatever state this attempt abandoned.
+      if (opened != null) {
+        try {
+          await opened.close();
+        } on Object catch (closeError, closeStackTrace) {
+          _onError(
+            'failed to release $boxName after falling back',
+            closeError,
+            closeStackTrace,
+          );
+        }
+      }
       _fallback = InMemoryTransactionStorage();
       _box = null;
       return null;
