@@ -20,12 +20,16 @@
  - **FEAT**(pubkeys): add `HdGapLimit`, which resolves the HD address gap to
    scan - 3 by default, 1 on a newly generated wallet's first sign-in, and the
    full 20 for hardware wallets.
- - **FIX**(transactions): make transaction identity and ordering stable enough
-   to persist and re-read, so a stored history round-trips without duplicates.
+ - **FIX**(transactions): treat an absent `received_by_me` or `spent_by_me` as
+   zero when converting a KDF transaction, rather than parsing null.
  - **SECURITY**(logging): replace the log-censoring key list with a set that
    also covers authorization headers, bearer/API tokens, cookies and GasFree
    authorization material, and redact to `<redacted>` rather than a run of
    asterisks that leaked the value's length.
+ - **FIX**(deps): declare the `flutter_test` dev dependency that
+   `sia_protocol_test.dart` imports.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
 ## 0.4.1
 

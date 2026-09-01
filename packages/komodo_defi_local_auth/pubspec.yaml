@@ -21,7 +21,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_bloc: ^9.1.1
-  flutter_secure_storage: ^10.0.0-beta.4
+  flutter_secure_storage: ^10.0.0
   freezed_annotation: ^3.0.0
   http: ^1.4.0
 

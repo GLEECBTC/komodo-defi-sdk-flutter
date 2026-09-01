@@ -7,6 +7,8 @@
    stay usable at large text scales.
  - **FIX**(addresses): correct address selection and formatting in the address
    select input and recipient/source fields.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
 ## 0.3.2
 

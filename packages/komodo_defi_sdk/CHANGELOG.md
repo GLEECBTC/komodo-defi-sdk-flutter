@@ -67,6 +67,13 @@
  - **FIX**(gasfree): discard an untraced pending transfer under a single lock,
    so a reservation belonging to an accepted transfer can no longer be stripped
    between the lookup and the removal.
+ - **FIX**(deps): declare `meta`, which `activation_strategy_base.dart`
+   imports, and the `flutter_test` and `plugin_platform_interface` dev
+   dependencies the tests import. They resolved only through the workspace, so
+   `dart pub publish` rejected the package.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
 
 ## 0.6.0
 

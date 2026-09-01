@@ -17,6 +17,7 @@ resolution: workspace
 
 # Add regular dependencies here.
 dependencies:
+  collection: ^1.18.0
   decimal: ^3.2.1
   http: ^1.4.0 # dart.dev
 

@@ -104,6 +104,13 @@ Packages with dependency updates only:
  - **FIX**(gasfree): discard an untraced pending transfer under a single lock,
    so a reservation belonging to an accepted transfer can no longer be stripped
    between the lookup and the removal.
+ - **FIX**(deps): declare `meta`, which `activation_strategy_base.dart`
+   imports, and the `flutter_test` and `plugin_platform_interface` dev
+   dependencies the tests import. They resolved only through the workspace, so
+   `dart pub publish` rejected the package.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
 
 #### `komodo_defi_types` - `v0.5.0`
 
@@ -133,6 +140,10 @@ Packages with dependency updates only:
    also covers authorization headers, bearer/API tokens, cookies and GasFree
    authorization material, and redact to `<redacted>` rather than a run of
    asterisks that leaked the value's length.
+ - **FIX**(deps): declare the `flutter_test` dev dependency that
+   `sia_protocol_test.dart` imports.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
 #### `komodo_defi_rpc_methods` - `v0.6.0`
 
@@ -237,6 +248,9 @@ Packages with dependency updates only:
    never included.
  - **FIX**(storage): open Android secure storage with `resetOnError: false`, so
    a read failure surfaces instead of silently clearing stored credentials.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
 
 #### `komodo_coins` - `v0.4.0`
 
@@ -278,15 +292,23 @@ Packages with dependency updates only:
    stay usable at large text scales.
  - **FIX**(addresses): correct address selection and formatting in the address
    select input and recipient/source fields.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
 #### `komodo_legacy_wallet_migration` - `v0.1.1`
 
  - **FIX**(android): open legacy encrypted shared preferences with
    `resetOnError: false`, so a read failure surfaces instead of silently
    clearing the legacy wallet data the migration exists to read.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
 
 #### `komodo_cex_market_data` - `v0.1.0+2`
 
+ - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
+   imports. It resolved only through the workspace, so `dart pub publish`
+   rejected the package.
  - Update a dependency to the latest release.
 
 ## 2026-05-02
