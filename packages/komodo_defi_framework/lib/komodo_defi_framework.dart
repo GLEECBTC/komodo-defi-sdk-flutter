@@ -20,7 +20,13 @@ export 'package:komodo_defi_framework/src/services/seed_node_service.dart';
 export 'package:komodo_defi_framework/src/streaming/event_streaming_service.dart';
 export 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 
+// Exported so a test harness can drive the real binary through the framework's
+// own implementation instead of reimplementing its lifecycle. See
+// `komodo_defi_harness/lib/src/process_kdf_operations.dart`.
+export 'src/native/kdf_executable_finder.dart' show KdfExecutableFinder;
 export 'src/operations/kdf_operations_interface.dart';
+export 'src/operations/kdf_operations_local_executable.dart'
+    show KdfOperationsLocalExecutable;
 
 class KomodoDefiFramework implements ApiClient {
   static const Duration _versionProbeTimeout = Duration(seconds: 2);

@@ -22,7 +22,6 @@ api:
 
   source_urls:
     - "https://nitride-kdf-builds.web.app"
-    - "https://api.github.com/repos/GLEECBTC/komodo-defi-framework"
     - "https://devbuilds.gleec.com"
     - "https://nebula.decker.im"
 

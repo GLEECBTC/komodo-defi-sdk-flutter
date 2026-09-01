@@ -78,6 +78,7 @@ class KdfUser extends Equatable {
     required this.walletId,
     required this.isBip39Seed,
     this.metadata = const {},
+    this.isGeneratedThisSession = false,
   });
 
   /// Create from JSON representation
@@ -100,6 +101,25 @@ class KdfUser extends Equatable {
   final bool isBip39Seed;
   final JsonMap metadata;
 
+  /// Whether this session created this wallet, with no mnemonic imported.
+  ///
+  /// Such a wallet provably has no on-chain history - the seed did not exist a
+  /// moment ago - which is what lets the HD address scan use a minimal gap
+  /// limit on this sign-in. See `HdGapLimit`.
+  ///
+  /// **Transient by design.** Never serialised, and stamped by the auth service
+  /// on every read for as long as the session lasts. Persisting it would keep
+  /// telling the scan there is nothing to find long after the wallet could have
+  /// received funds. It also defaults to false, so anything that builds a
+  /// `KdfUser` without knowing - a restored user from storage, a test double -
+  /// gets the safe answer.
+  ///
+  /// Distinct from `metadata['wallet_provenance']`, which is persisted, records
+  /// generated-vs-imported for the lifetime of the wallet, and is written by an
+  /// unawaited post-login finalizer in the app - so it is still absent while
+  /// the first activation burst runs.
+  final bool isGeneratedThisSession;
+
   bool get isHd => walletId.isHd;
 
   @Deprecated(
@@ -109,11 +129,18 @@ class KdfUser extends Equatable {
   AuthOptions get authOptions => walletId.authOptions;
 
   // Update copyWith to include new field
-  KdfUser copyWith({WalletId? walletId, bool? isBip39Seed, JsonMap? metadata}) {
+  KdfUser copyWith({
+    WalletId? walletId,
+    bool? isBip39Seed,
+    JsonMap? metadata,
+    bool? isGeneratedThisSession,
+  }) {
     return KdfUser(
       walletId: walletId ?? this.walletId,
       isBip39Seed: isBip39Seed ?? this.isBip39Seed,
       metadata: metadata ?? this.metadata,
+      isGeneratedThisSession:
+          isGeneratedThisSession ?? this.isGeneratedThisSession,
     );
   }
 

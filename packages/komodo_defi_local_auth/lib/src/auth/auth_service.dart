@@ -139,6 +139,25 @@ class KdfAuthService implements IAuthService {
   int _authStateGeneration = 0;
   Timer? _healthCheckTimer;
 
+  /// Compound ids of wallets this session created without an imported mnemonic.
+  ///
+  /// Never persisted, and consumed when the wallet's first authenticated
+  /// session ends ([_stopKdf]) or the wallet is deleted ([deleteWallet]): the
+  /// whole meaning is "first sign-in", and a value that outlived it would keep
+  /// telling the address scan there is nothing to find long after the wallet
+  /// could have received funds - including on a re-import under the same name.
+  final Set<String> _walletsGeneratedThisSession = <String>{};
+
+  /// Rolling cost of [getActiveUser]; see [_recordActiveUserCall].
+  int _activeUserCalls = 0;
+  int _activeUserQueuedMs = 0;
+  int _activeUserHeldMs = 0;
+  DateTime? _activeUserWindowStart;
+
+  /// Short enough to resolve a login burst into several windows, long enough
+  /// that a steady-state app logs roughly nothing.
+  static const Duration _activeUserReportInterval = Duration(seconds: 5);
+
   // Single-flight guard for ensureKdfHealthy to prevent concurrent restarts
   Future<bool>? _ongoingHealthCheck;
   DateTime? _lastHealthCheckAttempt;
@@ -329,6 +348,14 @@ class KdfAuthService implements IAuthService {
         late final KdfUser currentUser;
         try {
           currentUser = await _registerNewUser(config, options, isImported);
+          if (!isImported) {
+            // A wallet created here has no on-chain history by construction:
+            // the seed did not exist a moment ago. Recorded per session so the
+            // HD gap scan can be told so on this sign-in only.
+            _walletsGeneratedThisSession.add(
+              currentUser.walletId.compoundId,
+            );
+          }
         } catch (_) {
           await _clearFailedAuthenticatedKdfWithinWriteLock();
           rethrow;
@@ -338,9 +365,10 @@ class KdfAuthService implements IAuthService {
           '[$_sessionId] register: registration write path completed in '
           '${writePathStopwatch.elapsedMilliseconds}ms',
         );
-        _emitAuthStateChange(currentUser);
+        final sessionUser = _stampSessionFlags(currentUser)!;
+        _emitAuthStateChange(sessionUser);
         _invalidateUsersCache();
-        return currentUser;
+        return sessionUser;
       });
     } finally {
       registerStopwatch.stop();
@@ -426,9 +454,27 @@ class KdfAuthService implements IAuthService {
 
   @override
   Future<KdfUser?> getActiveUser() async {
+    // `getActiveUser` is the hottest thing on the login path and the reason it
+    // is hot is invisible from any single call site: it is invoked from the
+    // auth write lock by nearly every SDK subsystem, and each invocation costs
+    // two RPCs (`get_wallet_names` then `get_public_key_hash`). Field logs
+    // showed ~480 identity RPCs for one login, and nothing in either repo
+    // could say where they came from.
+    //
+    // Three numbers make that legible: how many calls, how long they queued
+    // for the write lock, and how long they held it. Queue time is the one
+    // that matters most - it is serialised, so N callers pay for each other.
+    //
+    // Deliberately NOT a cache. `protectRead` was removed here as a GasFree
+    // security fix (see the note at [_resolveActiveUserWithinWriteLock]) and
+    // caching `currentUser` per auth generation would reintroduce exactly what
+    // that removal prevents. This measures the cost; it does not avoid it.
+    final queued = Stopwatch()..start();
     return _lockWriteOperation(() async {
+      queued.stop();
+      final held = Stopwatch()..start();
       try {
-        return await _resolveActiveUserWithinWriteLock();
+        return _stampSessionFlags(await _resolveActiveUserWithinWriteLock());
       } catch (error) {
         // Clearing authentication here is the right response to an identity we
         // cannot trust - KDF answering with a different wallet, or a malformed
@@ -441,8 +487,59 @@ class KdfAuthService implements IAuthService {
         if (_isKdfUnreachable(error)) rethrow;
         await _clearFailedAuthenticatedKdfWithinWriteLock();
         rethrow;
+      } finally {
+        held.stop();
+        _recordActiveUserCall(
+          queued.elapsedMilliseconds,
+          held.elapsedMilliseconds,
+        );
       }
     });
+  }
+
+  /// Re-applies session-scoped facts that are not persisted with the user.
+  ///
+  /// [KdfUser.isGeneratedThisSession] lives only in [_walletsGeneratedThisSession],
+  /// so a user read back from secure storage has it false. Stamped on the way
+  /// out of [getActiveUser] rather than written into storage, because the whole
+  /// meaning is "this session created it": a persisted value would keep telling
+  /// the HD address scan there is nothing to find long after the wallet could
+  /// have received funds.
+  KdfUser? _stampSessionFlags(KdfUser? user) {
+    if (user == null) return null;
+    if (!_walletsGeneratedThisSession.contains(user.walletId.compoundId)) {
+      return user;
+    }
+    return user.copyWith(isGeneratedThisSession: true);
+  }
+
+  /// Accumulates [getActiveUser] cost and reports it at INFO, rate-limited.
+  ///
+  /// Rate-limited rather than one line per call: a login issues hundreds of
+  /// these, and per-call logging would itself become a cost. Rate-limited
+  /// rather than a single end-of-login summary, because there is no clean
+  /// "login finished" moment - the amplification continues through activation,
+  /// and watching the count decay across successive windows is what tells you
+  /// whether the burst is login or something that never settles.
+  void _recordActiveUserCall(int queuedMs, int heldMs) {
+    _activeUserCalls++;
+    _activeUserQueuedMs += queuedMs;
+    _activeUserHeldMs += heldMs;
+
+    final now = DateTime.now();
+    final since = _activeUserWindowStart ??= now;
+    if (now.difference(since) < _activeUserReportInterval) return;
+
+    _logger.info(
+      '[$_sessionId] getActiveUser: $_activeUserCalls calls in '
+      '${now.difference(since).inMilliseconds}ms '
+      '(${_activeUserCalls * 2} identity RPCs), '
+      'lock queue ${_activeUserQueuedMs}ms, lock held ${_activeUserHeldMs}ms',
+    );
+    _activeUserCalls = 0;
+    _activeUserQueuedMs = 0;
+    _activeUserHeldMs = 0;
+    _activeUserWindowStart = now;
   }
 
   Future<KdfUser?> _resolveActiveUserWithinWriteLock() async {
@@ -570,6 +667,12 @@ class KdfAuthService implements IAuthService {
           password: password,
         );
         await _secureStorage.deleteUser(walletName);
+        // A wallet re-imported under this name is not the wallet this session
+        // generated - it may have any amount of history - so the marker must
+        // not outlive the deletion. Compound ids are `name` or `name:<hash>`.
+        _walletsGeneratedThisSession.removeWhere(
+          (id) => id == walletName || id.startsWith('$walletName:'),
+        );
         _invalidateUsersCache();
       } on MmRpcException catch (e) {
         throw _mapDeleteWalletRpcError(e);
@@ -762,7 +865,10 @@ class KdfAuthService implements IAuthService {
   }
 
   late final Future<KdfStartupConfig> _noAuthConfig =
-      KdfStartupConfig.noAuthStartup(rpcPassword: _hostConfig.rpcPassword);
+      KdfStartupConfig.noAuthStartup(
+        rpcPassword: _hostConfig.rpcPassword,
+        rpcPort: _hostConfig.port,
+      );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
     final mnemonic = await getMnemonic(

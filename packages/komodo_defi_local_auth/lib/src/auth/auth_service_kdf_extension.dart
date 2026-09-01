@@ -45,6 +45,21 @@ extension KdfExtensions on KdfAuthService {
           (error is AuthException &&
               error.type == AuthExceptionType.apiConnectionError);
       if (!identityRpcIsUnavailable) {
+        // The exception deliberately carries only the cause's *type*: this
+        // message reaches the UI, and a cause like JsonUnsupportedObjectError
+        // stringifies the offending object, which here is a wallet identity
+        // response.
+        //
+        // That left nothing at all to debug with, though - a bare
+        // "causeType: JsonUnsupportedObjectError" says the response could not
+        // be re-encoded and not one thing about why. So log the full cause and
+        // stack at severe, where it reaches the log file the user can export
+        // and the redaction in the framework's log sink still applies.
+        _logger.severe(
+          '[$_sessionId] Authenticated wallet identity read failed',
+          error,
+          stackTrace,
+        );
         throw AuthException(
           'KDF returned a malformed authenticated wallet identity response',
           type: AuthExceptionType.internalError,
@@ -170,6 +185,11 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _stopKdf() async {
     await _shutdownSubscription?.cancel();
     _shutdownSubscription = null;
+    // Every authenticated session ends through here, and "generated this
+    // session" means "first sign-in": once that sign-in is over the marker
+    // must not keep telling the HD gap scan there is nothing to find. A later
+    // sign-in to the same wallet gets the standard gap.
+    _walletsGeneratedThisSession.clear();
     await _kdfFramework.kdfStop();
     _kdfFramework.resetHttpClient();
     _emitAuthStateChange(null);
@@ -399,35 +419,69 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
-  /// Whether [error] means KDF could not be reached, in either the raw or the
+  /// Whether [error] means KDF could not be *reached*, in either the raw or the
   /// already-wrapped form.
   ///
-  /// [_runStartupSensitiveRpc] retries the transport types below and then
-  /// gives up by throwing `AuthException(apiConnectionError)`, so by the time a
-  /// transport failure reaches a caller it is usually the wrapped form. Callers
-  /// that only match the raw types silently never fire.
-  /// [_ensureAuthenticatedWalletIdentity] already keys off the same pair.
+  /// Deliberately narrower than [_shouldRecoverStartupSensitiveRpc], and
+  /// deliberately not delegating to it: that one also retries a non-permanent
+  /// `GeneralErrorResponse`, which means KDF answered. This decides whether to
+  /// tear down the runtime and sign the user out, so it must mean transport
+  /// only.
+  ///
+  /// The wrapped form is the one that fires in practice.
+  /// [_runStartupSensitiveRpc] retries the raw types and then gives up by
+  /// throwing `AuthException(apiConnectionError)`, so a caller matching only
+  /// the raw types would silently never fire.
+  /// [_ensureAuthenticatedWalletIdentity] keys off the same pair.
   bool _isKdfUnreachable(Object error) {
     if (error is AuthException) {
       return error.type == AuthExceptionType.apiConnectionError;
     }
-    return _shouldRecoverStartupSensitiveRpc(error);
-  }
-
-  /// Whether [error] means "could not reach KDF", as opposed to "KDF answered
-  /// and the answer was bad".
-  ///
-  /// `ClientException` is the one that actually fires in practice. The RPC path
-  /// runs through `package:http` (`kdf_operations_native.dart`), and
-  /// `http_extensions.dart` raises `http.ClientException` directly, so a
-  /// loopback failure arrives as that rather than as the `dart:io` types below.
-  /// Those are kept for the paths that bypass `package:http`.
-  bool _shouldRecoverStartupSensitiveRpc(Object error) {
     return error is TimeoutException ||
         error is ClientException ||
         error is SocketException ||
         error is HttpException ||
         error is HandshakeException;
+  }
+
+  /// Whether a startup-sensitive RPC failure is worth one retry.
+  ///
+  /// The transport faults below, plus KDF answering *with* an error while it is
+  /// still coming up or is saturated - on web a single-threaded WASM instance
+  /// sharing the Flutter isolate with a login's activation fan-out. Without
+  /// that last clause, one such response on the very first attempt makes
+  /// [_ensureAuthenticatedWalletIdentity] fall straight through to a name-only
+  /// identity with no retry, and that downgrade is emitted on the auth stream
+  /// to every wallet-scoped consumer.
+  ///
+  /// `ClientException` is the transport type that actually fires: the RPC path
+  /// runs through `package:http` (`kdf_operations_native.dart`) and
+  /// `http_extensions.dart` raises it directly, so a loopback failure arrives
+  /// as that rather than as the `dart:io` types. Those are kept for the paths
+  /// that bypass `package:http`.
+  bool _shouldRecoverStartupSensitiveRpc(Object error) {
+    return error is TimeoutException ||
+        error is ClientException ||
+        error is SocketException ||
+        error is HttpException ||
+        error is HandshakeException ||
+        (error is GeneralErrorResponse && !_isPermanentStartupRpcError(error));
+  }
+
+  /// Errors KDF has explicitly classified as terminal.
+  ///
+  /// A deny-list, not an allow-list: the saturation responses this retry exists
+  /// for often carry no `error_type` at all, so anything unrecognised must stay
+  /// retryable. Retrying a *modelled* failure only delays the real message and
+  /// re-labels it `apiConnectionError`.
+  bool _isPermanentStartupRpcError(GeneralErrorResponse error) {
+    if (_isIncorrectPasswordRpcError(error) ||
+        _isWalletNotFoundRpcError(error)) {
+      return true;
+    }
+    final errorType = _extractRpcErrorType(error);
+    return _isInternalWalletError(errorType) ||
+        (errorType ?? '').toLowerCase() == 'invalidrequest';
   }
 
   Future<KdfStartupConfig> _generateStartupConfig({
@@ -455,6 +509,11 @@ extension KdfExtensions on KdfAuthService {
       walletPassword: walletPassword,
       seed: plaintextMnemonic ?? encryptedMnemonic,
       rpcPassword: _hostConfig.rpcPassword,
+      // Without this the `rpcPort = 7783` default won unconditionally, so the
+      // KDF this service started never listened anywhere else - no matter what
+      // the host config said. That is what made the port effectively fixed
+      // rather than merely defaulted.
+      rpcPort: _hostConfig.port,
       allowRegistrations: allowRegistrations,
       enableHd: hdEnabled,
       allowWeakPassword: allowWeakPassword,

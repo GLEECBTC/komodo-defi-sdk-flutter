@@ -152,6 +152,82 @@ void main() {
     });
   });
 
+  group('isDegradedWalletIdentity', () {
+    test('accepts the same wallet observed without its hash', () {
+      final enriched = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '0123456789abcdef',
+      );
+      final degraded = _wallet(name: 'wallet', authOptions: _hdAuth);
+
+      expect(isDegradedWalletIdentity(enriched, degraded), isTrue);
+    });
+
+    test('rejects an identity that never had an established hash', () {
+      final nameOnly = _wallet(name: 'wallet', authOptions: _hdAuth);
+      final blankHash = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '  ',
+      );
+      final degraded = _wallet(name: 'wallet', authOptions: _hdAuth);
+
+      expect(isDegradedWalletIdentity(nameOnly, degraded), isFalse);
+      expect(isDegradedWalletIdentity(blankHash, degraded), isFalse);
+    });
+
+    test('rejects an enrichment', () {
+      final nameOnly = _wallet(name: 'wallet', authOptions: _hdAuth);
+      final enriched = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '0123456789abcdef',
+      );
+
+      expect(isDegradedWalletIdentity(nameOnly, enriched), isFalse);
+    });
+
+    test('rejects a name change', () {
+      final enriched = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '0123456789abcdef',
+      );
+      final otherName = _wallet(name: 'other-wallet', authOptions: _hdAuth);
+
+      expect(isDegradedWalletIdentity(enriched, otherName), isFalse);
+    });
+
+    test('rejects a derivation-mode change', () {
+      final enriched = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '0123456789abcdef',
+      );
+      final otherDerivation = _wallet(name: 'wallet', authOptions: _iguanaAuth);
+
+      expect(isDegradedWalletIdentity(enriched, otherDerivation), isFalse);
+    });
+
+    test('rejects a private-key-policy change', () {
+      final enriched = _wallet(
+        name: 'wallet',
+        authOptions: _hdAuth,
+        pubkeyHash: '0123456789abcdef',
+      );
+      final trezor = _wallet(
+        name: 'wallet',
+        authOptions: const AuthOptions(
+          derivationMethod: DerivationMethod.hdWallet,
+          privKeyPolicy: PrivateKeyPolicy.trezor(),
+        ),
+      );
+
+      expect(isDegradedWalletIdentity(enriched, trezor), isFalse);
+    });
+  });
+
   group('preferEnrichedWalletIdentity', () {
     test('accepts a name-only to enriched transition', () {
       final nameOnly = _wallet(name: 'wallet', authOptions: _hdAuth);

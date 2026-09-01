@@ -88,6 +88,7 @@ export 'src/transaction_history/transaction_merge_utils.dart'
 export 'src/widgets/asset_balance_text.dart';
 export 'src/withdrawals/pending_gasless_transfer_repository.dart'
     show
+        GaslessJournalDiscardOutcome,
         GaslessTransferKeyDiscovery,
         GaslessTransferKeyValueStorage,
         GaslessTransferLegacyResolutionException,

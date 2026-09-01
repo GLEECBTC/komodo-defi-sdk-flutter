@@ -106,23 +106,22 @@ class SecurityManager {
       throw AuthException.notSignedIn();
     }
 
-    // If no assets specified, use all assets for which their activation is
-    // successful, pending, or failed.
-    final targetAssets =
-        assets != null
-            ? assets.toSet()
-            : {
-              ...(await _assetProvider.getActivatedAssets()).map((a) => a.id),
-              ..._activationCoordinator.pendingActivations,
-              ..._activationCoordinator.failedActivations,
-            };
+    // If no assets specified, use every asset the SDK has touched this
+    // session - activated, still activating, or failed - since a key export
+    // should not silently skip a coin whose activation is mid-flight or
+    // recoverable.
+    final targetAssets = assets != null
+        ? assets.toSet()
+        : {
+            ...(await _assetProvider.getActivatedAssets()).map((a) => a.id),
+            ..._activationCoordinator.activationStates.keys,
+          };
 
     // Filter out coins whose RPCs don't implement get_private_keys / show_priv_key.
     // Currently, SIA-based assets would throw "Unsupported" errors if included.
-    final filteredTargetAssets =
-        targetAssets
-            .where((assetId) => assetId.subClass != CoinSubClass.sia)
-            .toSet();
+    final filteredTargetAssets = targetAssets
+        .where((assetId) => assetId.subClass != CoinSubClass.sia)
+        .toSet();
 
     // Validate parameters
     if (filteredTargetAssets.isEmpty) {
@@ -130,8 +129,9 @@ class SecurityManager {
     }
 
     // Convert AssetId objects to coin ticker strings for the RPC call
-    final coinTickers =
-        filteredTargetAssets.map((assetId) => assetId.id).toList();
+    final coinTickers = filteredTargetAssets
+        .map((assetId) => assetId.id)
+        .toList();
 
     // Create a map from coin ticker to AssetId for conversion
     final assetMap = <String, AssetId>{

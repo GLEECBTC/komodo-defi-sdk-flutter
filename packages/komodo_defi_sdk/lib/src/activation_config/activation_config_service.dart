@@ -144,6 +144,12 @@ class ZhtlcRecurringSyncPolicy {
 abstract class KeyValueStore {
   Future<JsonMap?> get(String key);
   Future<void> set(String key, JsonMap value);
+
+  /// Removes every entry whose key starts with [prefix].
+  ///
+  /// Prefix-scoped rather than key-by-key because the caller purging a wallet
+  /// does not know which assets it stored configs for.
+  Future<void> deleteWithPrefix(String prefix);
 }
 
 /// In-memory key-value store default implementation.
@@ -157,6 +163,11 @@ class InMemoryKeyValueStore implements KeyValueStore {
   Future<void> set(String key, JsonMap value) async {
     _store[key] = value;
   }
+
+  @override
+  Future<void> deleteWithPrefix(String prefix) async {
+    _store.removeWhere((key, _) => key.startsWith(prefix));
+  }
 }
 
 /// Repository abstraction for typed activation configs.
@@ -167,6 +178,12 @@ abstract class ActivationConfigRepository {
     AssetId id,
     TConfig config,
   );
+
+  /// Deletes every stored config belonging to [walletId].
+  ///
+  /// Called when a wallet is deleted, so its activation preferences do not
+  /// outlive it.
+  Future<void> purgeWallet(WalletId walletId);
 }
 
 /// Minimal ZHTLC user configuration.
@@ -331,7 +348,10 @@ class JsonActivationConfigRepository implements ActivationConfigRepository {
   final KeyValueStore store;
 
   String _key(WalletId walletId, AssetId id) =>
-      'activation_config:${walletId.compoundId}:${id.id}';
+      '${_walletPrefix(walletId)}${id.id}';
+
+  String _walletPrefix(WalletId walletId) =>
+      'activation_config:${walletId.compoundId}:';
 
   @override
   Future<TConfig?> getConfig<TConfig>(WalletId walletId, AssetId id) async {
@@ -349,6 +369,10 @@ class JsonActivationConfigRepository implements ActivationConfigRepository {
     final json = ActivationConfigMapper.encode(config as Object);
     await store.set(_key(walletId, id), json);
   }
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) =>
+      store.deleteWithPrefix(_walletPrefix(walletId));
 }
 
 typedef WalletIdResolver = Future<WalletId?> Function();

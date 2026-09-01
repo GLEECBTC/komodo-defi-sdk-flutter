@@ -184,9 +184,14 @@ const _sensitiveLogKeys = <String>{
   'wif',
 };
 
+/// Hoisted out of [_isSensitiveLogKey], which runs once **per key of every
+/// node** in a censored tree. Building the same `RegExp` on each call is pure
+/// allocation, and this walk is on the RPC path.
+final RegExp _camelCaseBoundary = RegExp('([a-z0-9])([A-Z])');
+
 bool _isSensitiveLogKey(Object? key) {
   final snakeCaseKey = key.toString().trim().replaceAllMapped(
-    RegExp('([a-z0-9])([A-Z])'),
+    _camelCaseBoundary,
     (match) => '${match.group(1)}_${match.group(2)}',
   );
   final normalized = snakeCaseKey.toLowerCase().replaceAll('-', '_');

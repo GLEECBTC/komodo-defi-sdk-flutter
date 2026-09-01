@@ -16,6 +16,13 @@ abstract class PubkeysStorage {
 
   /// Returns a map of assetTicker -> stored pubkeys JSON for the wallet
   Future<Map<String, Map<String, dynamic>>> listForWallet(WalletId walletId);
+
+  /// Deletes every cached pubkey belonging to [walletId].
+  ///
+  /// Called when a wallet is deleted. Covers the legacy compound-id keyspace as
+  /// well as the current one, since the migration retains legacy records until
+  /// a fresh KDF response confirms them.
+  Future<void> purgeWallet(WalletId walletId);
 }
 
 /// Hive-backed pubkey cache isolated by complete wallet authentication context.
@@ -165,6 +172,21 @@ class HivePubkeysStorage implements PubkeysStorage {
       legacy: box.get(_legacyKeyFor(walletId, assetTicker)),
     );
     await box.put(scopedKey, scopedRecord);
+  }
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) async {
+    final box = await _openBox();
+    final scopedPrefix = _prefixFor(walletId);
+    final legacyPrefix = '${walletId.compoundId}|';
+    final keys = box.keys
+        .whereType<String>()
+        .where(
+          (key) => key.startsWith(scopedPrefix) || key.startsWith(legacyPrefix),
+        )
+        .toList();
+    if (keys.isEmpty) return;
+    await box.deleteAll(keys);
   }
 
   @override

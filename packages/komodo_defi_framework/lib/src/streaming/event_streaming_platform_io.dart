@@ -14,19 +14,14 @@ Uri _buildEventsUrl(
   IKdfHostConfig hostConfig, {
   int clientId = _kDefaultClientId,
 }) {
-  if (hostConfig is RemoteConfig) {
-    final Uri base = hostConfig.rpcUrl;
-    return base.replace(
-      pathSegments: <String>[...base.pathSegments, 'event-stream'],
-      queryParameters: {'id': clientId.toString()},
-    );
-  }
-
-  return Uri(
-    scheme: 'http',
-    host: '127.0.0.1',
-    port: 7783,
-    pathSegments: const ['event-stream'],
+  // Every host config now carries an rpcUrl, so this no longer needs a
+  // RemoteConfig special case with a hardcoded 127.0.0.1:7783 fallback. That
+  // fallback was the last thing pinning a locally started KDF to one port: the
+  // RPC client could be pointed elsewhere and the event stream would still
+  // dial 7783, silently attaching to whichever KDF happened to be there.
+  final Uri base = hostConfig.rpcUrl;
+  return base.replace(
+    pathSegments: <String>[...base.pathSegments, 'event-stream'],
     queryParameters: {'id': clientId.toString()},
   );
 }
@@ -43,9 +38,7 @@ Future<bool> _preflightCheck(IKdfHostConfig cfg) async {
     _log('Preflight: Checking KDF availability...');
     final client = HttpClient();
     try {
-      final uri = cfg is RemoteConfig
-          ? cfg.rpcUrl
-          : Uri(scheme: 'http', host: '127.0.0.1', port: 7783);
+      final uri = cfg.rpcUrl;
 
       final request = await client.postUrl(uri);
       request.headers.set('Content-Type', 'application/json');

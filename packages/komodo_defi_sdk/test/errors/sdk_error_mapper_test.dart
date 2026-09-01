@@ -75,8 +75,11 @@ void main() {
       ]);
       expect(sdkError.retryable, isFalse);
       // The technical detail (folded into the fallback) keeps the full
-      // activation fee without inventing a provider-address echo.
-      expect(sdkError.fallbackMessage, contains('activation fee 1.5'));
+      // activation fee without inventing a provider-address echo. Matched as
+      // the amount plus the words rather than as one literal phrase, so a
+      // rewording of the sentence does not read as a lost fee.
+      expect(sdkError.fallbackMessage, contains('1.5'));
+      expect(sdkError.fallbackMessage, contains('activation fee'));
       expect(sdkError.fallbackMessage, isNot(contains('TPRN')));
     });
 

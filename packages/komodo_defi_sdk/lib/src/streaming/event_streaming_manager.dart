@@ -197,20 +197,43 @@ class EventStreamingManager {
   ///
   /// Returns a [StreamSubscription] that can be used to listen to balance
   /// events and cancel the subscription.
+  ///
+  /// [streamerCoin] names the coin whose KDF streamer already covers [coin],
+  /// when that is a different coin. The registration and the reference count
+  /// then key on [streamerCoin] while the events handed back are still filtered
+  /// to [coin], so several tickers can share one KDF streamer and each caller
+  /// still sees only its own balance.
+  ///
+  /// This exists because KDF's `EthBalanceEventStreamer` already polls
+  /// `all_addresses()` x (its own ticker **plus every registered token**) on
+  /// each tick (`mm2src/coins/eth/eth_balance_events.rs:74-105`), and tokens
+  /// register onto the *platform* coin
+  /// (`mm2src/coins_activation/src/eth_with_token_activation.rs:215-229`; a
+  /// token's own `erc20_tokens_infos` is `Default::default()`,
+  /// `mm2src/coins/eth/v2_activation.rs:654`). A streamer enabled on a token
+  /// ticker therefore re-polls the same address set for a balance the platform
+  /// streamer is already reporting. Since the payload is one event carrying an
+  /// array of per-ticker entries, which this SDK already splits into one
+  /// [BalanceEvent] per ticker, the platform streamer alone satisfies every
+  /// token subscriber.
   Future<StreamSubscription<BalanceEvent>> subscribeToBalance({
     required String coin,
+    String? streamerCoin,
     StreamConfig? config,
-  }) => _subscribeToStream<BalanceEvent>(
-    key: 'balance:$coin',
-    streamType: 'balance',
-    coin: coin,
-    enableStream: () => _rpcMethods.streaming.enableBalance(
-      coin: coin,
-      clientId: _defaultClientId,
-      config: config,
-    ),
-    eventStream: _eventService.balanceEvents.where((e) => e.coin == coin),
-  );
+  }) {
+    final registrationCoin = streamerCoin ?? coin;
+    return _subscribeToStream<BalanceEvent>(
+      key: 'balance:$registrationCoin',
+      streamType: 'balance',
+      coin: registrationCoin,
+      enableStream: () => _rpcMethods.streaming.enableBalance(
+        coin: registrationCoin,
+        clientId: _defaultClientId,
+        config: config,
+      ),
+      eventStream: _eventService.balanceEvents.where((e) => e.coin == coin),
+    );
+  }
 
   /// Enable orderbook stream for a trading pair.
   ///

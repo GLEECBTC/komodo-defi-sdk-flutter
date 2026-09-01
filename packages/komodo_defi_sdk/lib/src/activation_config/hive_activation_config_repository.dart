@@ -83,4 +83,10 @@ class HiveActivationConfigRepository implements ActivationConfigRepository {
 
     await box.put(walletId.compoundId, updatedWrapper);
   }
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) async {
+    final box = await _openBox();
+    await box.delete(walletId.compoundId);
+  }
 }

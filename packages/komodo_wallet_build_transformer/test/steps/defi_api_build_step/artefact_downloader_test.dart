@@ -57,8 +57,7 @@ void main() {
 
   test('GitHub fallback uses its own configured source URL', () {
     const mirror = 'https://devbuilds.gleec.com';
-    const github =
-        'https://api.github.com/repos/GLEECBTC/komodo-defi-framework';
+    const github = 'https://api.github.com/repos/GLEECBTC/kdf-internal';
     final config = ApiBuildConfig(
       apiCommitHash: commit,
       branch: 'feat/tron-gasfree',

@@ -1,0 +1,11 @@
+include: package:very_good_analysis/analysis_options.7.0.0.yaml
+analyzer:
+  errors:
+    # This package *is* test infrastructure (publish_to: none, and it depends
+    # on flutter_test from lib/). Seeding FlutterSecureStorage before the
+    # framework is constructed is mandatory - see KdfHarness.replayed - and it
+    # has to live in lib/ because both tiers need it before any test body runs.
+    invalid_use_of_visible_for_testing_member: ignore
+    # Teardown and probe paths deliberately swallow anything: a failure while
+    # cleaning up must never mask the assertion that actually failed.
+    avoid_catches_without_on_clauses: ignore

@@ -58,6 +58,8 @@ class TendermintProtocol extends ProtocolClass {
   @override
   TendermintActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
+    // Ignored: Tendermint is single-address, so there is no gap to walk.
+    int? gapLimit,
   }) {
     // Create a config with mode if not present
     final configWithMode = JsonMap.of(config)

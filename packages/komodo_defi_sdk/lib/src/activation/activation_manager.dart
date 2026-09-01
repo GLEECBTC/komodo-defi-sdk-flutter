@@ -11,10 +11,19 @@ import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:logging/logging.dart';
 import 'package:mutex/mutex.dart';
 
 /// Manager responsible for handling asset activation lifecycle
 class ActivationManager {
+  /// Per-asset activation timing, at INFO.
+  ///
+  /// This class had no logging of any kind, which meant the single most
+  /// expensive step of a login - how long each asset took to activate, and
+  /// which one never finished - was invisible in a release build. Everything
+  /// downstream (balances, tx history, the wallet total) waits on it.
+  static final Logger _logger = Logger('ActivationManager');
+
   /// Manager responsible for handling asset activation lifecycle
   ActivationManager(
     this._client,
@@ -49,9 +58,239 @@ class ActivationManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   final Map<AssetId, Completer<void>> _activationCompleters = {};
+
+  /// Assets this session actually activated, as opposed to found already
+  /// enabled.
+  ///
+  /// Needed because the two things a caller wants to know are answered in
+  /// different places: `SharedActivationCoordinator.activateAsset` reports
+  /// "already active" for every call after the first, so the *second* caller in
+  /// a login - `PubkeyManager._fetchFreshPubkeys`, which runs after
+  /// `BalanceManager._ensureAssetActivated` - can no longer tell whether an
+  /// activation happened at all this session. It needs to, because a fresh
+  /// activation already made KDF walk the HD address gap.
+  final Set<AssetId> _freshlyActivated = <AssetId>{};
+
+  /// Whether [assetId] was activated during this session rather than found
+  /// already enabled.
+  bool wasFreshlyActivated(AssetId assetId) =>
+      _freshlyActivated.contains(assetId);
   final Map<AssetId, _ActivationCancellation> _cancelledActivations = {};
   int _activationSessionGeneration = 0;
   bool _isDisposed = false;
+
+  /// Authoritative per-asset activation state. Absent means "not activated".
+  ///
+  /// This manager is the only place where every activation path converges:
+  /// [SharedActivationCoordinator.activateAsset] and
+  /// `AssetManager.activateAsset`/`activateAssets` (used by the app's
+  /// ZHTLC/ARRR flow) both end up in [activateAssets]. Holding the state
+  /// anywhere else leaves a blind spot.
+  final Map<AssetId, AssetActivationState> _activationStates = {};
+
+  final StreamController<Map<AssetId, AssetActivationState>>
+  _activationStatesController =
+      StreamController<Map<AssetId, AssetActivationState>>.broadcast();
+
+  /// Current activation state for every asset the SDK has observed.
+  ///
+  /// Assets absent from this map are neither activating, active nor failed.
+  Map<AssetId, AssetActivationState> get activationStates => _snapshot();
+
+  /// Last observed activation state for [assetId], or null if none.
+  AssetActivationState? activationStateOf(AssetId assetId) =>
+      _activationStates[assetId];
+
+  /// Current activation states, then every subsequent change.
+  ///
+  /// The first event is always a snapshot of the current state, so a
+  /// subscriber that attaches mid-activation - or long after one finished -
+  /// still learns the truth. Closes only when this manager is disposed.
+  ///
+  /// A whole-map snapshot rather than per-asset deltas, deliberately: a
+  /// dropped snapshot self-heals on the next emission, whereas a dropped
+  /// delta is lost for good, which is the defect this stream exists to fix.
+  /// It also lets a wallet change be stated as `{}` and lets a group
+  /// activation report its platform and tokens atomically.
+  Stream<Map<AssetId, AssetActivationState>> watchActivationStates() {
+    if (_isDisposed) {
+      throw StateError('ActivationManager has been disposed');
+    }
+
+    late final StreamController<Map<AssetId, AssetActivationState>> out;
+    StreamSubscription<Map<AssetId, AssetActivationState>>? subscription;
+
+    out = StreamController<Map<AssetId, AssetActivationState>>(
+      onListen: () {
+        // Subscribe first, replay second. A change emitted while this is
+        // handing over then queues behind the replay instead of falling into
+        // the gap - which is exactly what a `yield current; yield* stream`
+        // prologue over an unbuffered broadcast controller would do.
+        subscription = _activationStatesController.stream.listen(
+          out.add,
+          onError: out.addError,
+          onDone: out.close,
+        );
+        out.add(_snapshot());
+      },
+      onCancel: () => subscription?.cancel(),
+    );
+
+    return out.stream;
+  }
+
+  /// Current state for [assetId], then every subsequent change to it.
+  ///
+  /// Derived from [watchActivationStates] rather than a second source, so the
+  /// two can never disagree. Emits null while the asset is not tracked.
+  Stream<AssetActivationState?> watchActivationStateOf(AssetId assetId) =>
+      watchActivationStates().map((states) => states[assetId]).distinct();
+
+  /// Copy, never a view: consumers must not observe the live map mutating
+  /// under them, or `distinct()` and any downstream diffing silently break.
+  Map<AssetId, AssetActivationState> _snapshot() =>
+      Map<AssetId, AssetActivationState>.unmodifiable(_activationStates);
+
+  void _emitActivationStates() {
+    if (_isDisposed || _activationStatesController.isClosed) return;
+    _activationStatesController.add(_snapshot());
+  }
+
+  /// Writes [states], emitting at most once and only if something changed.
+  ///
+  /// No-op suppression is load-bearing:
+  /// [SharedActivationCoordinator._waitForCoinAvailability] polls the
+  /// activated set up to 15 times per asset, and each read folds back into
+  /// here. Without this every consumer would receive 15 identical snapshots
+  /// per asset per activation.
+  void _setActivationStates(Iterable<AssetActivationState> states) {
+    var changed = false;
+    for (final state in states) {
+      if (_activationStates[state.assetId] == state) continue;
+      _activationStates[state.assetId] = state;
+      changed = true;
+    }
+    if (changed) _emitActivationStates();
+  }
+
+  /// Records a terminal failure observed outside the activation stream.
+  ///
+  /// The coordinator's post-activation availability check is stricter than
+  /// `progress.isSuccess`, so it can contradict a success this manager has
+  /// already recorded.
+  void recordActivationFailure(AssetId assetId, String errorMessage) {
+    _setActivationStates([
+      AssetActivationState.failed(assetId, errorMessage: errorMessage),
+    ]);
+  }
+
+  /// Releases the in-flight registration for [assetId] so the next attempt is
+  /// genuinely new.
+  ///
+  /// There are **two** in-flight registries on the activation path, and a
+  /// deadline that clears only one of them does not deliver a fresh retry:
+  /// `SharedActivationCoordinator._pendingActivations` dedupes coordinator
+  /// callers, and [_activationCompleters] dedupes activation attempts here.
+  /// When the coordinator abandons a wedged attempt it releases its own slot,
+  /// but the wedged generator is still suspended inside the hung status poll,
+  /// so its `_cleanupActivation` never runs and this map keeps the dead
+  /// completer. The retry then reaches [_registerActivation], is told
+  /// `shouldStartActivation: false`, and parks on a future that will never
+  /// complete - no new `task::enable_*::init`, no progress, exactly the stall
+  /// the deadline was added to break.
+  ///
+  /// Failing the completer rather than dropping it silently is deliberate:
+  /// anyone who already joined the dead attempt is waiting on this future, and
+  /// a failure is recoverable where a pending future is not.
+  ///
+  /// The wedged generator can still complete its own completer later; every
+  /// site guards on `isCompleted`, and [_cleanupActivation] only removes an
+  /// entry it still owns, so the fresh attempt registered after this cannot be
+  /// deregistered by the abandoned one.
+  Future<void> abandonActivation(AssetId assetId, String reason) async {
+    if (_isDisposed) return;
+    await _protectedOperation(() async {
+      final completer = _activationCompleters.remove(assetId);
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(
+          ActivationFailedException(
+            assetId: assetId,
+            message: reason,
+            errorCode: 'ACTIVATION_ABANDONED',
+          ),
+        );
+      }
+      _cancelledActivations.remove(assetId);
+    });
+    recordActivationFailure(assetId, reason);
+  }
+
+  /// Folds KDF's authoritative enabled set into the state map.
+  ///
+  /// This is what makes activations performed by other SDK subsystems - and
+  /// divergence on the KDF side - visible without any consumer polling.
+  void _foldAuthoritativeActiveSet(Set<AssetId> enabled) {
+    // An empty [enabled] is folded like any other: the caller guarantees it
+    // is KDF's authoritative "nothing enabled" - a successful read for a
+    // signed-in user - and not the signed-out cache short-circuit (see
+    // [_readActivatedAssetIds]). A failed or wedged read throws before here.
+    var changed = false;
+
+    for (final assetId in enabled) {
+      final current = _activationStates[assetId];
+      // Never clobber an in-flight activation: an asset that is still
+      // activating legitimately does not appear in `get_enabled_coins` yet,
+      // and this branch only ever sees ids that do.
+      if (current != null && current.isActive) continue;
+      _activationStates[assetId] = AssetActivationState.active(assetId);
+      changed = true;
+    }
+
+    // Anything we believed active but KDF no longer reports is gone.
+    // `activating` and `failed` are left alone - the first is not expected in
+    // the enabled set yet, and the second must stay visible until retried.
+    final staleActive = _activationStates.entries
+        .where((e) => e.value.isActive && !enabled.contains(e.key))
+        .map((e) => e.key)
+        .toList();
+    for (final assetId in staleActive) {
+      _activationStates.remove(assetId);
+      changed = true;
+    }
+
+    if (changed) _emitActivationStates();
+  }
+
+  /// Reads the activated set and folds it into [activationStates].
+  ///
+  /// All authoritative reads in this class go through here so the fold cannot
+  /// be forgotten at a call site.
+  Future<Set<AssetId>> _readActivatedAssetIds({
+    bool forceRefresh = false,
+  }) async {
+    final generation = _activationSessionGeneration;
+    final ids = await _activatedAssetsCache.getActivatedAssetIds(
+      forceRefresh: forceRefresh,
+    );
+    // Drop a result that started before a wallet change, so it cannot
+    // re-seed the previous wallet's assets after the reset cleared them.
+    if (generation != _activationSessionGeneration) return ids;
+    if (ids.isEmpty) {
+      // An empty set from the cache is ambiguous: it is also what a
+      // signed-out session reads (`ActivatedAssetsCache` answers `const []`
+      // without an RPC). Only a signed-in user's empty set is KDF's
+      // authoritative "nothing enabled" - the last coin disabled elsewhere,
+      // or an authenticated KDF restart that re-enabled nothing - and that
+      // one must sweep whatever this map still believes is active. Sign-out
+      // itself is handled by [resetActivationSessionState].
+      final user = await _auth.currentUser;
+      if (user == null || generation != _activationSessionGeneration) {
+        return ids;
+      }
+    }
+    _foldAuthoritativeActiveSet(ids);
+    return ids;
+  }
 
   /// Helper for mutex-protected operations with timeout
   Future<T> _protectedOperation<T>(Future<T> Function() operation) {
@@ -93,10 +332,20 @@ class ActivationManager {
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
     _activationSessionGeneration++;
+    _freshlyActivated.clear();
     final staleCompleters = _activationCompleters.values.toList();
     _activationCompleters.clear();
     _cancelledActivations.clear();
     _gaslessCapabilities.resetSession();
+
+    // Nothing is activated for the incoming wallet. Emitting the empty map
+    // rather than closing the stream keeps long-lived subscribers - which
+    // outlive a wallet switch - and states the reset in a form a late
+    // subscriber also replays.
+    if (_activationStates.isNotEmpty) {
+      _activationStates.clear();
+      _emitActivationStates();
+    }
 
     for (final completer in staleCompleters) {
       if (!completer.isCompleted) {
@@ -215,6 +464,9 @@ class ActivationManager {
       final activationStatus = await _checkActivationStatus(group);
       if (activationStatus.isComplete) {
         if (!shouldRefreshTronGaslessActivation) {
+          // Already active. Publish it: this branch is otherwise invisible to
+          // observers, and it is the common case on a warm re-login.
+          _setActivationStates(_groupStates(group, _activeState));
           yield activationStatus;
           continue;
         }
@@ -229,6 +481,10 @@ class ActivationManager {
         activationSessionGeneration,
       );
       final primaryCompleter = registration.completer;
+      if (registration.shouldStartActivation) {
+        // Before any RPC, so an observer sees the row turn over immediately.
+        _setActivationStates(_groupStates(group, _activatingState));
+      }
       if (!registration.shouldStartActivation) {
         debugPrint(
           'Activation already in progress for ${group.primary.id.name}',
@@ -287,6 +543,18 @@ class ActivationManager {
         ),
       );
 
+      // Both ends are logged, not just the end. A wedged activation never
+      // reaches the `finally` below - the strategy stays suspended inside its
+      // status poll - so the start line is the only evidence that the asset was
+      // ever attempted. An asset with a start and no finish is the signature of
+      // the stall that cost users minutes.
+      final activationStopwatch = Stopwatch()..start();
+      _logger.info(
+        'Activating ${group.primary.id.id}'
+        '${group.children.isEmpty ? '' : ' with ${group.children.length} '
+                  'token(s)'}',
+      );
+
       try {
         // Get the current user's auth options to retrieve privKeyPolicy
         final currentUser = await _auth.currentUser;
@@ -296,6 +564,17 @@ class ActivationManager {
 
         final gaslessProvider = _gaslessProviderFor(group);
 
+        // Hardware keeps the full BIP-44 gap; a wallet this session generated
+        // has no on-chain history to find, so its first sign-in walks the
+        // minimum. Resolved here because this is the one place that already
+        // holds the current user.
+        final hdGapLimit = currentUser == null
+            ? null
+            : HdGapLimit.resolve(
+                privKeyPolicy: privKeyPolicy,
+                isNewlyGeneratedFirstSignIn: currentUser.isGeneratedThisSession,
+              );
+
         // Create activator with the user's privKeyPolicy
         final activator = ActivationStrategyFactory.createStrategy(
           _client,
@@ -303,6 +582,7 @@ class ActivationManager {
           _configService,
           _activatedAssetsCache,
           tronGaslessProvider: gaslessProvider,
+          hdGapLimit: hdGapLimit,
         );
 
         var completionHandled = false;
@@ -325,6 +605,22 @@ class ActivationManager {
             if (!primaryCompleter.isCompleted) {
               primaryCompleter.completeError(cancellationError);
             }
+            // Cancellation is a terminal path of its own, so it has to write
+            // the state map like the error path below does. Leaving the group
+            // on `activating` hands it to `_failGroupIfStillActivating` in the
+            // `finally`, which overwrites the caller's reason with the generic
+            // 'Activation ended without a terminal result' - so the progress
+            // event and the published state would disagree about why this
+            // asset stopped.
+            _setActivationStates(
+              _groupStates(
+                group,
+                (id) => AssetActivationState.failed(
+                  id,
+                  errorMessage: cancellation.reason,
+                ),
+              ),
+            );
             yield ActivationProgress.error(
               message: cancellation.reason,
               errorCode: 'ACTIVATION_CANCELLED',
@@ -416,6 +712,7 @@ class ActivationManager {
           if (!primaryCompleter.isCompleted) {
             primaryCompleter.complete();
           }
+          _setActivationStates(_groupStates(group, _activeState));
           yield recoveredProgress;
           continue;
         }
@@ -425,12 +722,41 @@ class ActivationManager {
         if (!primaryCompleter.isCompleted) {
           primaryCompleter.completeError(mappedError);
         }
+        _setActivationStates(
+          _groupStates(
+            group,
+            (id) => AssetActivationState.failed(
+              id,
+              errorMessage: mappedError.fallbackMessage,
+              sdkError: mappedError,
+            ),
+          ),
+        );
         yield ActivationProgress.error(
           message: mappedError.fallbackMessage,
           sdkError: mappedError,
           stackTrace: st,
         );
       } finally {
+        activationStopwatch.stop();
+        // The outcome is read back from the state map rather than tracked in a
+        // local, so this reports what consumers will actually observe -
+        // including the `_failGroupIfStillActivating` correction below and any
+        // GasFree downgrade applied on the way through.
+        _logger.info(
+          'Activated ${group.primary.id.id} in '
+          '${activationStopwatch.elapsedMilliseconds}ms '
+          '(${_activationStates[group.primary.id]?.status.name ?? 'unknown'})',
+        );
+
+        // Fail closed. Also runs when a subscriber cancels this `async*`
+        // generator mid-activation - the `AssetManager.activateAsset` path
+        // can do that - which is the only other way an asset could sit on
+        // `activating` for the rest of the session.
+        _failGroupIfStillActivating(
+          group,
+          'Activation ended without a terminal result',
+        );
         try {
           await _cleanupActivation(group.primary.id, registration);
         } catch (e) {
@@ -438,6 +764,31 @@ class ActivationManager {
         }
       }
     }
+  }
+
+  /// Builds one state per asset in [group] (platform plus its tokens).
+  ///
+  /// A group activation enables the platform coin and its children together,
+  /// so their states must move together too.
+  Iterable<AssetActivationState> _groupStates(
+    _AssetGroup group,
+    AssetActivationState Function(AssetId) build,
+  ) => [group.primary, ...group.children].map((asset) => build(asset.id));
+
+  static AssetActivationState _activatingState(AssetId id) =>
+      AssetActivationState.activating(id);
+
+  static AssetActivationState _activeState(AssetId id) =>
+      AssetActivationState.active(id);
+
+  void _failGroupIfStillActivating(_AssetGroup group, String errorMessage) {
+    final stuck = [group.primary, ...group.children]
+        .map((asset) => asset.id)
+        .where((id) => _activationStates[id]?.isActivating ?? false)
+        .map(
+          (id) => AssetActivationState.failed(id, errorMessage: errorMessage),
+        );
+    if (stuck.isNotEmpty) _setActivationStates(stuck);
   }
 
   ActivationProgress _attachSdkError(
@@ -471,7 +822,7 @@ class ActivationManager {
   }) async {
     try {
       // Use cache instead of direct RPC call to avoid excessive requests
-      final enabledAssetIds = await _activatedAssetsCache.getActivatedAssetIds(
+      final enabledAssetIds = await _readActivatedAssetIds(
         forceRefresh: forceRefresh,
       );
 
@@ -588,6 +939,20 @@ class ActivationManager {
     _GaslessActivationContext? gaslessContext,
   }) async {
     if (progress.isSuccess) {
+      // Published first, before any await. The work below is guarded by
+      // `user != null` and can throw part-way through
+      // `_requireGaslessContextCurrent`; a state write buried in there would
+      // be skipped for an activation that genuinely succeeded. A throw there
+      // means the wallet changed, and the reset clears the map anyway.
+      _setActivationStates(_groupStates(group, _activeState));
+
+      // Recorded here rather than inferred from an `ActivationResult`, because
+      // by the time the pubkey layer asks, the coordinator reports "already
+      // active" - see [_freshlyActivated].
+      _freshlyActivated
+        ..add(group.primary.id)
+        ..addAll(group.children.map((child) => child.id));
+
       if (gaslessContext != null) {
         await _requireGaslessContextCurrent(gaslessContext);
       }
@@ -631,14 +996,40 @@ class ActivationManager {
             }
           }
 
-          // Pre-cache balance for the activated asset
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
-          await _balanceManager.precacheBalance(asset);
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
+          // Pre-cache the balance, but do NOT await it here.
+          //
+          // Two reasons, and the first is a hard deadlock:
+          //
+          // 1. `precacheBalance` awaits `PubkeyManager.getPubkeys(asset)`. On
+          //    the fresh-fetch path - no in-memory cache, no in-flight request,
+          //    no persisted pubkeys, i.e. the first ever activation of this
+          //    asset for this wallet on this device - that re-enters
+          //    `SharedActivationCoordinator.activateAsset(asset)`. The
+          //    coordinator finds its own still-pending completer in
+          //    `_pendingActivations` and joins it. But that completer is only
+          //    completed after this method returns, so the activation waits on
+          //    itself. Nothing on the chain has a timeout, so the asset stays
+          //    `activating` forever and every caller blocked on it - the login
+          //    fan-out's `Future.wait`, the balance watcher's
+          //    `_ensureAssetActivated` - hangs with it.
+          //
+          // 2. Even without the cycle it is a `get_new_address`/pubkey round
+          //    trip per asset sitting between KDF reporting success and the
+          //    terminal `ActivationProgress` the UI is waiting on. It is a
+          //    cache warm-up; nothing about the activation's correctness
+          //    depends on it, and the balance watcher fetches the balance on
+          //    its own anyway.
+          //
+          // The genuinely load-bearing side effects above (asset history,
+          // custom-token storage, cache invalidation, completing the join
+          // future) stay inline and still gate the terminal event.
+          unawaited(
+            _balanceManager.precacheBalance(asset).catchError((Object e) {
+              debugPrint(
+                'Background balance pre-cache failed for ${asset.id.id}: $e',
+              );
+            }),
+          );
         }
 
         if (gaslessContext != null) {
@@ -651,6 +1042,21 @@ class ActivationManager {
         completer.complete();
       }
     } else {
+      // Record the strategy's terminal failure - message and structured
+      // error - in the state map. Left on `activating`, the `finally`'s
+      // `_failGroupIfStillActivating` would replace it with the generic
+      // "ended without a terminal result", discarding the actionable error
+      // from the public [activationStates] API.
+      _setActivationStates(
+        _groupStates(
+          group,
+          (id) => AssetActivationState.failed(
+            id,
+            errorMessage: progress.errorMessage ?? 'Unknown error',
+            sdkError: progress.sdkError,
+          ),
+        ),
+      );
       if (!completer.isCompleted) {
         completer.completeError(progress.errorMessage ?? 'Unknown error');
       }
@@ -878,7 +1284,7 @@ class ActivationManager {
     }
 
     try {
-      return await _activatedAssetsCache.getActivatedAssetIds();
+      return await _readActivatedAssetIds();
     } catch (e) {
       debugPrint('Failed to get active assets: $e');
       return {};
@@ -896,7 +1302,7 @@ class ActivationManager {
 
     try {
       final activeAssets = forceRefresh
-          ? await _activatedAssetsCache.getActivatedAssetIds(forceRefresh: true)
+          ? await _readActivatedAssetIds(forceRefresh: true)
           : await getActiveAssets();
       return activeAssets.contains(assetId);
     } catch (e) {
@@ -924,6 +1330,8 @@ class ActivationManager {
 
       _activationCompleters.clear();
       _cancelledActivations.clear();
+      _activationStates.clear();
+      await _activationStatesController.close();
     });
   }
 }

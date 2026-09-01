@@ -42,8 +42,10 @@ void main(List<String> arguments) async {
     )
     ..addOption(
       'repo',
-      help: 'GitHub repository in format owner/repo',
-      defaultsTo: 'GLEECBTC/komodo-defi-framework',
+      help:
+          'GitHub repository in format owner/repo. The default is private, so '
+          '--source github needs a --token with read access to it.',
+      defaultsTo: 'GLEECBTC/kdf-internal',
     )
     ..addOption(
       'config',

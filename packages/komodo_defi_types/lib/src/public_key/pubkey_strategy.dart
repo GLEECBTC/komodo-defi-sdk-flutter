@@ -30,9 +30,12 @@ abstract class PubkeyStrategy {
 
 /// Factory to create appropriate strategy based on protocol and KDF user
 class PubkeyStrategyFactory {
+  /// [scanGapLimit] bounds `task::scan_for_new_addresses` only - not address
+  /// creation. Omit it and the full BIP-44 gap is used. See [HdGapLimit].
   static PubkeyStrategy createStrategy(
     ProtocolClass protocol, {
     required KdfUser kdfUser,
+    int? scanGapLimit,
   }) {
     final isHdWallet = kdfUser.isHd;
 
@@ -51,7 +54,10 @@ class PubkeyStrategyFactory {
         case const PrivateKeyPolicy.trezor():
           return TrezorHDWalletStrategy(kdfUser: kdfUser);
         case const PrivateKeyPolicy.contextPrivKey():
-          return ContextPrivKeyHDWalletStrategy(kdfUser: kdfUser);
+          return ContextPrivKeyHDWalletStrategy(
+            kdfUser: kdfUser,
+            scanGapLimit: scanGapLimit ?? HdGapLimit.hardware,
+          );
       }
     }
 
@@ -60,9 +66,10 @@ class PubkeyStrategyFactory {
 }
 
 extension AssetPubkeyStrategy on Asset {
-  PubkeyStrategy pubkeyStrategy({required KdfUser kdfUser}) {
+  PubkeyStrategy pubkeyStrategy({required KdfUser kdfUser, int? scanGapLimit}) {
     return PubkeyStrategyFactory.createStrategy(
       protocol,
+      scanGapLimit: scanGapLimit,
       kdfUser: kdfUser,
     );
   }

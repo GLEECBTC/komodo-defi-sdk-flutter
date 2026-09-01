@@ -46,8 +46,8 @@ class AssetBalanceText extends StatelessWidget {
         assetId,
         activateIfNeeded: activateIfNeeded,
       ),
-      formatData:
-          (bal) => formatBalance?.call(bal) ?? _defaultFormatBalance(bal),
+      formatData: (bal) =>
+          formatBalance?.call(bal) ?? _defaultFormatBalance(bal),
       style:
           style ??
           Theme.of(context).textTheme.bodyMedium, // TODO! Verify correct style

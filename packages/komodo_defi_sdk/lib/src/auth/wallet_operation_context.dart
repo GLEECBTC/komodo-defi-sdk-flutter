@@ -59,6 +59,55 @@ bool isSameStableWallet(WalletId previous, WalletId current) {
   return previous.name == current.name;
 }
 
+/// Whether [current] is an identity-RPC *degradation* of [previous] rather
+/// than a different wallet.
+///
+/// `KdfAuthService._ensureAuthenticatedWalletIdentity` deliberately returns a
+/// name-only [WalletId] when the `get_public_key_hash` RPC is unavailable, so
+/// that wallet-scoped secrets stay locked until the active identity has been
+/// verified in this session. That is correct for authorisation - but it means
+/// an already-authenticated session can transiently observe its own wallet
+/// without a `pubkeyHash`, which [isSameStableWallet] rejects by design.
+///
+/// Managers that use the wallet identity only to *scope caches* must not read
+/// that rejection as a wallet switch and throw away their state: a real switch
+/// always passes through a `null` user first (KDF is stopped for the outgoing
+/// wallet), so a same-name, same-options observation within a live session is
+/// the same wallet.
+///
+/// Returns false for anything else, including a name change, a hash change, or
+/// a derivation/private-key policy change.
+bool isDegradedWalletIdentity(WalletId previous, WalletId current) {
+  final previousHash = previous.pubkeyHash?.trim();
+  if (previousHash == null || previousHash.isEmpty) return false;
+
+  final currentHash = current.pubkeyHash?.trim();
+  if (currentHash != null && currentHash.isNotEmpty) return false;
+
+  return previous.authOptions.derivationMethod ==
+          current.authOptions.derivationMethod &&
+      previous.authOptions.privKeyPolicy == current.authOptions.privKeyPolicy &&
+      previous.name == current.name;
+}
+
+/// Whether an operation captured under [previous] may continue when the
+/// freshly observed identity is [current].
+///
+/// True for the same stable wallet, and for a transient identity-RPC
+/// degradation of it ([isDegradedWalletIdentity]). The capture paths already
+/// tolerate a degraded observation and keep the enriched identity, so the
+/// post-await guards must extend the same tolerance - otherwise an operation
+/// admitted under a degraded identity dies at its first checkpoint, during
+/// the exact blip the tolerance exists for. A real wallet switch still fails
+/// this check: it always passes through a `null` user or a different
+/// name/hash/options first.
+///
+/// Asymmetric like [isSameStableWallet]: pass the previously accepted
+/// identity first and the newly observed identity second.
+bool walletIdentityContinuesSession(WalletId previous, WalletId current) =>
+    isSameStableWallet(previous, current) ||
+    isDegradedWalletIdentity(previous, current);
+
 /// Accepts [current] as the latest compatible wallet identity.
 ///
 /// A name-only identity may be enriched, but an enriched identity may never be

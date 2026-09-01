@@ -88,6 +88,12 @@ class _RecordingPendingGaslessTransferRepository
       delegate.remove(walletId, identity);
 
   @override
+  Future<GaslessJournalDiscardOutcome> discardUntraced(
+    WalletId walletId,
+    String identity,
+  ) => delegate.discardUntraced(walletId, identity);
+
+  @override
   Future<void> resolveAmbiguousLegacyTransfers(
     WalletId walletId, {
     required Map<String, Set<String>> ownedSourceAddressesByAsset,

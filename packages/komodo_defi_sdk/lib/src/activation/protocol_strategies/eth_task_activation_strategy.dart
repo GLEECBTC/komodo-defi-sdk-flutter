@@ -12,12 +12,16 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
   const EthTaskActivationStrategy(
     super.client,
     this.privKeyPolicy, {
+    this.hdGapLimit,
     this.tronGaslessProvider,
   });
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
+
+  /// The HD address gap KDF should walk during activation. See `HdGapLimit`.
+  final int? hdGapLimit;
 
   /// Optional provider attached to task-based TRX activation.
   ///
@@ -103,6 +107,9 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
             erc20Tokens: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
+            // Sent explicitly: KDF defaults an absent gap_limit to 20, so
+            // omitting it left the ETH-family walk outside the gap policy.
+            gapLimit: hdGapLimit,
           ),
         final TrxProtocol _ =>
           TrxWithTokensActivationParams.fromJson(

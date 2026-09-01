@@ -91,27 +91,40 @@ class CexMarketDataManager
 
   @override
   Future<void> init() async {
-    for (final repo in _priceRepositories) {
-      try {
-        final coins = await repo.getCoinList();
-        _logger.finer(
-          'Loaded ${coins.length} coins from repository: ${repo.runtimeType}',
-        );
-      } catch (e, s) {
-        // Log error but continue with other repositories
-        _logger
-          ..info('Failed to get coin list from repository: $e')
-          ..finest('Stack trace: $s');
-      }
-    }
-
-    // Start cache clearing timer
+    // Start the cache clearing timer and report ready immediately.
     _cacheTimer = Timer.periodic(_cacheClearInterval, (_) => _clearCaches());
     _logger.finer(
       'Started cache clearing timer with interval $_cacheClearInterval',
     );
 
     _isInitialized = true;
+
+    // Coin-list loading is a cache warm-up, not a precondition: every
+    // repository fetches on demand, and each failure here was already
+    // swallowed and stepped over. Awaiting it made four remote downloads -
+    // Komodo, Binance, CoinPaprika, CoinGecko - run *serially* inside a
+    // `registerSingletonAsync`, so `container.allReady()` and therefore the
+    // whole SDK bootstrap (and `runApp` behind it) waited on them.
+    unawaited(_warmCoinLists());
+  }
+
+  Future<void> _warmCoinLists() async {
+    // Independent endpoints: warm them concurrently rather than one by one.
+    await Future.wait(
+      _priceRepositories.map((repo) async {
+        try {
+          final coins = await repo.getCoinList();
+          _logger.finer(
+            'Loaded ${coins.length} coins from repository: ${repo.runtimeType}',
+          );
+        } catch (e, s) {
+          // Log error but continue with other repositories
+          _logger
+            ..info('Failed to get coin list from repository: $e')
+            ..finest('Stack trace: $s');
+        }
+      }),
+    );
   }
 
   final List<CexRepository> _priceRepositories;

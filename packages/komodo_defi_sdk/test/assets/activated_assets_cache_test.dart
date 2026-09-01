@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
@@ -131,6 +133,83 @@ void main() {
 
       // A platform coin with no parent must not pull in any extra asset.
       expect(ids, equals(<AssetId>{parent.id}));
+    });
+
+    group('fetch liveness ceiling', () {
+      // `get_enabled_coins` is a local KDF state read, but nothing below this
+      // cache bounds it - not the RPC client, not the transport. An unbounded
+      // read here defeats every deadline built on top of it: both
+      // `KomodoDefiSdk.waitForEnabledAssetsToPassThreshold` and the app's
+      // `waitForEnabledCoinsToPassThreshold` evaluate their documented timeout
+      // *after* awaiting this read, so a wedged node made a
+      // documented-timeout method hang forever.
+      const fetchTimeout = Duration(milliseconds: 50);
+
+      ActivatedAssetsCache buildBounded() => ActivatedAssetsCache(
+        client: client,
+        auth: auth,
+        assetLookup: assetLookup,
+        fetchTimeout: fetchTimeout,
+      );
+
+      void stubNeverCompletingRpc() {
+        when(
+          () => client.executeRpc(any()),
+        ).thenAnswer((_) => Completer<Map<String, dynamic>>().future);
+      }
+
+      test('the originating caller times out rather than hanging', () async {
+        stubNeverCompletingRpc();
+        final cache = buildBounded();
+        addTearDown(cache.dispose);
+
+        await expectLater(
+          cache.getActivatedAssetIds(),
+          throwsA(isA<TimeoutException>()),
+        );
+      });
+
+      test('a caller that joined the same fetch is released too', () async {
+        stubNeverCompletingRpc();
+        final cache = buildBounded();
+        addTearDown(cache.dispose);
+
+        final first = cache.getActivatedAssetIds();
+        final joined = cache.getActivatedAssetIds();
+
+        await expectLater(first, throwsA(isA<TimeoutException>()));
+        await expectLater(joined, throwsA(isA<TimeoutException>()));
+      });
+
+      test('a later caller starts a fresh fetch', () async {
+        stubNeverCompletingRpc();
+        final cache = buildBounded();
+        addTearDown(cache.dispose);
+
+        await expectLater(
+          cache.getActivatedAssetIds(),
+          throwsA(isA<TimeoutException>()),
+        );
+        await expectLater(
+          cache.getActivatedAssetIds(),
+          throwsA(isA<TimeoutException>()),
+        );
+
+        // Two real round trips, not a second caller joining a dead fetch.
+        verify(() => client.executeRpc(any())).called(2);
+      });
+
+      test('rejects a non-positive ceiling', () {
+        expect(
+          () => ActivatedAssetsCache(
+            client: client,
+            auth: auth,
+            assetLookup: assetLookup,
+            fetchTimeout: Duration.zero,
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
     });
   });
 }

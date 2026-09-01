@@ -162,6 +162,26 @@ void main() {
           syncStatus: SyncStatusEnum.success,
         ),
       );
+      when(() => pubkeyManager.refreshPubkeys(asset)).thenAnswer(
+        (_) async => AssetPubkeys(
+          assetId: assetId,
+          keys: [
+            PubkeyInfo(
+              address: 'TTtRecoverExample',
+              derivationPath: null,
+              chain: null,
+              balance: BalanceInfo(
+                total: Decimal.fromInt(5),
+                spendable: Decimal.fromInt(5),
+                unspendable: Decimal.zero,
+              ),
+              coinTicker: assetId.id,
+            ),
+          ],
+          availableAddressesCount: 1,
+          syncStatus: SyncStatusEnum.success,
+        ),
+      );
 
       activationAttempts = 0;
       when(

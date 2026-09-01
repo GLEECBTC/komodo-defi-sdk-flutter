@@ -5,6 +5,7 @@ library types;
 
 export 'activation/activation_progress.dart';
 export 'activation/activation_strategy.dart';
+export 'activation/asset_activation_state.dart';
 export 'addresses/address_conversion_result.dart';
 export 'addresses/address_validation.dart';
 export 'api/api_client.dart';

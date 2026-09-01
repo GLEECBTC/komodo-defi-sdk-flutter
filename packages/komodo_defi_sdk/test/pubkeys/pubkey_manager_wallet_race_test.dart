@@ -15,9 +15,24 @@ class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
+extension on _MockActivationCoordinator {
+  /// These tests are about wallet-switch races, not about the HD address scan.
+  /// Default to "not activated this session" so `_activationAlreadyScanned`
+  /// short-circuits and the scan behaves as it did before that skip existed.
+  void stubNotFreshlyActivated() {
+    when(() => wasFreshlyActivated(any())).thenReturn(false);
+  }
+}
+
 class _RecordingPubkeysStorage implements PubkeysStorage {
   final savedWallets = <WalletId>[];
+  final purgedWallets = <WalletId>[];
   int readCount = 0;
+
+  @override
+  Future<void> purgeWallet(WalletId walletId) async {
+    purgedWallets.add(walletId);
+  }
 
   @override
   Future<Map<String, Map<String, dynamic>>> listForWallet(
@@ -201,12 +216,13 @@ Map<String, dynamic> _accountBalance({
 void main() {
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
+    registerFallbackValue(_singleAddressAsset().id);
   });
 
   test('fresh fetch bypasses memory and persisted pubkey caches', () async {
     final client = _MockApiClient();
     final auth = _MockAuth();
-    final activation = _MockActivationCoordinator();
+    final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
     final storage = _RecordingPubkeysStorage();
     final authChanges = StreamController<KdfUser?>.broadcast();
     final asset = _singleAddressAsset();
@@ -257,7 +273,7 @@ void main() {
   test('fresh fetch rejects a response from the previous wallet', () async {
     final client = _MockApiClient();
     final auth = _MockAuth();
-    final activation = _MockActivationCoordinator();
+    final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
     final storage = _RecordingPubkeysStorage();
     final authChanges = StreamController<KdfUser?>.broadcast();
     final response = Completer<Map<String, dynamic>>();
@@ -308,7 +324,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       final walletAResponse = Completer<Map<String, dynamic>>();
@@ -419,7 +436,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       KdfUser? currentUser = _walletA;
@@ -476,7 +494,8 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
-      final activation = _MockActivationCoordinator();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
       final storage = _RecordingPubkeysStorage();
       final authChanges = StreamController<KdfUser?>.broadcast();
       KdfUser? currentUser = _nameOnlyWallet;
@@ -525,6 +544,110 @@ void main() {
       expect(
         manager.lastKnownForWallet(asset.id, _hashAWallet.walletId),
         isNull,
+      );
+    },
+  );
+
+  test('a degraded identity does not drop cached pubkeys', () async {
+    // The mirror of the test above. `_ensureAuthenticatedWalletIdentity` strips
+    // the pubkeyHash whenever the identity RPC is unavailable, so the *same*
+    // wallet is observed name-only. Treating that as a wallet change would
+    // clear every cached pubkey set - and the RPC is most likely to blip
+    // exactly during a login's activation fan-out.
+    final client = _MockApiClient();
+    final auth = _MockAuth();
+    final activation = _MockActivationCoordinator()..stubNotFreshlyActivated();
+    final storage = _RecordingPubkeysStorage();
+    final authChanges = StreamController<KdfUser?>.broadcast();
+    KdfUser? currentUser = _hashAWallet;
+    final asset = _singleAddressAsset();
+
+    when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+    when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+    when(
+      () => activation.activateAsset(asset),
+    ).thenAnswer((_) async => ActivationResult.success(asset.id));
+    when(() => client.executeRpc(any())).thenAnswer((_) async {
+      return {
+        'address': 'cosmos1hasha',
+        'balance': '5',
+        'unspendable_balance': '0',
+        'coin': asset.id.id,
+      };
+    });
+
+    final manager = PubkeyManager(client, auth, activation, storage: storage);
+    addTearDown(() async {
+      await manager.dispose();
+      await authChanges.close();
+    });
+
+    final pubkeys = await manager.getPubkeys(asset);
+    expect(
+      manager.lastKnownForWallet(asset.id, _hashAWallet.walletId),
+      pubkeys,
+    );
+
+    currentUser = _nameOnlyWallet;
+    authChanges.add(_nameOnlyWallet);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(
+      manager.lastKnownForWallet(asset.id, _hashAWallet.walletId),
+      pubkeys,
+      reason: 'a degraded identity is not a wallet change',
+    );
+  });
+
+  test(
+    'hydratedPubkeys does not return the previous wallet\'s cached pubkeys',
+    () async {
+      // `_captureWalletContext` is what notices a wallet switch the auth stream
+      // has not delivered yet, and clears the pubkey cache. `hydratedPubkeys`
+      // used to read the cache *before* calling it, so a cache entry populated
+      // under wallet A survived a switch to wallet B - and BalanceManager
+      // paints a balance straight from this.
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final activation = _MockActivationCoordinator()
+        ..stubNotFreshlyActivated();
+      final storage = _RecordingPubkeysStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast();
+      final asset = _singleAddressAsset();
+      KdfUser? currentUser = _walletA;
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+      when(() => client.executeRpc(any())).thenAnswer((_) async {
+        return {
+          'address': 'cosmos1walletA',
+          'balance': '1',
+          'unspendable_balance': '0',
+          'coin': asset.id.id,
+        };
+      });
+
+      final manager = PubkeyManager(client, auth, activation, storage: storage);
+      addTearDown(() async {
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      // Populate the in-memory cache under wallet A.
+      final cached = await manager.getPubkeys(asset);
+      expect(cached.keys.single.address, 'cosmos1walletA');
+
+      // Switch wallets WITHOUT pushing an auth event, which is the race: the
+      // stream is asynchronous and a caller can get here first.
+      currentUser = _walletB;
+
+      expect(
+        await manager.hydratedPubkeys(asset),
+        isNull,
+        reason: "wallet A's pubkeys must not be visible under wallet B",
       );
     },
   );

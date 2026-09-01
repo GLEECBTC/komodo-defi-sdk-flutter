@@ -91,6 +91,17 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   final _lastBalanceForPolling = <AssetId, BalanceInfo>{};
   final _lastCustodyBalanceForPolling = <AssetId, Decimal>{};
   final _syncInProgress = <(AssetId, int)>{};
+
+  /// Assets this process has successfully activated for the current wallet.
+  ///
+  /// The activation skip in [getTransactionHistory] used to key off "we have
+  /// local history for this asset", on the reasoning that stored rows prove a
+  /// prior activation. That reasoning only holds while storage is per-process.
+  /// Once history is persisted, a cold start has rows for an asset KDF has not
+  /// enabled yet, and the strategy fetch below it would run against an inactive
+  /// coin. Tracking activation per session keeps the RPC-spam reduction the
+  /// skip was added for without inheriting a cross-session claim.
+  final _activatedThisSession = <AssetId>{};
   final _rateLimiter = _RateLimiter(const Duration(milliseconds: 500));
 
   static const _defaultPollingInterval = Duration(seconds: 30);
@@ -136,6 +147,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _lastBalanceForPolling.clear();
     _lastCustodyBalanceForPolling.clear();
     _syncInProgress.clear();
+    _activatedThisSession.clear();
     _stopAllStreaming();
   }
 
@@ -159,6 +171,17 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         user.walletId,
       );
       _currentWalletId = operationWalletId;
+    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+      // Same wallet, identity RPC temporarily unavailable. Keep operating - and
+      // keep keying storage - under the enriched identity already held.
+      //
+      // Without this branch a transient `get_public_key_hash` failure looks
+      // like a wallet switch: the generation bumps, streaming stops, and the
+      // history that follows is written under a name-only storage prefix. The
+      // rows under the enriched prefix are then orphaned and swept, so this is
+      // silent loss of persisted history rather than a re-walk.
+      // [BalanceManager] and [PubkeyManager] both already have this branch.
+      operationWalletId = currentWalletId;
     } else {
       // Do not wait for the auth stream to deliver before isolating the old
       // wallet's subscriptions and in-flight operations.
@@ -168,6 +191,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       _lastBalanceForPolling.clear();
       _lastCustodyBalanceForPolling.clear();
       _syncInProgress.clear();
+      _activatedThisSession.clear();
       _stopAllStreaming();
     }
 
@@ -188,9 +212,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
     if (!_isWalletContextCurrentSync(context)) return false;
     final user = await _auth.currentUser;
+    // Continues-session, not same-stable: the fresh read can observe the same
+    // wallet degraded to name-only while the identity RPC is down, which the
+    // capture path deliberately admits - rejecting it here would fail the
+    // operation during the exact blip that branch tolerates.
     return user != null &&
         _isWalletContextCurrentSync(context) &&
-        isSameStableWallet(context.walletId, user.walletId);
+        walletIdentityContinuesSession(context.walletId, user.walletId);
   }
 
   Future<void> _requireWalletContextCurrent(
@@ -300,31 +328,43 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         }
       }
 
-      // First try to get from local storage
-      final localPage = await _storage.getTransactions(
-        asset.id,
-        walletContext.walletId,
-        fromId: pagination is TransactionBasedPagination
-            ? pagination.fromId
-            : null,
-        pageNumber: pagination is PagePagination ? pagination.pageNumber : null,
-        limit: pagination.limit ?? _maxBatchSize,
-      );
+      // First try to get from local storage. A TransactionBasedPagination
+      // cursor is not necessarily a stored internalId: a strategy may hand
+      // back its own opaque token as `nextPageId` (TronGrid's encoded
+      // per-address cursor), which storage rejects as an unknown starting
+      // transaction. That rejection means "not ours to serve", never a failed
+      // request - the strategy below owns the cursor and consumes it.
+      TransactionPage? localPage;
+      try {
+        localPage = await _storage.getTransactions(
+          asset.id,
+          walletContext.walletId,
+          fromId: pagination is TransactionBasedPagination
+              ? pagination.fromId
+              : null,
+          pageNumber: pagination is PagePagination
+              ? pagination.pageNumber
+              : null,
+          limit: pagination.limit ?? _maxBatchSize,
+        );
+      } on TransactionStorageException {
+        localPage = null;
+      }
       await _requireWalletContextCurrent(walletContext);
 
       // If we have enough local data and it's not a first page request, return it
-      if (localPage.transactions.isNotEmpty &&
+      if (localPage != null &&
+          localPage.transactions.isNotEmpty &&
           (pagination is PagePagination && pagination.pageNumber > 1 ||
               pagination is TransactionBasedPagination)) {
         return localPage;
       }
 
-      // Skip activation check if we have local transaction history, as this
-      // implies the asset was previously activated. This reduces RPC spam when
-      // opening the coin details page repeatedly for already-activated assets.
-      final hasLocalHistory = localPage.transactions.isNotEmpty;
-
-      if (!hasLocalHistory) {
+      // Skip the activation check only when this process already activated the
+      // asset. That reduces RPC spam when the coin details page is reopened
+      // repeatedly, without assuming that persisted history implies KDF has the
+      // coin enabled right now - it does not, on a cold start.
+      if (!_activatedThisSession.contains(asset.id)) {
         await _ensureAssetActivated(asset);
         await _requireWalletContextCurrent(walletContext);
       }
@@ -380,6 +420,28 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
     final walletContext = await _captureWalletContext();
 
+    // Cached rows are yielded *before* activation, not after.
+    //
+    // `_ensureAssetActivated` has no upper bound - it awaits the shared
+    // activation coordinator, which polls KDF indefinitely. Reading storage
+    // after it meant a coin page re-opened seconds after the last fetch showed
+    // a spinner for as long as activation took, despite every row already
+    // being in memory. Storage is a local read and cannot block on the network.
+    //
+    // Activation is still awaited below, before the network walk: local history
+    // does not prove the asset is enabled in KDF *right now*, and that stays
+    // true once this storage is persisted across sessions.
+    final localPage = await _storage.getTransactions(
+      asset.id,
+      walletContext.walletId,
+      limit: _maxBatchSize,
+    );
+    await _requireWalletContextCurrent(walletContext);
+
+    if (localPage.transactions.isNotEmpty) {
+      yield localPage.transactions;
+    }
+
     try {
       await _ensureAssetActivated(asset);
       await _requireWalletContextCurrent(walletContext);
@@ -398,18 +460,6 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       }
     }
     final strategy = _strategyFactory.forAsset(asset);
-
-    // First try to get any cached transactions
-    final localPage = await _storage.getTransactions(
-      asset.id,
-      walletContext.walletId,
-      limit: _maxBatchSize,
-    );
-    await _requireWalletContextCurrent(walletContext);
-
-    if (localPage.transactions.isNotEmpty) {
-      yield localPage.transactions;
-    }
 
     String? fromId;
     var hasMore = true;
@@ -699,6 +749,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         originalError: activationResult.errorMessage,
       );
     }
+    _activatedThisSession.add(asset.id);
   }
 
   Future<void> _batchStoreTransactions(
@@ -940,9 +991,11 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   /// falls back to EOA balance gating alone.
   ///
   /// Note: [_fetchOpaqueCursorTransactionsSince] stops at the stored head, so
-  /// custody transactions older than the head are not backfilled mid-session;
-  /// storage is in-memory and [getTransactionsStreamed] re-fetches from page 1
-  /// on every coin-details open, so the gap self-heals.
+  /// custody transactions older than the head are not backfilled mid-session.
+  /// [getTransactionsStreamed] walks the network from page 1 to exhaustion on
+  /// every coin-details open, regardless of what storage already holds, so the
+  /// gap self-heals there. That is a property of the walk, not of storage being
+  /// per-process, and it survives storage being persisted across sessions.
   ///
   /// The new balance is committed before the triggered sync runs (mirroring
   /// [_updateLastKnownBalance] for EOA balances), so a sync whose retries all
@@ -1234,11 +1287,20 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
     _syncInProgress.clear();
 
+    _activatedThisSession.clear();
+
     // Cancel confirmations refresh timers
     for (final timer in _confirmationsTimers.values) {
       timer.cancel();
     }
     _confirmationsTimers.clear();
+
+    // Release the backing store when it owns one. Opt-in rather than part of
+    // TransactionStorage, so the in-memory implementation and the test fakes
+    // are unaffected.
+    if (_storage case final ClosableTransactionStorage closable) {
+      await closable.close();
+    }
   }
 }
 
