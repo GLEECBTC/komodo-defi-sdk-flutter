@@ -1,3 +1,23 @@
+## 0.5.0
+
+ - **FEAT**(auth): add `KomodoDefiAuth.onWalletDeletion`, an awaited hook that
+   runs inside `deleteWallet` after KDF and secure storage have forgotten the
+   wallet but before the call returns. Wallet-scoped cache owners register here
+   so deleting and immediately recreating the same wallet cannot race a
+   still-running purge; the `walletDeletions` stream remains for passive
+   observers.
+ - **FIX**(auth): stop treating a transient transport failure as an
+   authentication failure - a brief network drop no longer ends the session.
+ - **FIX**(auth): resolve the deleted wallet's identity before deletion, since
+   it cannot be recovered afterwards.
+ - **FIX**(trezor): surface the device's own message in `TrezorException`
+   instead of `GeneralErrorResponse.toString()`, which is deliberately reduced
+   to its `error_type` to keep request payloads out of logs and so read as
+   `GeneralErrorResponse(errorType: ...)` to the user. `error_data` is still
+   never included.
+ - **FIX**(storage): open Android secure storage with `resetOnError: false`, so
+   a read failure surfaces instead of silently clearing stored credentials.
+
 ## 0.4.1
 
  - **FIX**(auth,migration): wait for KDF RPC readiness and guard unsupported platforms during migration.

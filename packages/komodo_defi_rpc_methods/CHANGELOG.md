@@ -1,4 +1,4 @@
-## 1.0.0
+## 0.6.0
 
 > Note: This release has breaking GasFree relay response interfaces.
 
@@ -12,6 +12,14 @@
    streaming exceptions from the pinned KDF Rust error enums.
  - **FIX**(gasfree): serialize maximum withdrawals with `max: true` and no
    `amount`, and serialize only documented GasFree withdrawal options.
+ - **FEAT**(activation): send the HD address `gap_limit` on the wire for the
+   activation methods that accept it, so callers can scan fewer addresses than
+   KDF's default of 20.
+ - **FEAT**(activation): add WebSocket expansion of EVM node entries, gated off
+   on both web and native for this release: KDF `main` panics on a `wss://`
+   reply that lands after the caller's timeout, so only HTTP nodes are sent.
+ - **FIX**(requests): encode request bodies through a single encodable path so
+   nested parameter objects serialize consistently.
 
 ## 0.5.0
 
