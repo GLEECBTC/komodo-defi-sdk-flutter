@@ -17,6 +17,27 @@ function post(port, data) {
   }
 }
 
+// Counts non-UI ports - the ports KDF's own WASM event task owns, since only
+// UI clients ever send a control message.
+//
+// KNOWN GAP: a successful `postMessage` is not proof of liveness. A port whose
+// peer has gone away is disentangled, not broken, so `post()` returns true for
+// it just the same, and a KDF port is only ever removed from `connections` if
+// it throws. KDF never speaks this control protocol, so it never sends
+// `disconnect` either. A KDF instance that stops while the page and this
+// worker stay alive therefore leaves a port behind that still counts here, and
+// a `ready` asked in the gap before the replacement KDF connects is answered
+// yes too early.
+//
+// The obvious hardening is unavailable: no MessagePort API distinguishes a
+// dead peer from a silent one, and KDF will not answer an acknowledgment or
+// renew a lease. Narrowing this needs a signal from the Dart side at KDF
+// shutdown, marking the ports of the outgoing instance stale. Note that the
+// naive alternatives are worse than the gap: requiring a port to have sent
+// something reinstates a deadlock, because no KDF event arrives before
+// `stream::enable`, which itself waits on this readiness answer; and treating
+// an older non-UI port as stale when a newer one connects breaks the
+// two-tab case, where one SharedWorker is shared by two live KDF instances.
 function livePeerCount(source) {
   let count = 0;
   for (const port of Array.from(connections)) {
@@ -39,9 +60,11 @@ onconnect = function (event) {
         if (data[controlKey] === 'ping') {
           post(port, { [controlKey]: 'pong', nonce: data.nonce });
         } else if (data[controlKey] === 'ready') {
-          // KDF's WASM event task owns another port on this worker. Seeing a
-          // live peer proves client 0 was created without waiting for the first
-          // application event (which itself requires stream::enable).
+          // KDF's WASM event task owns another port on this worker, so a
+          // non-UI peer standing here means client 0 was created - without
+          // waiting for the first application event, which itself requires
+          // stream::enable. See livePeerCount for what this does and does not
+          // establish.
           post(port, {
             [controlKey]: 'ready',
             ready: livePeerCount(port) > 0,
