@@ -179,9 +179,8 @@ Packages with dependency updates only:
  - **BREAKING** **BUILD**(kdf): require a full 40-character commit hash and
    declare `required_platforms`, so a partial or missing platform fails the
    build instead of shipping a stale artefact.
- - **FEAT**(build): resolve artefacts from the Gleec and Nitride dev-build
-   mirrors. `source_urls[0]` is load-bearing - only `devbuilds.gleec.com`
-   serves `main/`, and CI passes the first entry as its single mirror.
+ - **SECURITY**(build): restrict bundled KDF sources to the official Devbuilds
+   and Nebula mirrors. Keep `devbuilds.gleec.com` first for `main/` builds.
  - **FEAT**(streaming): add typed `GASLESS_TRACE` events and rework the web and
    IO event-stream transports around a single service lifecycle.
  - **FEAT**(config): allow an `IKdfOperations` implementation to be injected,
