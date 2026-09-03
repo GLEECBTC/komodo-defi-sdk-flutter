@@ -4,8 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LineChart', () {
-    testWidgets('should render LineChart with elements',
-        (WidgetTester tester) async {
+    testWidgets('should render LineChart with elements', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

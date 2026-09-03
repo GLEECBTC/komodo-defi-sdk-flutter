@@ -9,20 +9,153 @@ Future<PubkeyInfo?> showAddressSearch(
   required String assetNameLabel,
   bool Function(PubkeyInfo)? verified,
   void Function(PubkeyInfo)? onCopied,
+  String Function(PubkeyInfo)? displayAddress,
+  String Function(PubkeyInfo)? copyAddress,
+  String Function(PubkeyInfo)? balanceLabel,
+  String copyTooltip = 'Copy address',
   String searchHint = 'Search addresses',
   DropdownMenuItem<PubkeyInfo> Function(PubkeyInfo address, {bool? isVerified})?
   customItemBuilder,
 }) {
   final theme = Theme.of(context);
 
-  final items =
-      addresses.map((address) {
-        final isVerified = verified?.call(address) ?? false;
+  final items = addresses.map((address) {
+    final isVerified = verified?.call(address) ?? false;
+    final addressText = displayAddress?.call(address) ?? address.address;
+    final copiedAddress = copyAddress?.call(address) ?? address.address;
+    final subtitle =
+        balanceLabel?.call(address) ??
+        '${address.balance.spendable} $assetNameLabel available';
 
-        return customItemBuilder?.call(address, isVerified: isVerified) ??
-            DropdownMenuItem<PubkeyInfo>(
-              value: address,
-              child: Padding(
+    return customItemBuilder?.call(address, isVerified: isVerified) ??
+        DropdownMenuItem<PubkeyInfo>(
+          value: address,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: isVerified
+                        ? theme.colorScheme.primaryContainer
+                        : theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.colorScheme.outline),
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.account_balance_wallet_outlined,
+                      size: 18,
+                      color: isVerified
+                          ? theme.colorScheme.onPrimaryContainer
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              formatCompactAddress(addressText),
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          if (isVerified)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Icon(
+                                Icons.verified,
+                                size: 16,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onCopied != null)
+                  IconButton(
+                    icon: const Icon(Icons.copy_outlined, size: 18),
+                    style: IconButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.all(8),
+                    ),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: copiedAddress));
+                      onCopied.call(address);
+                    },
+                    tooltip: copyTooltip,
+                  ),
+              ],
+            ),
+          ),
+        );
+  }).toList();
+
+  return showSearchableSelect<PubkeyInfo>(
+    context: context,
+    items: items,
+    searchHint: searchHint,
+  );
+}
+
+Widget showAddressSelectDropdown({
+  required List<PubkeyInfo> addresses,
+  required String assetName,
+  required BuildContext context,
+  PubkeyInfo? selectedAddress,
+  String hint = 'Select Address',
+  bool Function(PubkeyInfo)? verified,
+  void Function(PubkeyInfo)? onCopied,
+  String Function(PubkeyInfo)? displayAddress,
+  String Function(PubkeyInfo)? copyAddress,
+  String Function(PubkeyInfo)? balanceLabel,
+  String copyTooltip = 'Copy address',
+  ValueChanged<PubkeyInfo?>? onAddressSelected,
+  InputDecoration? decoration,
+  Widget Function(BuildContext, PubkeyInfo?)? customSelectedItemBuilder,
+  Widget Function(PubkeyInfo, bool)? customItemBuilder,
+}) {
+  final theme = Theme.of(context);
+
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: SearchableSelect<PubkeyInfo>(
+      items: addresses.map((address) {
+        final isVerified = verified?.call(address) ?? false;
+        final addressText = displayAddress?.call(address) ?? address.address;
+        final copiedAddress = copyAddress?.call(address) ?? address.address;
+        final subtitle =
+            balanceLabel?.call(address) ??
+            '${address.balance.spendable} $assetName available';
+
+        return DropdownMenuItem<PubkeyInfo>(
+          value: address,
+          child:
+              customItemBuilder?.call(address, isVerified) ??
+              Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
@@ -30,10 +163,9 @@ Future<PubkeyInfo?> showAddressSearch(
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color:
-                            isVerified
-                                ? theme.colorScheme.primaryContainer
-                                : theme.colorScheme.surface,
+                        color: isVerified
+                            ? theme.colorScheme.primaryContainer
+                            : theme.colorScheme.surface,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: theme.colorScheme.outline),
                       ),
@@ -41,10 +173,9 @@ Future<PubkeyInfo?> showAddressSearch(
                         child: Icon(
                           Icons.account_balance_wallet_outlined,
                           size: 18,
-                          color:
-                              isVerified
-                                  ? theme.colorScheme.onPrimaryContainer
-                                  : theme.colorScheme.onSurfaceVariant,
+                          color: isVerified
+                              ? theme.colorScheme.onPrimaryContainer
+                              : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -57,7 +188,8 @@ Future<PubkeyInfo?> showAddressSearch(
                           Row(
                             children: [
                               Text(
-                                address.formatted,
+                                formatCompactAddress(addressText),
+                                overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontFamily: 'monospace',
                                   fontWeight: FontWeight.w500,
@@ -77,11 +209,12 @@ Future<PubkeyInfo?> showAddressSearch(
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            // TODO: Properly localize this (including param)
-                            '${address.balance.spendable} $assetNameLabel available',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                            subtitle,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.listTileTheme.subtitleTextStyle
+                                ?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
                           ),
                         ],
                       ),
@@ -94,138 +227,16 @@ Future<PubkeyInfo?> showAddressSearch(
                           padding: const EdgeInsets.all(8),
                         ),
                         onPressed: () {
-                          Clipboard.setData(
-                            ClipboardData(text: address.address),
-                          );
+                          Clipboard.setData(ClipboardData(text: copiedAddress));
                           onCopied.call(address);
                         },
-                        tooltip: 'Copy address',
+                        tooltip: copyTooltip,
                       ),
                   ],
                 ),
               ),
-            );
-      }).toList();
-
-  return showSearchableSelect<PubkeyInfo>(
-    context: context,
-    items: items,
-    searchHint: searchHint,
-  );
-}
-
-Widget showAddressSelectDropdown({
-  required List<PubkeyInfo> addresses,
-  required String assetName,
-  required BuildContext context,
-  PubkeyInfo? selectedAddress,
-  String hint = 'Select Address',
-  bool Function(PubkeyInfo)? verified,
-  void Function(PubkeyInfo)? onCopied,
-  ValueChanged<PubkeyInfo?>? onAddressSelected,
-  InputDecoration? decoration,
-  Widget Function(BuildContext, PubkeyInfo?)? customSelectedItemBuilder,
-  Widget Function(PubkeyInfo, bool)? customItemBuilder,
-}) {
-  final theme = Theme.of(context);
-
-  return MouseRegion(
-    cursor: SystemMouseCursors.click,
-    child: SearchableSelect<PubkeyInfo>(
-      items:
-          addresses.map((address) {
-            final isVerified = verified?.call(address) ?? false;
-
-            return DropdownMenuItem<PubkeyInfo>(
-              value: address,
-              child:
-                  customItemBuilder?.call(address, isVerified) ??
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color:
-                                isVerified
-                                    ? theme.colorScheme.primaryContainer
-                                    : theme.colorScheme.surface,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: theme.colorScheme.outline,
-                            ),
-                          ),
-                          child: Center(
-                            child: Icon(
-                              Icons.account_balance_wallet_outlined,
-                              size: 18,
-                              color:
-                                  isVerified
-                                      ? theme.colorScheme.onPrimaryContainer
-                                      : theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    address.formatted,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      fontFamily: 'monospace',
-                                      fontWeight: FontWeight.w500,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                  if (isVerified)
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 4),
-                                      child: Icon(
-                                        Icons.verified,
-                                        size: 16,
-                                        color: theme.colorScheme.primary,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${address.balance.spendable} $assetName available',
-                                style: theme.listTileTheme.subtitleTextStyle
-                                    ?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (onCopied != null)
-                          IconButton(
-                            icon: const Icon(Icons.copy_outlined, size: 18),
-                            style: IconButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.all(8),
-                            ),
-                            onPressed: () {
-                              Clipboard.setData(
-                                ClipboardData(text: address.address),
-                              );
-                              onCopied.call(address);
-                            },
-                            tooltip: 'Copy address',
-                          ),
-                      ],
-                    ),
-                  ),
-            );
-          }).toList(),
+        );
+      }).toList(),
       value: selectedAddress,
       hint: hint,
       onChanged: onAddressSelected,
@@ -271,13 +282,19 @@ Widget showAddressSelectDropdown({
         }
 
         final isVerified = verified?.call(selected) ?? false;
+        final selectedAddressText =
+            displayAddress?.call(selected) ?? selected.address;
+        final selectedBalanceLabel =
+            balanceLabel?.call(selected) ??
+            '(${selected.balance.spendable} $assetName)';
         return Row(
           children: [
             Expanded(
               child: Row(
                 children: [
                   Text(
-                    selected.formatted,
+                    formatCompactAddress(selectedAddressText),
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontFamily: 'monospace',
                       fontWeight: FontWeight.w500,
@@ -294,7 +311,8 @@ Widget showAddressSelectDropdown({
                     const SizedBox(width: 8),
                   ],
                   Text(
-                    '(${selected.balance.spendable} $assetName)',
+                    selectedBalanceLabel,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

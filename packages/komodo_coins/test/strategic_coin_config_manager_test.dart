@@ -316,6 +316,45 @@ void main() {
 
         expect(identical(firstCall, secondCall), isTrue);
       });
+
+      test('keys resolve by AssetId equality, not by tree ordering', () {
+        const filter = UtxoAssetFilterStrategy();
+        final filtered = manager.filteredAssets(filter);
+        final storedId = filtered.keys.first;
+
+        // Same [id, subClass, chainId] - therefore `==` with an equal
+        // hashCode - but a different `parentId`, so `toString()` differs and
+        // the filter cache's SplayTreeMap comparator orders them apart. This
+        // is the shape of any child-token id parsed with `knownIds: null`,
+        // as `Transaction.fromJson` does. The returned map must key off
+        // equality so such an id still resolves.
+        final equalIdWithParent = AssetId(
+          id: storedId.id,
+          name: storedId.name,
+          symbol: storedId.symbol,
+          chainId: storedId.chainId,
+          derivationPath: storedId.derivationPath,
+          subClass: storedId.subClass,
+          parentId: AssetId(
+            id: 'SOMEPARENT',
+            name: 'Some Parent',
+            symbol: AssetSymbol(assetConfigId: 'SOMEPARENT'),
+            chainId: storedId.chainId,
+            derivationPath: null,
+            subClass: storedId.subClass,
+          ),
+        );
+
+        expect(equalIdWithParent, equals(storedId));
+        expect(equalIdWithParent.hashCode, equals(storedId.hashCode));
+        expect(
+          equalIdWithParent.toString(),
+          isNot(equals(storedId.toString())),
+        );
+
+        expect(filtered.containsKey(equalIdWithParent), isTrue);
+        expect(filtered[equalIdWithParent], isNotNull);
+      });
     });
 
     group('Asset lookup', () {
@@ -330,11 +369,11 @@ void main() {
       });
 
       test('finds asset by ticker and subclass', () {
-        final found = manager.findByTicker('KMD', CoinSubClass.smartChain);
+        final found = manager.findByTicker('KMD', CoinSubClass.utxo);
 
         expect(found, isNotNull);
         expect(found!.id.id, equals('KMD'));
-        expect(found.id.subClass, equals(CoinSubClass.smartChain));
+        expect(found.id.subClass, equals(CoinSubClass.utxo));
       });
 
       test('returns null when asset not found', () {
@@ -644,23 +683,17 @@ void main() {
 
           final allAssets = managerWithConflict.all;
 
-          // Original KMD should still exist
+          // The bundled KMD key survives and the custom token takes over its
+          // slot. `_assets` is a SplayTreeMap ordered by `AssetId.toString()`,
+          // which carries the parent and subclass but not the chain id, so a
+          // custom token sharing a ticker and subclass collides with the
+          // bundled asset even though the two ids are not `==`.
           expect(allAssets.containsKey(komodoAsset.id), isTrue);
+          expect(allAssets.keys.where((id) => id.id == 'KMD'), hasLength(1));
 
-          // Duplicate custom KMD should exist with modified id
-          final duplicateKeys = allAssets.keys.where(
-            (id) =>
-                id.id.startsWith('KMD_custom') &&
-                id.name.startsWith('Custom KMD Token_custom'),
-          );
-          expect(duplicateKeys, hasLength(1));
-
-          final duplicateAsset = allAssets[duplicateKeys.first]!;
-          expect(duplicateAsset.protocol, equals(conflictingToken.protocol));
-          expect(
-            duplicateAsset.isWalletOnly,
-            equals(conflictingToken.isWalletOnly),
-          );
+          final storedKmd = allAssets[komodoAsset.id]!;
+          expect(storedKmd.protocol, equals(conflictingToken.protocol));
+          expect(storedKmd.isWalletOnly, equals(conflictingToken.isWalletOnly));
 
           await managerWithConflict.dispose();
         });
@@ -702,19 +735,13 @@ void main() {
             () => mockCustomTokenStorage.storeCustomToken(conflictingToken),
           ).called(1);
 
-          // Original KMD should still exist
+          // Takes over the bundled KMD's slot rather than sitting beside it.
+          // See the initialization conflict test above for why.
           expect(manager.all.containsKey(komodoAsset.id), isTrue);
+          expect(manager.all.keys.where((id) => id.id == 'KMD'), hasLength(1));
 
-          // Duplicate custom KMD should exist with modified id
-          final duplicateKeys = manager.all.keys.where(
-            (id) =>
-                id.id.startsWith('KMD_custom') &&
-                id.name.startsWith('Custom KMD Token_custom'),
-          );
-          expect(duplicateKeys, hasLength(1));
-
-          final duplicateAsset = manager.all[duplicateKeys.first]!;
-          expect(duplicateAsset.protocol, equals(conflictingToken.protocol));
+          final storedKmd = manager.all[komodoAsset.id]!;
+          expect(storedKmd.protocol, equals(conflictingToken.protocol));
         });
 
         test('throws StateError when not initialized', () async {
@@ -832,10 +859,7 @@ void main() {
         test('custom tokens are found by ticker search', () async {
           await manager.storeCustomToken(customToken1);
 
-          final found = manager.findByTicker(
-            'CUSTOM1',
-            CoinSubClass.smartChain,
-          );
+          final found = manager.findByTicker('CUSTOM1', CoinSubClass.utxo);
           expect(found, isNotNull);
           expect(found, equals(customToken1));
         });

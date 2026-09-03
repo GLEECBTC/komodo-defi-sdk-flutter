@@ -7,6 +7,7 @@ class AddressInfo {
     required this.derivationPath,
     required this.chain,
     required this.balance,
+    this.gasfreeAddress,
   });
 
   factory AddressInfo.fromJson(JsonMap json) {
@@ -15,6 +16,7 @@ class AddressInfo {
       derivationPath: json.value<String>('derivation_path'),
       chain: json.value<String>('chain'),
       balance: TokenBalanceMap.fromJson(json.value<JsonMap>('balance')),
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
 
@@ -22,11 +24,13 @@ class AddressInfo {
   final String derivationPath;
   final String chain;
   final TokenBalanceMap balance;
+  final String? gasfreeAddress;
 
   JsonMap toJson() => {
     'address': address,
     'derivation_path': derivationPath,
     'chain': chain,
     'balance': balance.toJson(),
+    if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
   };
 }

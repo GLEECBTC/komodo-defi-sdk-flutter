@@ -186,8 +186,11 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
     return true;
   }
 
+  /// [gapLimit] is the HD address gap KDF should walk during activation. Only
+  /// protocols that actually send one honour it; see `HdGapLimit`.
   ActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
+    int? gapLimit,
   }) => ActivationParams.fromConfigJson(
     config,
   ).genericCopyWith(privKeyPolicy: privKeyPolicy);

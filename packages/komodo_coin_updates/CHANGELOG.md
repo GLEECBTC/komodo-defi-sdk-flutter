@@ -1,3 +1,18 @@
+## 2.1.0
+
+ - **FEAT**(config): add `CoinConfigTransformer.additionalTransforms`, applied
+   after the built-in normalization set so an application can amend normalized
+   asset configuration without replacing SDK defaults.
+ - **FEAT**(tron): add `TronQuickNodeTransform`, keeping mainnet TRX and TRC20
+   assets pointed at the Gleec proxy while preserving upstream fallback nodes.
+ - **FIX**(custom-tokens): stop rejecting a re-store of an existing custom token
+   as a contract collision. Assets read back through `AssetAdapter` are rebuilt
+   without known parent ids, so the stored copy never carries a `parentId`;
+   comparing that absence against a live parsed parent made every `upsert` and
+   `addCustomTokenIfNotExists` on an existing token throw. Parents are now only
+   compared when both sides carry one - a differing contract address still
+   conflicts.
+
 ## 2.0.1
 
  - Update a dependency to the latest release.

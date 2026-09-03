@@ -109,7 +109,9 @@ void main() {
         () => mockDataFactory.createRepository(any(), any()),
       ).thenReturn(mockRepo);
       var localProviderCallCount = 0;
-      when(() => mockDataFactory.createLocalProvider(any())).thenAnswer((_) {
+      when(
+        () => mockDataFactory.createLocalProvider(any(), mockTransformer),
+      ).thenAnswer((_) {
         localProviderCallCount++;
         if (localProviderCallCount == 1) {
           return mockLocalProvider; // First call for asset manager
@@ -201,6 +203,47 @@ void main() {
           expect(currentCommit, equals(bundledCommitHash));
 
           verify(() => mockLocalProvider.getAssets()).called(greaterThan(0));
+        },
+      );
+
+      test(
+        'keeps application view transforms out of persistence wiring',
+        () async {
+          final persistenceTransformer = MockCoinConfigTransformer();
+          when(
+            () => mockDataFactory.createLocalProvider(
+              any(),
+              persistenceTransformer,
+            ),
+          ).thenReturn(mockFallbackProvider);
+
+          final coins = KomodoAssetsUpdateManager(
+            configRepository: mockConfigRepository,
+            transformer: mockTransformer,
+            persistenceTransformer: persistenceTransformer,
+            dataFactory: mockDataFactory,
+            enableAutoUpdate: false,
+          );
+
+          await coins.init();
+
+          verify(
+            () => mockDataFactory.createRepository(any(), mockTransformer),
+          ).called(1);
+          verify(
+            () =>
+                mockDataFactory.createRepository(any(), persistenceTransformer),
+          ).called(1);
+          verify(
+            () => mockDataFactory.createLocalProvider(any(), mockTransformer),
+          ).called(1);
+          verify(
+            () => mockDataFactory.createLocalProvider(
+              any(),
+              persistenceTransformer,
+            ),
+          ).called(1);
+          await coins.dispose();
         },
       );
 

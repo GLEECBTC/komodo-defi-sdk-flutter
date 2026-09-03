@@ -106,6 +106,29 @@ class StrategicCoinConfigManager
 
   SplayTreeMap<AssetId, Asset>? _assets;
   final Map<String, SplayTreeMap<AssetId, Asset>> _filterCache = {};
+
+  /// Hash-keyed snapshots of [_filterCache], memoised per strategy.
+  ///
+  /// [_filterCache] holds [SplayTreeMap]s ordered by [_assetIdComparator], so
+  /// key lookups on them resolve through that comparator rather than through
+  /// `AssetId`'s `==`/`hashCode`. The two disagree: the comparator orders on
+  /// `AssetId.toString()`, which includes `parentId` and omits `chainId`,
+  /// while equality is defined by `[id, subClass, chainId]`. Handing the tree
+  /// itself to callers therefore misses on an [AssetId] that is `==` a stored
+  /// key but carries a different `parentId` - e.g. any child-token id parsed
+  /// with `knownIds: null`, as `Transaction.fromJson` does.
+  ///
+  /// Snapshotting into a [LinkedHashMap] restores `==`/`hashCode` lookups
+  /// while preserving the tree's ordering. It also makes the returned map a
+  /// stable snapshot rather than a live view, so callers may iterate it across
+  /// an await without risking [ConcurrentModificationError] when a custom
+  /// token is stored or deleted mid-iteration.
+  ///
+  /// Memoised because [filteredAssets] is on hot paths - every
+  /// `AssetManager.available` read and everything built on it. Every mutation
+  /// of [_filterCache] must invalidate this alongside it.
+  final Map<String, Map<AssetId, Asset>> _filterViewCache = {};
+
   bool _isDisposed = false;
   bool _isInitialized = false;
 
@@ -249,6 +272,7 @@ class StrategicCoinConfigManager
     _assets = _mapAssets(assets);
     await _loadAndMergeCustomTokens();
     _filterCache.clear(); // Clear cache after refresh
+    _filterViewCache.clear();
 
     // Refresh commit hash cache when assets are refreshed
     _cachedCommitHash = null;
@@ -288,22 +312,29 @@ class StrategicCoinConfigManager
     _assertInitialized();
 
     final cacheKey = strategy.strategyId;
-    final cached = _filterCache[cacheKey];
-    if (cached != null) return cached;
+    final cachedView = _filterViewCache[cacheKey];
+    if (cachedView != null) return cachedView;
 
-    final result = SplayTreeMap<AssetId, Asset>(_assetIdComparator);
-    for (final entry in _assets!.entries) {
-      final config = entry.value.protocol.config;
-      if (strategy.shouldInclude(entry.value, config)) {
-        result[entry.key] = entry.value;
+    var result = _filterCache[cacheKey];
+    if (result == null) {
+      result = SplayTreeMap<AssetId, Asset>(_assetIdComparator);
+      for (final entry in _assets!.entries) {
+        final config = entry.value.protocol.config;
+        if (strategy.shouldInclude(entry.value, config)) {
+          result[entry.key] = entry.value;
+        }
       }
+
+      _filterCache[cacheKey] = result;
+      _logger.finer(
+        'filteredAssets(${strategy.strategyId}): ${result.length} assets',
+      );
     }
 
-    _filterCache[cacheKey] = result;
-    _logger.finer(
-      'filteredAssets(${strategy.strategyId}): ${result.length} assets',
+    // Ordered by the tree, keyed by ==/hashCode. See [_filterViewCache].
+    return _filterViewCache[cacheKey] = UnmodifiableMapView(
+      LinkedHashMap<AssetId, Asset>.of(result),
     );
-    return result;
   }
 
   @override
@@ -350,7 +381,10 @@ class StrategicCoinConfigManager
         return;
       }
 
-      // Add custom tokens to _assets, handling conflicts by creating duplicate entries
+      // Keyed by _assetIdComparator, which orders on `AssetId.toString()` and
+      // so ignores the chain id: a custom token that shares a ticker, parent
+      // and subclass with a bundled asset takes over its slot rather than
+      // sitting beside it.
       for (final customToken in customTokens) {
         _assets![customToken.id] = customToken;
       }
@@ -363,6 +397,8 @@ class StrategicCoinConfigManager
 
   /// Updates filter caches when an asset is added
   void _updateFilterCachesForAddedAsset(Asset asset) {
+    // The memoised snapshots are now stale for every strategy this touches.
+    _filterViewCache.clear();
     for (final entry in _filterCache.entries) {
       final strategyId = entry.key;
       final cachedAssets = entry.value;
@@ -380,6 +416,7 @@ class StrategicCoinConfigManager
 
   /// Updates filter caches when an asset is removed
   void _updateFilterCachesForRemovedAsset(AssetId assetId) {
+    _filterViewCache.clear();
     for (final cachedAssets in _filterCache.values) {
       cachedAssets.remove(assetId);
     }
@@ -414,6 +451,7 @@ class StrategicCoinConfigManager
     _isInitialized = false;
     _assets = null;
     _filterCache.clear();
+    _filterViewCache.clear();
     _cachedCommitHash = null; // Clear commit hash cache
     await _customTokenStorage.dispose(); // Dispose custom token storage
     clearSourceHealthData(); // Clear mixin data

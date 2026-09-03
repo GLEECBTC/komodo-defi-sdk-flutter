@@ -6,6 +6,24 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// Default amount value for KMD rewards when claiming
 const String _kDefaultKmdRewardsAmount = '0';
 
+bool _validatedWithdrawalMax({required Object? amount, required bool max}) {
+  if (max && amount != null) {
+    throw ArgumentError.value(
+      amount,
+      'amount',
+      'Must be omitted when max is true',
+    );
+  }
+  if (!max && amount == null) {
+    throw ArgumentError.value(
+      amount,
+      'amount',
+      'Must be specified when max is false',
+    );
+  }
+  return max;
+}
+
 /// Returns KMD-specific parameters for withdrawal requests
 ///
 /// KDF requires kmd_rewards object with claimed_by_me flag for KMD withdrawals
@@ -19,7 +37,7 @@ Map<String, dynamic> _kmdRewardsParams() => {
 /// will be deprecated in favor of the new task-based withdrawal API.
 // @Deprecated('Use the new task-based withdrawal API')
 class WithdrawRequest
-    extends BaseRequest<WithdrawStatusResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawStatusResponse, GaslessWithdrawException> {
   // @Deprecated('Use the new task-based withdrawal API')
   WithdrawRequest({
     required super.rpcPass,
@@ -29,16 +47,19 @@ class WithdrawRequest
     this.fee,
     this.from,
     this.memo,
-    this.max = false,
+    bool max = false,
     this.ibcSourceChannel,
     this.expirationSeconds,
-  }) : assert(
+    this.feeMethod,
+    this.gaslessOptions,
+  }) : max = _validatedWithdrawalMax(amount: amount, max: max),
+       assert(
          amount != null || max,
-         'Amount cannot be specified if sending the maximum amount',
+         'Amount must be specified when max is false',
        ),
        assert(
          amount == null || !max,
-         'Amount must be specified if not sending the maximum amount',
+         'Amount must be omitted when max is true',
        ),
        super(method: 'withdraw', mmrpc: RpcVersion.v2_0);
 
@@ -51,6 +72,8 @@ class WithdrawRequest
   final bool max;
   final int? ibcSourceChannel;
   final int? expirationSeconds;
+  final WithdrawalFeeMethod? feeMethod;
+  final GaslessWithdrawalOptions? gaslessOptions;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -66,6 +89,8 @@ class WithdrawRequest
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
       if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
       if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+      if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+      if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
     },
   };
 
@@ -85,11 +110,15 @@ class WithdrawRequest
       ),
     );
   }
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
 
 /// Request to initialize withdrawal task
 class WithdrawInitRequest
-    extends BaseRequest<WithdrawInitResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawInitResponse, GaslessWithdrawException> {
   WithdrawInitRequest({
     required super.rpcPass,
     required WithdrawParameters params,
@@ -99,12 +128,20 @@ class WithdrawInitRequest
        fee = params.fee,
        from = params.from,
        memo = params.memo,
-       max = params.isMax ?? false,
+       max = _validatedWithdrawalMax(
+         amount: params.amount,
+         max: params.isMax ?? false,
+       ),
        expirationSeconds = params.expirationSeconds,
+       feeMethod = params.feeMethod,
+       gaslessOptions = params.gaslessOptions,
        assert(
          params.amount != null || (params.isMax ?? false),
-         'Amount must be non-null if isMax is false and '
-         'must be null if isMax is true',
+         'Amount must be specified when isMax is false',
+       ),
+       assert(
+         params.amount == null || !(params.isMax ?? false),
+         'Amount must be omitted when isMax is true',
        ),
        super(method: 'task::withdraw::init', mmrpc: RpcVersion.v2_0);
 
@@ -116,6 +153,8 @@ class WithdrawInitRequest
   final String? memo;
   final bool max;
   final int? expirationSeconds;
+  final WithdrawalFeeMethod? feeMethod;
+  final GaslessWithdrawalOptions? gaslessOptions;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -123,12 +162,14 @@ class WithdrawInitRequest
     'params': {
       'coin': coin,
       'to': to,
-      if (amount != null) 'amount': amount,
+      if (!max && amount != null) 'amount': amount,
       if (fee != null) 'fee': fee!.toJson(),
       if (from != null) 'from': from!.toRpcParams(),
       if (memo != null) 'memo': memo,
       if (max) 'max': max,
       if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+      if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+      if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
       if (coin.toUpperCase() == 'KMD') ..._kmdRewardsParams(),
     },
   };
@@ -136,13 +177,17 @@ class WithdrawInitRequest
   @override
   WithdrawInitResponse parse(Map<String, dynamic> json) =>
       WithdrawInitResponse.parse(json);
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
 
 typedef WithdrawInitResponse = NewTaskResponse;
 
 /// Request to check withdrawal task status
 class WithdrawStatusRequest
-    extends BaseRequest<WithdrawStatusResponse, GeneralErrorResponse> {
+    extends BaseRequest<WithdrawStatusResponse, GaslessWithdrawException> {
   WithdrawStatusRequest({
     required super.rpcPass,
     required this.taskId,
@@ -161,7 +206,37 @@ class WithdrawStatusRequest
   @override
   WithdrawStatusResponse parse(Map<String, dynamic> json) =>
       WithdrawStatusResponse.parse(json);
+
+  @override
+  bool shouldParseErrorAsResponse(JsonMap json) =>
+      json.valueOrNull<String>('result', 'status') == 'Error' &&
+      json.hasNestedKey('result', 'details');
+
+  @override
+  GaslessWithdrawException? parseCustomErrorResponse(JsonMap json) =>
+      GaslessWithdrawException.tryParse(json);
 }
+
+Object? _typedWithdrawTaskError(Object details) {
+  final errorJson = switch (details) {
+    final String value => tryParseJson(value),
+    final Map<dynamic, dynamic> value => convertToJsonMap(value),
+    _ => null,
+  };
+  if (errorJson == null) return null;
+
+  return GaslessWithdrawException.tryParse(errorJson) ??
+      KdfErrorRegistry.tryParse(
+        errorJson,
+        rpcMethodHint: 'task::withdraw::status',
+      );
+}
+
+Object _untypedWithdrawTaskError(Object details) => switch (details) {
+  final String value => value,
+  final Map<dynamic, dynamic> value => convertToJsonMap(value).toJsonString(),
+  _ => details.toString(),
+};
 
 class WithdrawStatusResponse extends BaseResponse {
   WithdrawStatusResponse({
@@ -173,30 +248,39 @@ class WithdrawStatusResponse extends BaseResponse {
   factory WithdrawStatusResponse.parse(Map<String, dynamic> json) {
     final result = json.value<JsonMap>('result');
     final status = result.value<String>('status');
+    final rawDetails = result.value<Object>('details');
 
     return WithdrawStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
       status: status,
       details: status == 'Ok'
           ? WithdrawResult.fromJson(result.value<JsonMap>('details'))
+          : status == 'Error'
+          ? _typedWithdrawTaskError(rawDetails) ??
+                _untypedWithdrawTaskError(rawDetails)
           : result.value<String>('details'),
     );
   }
 
   final String status;
 
-  /// String for in-progress/error states, WithdrawResult for completed state
-  // TODO: Refactor this class to avoid dynamic
-  final dynamic details;
+  /// Progress text, a completed [WithdrawResult], or a typed terminal error.
+  ///
+  /// JSON-stringified task errors are decoded at this RPC boundary so SDK
+  /// consumers never need to inspect or regex-match the raw error text.
+  final Object details;
 
   @override
   Map<String, dynamic> toJson() => {
     'mmrpc': mmrpc,
     'result': {
       'status': status,
-      'details': (details is WithdrawResult)
-          ? (details as WithdrawResult).toJson()
-          : details,
+      'details': switch (details) {
+        final WithdrawResult result => result.toJson(),
+        final GaslessWithdrawException error => error.toJson().toJsonString(),
+        final MmRpcException error => error.toString(),
+        final Object value => value,
+      },
     },
   };
 

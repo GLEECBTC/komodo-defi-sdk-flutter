@@ -24,7 +24,11 @@ class TrezorAuthService implements IAuthService {
     String Function(int length)? passwordGenerator,
   }) : _connectionMonitor =
            connectionMonitor ?? TrezorConnectionMonitor(_trezor),
-       _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+       _secureStorage =
+           secureStorage ??
+           const FlutterSecureStorage(
+             aOptions: AndroidOptions(resetOnError: false),
+           ),
        _generatePassword =
            passwordGenerator ?? SecurityUtils.generatePasswordSecure;
 
@@ -108,8 +112,7 @@ class TrezorAuthService implements IAuthService {
   Future<void> updateActiveUserMetadataKey(
     String key,
     dynamic Function(dynamic currentValue) transform,
-  ) =>
-      _authService.updateActiveUserMetadataKey(key, transform);
+  ) => _authService.updateActiveUserMetadataKey(key, transform);
 
   @override
   Future<void> restoreSession(KdfUser user) =>

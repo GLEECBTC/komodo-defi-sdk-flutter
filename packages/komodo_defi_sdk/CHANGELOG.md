@@ -1,3 +1,80 @@
+## 0.7.0
+
+> Note: This release has breaking GasFree activation and withdrawal behavior.
+
+ - **BREAKING** **FEAT**(gasfree): derive token enrollment only from activated
+   TRC20 `gasless.enabled` configuration and require an authoritative
+   account-status check before custody balance or sends become available.
+   Applications may amend normalized asset configuration before SDK parsing
+   through `assetConfigTransform`.
+ - **BREAKING** **FEAT**(gasfree): configure the documented
+   `tron_gasless_provider` and per-token `gasless` fields during ordinary TRON
+   activation. Remove runtime `gasless::configure`, its restart fallback, and
+   the legacy V0/V1/bound compatibility contracts.
+ - **BREAKING** **FEAT**(gasfree): adopt the required four-state account status
+   contract (`available`, `pending_transfer`, `token_unsupported`, and
+   `provider_unreachable`) with endpoint-typed provider, custody-address, and
+   token-decimal errors.
+ - **SECURITY**(gasfree): persist a wallet-scoped local `journalId` before
+   submission, never serialize it to KDF, retain unknown outcomes without
+   resubmitting, and migrate accepted records with a trace ID into trace
+   recovery.
+ - **FEAT**(gasfree): subscribe to `GASLESS_TRACE:<coin>` before submission,
+   persist KDF's accepted `trace_id`, reconcile it once immediately, and follow
+   matching success/error stream events. Restart and disconnect recovery use a
+   one-shot `gasless::trace_status` request.
+ - **BREAKING** **FIX**(gasfree): serialize only KDF's documented withdrawal and
+   relay fields, report the actual Standard/GasFree submission rail, and obtain
+   final fee and finality from trace status rather than preview metadata.
+ - **FIX**(gasfree): treat account-status `max_withdrawable` as an advisory
+   status value and delegate maximum sends to KDF with `max: true` and no
+   amount.
+ - **FIX**(gasfree): retain custody/recovery access during provider outages,
+   preserve KDF-compatible Iguana, software-HD, and hardware-HD activation
+   identities, preserve cross-page address perspectives, and expose final fee
+   plus confirmation metadata without enabling resubmission.
+ - **FIX**(pubkeys): migrate legacy address metadata conservatively so funded
+   and previously used Standard addresses remain visible.
+ - **FIX**(gasfree): keep KDF's fresh custody total distinct from provider
+   spendability and Standard balances; remove external custody-balance and
+   finality readers.
+ - **FEAT**(activation): expose per-asset activation state through
+   `activationStates`, `watchActivationStates` and `watchActivationStateOf`,
+   and reach a terminal state on every path - a progress stream that never
+   emits and never closes no longer strands the caller past its deadline.
+ - **FEAT**(transaction-history): persist transaction history to disk. A coin's
+   history is served from local storage on a cold start and the network walk
+   that follows is a refresh rather than a first fetch. On by default, with
+   unbounded retention; `KomodoDefiSdkConfig` gates it.
+ - **FEAT**(transaction-history): add a Blockscout strategy so GLEEC and GRC-20
+   report history instead of returning an empty list.
+ - **FEAT**(balances): paint balances from local storage before activation
+   completes, and keep the balance watcher alive across a transport blip or a
+   degraded wallet identity rather than emitting nothing at all.
+ - **PERF**(pubkeys): scale the HD address gap scan through `HdGapLimit` -
+   3 addresses, or 1 on a newly generated wallet's first sign-in, against KDF's
+   default of 20 - and skip the redundant post-activation scan. Hardware
+   wallets keep the full gap of 20. Measured single-coin HD activation falls
+   from 46.9s to roughly 13.1s.
+ - **PERF**(auth): cut the identity RPCs issued on every sign-in and stop
+   activation precaching from blocking first paint.
+ - **FIX**(wallets): purge wallet-scoped caches - derived addresses, activation
+   config, enabled assets, transaction history - inside `deleteWallet` via the
+   new `KomodoDefiAuth.onWalletDeletion` hook, so deleting and immediately
+   recreating a wallet cannot race a still-running purge.
+ - **FIX**(balances): read cached public keys only after the undelivered
+   wallet-switch check, so a balance cannot be painted from the previous wallet.
+ - **FIX**(gasfree): discard an untraced pending transfer under a single lock,
+   so a reservation belonging to an accepted transfer can no longer be stripped
+   between the lookup and the removal.
+ - **FIX**(deps): declare `meta`, which `activation_strategy_base.dart`
+   imports, and the `flutter_test` and `plugin_platform_interface` dev
+   dependencies the tests import. They resolved only through the workspace, so
+   `dart pub publish` rejected the package.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
+
 ## 0.6.0
 
 > Note: This release has breaking changes.

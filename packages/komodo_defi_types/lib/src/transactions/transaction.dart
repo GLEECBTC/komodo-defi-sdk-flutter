@@ -22,26 +22,21 @@ class Transaction extends Equatable {
   });
 
   factory Transaction.fromJson(JsonMap json) => Transaction(
-        id: json.value<String>('id'),
-        internalId: json.value<String>('internal_id'),
-        assetId: AssetId.parse(
-          json.value<JsonMap>('asset_id'),
-          knownIds: null,
-        ),
-        balanceChanges: BalanceChanges.fromJson(json),
-        timestamp: DateTime.parse(json.value<String>('timestamp')),
-        confirmations: json.value<int>('confirmations'),
-        blockHeight: json.value<int>('block_height'),
-        from: List<String>.from(json.value('from')),
-        to: List<String>.from(json.value('to')),
-        txHash: json.valueOrNull<String>('tx_hash'),
-        fee: json.containsKey('fee') || json.containsKey('fee_details')
-            ? FeeInfo.fromJson(
-                json.valueOrNull('fee') ?? json.value('fee_details'),
-              )
-            : null,
-        memo: json.valueOrNull<String>('memo'),
-      );
+    id: json.value<String>('id'),
+    internalId: json.value<String>('internal_id'),
+    assetId: AssetId.parse(json.value<JsonMap>('asset_id'), knownIds: null),
+    balanceChanges: BalanceChanges.fromJson(json),
+    timestamp: DateTime.parse(json.value<String>('timestamp')),
+    confirmations: json.value<int>('confirmations'),
+    blockHeight: json.value<int>('block_height'),
+    from: List<String>.from(json.value('from')),
+    to: List<String>.from(json.value('to')),
+    txHash: json.valueOrNull<String>('tx_hash'),
+    fee: json.containsKey('fee') || json.containsKey('fee_details')
+        ? FeeInfo.fromJson(json.valueOrNull('fee') ?? json.value('fee_details'))
+        : null,
+    memo: json.valueOrNull<String>('memo'),
+  );
 
   final String id;
   final String internalId;
@@ -67,34 +62,34 @@ class Transaction extends Equatable {
 
   @override
   List<Object?> get props => [
-        id,
-        internalId,
-        assetId,
-        balanceChanges,
-        timestamp,
-        confirmations,
-        blockHeight,
-        from,
-        to,
-        txHash,
-        fee,
-        memo,
-      ];
+    id,
+    internalId,
+    assetId,
+    balanceChanges,
+    timestamp,
+    confirmations,
+    blockHeight,
+    from,
+    to,
+    txHash,
+    fee,
+    memo,
+  ];
 
   JsonMap toJson() => {
-        'id': id,
-        'internal_id': internalId,
-        'asset_id': assetId.toJson(),
-        'balance_changes': balanceChanges.toJson(),
-        'timestamp': timestamp.toIso8601String(),
-        'confirmations': confirmations,
-        'block_height': blockHeight,
-        'from': from,
-        'to': to,
-        if (txHash != null) 'tx_hash': txHash,
-        if (fee != null) 'fee': fee!.toJson(),
-        if (memo != null) 'memo': memo,
-      };
+    'id': id,
+    'internal_id': internalId,
+    'asset_id': assetId.toJson(),
+    'balance_changes': balanceChanges.toJson(),
+    'timestamp': timestamp.toIso8601String(),
+    'confirmations': confirmations,
+    'block_height': blockHeight,
+    'from': from,
+    'to': to,
+    if (txHash != null) 'tx_hash': txHash,
+    if (fee != null) 'fee': fee!.toJson(),
+    if (memo != null) 'memo': memo,
+  };
 
   Transaction copyWith({
     String? id,
@@ -109,48 +104,49 @@ class Transaction extends Equatable {
     String? txHash,
     FeeInfo? fee,
     String? memo,
-  }) =>
-      Transaction(
-        id: id ?? this.id,
-        internalId: internalId ?? this.internalId,
-        assetId: assetId ?? this.assetId,
-        balanceChanges: balanceChanges ?? this.balanceChanges,
-        timestamp: timestamp ?? this.timestamp,
-        confirmations: confirmations ?? this.confirmations,
-        blockHeight: blockHeight ?? this.blockHeight,
-        from: from ?? this.from,
-        to: to ?? this.to,
-        txHash: txHash ?? this.txHash,
-        fee: fee ?? this.fee,
-        memo: memo ?? this.memo,
-      );
+  }) => Transaction(
+    id: id ?? this.id,
+    internalId: internalId ?? this.internalId,
+    assetId: assetId ?? this.assetId,
+    balanceChanges: balanceChanges ?? this.balanceChanges,
+    timestamp: timestamp ?? this.timestamp,
+    confirmations: confirmations ?? this.confirmations,
+    blockHeight: blockHeight ?? this.blockHeight,
+    from: from ?? this.from,
+    to: to ?? this.to,
+    txHash: txHash ?? this.txHash,
+    fee: fee ?? this.fee,
+    memo: memo ?? this.memo,
+  );
 }
 
 extension TransactionInfoExtension on TransactionInfo {
-  Transaction asTransaction(AssetId assetId) => Transaction(
-        id: txHash,
-        internalId: internalId,
-        assetId: assetId,
-        balanceChanges: BalanceChanges(
-          netChange: Decimal.parse(myBalanceChange),
-          receivedByMe: receivedByMe != null
-              ? Decimal.parse(receivedByMe!)
-              : Decimal.zero,
-          spentByMe:
-              spentByMe != null ? Decimal.parse(spentByMe!) : Decimal.zero,
-          totalAmount: Decimal.parse(
-            // For historical transactions that don't have spent/received,
-            // use the absolute value of the balance change
-            receivedByMe ?? spentByMe ?? myBalanceChange.replaceAll('-', ''),
-          ),
-        ),
-        timestamp: DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
-        confirmations: confirmations,
-        blockHeight: blockHeight,
-        from: from,
-        to: to,
-        txHash: txHash,
-        fee: feeDetails,
-        memo: memo,
-      );
+  Transaction asTransaction(AssetId assetId) {
+    final received = receivedByMe == null
+        ? Decimal.zero
+        : Decimal.parse(receivedByMe!);
+    final spent = spentByMe == null ? Decimal.zero : Decimal.parse(spentByMe!);
+    final total = received > spent ? received : spent;
+    return Transaction(
+      id: txHash,
+      internalId: internalId,
+      assetId: assetId,
+      balanceChanges: BalanceChanges(
+        netChange: Decimal.parse(myBalanceChange),
+        receivedByMe: received,
+        spentByMe: spent,
+        totalAmount: total > Decimal.zero
+            ? total
+            : Decimal.parse(myBalanceChange).abs(),
+      ),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
+      confirmations: confirmations,
+      blockHeight: blockHeight,
+      from: from,
+      to: to,
+      txHash: txHash,
+      fee: feeDetails,
+      memo: memo,
+    );
+  }
 }

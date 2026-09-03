@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' show log;
 
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
@@ -248,6 +249,36 @@ abstract interface class KomodoDefiAuth {
   /// Returns true if KDF is healthy or was successfully restarted, false otherwise.
   Future<bool> ensureKdfHealthy();
 
+  /// Emits the identity of each wallet as it is deleted.
+  ///
+  /// [deleteWallet] removes the wallet from KDF and from secure storage, but
+  /// callers may hold wallet-scoped caches of their own - derived addresses,
+  /// activation config, transaction history - that outlive it. Those caches are
+  /// keyed by [WalletId], and the identity cannot be recovered after the fact,
+  /// so it is resolved before the deletion and published here.
+  ///
+  /// Broadcast, and emitted only after the deletion succeeds - including its
+  /// registered [onWalletDeletion] hooks. A stream listener runs *after*
+  /// [deleteWallet] has already returned, so anything that must be purged
+  /// before the caller can act on the deletion belongs in a hook, not here.
+  Stream<WalletId> get walletDeletions;
+
+  /// Registers [hook] to run - and be awaited - inside [deleteWallet], after
+  /// KDF and secure storage no longer know the wallet but before the call
+  /// returns.
+  ///
+  /// This is what makes deletion safe to chain: a caller that deletes and
+  /// immediately recreates the same wallet must not have a still-running
+  /// purge sweep away the new wallet's freshly persisted pubkeys, activation
+  /// config, or history. A [walletDeletions] listener cannot give that
+  /// guarantee - it is not awaited - so purge owners register here and the
+  /// stream stays for passive observers.
+  ///
+  /// Hook failures are contained and logged by the caller of the hook:
+  /// purging is best-effort, and a cache that will not clear must not make
+  /// the wallet look undeleted.
+  void onWalletDeletion(Future<void> Function(WalletId walletId) hook);
+
   /// Disposes of any resources held by the authentication service.
   ///
   /// This method should be called when the authentication service is no longer
@@ -266,6 +297,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   final SecureLocalStorage _secureStorage = SecureLocalStorage();
+  final _walletDeletions = StreamController<WalletId>.broadcast();
+  final _walletDeletionHooks = <Future<void> Function(WalletId)>[];
   final bool _allowRegistrations;
   late final IAuthService _authService;
   late final TrezorAuthService _trezorAuthService;
@@ -597,16 +630,47 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
+  Stream<WalletId> get walletDeletions => _walletDeletions.stream;
+
+  @override
+  void onWalletDeletion(Future<void> Function(WalletId walletId) hook) {
+    _walletDeletionHooks.add(hook);
+  }
+
+  @override
   Future<void> deleteWallet({
     required String walletName,
     required String password,
   }) async {
     await ensureInitialized();
+    // Resolve the identity first: wallet-scoped caches are keyed by WalletId,
+    // and once the wallet is gone there is nothing left to derive one from.
+    final deleted = await _resolveWalletId(walletName);
     try {
       await _authService.deleteWallet(
         walletName: walletName,
         password: password,
       );
+      if (deleted != null) {
+        // Awaited before this method returns, so a caller that immediately
+        // recreates the wallet cannot race a still-running purge into
+        // deleting the new wallet's fresh data. Each hook is contained:
+        // purging is best-effort, and a cache that will not clear must not
+        // make the wallet look undeleted.
+        for (final hook in _walletDeletionHooks) {
+          try {
+            await hook(deleted);
+          } on Object catch (error) {
+            log(
+              'Wallet-deletion hook failed: $error',
+              name: 'KomodoDefiLocalAuth',
+            );
+          }
+        }
+        if (!_walletDeletions.isClosed) {
+          _walletDeletions.add(deleted);
+        }
+      }
     } on AuthException {
       rethrow;
     } catch (e) {
@@ -687,10 +751,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     if (signedIn != expected) {
       throw AuthException(
         'User is ${signedIn ? 'signed in' : 'not signed in'}.',
-        type:
-            signedIn
-                ? AuthExceptionType.alreadySignedIn
-                : AuthExceptionType.unauthorized,
+        type: signedIn
+            ? AuthExceptionType.alreadySignedIn
+            : AuthExceptionType.unauthorized,
       );
     }
   }
@@ -701,8 +764,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     return _authService.ensureKdfHealthy();
   }
 
+  /// Returns the stored identity for [walletName], or `null` when it is not a
+  /// known wallet.
+  ///
+  /// Failures are swallowed: a lookup that cannot complete costs a stale cache,
+  /// whereas letting it throw would fail a deletion that is otherwise fine.
+  Future<WalletId?> _resolveWalletId(String walletName) async {
+    try {
+      for (final user in await _authService.getUsers()) {
+        if (user.walletId.name == walletName) return user.walletId;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Future<void> dispose() async {
+    await _walletDeletions.close();
     await _authService.dispose();
   }
 }

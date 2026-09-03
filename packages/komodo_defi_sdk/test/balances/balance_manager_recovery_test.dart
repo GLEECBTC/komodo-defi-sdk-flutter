@@ -51,6 +51,9 @@ class _InMemoryAssetHistoryStorage extends AssetHistoryStorage {
   }
 
   @override
+  Future<bool> hasAmbiguousLegacyHistory(WalletId walletId) async => false;
+
+  @override
   Future<void> clearWalletAssets(WalletId walletId) async {
     _walletAssets.remove(_key(walletId));
   }
@@ -140,6 +143,26 @@ void main() {
         () => pubkeyManager.watchPubkeys(asset),
       ).thenAnswer((_) => const Stream<AssetPubkeys>.empty());
       when(() => pubkeyManager.getPubkeys(asset)).thenAnswer(
+        (_) async => AssetPubkeys(
+          assetId: assetId,
+          keys: [
+            PubkeyInfo(
+              address: 'TTtRecoverExample',
+              derivationPath: null,
+              chain: null,
+              balance: BalanceInfo(
+                total: Decimal.fromInt(5),
+                spendable: Decimal.fromInt(5),
+                unspendable: Decimal.zero,
+              ),
+              coinTicker: assetId.id,
+            ),
+          ],
+          availableAddressesCount: 1,
+          syncStatus: SyncStatusEnum.success,
+        ),
+      );
+      when(() => pubkeyManager.refreshPubkeys(asset)).thenAnswer(
         (_) async => AssetPubkeys(
           assetId: assetId,
           keys: [

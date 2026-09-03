@@ -1,7 +1,13 @@
 name: komodo_wallet_build_transformer
 description: A build transformer for Gleec Wallet used for managing all build-time dependencies.
-version: 0.4.2
+version: 0.5.0
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - defi
+  - build
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -11,6 +12,46 @@ class LegacyWithdrawalManager implements WithdrawalManager {
 
   final ApiClient _client;
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
+
+  @override
+  Future<bool> discardPendingGaslessTransfer(String journalId) =>
+      Future.error(
+        UnsupportedError(
+          'Legacy withdrawals keep no GasFree journal to discard from',
+        ),
+      );
+
+  @override
+  Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) =>
+      Future.error(
+        UnsupportedError(
+          'Legacy withdrawals do not expose unvalidated GasFree status',
+        ),
+      );
+
+  @override
+  Future<List<PendingGaslessTransfer>> listPendingGaslessTransfers() async =>
+      const [];
+
+  @override
+  Stream<List<PendingGaslessTransfer>> watchPendingGaslessTransfers() =>
+      const Stream<List<PendingGaslessTransfer>>.empty();
+
+  @override
+  Stream<WithdrawalProgress> resumePendingGaslessTransfer(String traceId) =>
+      Stream.error(
+        UnsupportedError('Legacy withdrawals do not support GasFree relays'),
+      );
+
+  @override
+  Stream<WithdrawalProgress> reconcilePendingGaslessTransfers() =>
+      const Stream<WithdrawalProgress>.empty();
+
+  @override
+  Future<void> startGaslessReconciliation() async {}
+
+  @override
+  Future<void> stopGaslessReconciliation() async {}
 
   /// Creates a preview and immediately executes the withdrawal.
   ///
@@ -57,6 +98,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               result.kmdRewards != null &&
               Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: result.blockHeight > 0
+              ? result.blockHeight
+              : null,
+          confirmedAt: result.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  result.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
 
@@ -73,7 +123,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           status: WithdrawalStatus.complete,
           message: 'Withdrawal completed successfully',
           withdrawalResult: WithdrawalResult(
-            txHash: broadcastResponse.txHash,
+            txHash: broadcastResponse.txHash ?? result.txHash,
             balanceChanges: result.balanceChanges,
             coin: result.coin,
             toAddress: result.to.first,
@@ -81,6 +131,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
             kmdRewardsEligible:
                 result.kmdRewards != null &&
                 Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+            confirmationBlockHeight: result.blockHeight > 0
+                ? result.blockHeight
+                : null,
+            confirmedAt: result.timestamp > 0
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    result.timestamp * 1000,
+                    isUtc: true,
+                  )
+                : null,
           ),
         );
       } catch (e) {
@@ -163,6 +222,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               preview.kmdRewards != null &&
               Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: preview.blockHeight > 0
+              ? preview.blockHeight
+              : null,
+          confirmedAt: preview.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  preview.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
 
@@ -178,7 +246,7 @@ class LegacyWithdrawalManager implements WithdrawalManager {
         status: WithdrawalStatus.complete,
         message: 'Withdrawal completed successfully',
         withdrawalResult: WithdrawalResult(
-          txHash: broadcastResponse.txHash,
+          txHash: broadcastResponse.txHash ?? preview.txHash,
           balanceChanges: preview.balanceChanges,
           coin: assetId,
           toAddress: preview.to.first,
@@ -186,6 +254,15 @@ class LegacyWithdrawalManager implements WithdrawalManager {
           kmdRewardsEligible:
               preview.kmdRewards != null &&
               Decimal.parse(preview.kmdRewards!.amount) > Decimal.zero,
+          confirmationBlockHeight: preview.blockHeight > 0
+              ? preview.blockHeight
+              : null,
+          confirmedAt: preview.timestamp > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  preview.timestamp * 1000,
+                  isUtc: true,
+                )
+              : null,
         ),
       );
     } catch (e) {

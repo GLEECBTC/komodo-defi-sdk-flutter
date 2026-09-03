@@ -62,6 +62,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
   KomodoAssetsUpdateManager({
     AssetRuntimeUpdateConfigRepository? configRepository,
     CoinConfigTransformer? transformer,
+    CoinConfigTransformer? persistenceTransformer,
     CoinConfigDataFactory? dataFactory,
     LoadingStrategy? loadingStrategy,
     UpdateStrategy? updateStrategy,
@@ -72,6 +73,10 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
   }) : _configRepository =
            configRepository ?? AssetRuntimeUpdateConfigRepository(),
        _transformer = transformer ?? const CoinConfigTransformer(),
+       _persistenceTransformer =
+           persistenceTransformer ??
+           transformer ??
+           const CoinConfigTransformer(),
        _dataFactory = dataFactory ?? const DefaultCoinConfigDataFactory(),
        _loadingStrategy = loadingStrategy ?? StorageFirstLoadingStrategy(),
        _updateStrategy = updateStrategy ?? const BackgroundUpdateStrategy(),
@@ -91,6 +96,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
 
   final AssetRuntimeUpdateConfigRepository _configRepository;
   final CoinConfigTransformer _transformer;
+  final CoinConfigTransformer _persistenceTransformer;
   final CoinConfigDataFactory _dataFactory;
   final LoadingStrategy _loadingStrategy;
   final UpdateStrategy _updateStrategy;
@@ -149,9 +155,12 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       // Initialize update manager
       final repository = _dataFactory.createRepository(
         runtimeConfig,
-        _transformer,
+        _persistenceTransformer,
       );
-      final localProvider = _dataFactory.createLocalProvider(runtimeConfig);
+      final localProvider = _dataFactory.createLocalProvider(
+        runtimeConfig,
+        _persistenceTransformer,
+      );
       final newUpdatesManager = StrategicCoinUpdateManager(
         repository: repository,
         updateStrategy: enableAutoUpdate ? _updateStrategy : NoUpdateStrategy(),
@@ -235,7 +244,10 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
     sources.add(StorageCoinConfigSource(repository: repository));
 
     // Add local asset bundle source
-    final localProvider = _dataFactory.createLocalProvider(config);
+    final localProvider = _dataFactory.createLocalProvider(
+      config,
+      _transformer,
+    );
     sources.add(AssetBundleCoinConfigSource(provider: localProvider));
 
     return sources;

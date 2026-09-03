@@ -7,7 +7,14 @@ import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class QtumActivationStrategy extends ProtocolActivationStrategy {
-  const QtumActivationStrategy(super.client, this.privKeyPolicy);
+  const QtumActivationStrategy(
+    super.client,
+    this.privKeyPolicy, {
+    this.hdGapLimit,
+  });
+
+  /// The HD address gap KDF should walk during activation.
+  final int? hdGapLimit;
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
@@ -43,6 +50,7 @@ class QtumActivationStrategy extends ProtocolActivationStrategy {
     try {
       final activationParams = asset.protocol.defaultActivationParams(
         privKeyPolicy: privKeyPolicy,
+        gapLimit: hdGapLimit,
       );
 
       // Debug logging for QTUM activation

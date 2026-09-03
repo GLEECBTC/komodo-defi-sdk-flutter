@@ -18,6 +18,49 @@ class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
+Asset _trc20Asset() {
+  final trx = Asset.fromJson(const {
+    'coin': 'TRX',
+    'type': 'TRX',
+    'name': 'TRON',
+    'fname': 'TRON',
+    'wallet_only': true,
+    'mm2': 1,
+    'decimals': 6,
+    'required_confirmations': 1,
+    'derivation_path': "m/44'/195'",
+    'protocol': {
+      'type': 'TRX',
+      'protocol_data': {'network': 'Mainnet'},
+    },
+    'nodes': <Map<String, dynamic>>[],
+  }, knownIds: const {});
+  return Asset.fromJson(
+    const {
+      'coin': 'USDT-TRC20',
+      'type': 'TRC-20',
+      'name': 'Tether',
+      'fname': 'Tether',
+      'wallet_only': true,
+      'mm2': 1,
+      'decimals': 6,
+      'required_confirmations': 1,
+      'derivation_path': "m/44'/195'",
+      'protocol': {
+        'type': 'TRC20',
+        'protocol_data': {
+          'platform': 'TRX',
+          'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        },
+      },
+      'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      'parent_coin': 'TRX',
+      'nodes': <Map<String, dynamic>>[],
+    },
+    knownIds: {trx.id},
+  );
+}
+
 void main() {
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
@@ -70,6 +113,10 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      // Default to "not activated this session", which is the shape that makes
+      // `_scanForNewHdAddressesIfNeeded` still scan. The skip is opt-in and is
+      // covered explicitly further down.
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
 
       manager = PubkeyManager(client, auth, activation);
 
@@ -123,6 +170,7 @@ void main() {
       required String coin,
       Decimal? total,
       Decimal? unspendable,
+      String? gasfreeAddress,
     }) {
       when(() => client.executeRpc(any())).thenAnswer((invocation) async {
         final req =
@@ -134,6 +182,7 @@ void main() {
             'balance': (total ?? Decimal.zero).toString(),
             'unspendable_balance': (unspendable ?? Decimal.zero).toString(),
             'coin': coin,
+            if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
           };
         }
         if (method == 'unban_pubkeys') {
@@ -163,6 +212,33 @@ void main() {
         expect(result.assetId, tendermintAsset.id);
         expect(result.keys, hasLength(1));
         expect(result.keys.first.address, 'cosmos1abc');
+      },
+    );
+
+    test(
+      'fresh pubkeys do not inherit a cached GasFree custody address',
+      () async {
+        final asset = _trc20Asset();
+        final user = nonHdUser();
+        when(() => auth.currentUser).thenAnswer((_) async => user);
+        await stubActivationAlwaysActive(asset);
+        stubWalletMyBalance(
+          address: 'TStandardAddress',
+          coin: asset.id.id,
+          gasfreeAddress: 'TCachedCustodyAddress',
+        );
+
+        final cached = await manager.getPubkeys(asset);
+        expect(cached.keys.single.gasfreeAddress, 'TCachedCustodyAddress');
+
+        stubWalletMyBalance(address: 'TStandardAddress', coin: asset.id.id);
+        final refreshed = await manager
+            .watchPubkeys(asset)
+            .firstWhere((pubkeys) => pubkeys.keys.single.gasfreeAddress == null)
+            .timeout(const Duration(seconds: 2));
+
+        expect(refreshed.keys.single.address, 'TStandardAddress');
+        expect(refreshed.keys.single.gasfreeAddress, isNull);
       },
     );
 
@@ -530,6 +606,7 @@ void main() {
       client = _MockApiClient();
       auth = _MockAuth();
       activation = _MockActivationCoordinator();
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
     });
 
     test(
@@ -669,6 +746,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks
@@ -1086,6 +1164,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks
@@ -1367,6 +1446,9 @@ void main() {
       when(
         () => disposalActivation.isAssetActive(any()),
       ).thenAnswer((_) async => true);
+      when(
+        () => disposalActivation.wasFreshlyActivated(any()),
+      ).thenReturn(false);
       when(() => disposalActivation.activateAsset(any())).thenAnswer((
         invocation,
       ) async {
@@ -1583,6 +1665,7 @@ void main() {
       authChanges = StreamController<KdfUser?>.broadcast();
 
       when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => activation.wasFreshlyActivated(any())).thenReturn(false);
       manager = PubkeyManager(client, auth, activation);
 
       // Setup common mocks

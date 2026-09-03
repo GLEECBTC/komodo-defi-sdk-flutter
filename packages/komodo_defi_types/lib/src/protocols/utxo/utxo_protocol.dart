@@ -32,6 +32,7 @@ class UtxoProtocol extends ProtocolClass {
   // to be async.
   UtxoActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
+    int? gapLimit,
   }) {
     var scanPolicy = ScanPolicy.scanIfNewWallet;
     if (privKeyPolicy == const PrivateKeyPolicy.trezor()) {
@@ -43,7 +44,10 @@ class UtxoProtocol extends ProtocolClass {
         .copyWithHd(
           minAddressesNumber: 1,
           scanPolicy: scanPolicy,
-          gapLimit: 20,
+          // Falls back to the full BIP-44 gap rather than the software one:
+          // a caller that did not resolve a policy has not established that
+          // this wallet is safe to scan shallowly.
+          gapLimit: gapLimit ?? HdGapLimit.hardware,
         );
   }
 

@@ -40,8 +40,10 @@ void main() {
       'createLocalProvider returns LocalAssetCoinConfigProvider.fromConfig',
       () {
         const factory = DefaultCoinConfigDataFactory();
+        const transformer = CoinConfigTransformer();
         final provider = factory.createLocalProvider(
           const AssetRuntimeUpdateConfig(),
+          transformer,
         );
         // We don\'t import the concrete type here; verifying an instance is returned is enough
         expect(provider, isNotNull);

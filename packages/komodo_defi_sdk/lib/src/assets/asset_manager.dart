@@ -1,4 +1,5 @@
 import 'dart:async' show StreamSubscription;
+import 'dart:collection' show UnmodifiableMapView, UnmodifiableSetView;
 
 import 'package:flutter/foundation.dart' show ValueGetter;
 import 'package:komodo_coins/komodo_coins.dart';
@@ -135,9 +136,24 @@ class AssetManager implements IAssetProvider {
   /// Default assets (configured in [KomodoDefiSdkConfig]) appear first,
   /// followed by other assets in alphabetical order.
   /// The filtering and ordering is handled by the underlying coin_config_manager.
+  ///
+  /// Returns an unmodifiable, `==`/`hashCode`-keyed snapshot.
+  ///
+  /// This getter is on hot paths - every [fromId], [findAssetsByConfigId] and
+  /// [childAssetsOf] call, and those run once per enabled coin on every
+  /// activated-assets refresh. `Map.unmodifiable` copies, so the previous
+  /// implementation rebuilt the whole ~800-entry catalogue on each access,
+  /// dozens of times during login.
+  ///
+  /// [CoinConfigManager.filteredAssets] now memoises that snapshot and
+  /// invalidates it on every mutation, so this is O(1) without changing the
+  /// map's lookup semantics. Note that it must stay a hash-keyed map: the
+  /// filter caches are `SplayTreeMap`s whose comparator is *not* consistent
+  /// with [AssetId] equality, so exposing one directly silently misses on ids
+  /// that are `==` a stored key but stringify differently.
   @override
   Map<AssetId, Asset> get available =>
-      Map.unmodifiable(_coins.filteredAssets(_currentFilterStrategy));
+      UnmodifiableMapView(_coins.filteredAssets(_currentFilterStrategy));
 
   /// Returns currently activated assets for the signed-in user.
   ///
@@ -165,9 +181,49 @@ class AssetManager implements IAssetProvider {
   ///   print('${asset.id.name} on ${asset.protocol.subClass.formatted}');
   /// }
   /// ```
+  ///
+  /// The result is an unmodifiable view: it is backed by the cached lookup
+  /// index, and letting a caller mutate it in place would corrupt every
+  /// subsequent lookup until the catalogue next changes.
   @override
   Set<Asset> findAssetsByConfigId(String ticker) {
-    return available.values.where((asset) => asset.id.id == ticker).toSet();
+    final matches = _indexes.byConfigId[ticker];
+    return matches == null ? const <Asset>{} : UnmodifiableSetView(matches);
+  }
+
+  /// Lookup indexes over the catalogue, rebuilt only when it changes.
+  ///
+  /// [findAssetsByConfigId] and [childAssetsOf] were linear scans of the whole
+  /// catalogue per call. Both are called once per configured coin on the login
+  /// path, once per enabled coin on every activated-assets refresh, and again
+  /// while parsing each `get_enabled_coins` response - so over a ~2000-entry
+  /// catalogue the scans multiplied out to O(coins x catalogue) per login.
+  ///
+  /// Keyed on the identity of the map [CoinConfigManager] memoises. That map is
+  /// replaced rather than mutated whenever the catalogue or the filter strategy
+  /// changes, so the index cannot outlive the data it was built from - the same
+  /// reason [available] can safely be an O(1) view.
+  _AssetIndexes? _cachedIndexes;
+
+  _AssetIndexes get _indexes {
+    final source = _coins.filteredAssets(_currentFilterStrategy);
+    final cached = _cachedIndexes;
+    if (cached != null && identical(cached.source, source)) return cached;
+
+    final byConfigId = <String, Set<Asset>>{};
+    final byParent = <AssetId, Set<Asset>>{};
+    for (final asset in source.values) {
+      (byConfigId[asset.id.id] ??= <Asset>{}).add(asset);
+      final parentId = asset.id.parentId;
+      if (asset.id.isChildAsset && parentId != null) {
+        (byParent[parentId] ??= <Asset>{}).add(asset);
+      }
+    }
+    return _cachedIndexes = _AssetIndexes(
+      source: source,
+      byConfigId: byConfigId,
+      byParent: byParent,
+    );
   }
 
   /// Returns child assets for the given parent asset ID.
@@ -179,13 +235,13 @@ class AssetManager implements IAssetProvider {
   /// final ethId = assetManager.findAssetsByTicker('ETH').first.id;
   /// final erc20Tokens = assetManager.childAssetsOf(ethId);
   /// ```
+  ///
+  /// The result is an unmodifiable view over the cached lookup index, for the
+  /// same reason as [findAssetsByConfigId].
   @override
   Set<Asset> childAssetsOf(AssetId parentId) {
-    return available.values
-        .where(
-          (asset) => asset.id.isChildAsset && asset.id.parentId == parentId,
-        )
-        .toSet();
+    final children = _indexes.byParent[parentId];
+    return children == null ? const <Asset>{} : UnmodifiableSetView(children);
   }
 
   /// Activates a single asset.
@@ -240,4 +296,20 @@ class AssetManager implements IAssetProvider {
     await _authSubscription?.cancel();
     _activatedAssetsCache().invalidate();
   }
+}
+
+/// Memoised lookup indexes over one snapshot of the asset catalogue.
+///
+/// [source] is held only for the identity check that decides whether the
+/// indexes are still valid - see [AssetManager._indexes].
+class _AssetIndexes {
+  const _AssetIndexes({
+    required this.source,
+    required this.byConfigId,
+    required this.byParent,
+  });
+
+  final Map<AssetId, Asset> source;
+  final Map<String, Set<Asset>> byConfigId;
+  final Map<AssetId, Set<Asset>> byParent;
 }

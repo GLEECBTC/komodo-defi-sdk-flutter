@@ -24,6 +24,7 @@ class SourceAddressField extends StatelessWidget {
   final VoidCallback? onRetry;
   final bool isLoading;
   final bool showBalanceIndicator;
+
   final Widget? title;
 
   @override
@@ -112,9 +113,8 @@ class SourceAddressField extends StatelessWidget {
     );
   }
 
-  bool _isAddressVerified(PubkeyInfo address) {
-    return _getAddressStatus(address) == AddressStatus.available;
-  }
+  bool _isAddressVerified(PubkeyInfo address) =>
+      _getAddressStatus(address) == AddressStatus.available;
 
   AddressStatus _getAddressStatus(PubkeyInfo address) {
     if (address.balance.spendable <= Decimal.zero &&
@@ -167,7 +167,9 @@ class _LoadingState extends StatelessWidget {
             Text(
               'Fetching your ${asset.id.name} addresses',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+                color: theme.textTheme.bodyMedium?.color?.withValues(
+                  alpha: 0.7,
+                ),
               ),
             ),
           ],

@@ -1,3 +1,4 @@
+import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 
 /// RPC namespace for streaming methods.
@@ -55,6 +56,25 @@ class StreamingMethodsNamespace extends BaseRpcMethodNamespace {
         coin: coin,
         clientId: clientId,
         config: config,
+      ),
+    );
+  }
+
+  /// Enable live GasFree trace updates for one activated TRC20 token.
+  ///
+  /// The returned streamer id is `GASLESS_TRACE:<coin>`. The stream must be
+  /// attached before submitting a relay because registrations are not
+  /// retroactive.
+  Future<StreamEnableResponse<GaslessTraceEvent>> enableGaslessTrace({
+    required String coin,
+    int? clientId,
+    String? rpcPass,
+  }) {
+    return execute(
+      StreamGaslessTraceEnableRequest(
+        rpcPass: rpcPass ?? this.rpcPass ?? '',
+        coin: coin,
+        clientId: clientId,
       ),
     );
   }

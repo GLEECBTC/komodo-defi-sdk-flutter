@@ -1,4 +1,5 @@
 import 'package:collection/collection.dart';
+import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Shared helpers for reconciling transaction lifecycle updates in clients.
@@ -21,28 +22,68 @@ class TransactionMergeUtils {
     Transaction existing,
     Transaction incoming,
   ) {
+    // Address-backed APIs can return one perspective of the same transfer on
+    // different pages (for example Standard EOA debit first, GasFree custody
+    // credit later). Merge components monotonically: repeated fetches of the
+    // same perspective must not double-count, while the complementary credit
+    // turns a consolidation into the correct net-zero internal transfer.
+    final spent = _maxDecimal(
+      existing.balanceChanges.spentByMe,
+      incoming.balanceChanges.spentByMe,
+    );
+    final received = _maxDecimal(
+      existing.balanceChanges.receivedByMe,
+      incoming.balanceChanges.receivedByMe,
+    );
+    final totalAmount = _maxDecimal(
+      existing.balanceChanges.totalAmount,
+      incoming.balanceChanges.totalAmount,
+    );
+
     return existing.copyWith(
-      confirmations: incoming.confirmations,
-      blockHeight: incoming.blockHeight,
+      balanceChanges: BalanceChanges(
+        netChange: received - spent,
+        receivedByMe: received,
+        spentByMe: spent,
+        totalAmount: totalAmount,
+      ),
+      confirmations: existing.confirmations > incoming.confirmations
+          ? existing.confirmations
+          : incoming.confirmations,
+      blockHeight: existing.blockHeight > incoming.blockHeight
+          ? existing.blockHeight
+          : incoming.blockHeight,
+      from: <String>{...existing.from, ...incoming.from}.toList(),
+      to: <String>{...existing.to, ...incoming.to}.toList(),
+      txHash: incoming.txHash ?? existing.txHash,
       fee: incoming.fee ?? existing.fee,
       memo: incoming.memo ?? existing.memo,
-      timestamp: incoming.timestamp,
+      timestamp: existing.timestamp.isAfter(incoming.timestamp)
+          ? existing.timestamp
+          : incoming.timestamp,
     );
   }
 
+  static Decimal _maxDecimal(Decimal left, Decimal right) =>
+      left >= right ? left : right;
+
+  /// Whether [assetId] uses a Tendermint transaction lifecycle.
   static bool isTendermintAsset(AssetId assetId) {
     return assetId.subClass == CoinSubClass.tendermint ||
         assetId.subClass == CoinSubClass.tendermintToken;
   }
 
+  /// Whether [transaction] has received an authoritative confirmation.
   static bool isConfirmed(Transaction transaction) {
     return transaction.confirmations > 0 || transaction.blockHeight > 0;
   }
 
+  /// Whether [transaction] is still awaiting its first confirmation.
   static bool isPending(Transaction transaction) {
     return transaction.confirmations <= 0 && transaction.blockHeight == 0;
   }
 
+  /// Whether two lifecycle records describe the same value transfer.
   static bool matchesTransferFingerprint(
     Transaction first,
     Transaction second,

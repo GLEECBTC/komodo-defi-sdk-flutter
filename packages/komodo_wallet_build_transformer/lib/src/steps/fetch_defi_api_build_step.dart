@@ -6,10 +6,691 @@ import 'package:komodo_wallet_build_transformer/src/build_step.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/artefact_downloader_factory.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/defi_api_build_step/node_path.dart';
+import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_artifact_provenance.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_build_platform_config.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/build_config.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
+
+/// Determines whether an artifact must be downloaded without allowing an
+/// explicit network opt-out to bypass stale provenance.
+bool shouldUpdateApiArtifact({
+  required bool isOutdated,
+  required bool forceUpdate,
+  required bool? overrideDownload,
+  required String platform,
+  required String apiCommitHash,
+}) {
+  if (overrideDownload == false && isOutdated) {
+    throw StateError(
+      'KDF artifact for $platform does not match pinned commit '
+      '$apiCommitHash. OVERRIDE_DEFI_API_DOWNLOAD=false may disable network '
+      'fetching, but it cannot bypass artifact provenance validation.',
+    );
+  }
+  return overrideDownload ?? (forceUpdate || isOutdated);
+}
+
+const List<String> _webCoreWasmCandidates = [
+  'kdflib_bg.wasm',
+  'kdf_bg.wasm',
+  'mm2_bg.wasm',
+  'kdflib.wasm',
+  'kdf.wasm',
+  'mm2.wasm',
+];
+const String _webGlueFilename = 'kdflib.js';
+const Set<String> _webRuntimeExtensions = {'.js', '.wasm'};
+
+class _NativeRuntimeIdentity {
+  const _NativeRuntimeIdentity({
+    required this.entrypointFilenames,
+    required this.runtimeFilenames,
+    this.discardableFilenames = const <String>{},
+  });
+
+  final Set<String> entrypointFilenames;
+  final Set<String> runtimeFilenames;
+
+  /// Build residue the upstream packaging job is known to include, which must
+  /// be dropped rather than installed - and which must not fail the extraction.
+  ///
+  /// This is deliberately a *named* list, not a relaxation of [matches]: an
+  /// unrecognised file still fails closed, and a discarded file never reaches
+  /// the destination folder or the runtime-set digest.
+  final Set<String> discardableFilenames;
+
+  bool matches(String filename) => runtimeFilenames.contains(filename);
+
+  bool isDiscardable(String filename) =>
+      discardableFilenames.contains(filename);
+}
+
+const Map<String, _NativeRuntimeIdentity> _nativeRuntimeIdentities = {
+  'ios': _NativeRuntimeIdentity(
+    entrypointFilenames: {'libkdf.a', 'libmm2.a'},
+    runtimeFilenames: {
+      'libkdf.a',
+      'libmm2.a',
+      'libkdflib.a',
+      'libmm2.dylib',
+      'libkdflib.dylib',
+    },
+  ),
+  'macos': _NativeRuntimeIdentity(
+    entrypointFilenames: {'kdf', 'mm2'},
+    runtimeFilenames: {
+      'kdf',
+      'mm2',
+      'libkdf.a',
+      'libmm2.a',
+      'libkdflib.a',
+      'libmm2.dylib',
+      'libkdflib.dylib',
+    },
+  ),
+  'android-armv7': _NativeRuntimeIdentity(
+    entrypointFilenames: {'libkdf.a', 'libmm2.a'},
+    runtimeFilenames: {
+      'libkdf.a',
+      'libmm2.a',
+      'libkdflib.a',
+      'libkdflib.so',
+      'libkdflib_static.so',
+    },
+  ),
+  'android-aarch64': _NativeRuntimeIdentity(
+    entrypointFilenames: {'libkdf.a', 'libmm2.a'},
+    runtimeFilenames: {
+      'libkdf.a',
+      'libmm2.a',
+      'libkdflib.a',
+      'libkdflib.so',
+      'libkdflib_static.so',
+    },
+  ),
+  'linux': _NativeRuntimeIdentity(
+    entrypointFilenames: {'kdf', 'mm2'},
+    runtimeFilenames: {
+      'kdf',
+      'mm2',
+      'libmm2.so',
+      'libkdflib.so',
+      'libkdflib_static.so',
+    },
+  ),
+  'windows': _NativeRuntimeIdentity(
+    entrypointFilenames: {'kdf.exe', 'mm2.exe'},
+    runtimeFilenames: {
+      'kdf.exe',
+      'mm2.exe',
+      'kdflib.dll',
+      'libkdflib.dll',
+      'mm2.dll',
+    },
+    // Rust proc-macro crates. Cargo emits them into `target/release/` and the
+    // KDF Windows packaging job globs the directory, so they ride along in the
+    // archive: `kdf_f3efd2c-win-x86-64.zip` carries all three, where
+    // `kdf_538724e-win-x86-64.zip` carried only `kdf.exe` and `kdflib.dll`.
+    //
+    // They are compile-time only - nothing loads them at runtime - so shipping
+    // them would put ~3.9 MB of unreferenced DLLs into the Windows bundle and
+    // fold them into the runtime-set digest. Dropped instead. The real fix is
+    // in the KDF release workflow's file list; this keeps the published
+    // artefact usable until that lands.
+    discardableFilenames: {
+      'enum_derives.dll',
+      'ser_error_derive.dll',
+      'serialization_derive.dll',
+    },
+  ),
+};
+
+/// Selects only the artifacts relevant to the active build target.
+List<String> apiPlatformsForTarget(
+  Iterable<String> platforms, {
+  required bool isTargetIphone,
+}) => platforms
+    .where((platform) => !isTargetIphone || platform == 'ios')
+    .toList(growable: false);
+
+/// Removes every recognized runtime candidate before extracting a new archive.
+///
+/// This prevents a verified archive that omits its runtime payload from
+/// inheriting and certifying bytes left by an older extraction.
+void clearExtractedApiArtifactCandidates({
+  required String platform,
+  required String destinationFolder,
+}) {
+  for (final relativePath in _existingRuntimeRelativePaths(
+    platform,
+    destinationFolder,
+  )) {
+    _deleteFileSystemEntityIfPresent(
+      path.join(destinationFolder, relativePath),
+    );
+  }
+}
+
+/// Calculates the digest of the extracted KDF core artifact used by [platform].
+///
+/// The core is the selected native entrypoint or WebAssembly module. Companion
+/// runtimes are covered separately by [calculateExtractedApiRuntimeSetSha256].
+Future<String> calculateExtractedApiArtifactSha256({
+  required String platform,
+  required String destinationFolder,
+}) async {
+  final runtimeSet = _validatedRuntimeSet(platform, destinationFolder);
+  return (await sha256.bind(runtimeSet.coreArtifact.openRead()).first)
+      .toString();
+}
+
+/// Calculates a deterministic digest over the complete extracted runtime set.
+///
+/// This includes the core artifact and all recognized companion libraries or
+/// Web runtime outputs. Any added, removed, or modified runtime changes it.
+Future<String> calculateExtractedApiRuntimeSetSha256({
+  required String platform,
+  required String destinationFolder,
+}) {
+  final runtimeSet = _validatedRuntimeSet(platform, destinationFolder);
+  return _calculateRuntimeSetSha256(
+    runtimeSet.runtimeFiles,
+    destinationFolder: destinationFolder,
+  );
+}
+
+class _ValidatedRuntimeSet {
+  const _ValidatedRuntimeSet({
+    required this.coreArtifact,
+    required this.runtimeFiles,
+  });
+
+  final File coreArtifact;
+  final List<File> runtimeFiles;
+}
+
+_ValidatedRuntimeSet _validatedRuntimeSet(
+  String platform,
+  String destinationFolder,
+) {
+  if (platform == 'web') {
+    return _validatedWebRuntimeSet(destinationFolder);
+  }
+
+  final identity = _nativeRuntimeIdentities[platform];
+  if (identity == null) {
+    throw UnsupportedError('No KDF artifact identity is defined for $platform');
+  }
+  final runtimeFiles = <File>[];
+  for (final entity in _runtimeEntitiesForPlatform(
+    platform,
+    destinationFolder,
+  )) {
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      throw StateError(
+        'Extracted KDF artifact must not be a link for $platform: '
+        '${entity.path}',
+      );
+    }
+    if (type == FileSystemEntityType.file) {
+      runtimeFiles.add(File(entity.path));
+    }
+  }
+
+  final entrypoints = runtimeFiles
+      .where(
+        (file) =>
+            path.equals(path.dirname(file.path), destinationFolder) &&
+            identity.entrypointFilenames.contains(path.basename(file.path)),
+      )
+      .toList(growable: false);
+  if (entrypoints.length != 1) {
+    throw StateError(
+      'Extracted KDF runtime must contain exactly one entrypoint for '
+      '$platform in '
+      '$destinationFolder. Found: '
+      '${entrypoints.map((file) => path.basename(file.path)).join(', ')}',
+    );
+  }
+
+  return _ValidatedRuntimeSet(
+    coreArtifact: entrypoints.single,
+    runtimeFiles: runtimeFiles,
+  );
+}
+
+_ValidatedRuntimeSet _validatedWebRuntimeSet(String destinationFolder) {
+  final destination = Directory(destinationFolder);
+  if (!destination.existsSync()) {
+    throw StateError(
+      'Extracted KDF web runtime is missing in $destinationFolder',
+    );
+  }
+
+  final glue = File(path.join(destinationFolder, _webGlueFilename));
+  if (!FileSystemEntity.isFileSync(glue.path)) {
+    throw StateError(
+      'Extracted KDF web runtime is missing $_webGlueFilename in '
+      '$destinationFolder',
+    );
+  }
+
+  final coreWasmArtifacts = _webCoreWasmCandidates
+      .map((filename) => File(path.join(destinationFolder, filename)))
+      .where((artifact) => FileSystemEntity.isFileSync(artifact.path))
+      .toList(growable: false);
+  if (coreWasmArtifacts.length != 1) {
+    throw StateError(
+      'Extracted KDF web runtime must contain exactly one core WASM artifact '
+      'in $destinationFolder. Found: '
+      '${coreWasmArtifacts.map((file) => path.basename(file.path)).join(', ')}',
+    );
+  }
+
+  final runtimeFiles = <File>[];
+  for (final entity in destination.listSync(
+    recursive: true,
+    followLinks: false,
+  )) {
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      throw StateError(
+        'Extracted KDF web runtime must not contain linked output: '
+        '${entity.path}',
+      );
+    }
+    if (!_webRuntimeExtensions.contains(
+      path.extension(entity.path).toLowerCase(),
+    )) {
+      continue;
+    }
+    if (type == FileSystemEntityType.file) {
+      runtimeFiles.add(File(entity.path));
+    }
+  }
+
+  return _ValidatedRuntimeSet(
+    coreArtifact: coreWasmArtifacts.single,
+    runtimeFiles: runtimeFiles,
+  );
+}
+
+Future<String> _calculateRuntimeSetSha256(
+  List<File> runtimeFiles, {
+  required String destinationFolder,
+}) async {
+  if (runtimeFiles.isEmpty) {
+    throw StateError(
+      'Extracted KDF runtime set is empty in $destinationFolder',
+    );
+  }
+
+  final manifestEntries = <List<String>>[];
+  for (final runtimeFile in runtimeFiles) {
+    final relativePath = path.posix.joinAll(
+      path.split(path.relative(runtimeFile.path, from: destinationFolder)),
+    );
+    final digest = await sha256.bind(runtimeFile.openRead()).first;
+    manifestEntries.add([relativePath, digest.toString()]);
+  }
+  manifestEntries.sort((left, right) => left.first.compareTo(right.first));
+
+  return sha256.convert(utf8.encode(json.encode(manifestEntries))).toString();
+}
+
+/// Promotes a validated extraction without exposing a partial archive.
+///
+/// Existing files affected by the archive, stale runtime candidates, and the
+/// provenance marker are moved to a sibling backup first. Any install or
+/// finalization failure restores those files before the error is rethrown.
+Future<void> replaceExtractedApiArtifactAtomically({
+  required String platform,
+  required String stagingFolder,
+  required String destinationFolder,
+  required String trustedRootFolder,
+  required Future<void> Function() finalizeInstall,
+}) async {
+  final staging = Directory(stagingFolder);
+  if (!staging.existsSync()) {
+    throw StateError(
+      'KDF artifact staging directory is missing: $stagingFolder',
+    );
+  }
+
+  final stagedFiles = <String, File>{};
+  for (final entity in staging.listSync(recursive: true, followLinks: false)) {
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      throw StateError(
+        'Extracted KDF archive must not contain links: ${entity.path}',
+      );
+    }
+    if (type != FileSystemEntityType.file) continue;
+
+    final relativePath = path.normalize(
+      path.relative(entity.path, from: stagingFolder),
+    );
+    if (relativePath == '.' ||
+        relativePath == '..' ||
+        relativePath.startsWith('..${path.separator}')) {
+      throw StateError(
+        'Extracted KDF archive contains an unsafe path: ${entity.path}',
+      );
+    }
+    if (path.basename(relativePath).startsWith('.api_last_updated_')) {
+      throw StateError(
+        'Extracted KDF archive must not provide provenance markers: '
+        '$relativePath',
+      );
+    }
+    if (_isDiscardableStagedFile(platform, relativePath)) continue;
+    stagedFiles[relativePath] = File(entity.path);
+  }
+  if (stagedFiles.isEmpty) {
+    throw StateError('Extracted KDF archive contains no files');
+  }
+  _validateStagedPlatformFiles(platform, stagedFiles.keys);
+
+  _validateDestinationFromTrustedRoot(trustedRootFolder, destinationFolder);
+  final destination = Directory(destinationFolder)..createSync(recursive: true);
+  final targetPaths = <String>{
+    ...stagedFiles.keys,
+    ..._existingRuntimeRelativePaths(platform, destinationFolder),
+    '.api_last_updated_$platform',
+  };
+  for (final relativePath in targetPaths) {
+    _validateDestinationAncestors(destinationFolder, relativePath);
+    final targetPath = path.join(destinationFolder, relativePath);
+    if (FileSystemEntity.typeSync(targetPath, followLinks: false) ==
+        FileSystemEntityType.directory) {
+      throw StateError(
+        'Cannot replace KDF artifact file with a directory: $targetPath',
+      );
+    }
+  }
+
+  final backup = Directory(
+    path.dirname(destination.path),
+  ).createTempSync('.${path.basename(destination.path)}.kdf-backup-');
+  final backedUpTypes = <String, FileSystemEntityType>{};
+  final installedPaths = <String>[];
+  var finalizationStarted = false;
+  var committed = false;
+  var rolledBack = false;
+
+  try {
+    for (final relativePath in targetPaths.toList()..sort()) {
+      final targetPath = path.join(destinationFolder, relativePath);
+      final type = FileSystemEntity.typeSync(targetPath, followLinks: false);
+      if (type != FileSystemEntityType.file &&
+          type != FileSystemEntityType.link) {
+        continue;
+      }
+
+      final backupPath = path.join(backup.path, relativePath);
+      Directory(path.dirname(backupPath)).createSync(recursive: true);
+      _renameFileSystemEntity(targetPath, backupPath, type);
+      backedUpTypes[relativePath] = type;
+    }
+
+    final stagedEntries = stagedFiles.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    for (final entry in stagedEntries) {
+      _validateDestinationAncestors(destinationFolder, entry.key);
+      final targetPath = path.join(destinationFolder, entry.key);
+      Directory(path.dirname(targetPath)).createSync(recursive: true);
+      entry.value.renameSync(targetPath);
+      installedPaths.add(entry.key);
+    }
+
+    finalizationStarted = true;
+    await finalizeInstall();
+    committed = true;
+  } catch (error, stackTrace) {
+    for (final relativePath in installedPaths.reversed) {
+      _deleteFileSystemEntityIfPresent(
+        path.join(destinationFolder, relativePath),
+      );
+    }
+    if (finalizationStarted) {
+      _deleteFileSystemEntityIfPresent(
+        path.join(destinationFolder, '.api_last_updated_$platform'),
+      );
+    }
+    for (final entry in backedUpTypes.entries) {
+      final targetPath = path.join(destinationFolder, entry.key);
+      _deleteFileSystemEntityIfPresent(targetPath);
+      Directory(path.dirname(targetPath)).createSync(recursive: true);
+      _renameFileSystemEntity(
+        path.join(backup.path, entry.key),
+        targetPath,
+        entry.value,
+      );
+    }
+    rolledBack = true;
+    Error.throwWithStackTrace(error, stackTrace);
+  } finally {
+    _deleteDirectoryIfPresent(staging);
+    if (committed || rolledBack || backedUpTypes.isEmpty) {
+      _deleteDirectoryIfPresent(backup);
+    }
+  }
+
+  _deleteDirectoryIfPresent(backup);
+}
+
+Set<String> _existingRuntimeRelativePaths(
+  String platform,
+  String destinationFolder,
+) {
+  return _runtimeEntitiesForPlatform(platform, destinationFolder)
+      .map(
+        (entity) =>
+            path.normalize(path.relative(entity.path, from: destinationFolder)),
+      )
+      .toSet();
+}
+
+Iterable<FileSystemEntity> _runtimeEntitiesForPlatform(
+  String platform,
+  String destinationFolder,
+) {
+  final destination = Directory(destinationFolder);
+  if (!destination.existsSync()) return const <FileSystemEntity>[];
+
+  if (platform == 'web') {
+    return destination
+        .listSync(recursive: true, followLinks: false)
+        .where(
+          (entity) =>
+              FileSystemEntity.typeSync(entity.path, followLinks: false) ==
+                  FileSystemEntityType.link ||
+              _webRuntimeExtensions.contains(
+                path.extension(entity.path).toLowerCase(),
+              ),
+        );
+  }
+
+  final identity = _nativeRuntimeIdentities[platform];
+  if (identity == null) {
+    throw UnsupportedError('No KDF artifact identity is defined for $platform');
+  }
+  return destination
+      .listSync(followLinks: false)
+      .where((entity) => identity.matches(path.basename(entity.path)));
+}
+
+/// Whether a staged archive entry is known build residue to drop.
+///
+/// Only top-level entries qualify: a nested path is never residue, and letting
+/// one match by basename alone would give an archive a way to smuggle a file
+/// past [_validateStagedPlatformFiles] by burying it in a directory.
+bool _isDiscardableStagedFile(String platform, String relativePath) {
+  if (platform == 'web') return false;
+  if (path.dirname(relativePath) != '.') return false;
+  final identity = _nativeRuntimeIdentities[platform];
+  if (identity == null) return false;
+  return identity.isDiscardable(path.basename(relativePath));
+}
+
+void _validateStagedPlatformFiles(
+  String platform,
+  Iterable<String> relativePaths,
+) {
+  if (platform == 'web') return;
+
+  final identity = _nativeRuntimeIdentities[platform];
+  if (identity == null) {
+    throw UnsupportedError('No KDF artifact identity is defined for $platform');
+  }
+  final unexpectedPaths = relativePaths
+      .where(
+        (relativePath) =>
+            path.dirname(relativePath) != '.' ||
+            !identity.matches(path.basename(relativePath)),
+      )
+      .toList(growable: false);
+  if (unexpectedPaths.isNotEmpty) {
+    throw StateError(
+      'Extracted KDF archive contains files outside the owned top-level '
+      '$platform runtime set: ${unexpectedPaths.join(', ')}',
+    );
+  }
+}
+
+void _validateDestinationFromTrustedRoot(
+  String trustedRootFolder,
+  String destinationFolder,
+) {
+  final trustedRoot = path.normalize(path.absolute(trustedRootFolder));
+  final destination = path.normalize(path.absolute(destinationFolder));
+  if (!path.equals(trustedRoot, destination) &&
+      !path.isWithin(trustedRoot, destination)) {
+    throw StateError(
+      'KDF artifact destination is outside its trusted root: $destination',
+    );
+  }
+
+  final trustedRootType = FileSystemEntity.typeSync(
+    trustedRoot,
+    followLinks: false,
+  );
+  if (trustedRootType == FileSystemEntityType.link) {
+    throw StateError(
+      'KDF artifact trusted root must not be a link: $trustedRoot',
+    );
+  }
+  if (trustedRootType != FileSystemEntityType.directory) {
+    throw StateError(
+      'KDF artifact trusted root must be an existing directory: $trustedRoot',
+    );
+  }
+
+  var currentPath = trustedRoot;
+  final relativeDestination = path.relative(destination, from: trustedRoot);
+  if (relativeDestination == '.') return;
+
+  for (final segment in path.split(relativeDestination)) {
+    currentPath = path.join(currentPath, segment);
+    final type = FileSystemEntity.typeSync(currentPath, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      throw StateError(
+        'KDF artifact destination path must not contain links: $currentPath',
+      );
+    }
+    if (type != FileSystemEntityType.notFound &&
+        type != FileSystemEntityType.directory) {
+      throw StateError(
+        'KDF artifact destination path must contain only directories: '
+        '$currentPath',
+      );
+    }
+  }
+}
+
+/// Resolves and validates a configured KDF artifact destination.
+///
+/// Callers must use the returned path as their filesystem boundary so an
+/// escaping or link-routed configuration is rejected before any download,
+/// extraction, or staging directories can be created.
+String resolveApiArtifactDestination({
+  required String trustedRootFolder,
+  required String configuredDestinationPath,
+}) {
+  final destinationFolder = path.join(
+    trustedRootFolder,
+    configuredDestinationPath,
+  );
+  _validateDestinationFromTrustedRoot(trustedRootFolder, destinationFolder);
+  return destinationFolder;
+}
+
+void _validateDestinationAncestors(
+  String destinationFolder,
+  String relativePath,
+) {
+  final normalizedRelativePath = path.normalize(relativePath);
+  if (path.isAbsolute(normalizedRelativePath) ||
+      normalizedRelativePath == '.' ||
+      normalizedRelativePath == '..' ||
+      normalizedRelativePath.startsWith('..${path.separator}')) {
+    throw StateError('KDF artifact destination path is unsafe: $relativePath');
+  }
+
+  var ancestorPath = destinationFolder;
+  final pathSegments = path.split(normalizedRelativePath);
+  for (final segment in pathSegments.take(pathSegments.length - 1)) {
+    ancestorPath = path.join(ancestorPath, segment);
+    final type = FileSystemEntity.typeSync(ancestorPath, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      throw StateError(
+        'KDF artifact destination ancestor must not be a link: $ancestorPath',
+      );
+    }
+    if (type != FileSystemEntityType.notFound &&
+        type != FileSystemEntityType.directory) {
+      throw StateError(
+        'KDF artifact destination ancestor must be a directory: '
+        '$ancestorPath',
+      );
+    }
+  }
+}
+
+void _renameFileSystemEntity(
+  String sourcePath,
+  String destinationPath,
+  FileSystemEntityType type,
+) {
+  if (type == FileSystemEntityType.file) {
+    File(sourcePath).renameSync(destinationPath);
+    return;
+  }
+  if (type == FileSystemEntityType.link) {
+    Link(sourcePath).renameSync(destinationPath);
+    return;
+  }
+  throw StateError(
+    'Unsupported KDF artifact entity type at $sourcePath: $type',
+  );
+}
+
+void _deleteFileSystemEntityIfPresent(String entityPath) {
+  final type = FileSystemEntity.typeSync(entityPath, followLinks: false);
+  if (type == FileSystemEntityType.file) {
+    File(entityPath).deleteSync();
+  } else if (type == FileSystemEntityType.link) {
+    Link(entityPath).deleteSync();
+  }
+}
+
+void _deleteDirectoryIfPresent(Directory directory) {
+  if (directory.existsSync()) {
+    directory.deleteSync(recursive: true);
+  }
+}
 
 class FetchDefiApiStep extends BuildStep {
   FetchDefiApiStep._({
@@ -34,6 +715,9 @@ class FetchDefiApiStep extends BuildStep {
     File buildConfigFile, {
     String? githubToken,
   }) {
+    validateApiArtifactProvenanceCommitHash(
+      buildConfig.apiConfig.apiCommitHash,
+    );
     final artefactDownloaders = ArtefactDownloaderFactory.fromBuildConfig(
       buildConfig.apiConfig,
       githubToken: githubToken,
@@ -48,7 +732,7 @@ class FetchDefiApiStep extends BuildStep {
       artifactOutputPath: artifactOutputPath.path,
       enabled: buildConfig.apiConfig.fetchAtBuildEnabled,
       buildConfigFile: buildConfigFile,
-      concurrent: buildConfig.coinCIConfig.concurrentDownloadsEnabled,
+      concurrent: buildConfig.apiConfig.concurrentDownloadsEnabled,
     );
   }
   @override
@@ -103,11 +787,29 @@ class FetchDefiApiStep extends BuildStep {
       return;
     }
 
+    final targetPlatforms = apiPlatformsForTarget(
+      platformsToUpdate,
+      isTargetIphone: _isTargetIphone(),
+    );
+    final releaseBlockedPlatforms = targetPlatforms
+        .where(
+          (platform) => platformsConfig[platform]?.isReleaseBlocked ?? false,
+        )
+        .toList();
+    if (releaseBlockedPlatforms.isNotEmpty) {
+      throw StateError(
+        'KDF artifact release is blocked for '
+        '${releaseBlockedPlatforms.join(', ')} at $apiCommitHash. Build and '
+        'publish each exact pinned-commit archive, calculate its SHA-256, and '
+        'replace the all-zero manifest checksum.',
+      );
+    }
+
     _log.info('=====================');
     if (concurrent) {
-      await Future.wait(platformsToUpdate.map(updatePlatformWithProgress));
+      await Future.wait(targetPlatforms.map(updatePlatformWithProgress));
     } else {
-      await Future.forEach(platformsToUpdate, updatePlatformWithProgress);
+      await Future.forEach(targetPlatforms, updatePlatformWithProgress);
     }
     _log.info('=====================');
     _updateDocumentationIfExists();
@@ -139,8 +841,9 @@ class FetchDefiApiStep extends BuildStep {
   /// If set to true/TRUE/True, the API will be fetched and downloaded on every
   /// build, even if it is already up-to-date with the configuration.
   ///
-  /// If set to false/FALSE/False, the API fetching will be skipped, even if
-  /// the existing API is not up-to-date with the configuration.
+  /// If set to false/FALSE/False, network fetching will be skipped only when
+  /// the existing API passes the configured provenance checks. A stale,
+  /// incomplete, or tampered artifact still fails the build.
   ///
   /// If unset, the default behavior will be used.
   ///
@@ -166,6 +869,14 @@ class FetchDefiApiStep extends BuildStep {
     String platform,
     ApiBuildPlatformConfig config,
   ) async {
+    if (config.isReleaseBlocked) {
+      throw StateError(
+        'KDF artifact release is blocked for $platform at $apiCommitHash. '
+        'Build and publish the exact pinned-commit archive, calculate its '
+        'SHA-256, and replace the all-zero manifest checksum.',
+      );
+    }
+
     final updateMessage = overrideDefiApiDownload != null
         ? '${overrideDefiApiDownload! ? 'FORCING' : 'SKIPPING'} update of '
               '$platform platform because OVERRIDE_DEFI_API_DOWNLOAD is set to '
@@ -183,14 +894,19 @@ class FetchDefiApiStep extends BuildStep {
       config,
     );
 
-    if (!_shouldUpdate(isOutdated)) {
+    if (!_shouldUpdate(isOutdated, platform)) {
       _log.info('$platform platform is up to date.');
       await _postUpdateActions(platform, destinationFolder);
       return;
     }
 
     String? zipFilePath;
+    String? acceptedArchiveFilename;
+    String? acceptedArchiveSha256;
+    Directory? acceptedStagingDirectory;
     for (final sourceUrl in sourceUrls) {
+      Directory? attemptStagingDirectory;
+      zipFilePath = null;
       try {
         _log.fine('Attempting to download from $sourceUrl for $platform');
 
@@ -208,13 +924,28 @@ class FetchDefiApiStep extends BuildStep {
           destinationPath: destinationFolder,
         );
 
-        if (await _verifyChecksum(zipFilePath, platform)) {
+        final archiveSha256 = await _verifyChecksum(zipFilePath, platform);
+        if (archiveSha256 != null) {
+          attemptStagingDirectory = _createArtifactStagingDirectory(
+            destinationFolder,
+          );
           await downloader.extractArtefact(
             filePath: zipFilePath,
-            destinationFolder: destinationFolder,
+            destinationFolder: attemptStagingDirectory.path,
           );
-          _updateLastUpdatedFile(platform, destinationFolder, zipFilePath);
-          _log.info('$platform platform update completed.');
+          _normalizeStagedArtifact(platform, attemptStagingDirectory.path);
+          await calculateExtractedApiArtifactSha256(
+            platform: platform,
+            destinationFolder: attemptStagingDirectory.path,
+          );
+          await calculateExtractedApiRuntimeSetSha256(
+            platform: platform,
+            destinationFolder: attemptStagingDirectory.path,
+          );
+          acceptedArchiveFilename = path.basename(zipFilePath);
+          acceptedArchiveSha256 = archiveSha256;
+          acceptedStagingDirectory = attemptStagingDirectory;
+          attemptStagingDirectory = null;
           break;
         } else {
           _log.warning('SHA256 Checksum verification failed for $zipFilePath');
@@ -230,6 +961,9 @@ class FetchDefiApiStep extends BuildStep {
           rethrow;
         }
       } finally {
+        if (attemptStagingDirectory != null) {
+          _deleteDirectoryIfPresent(attemptStagingDirectory);
+        }
         if (zipFilePath != null) {
           try {
             File(zipFilePath).deleteSync();
@@ -241,14 +975,57 @@ class FetchDefiApiStep extends BuildStep {
       }
     }
 
-    await _postUpdateActions(platform, destinationFolder);
+    if (acceptedArchiveFilename == null ||
+        acceptedArchiveSha256 == null ||
+        acceptedStagingDirectory == null) {
+      throw StateError('No verified KDF archive was extracted for $platform');
+    }
+    await replaceExtractedApiArtifactAtomically(
+      platform: platform,
+      stagingFolder: acceptedStagingDirectory.path,
+      destinationFolder: destinationFolder,
+      trustedRootFolder: artifactOutputPath,
+      finalizeInstall: () async {
+        await _postUpdateActions(platform, destinationFolder);
+        await _updateLastUpdatedFile(
+          platform,
+          destinationFolder,
+          acceptedArchiveFilename!,
+          acceptedArchiveSha256!,
+        );
+      },
+    );
+    _log.info('$platform platform update completed.');
   }
 
-  bool _shouldUpdate(bool isOutdated) {
-    return overrideDefiApiDownload ?? (forceUpdate || isOutdated);
+  Directory _createArtifactStagingDirectory(String destinationFolder) {
+    final parent = Directory(path.dirname(destinationFolder))
+      ..createSync(recursive: true);
+    return parent.createTempSync(
+      '.${path.basename(destinationFolder)}.kdf-staging-',
+    );
   }
 
-  Future<bool> _verifyChecksum(String filePath, String platform) async {
+  void _normalizeStagedArtifact(String platform, String stagingFolder) {
+    if (platform == 'web') return;
+    if (_isBinaryExecutable(platform)) {
+      _tryRenameExecutable(platform, stagingFolder);
+    } else {
+      _tryRenameLibrary(platform, stagingFolder);
+    }
+  }
+
+  bool _shouldUpdate(bool isOutdated, String platform) {
+    return shouldUpdateApiArtifact(
+      isOutdated: isOutdated,
+      forceUpdate: forceUpdate,
+      overrideDownload: overrideDefiApiDownload,
+      platform: platform,
+      apiCommitHash: apiCommitHash,
+    );
+  }
+
+  Future<String?> _verifyChecksum(String filePath, String platform) async {
     final validChecksums = List<String>.from(
       platformsConfig[platform]!.validZipSha256Checksums,
     );
@@ -260,21 +1037,22 @@ class FetchDefiApiStep extends BuildStep {
 
     if (validChecksums.contains(fileSha256Checksum)) {
       _log.info('Checksum validated for $filePath');
-      return true;
+      return fileSha256Checksum;
     } else {
       _log.severe(
         'SHA256 Checksum mismatch for $filePath: expected any of '
         '$validChecksums, got $fileSha256Checksum',
       );
-      return false;
+      return null;
     }
   }
 
-  void _updateLastUpdatedFile(
+  Future<void> _updateLastUpdatedFile(
     String platform,
     String destinationFolder,
-    String zipFilePath,
-  ) {
+    String archiveFilename,
+    String archiveSha256,
+  ) async {
     final lastUpdatedFile = File(
       path.join(destinationFolder, '.api_last_updated_$platform'),
     );
@@ -282,12 +1060,25 @@ class FetchDefiApiStep extends BuildStep {
     final targetChecksums = List<String>.from(
       platformsConfig[platform]!.validZipSha256Checksums,
     );
+    final artifactSha256 = await calculateExtractedApiArtifactSha256(
+      platform: platform,
+      destinationFolder: destinationFolder,
+    );
+    final runtimeSetSha256 = await calculateExtractedApiRuntimeSetSha256(
+      platform: platform,
+      destinationFolder: destinationFolder,
+    );
+    final provenance = <String, dynamic>{
+      'api_commit_hash': apiCommitHash,
+      'checksums': targetChecksums,
+      'archive_filename': path.basename(archiveFilename),
+      'archive_sha256': archiveSha256,
+      'artifact_sha256': artifactSha256,
+      'runtime_set_sha256': runtimeSetSha256,
+    };
+    ApiArtifactProvenance.fromJson(provenance);
     lastUpdatedFile.writeAsStringSync(
-      json.encode({
-        'api_commit_hash': apiCommitHash,
-        'timestamp': currentTimestamp,
-        'checksums': targetChecksums,
-      }),
+      json.encode({...provenance, 'timestamp': currentTimestamp}),
     );
     _log.info('Updated last updated file for $platform.');
   }
@@ -308,33 +1099,38 @@ class FetchDefiApiStep extends BuildStep {
     }
 
     try {
-      final lastUpdatedData =
-          json.decode(lastUpdatedFile.readAsStringSync())
-              as Map<String, dynamic>? ??
-          {};
-      if (lastUpdatedData['api_commit_hash'] == apiCommitHash) {
-        final storedChecksums = List<String>.from(
-          lastUpdatedData['checksums'] as List? ?? [],
+      final lastUpdatedData = json.decode(lastUpdatedFile.readAsStringSync());
+      if (lastUpdatedData is! Map<String, dynamic>) {
+        throw const FormatException('Artifact marker must be a JSON object');
+      }
+      final provenance = ApiArtifactProvenance.fromJson(lastUpdatedData);
+      if (!config.matchingConfig.matches(provenance.archiveFilename)) {
+        _log.warning(
+          'Artifact marker archive ${provenance.archiveFilename} does not '
+          'match the configured $platform archive pattern.',
         );
-        final targetChecksums = List<String>.from(
-          config.validZipSha256Checksums,
-        );
-
-        // Consider up-to-date only if the stored set exactly matches the target set
-        final storedSet = storedChecksums.toSet();
-        final targetSet = targetChecksums.toSet();
-        if (storedSet.length == targetSet.length &&
-            storedSet.containsAll(targetSet)) {
-          _log.info(
-            'version: $apiCommitHash and checksum set matches exactly.',
+        return true;
+      }
+      final observedArtifactSha256 = await calculateExtractedApiArtifactSha256(
+        platform: platform,
+        destinationFolder: destinationFolder,
+      );
+      final observedRuntimeSetSha256 =
+          await calculateExtractedApiRuntimeSetSha256(
+            platform: platform,
+            destinationFolder: destinationFolder,
           );
-          return false;
-        }
+      if (provenance.matches(
+        expectedCommitHash: apiCommitHash,
+        expectedChecksums: config.validZipSha256Checksums,
+        observedArtifactSha256: observedArtifactSha256,
+        observedRuntimeSetSha256: observedRuntimeSetSha256,
+      )) {
+        _log.info('version: $apiCommitHash and checksum set matches exactly.');
+        return false;
       }
     } catch (e, s) {
       _log.severe('Error reading or parsing .api_last_updated_$platform', e, s);
-      lastUpdatedFile.deleteSync();
-      rethrow;
     }
 
     return true;
@@ -397,7 +1193,10 @@ class FetchDefiApiStep extends BuildStep {
 
   String _getPlatformDestinationFolder(String platform) {
     if (platformsConfig.containsKey(platform)) {
-      return path.join(artifactOutputPath, platformsConfig[platform]!.path);
+      return resolveApiArtifactDestination(
+        trustedRootFolder: artifactOutputPath,
+        configuredDestinationPath: platformsConfig[platform]!.path,
+      );
     } else {
       throw ArgumentError('Invalid platform: $platform');
     }
@@ -454,10 +1253,15 @@ class FetchDefiApiStep extends BuildStep {
     final newExecutablePath = path.join(destinationFolder, newExecutableName);
     if (FileSystemEntity.isFileSync(filePath)) {
       try {
+        final existingTarget = File(newExecutablePath);
+        if (existingTarget.existsSync()) {
+          existingTarget.deleteSync();
+        }
         File(filePath).renameSync(newExecutablePath);
         _log.info('Renamed kdf from $filePath to $newExecutableName');
       } catch (e) {
         _log.severe('Failed to rename kdf: $e');
+        rethrow;
       }
     } else {
       // If it's already renamed, there's no need to log a warning.

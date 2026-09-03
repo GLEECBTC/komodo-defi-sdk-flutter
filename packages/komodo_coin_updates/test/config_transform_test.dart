@@ -3,6 +3,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_coin_updates/src/coins_config/config_transform.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
+class _SetFieldTransform implements CoinConfigTransform {
+  const _SetFieldTransform(this.key, this.value);
+
+  final String key;
+  final Object value;
+
+  @override
+  bool needsTransform(JsonMap config) => config[key] != value;
+
+  @override
+  JsonMap transform(JsonMap config) => JsonMap.of(config)..[key] = value;
+}
+
 /// Unit tests for coin configuration transformation pipeline and individual transforms.
 ///
 /// **Purpose**: Tests the configuration transformation system that modifies coin
@@ -50,6 +63,19 @@ void main() {
       final twice = transformer.apply(JsonMap.of(once));
       expect(twice, equals(once));
     });
+
+    test('additional transforms run after the configured base transforms', () {
+      const transformer = CoinConfigTransformer(
+        transforms: [_SetFieldTransform('stage', 'base')],
+        additionalTransforms: [_SetFieldTransform('stage', 'application')],
+      );
+      final input = <String, dynamic>{'coin': 'KMD'};
+
+      final transformed = transformer.apply(input);
+
+      expect(transformed['stage'], 'application');
+      expect(input, {'coin': 'KMD'});
+    });
   });
 
   group('WssWebsocketTransform', () {
@@ -79,6 +105,101 @@ void main() {
         expect(list.length, 1);
         expect(list.first['protocol'] != 'WSS', isTrue);
       }
+    });
+  });
+
+  group('TronQuickNodeTransform', () {
+    test('adds QuickNode as the preferred mainnet TRX node', () {
+      const t = TronQuickNodeTransform();
+      final config = JsonMap.of({
+        'coin': 'TRX',
+        'type': 'TRX',
+        'protocol': {
+          'type': 'TRX',
+          'protocol_data': {'network': 'Mainnet'},
+        },
+        'nodes': [
+          {'url': 'https://api.trongrid.io'},
+        ],
+      });
+
+      final out = t.transform(JsonMap.of(config));
+      final nodes = out.value<JsonList>('nodes');
+
+      expect(nodes.first['url'], TronQuickNodeTransform.quickNodeUrl);
+      expect(nodes.first['komodo_proxy'], isTrue);
+      expect(nodes[1]['url'], 'https://api.trongrid.io');
+      expect(t.needsTransform(out), isFalse);
+      expect(t.transform(JsonMap.of(out)), equals(out));
+    });
+
+    test('marks an existing QuickNode TRX node as a KDF proxy', () {
+      const t = TronQuickNodeTransform();
+      final config = JsonMap.of({
+        'coin': 'TRX',
+        'type': 'TRX',
+        'protocol': {
+          'type': 'TRX',
+          'protocol_data': {'network': 'Mainnet'},
+        },
+        'nodes': [
+          {'url': TronQuickNodeTransform.quickNodeUrl},
+          {'url': 'https://api.trongrid.io'},
+        ],
+      });
+
+      expect(t.needsTransform(config), isTrue);
+
+      final out = t.transform(JsonMap.of(config));
+      final nodes = out.value<JsonList>('nodes');
+
+      expect(nodes, hasLength(2));
+      expect(nodes.first, {
+        'url': TronQuickNodeTransform.quickNodeUrl,
+        'komodo_proxy': true,
+      });
+      expect(t.needsTransform(out), isFalse);
+    });
+
+    test('adds QuickNode to TRC20 tokens on TRX', () {
+      const t = TronQuickNodeTransform();
+      final config = JsonMap.of({
+        'coin': 'USDT-TRC20',
+        'type': 'TRC-20',
+        'protocol': {
+          'type': 'TRC20',
+          'protocol_data': {
+            'platform': 'TRX',
+            'contract_address': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+          },
+        },
+        'nodes': <JsonMap>[],
+      });
+
+      final out = t.transform(JsonMap.of(config));
+      final nodes = out.value<JsonList>('nodes');
+
+      expect(nodes, hasLength(1));
+      expect(nodes.first['url'], TronQuickNodeTransform.quickNodeUrl);
+      expect(nodes.first['komodo_proxy'], isTrue);
+    });
+
+    test('does not add QuickNode to Nile TRX configs', () {
+      const t = TronQuickNodeTransform();
+      final config = JsonMap.of({
+        'coin': 'TRXT',
+        'type': 'TRX',
+        'protocol': {
+          'type': 'TRX',
+          'protocol_data': {'network': 'Nile'},
+        },
+        'nodes': [
+          {'url': 'https://nile.trongrid.io'},
+        ],
+      });
+
+      expect(t.needsTransform(config), isFalse);
+      expect(t.transform(JsonMap.of(config)), equals(config));
     });
   });
 

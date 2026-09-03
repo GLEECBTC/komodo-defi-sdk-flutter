@@ -199,6 +199,44 @@ class FeeInfoDisplay extends StatelessWidget {
               ],
             ],
 
+            final FeeInfoTronGasless fee => [
+              Text('Provider:', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                fee.providerName,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                'Transfer Fee:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.transferFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              if (fee.activationFee != null) ...[
+                Text(
+                  'Account Activation Fee:',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                Text(
+                  '${fee.activationFee} ${fee.coin}',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ],
+              Text(
+                'Total Fee (paid in token):',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.totalTokenFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                'Max Fee: ${fee.signedMaxFee} ${fee.coin}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+
             final FeeInfoSia fee => [
               Text('Policy:', style: Theme.of(context).textTheme.bodyMedium),
               Text(fee.policy, style: Theme.of(context).textTheme.labelLarge),

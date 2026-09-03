@@ -84,6 +84,11 @@ macos/x86/
 macos/bin/
 **/.api_last_updated*
 
+# CMake's Unix Makefiles generator drops this at the top of the build
+# directory. The generic CMake output patterns are in the root .gitignore;
+# this one is scoped because `Makefile` is a name a real file could want.
+/Makefile
+
 # Android C++ files
 android/app/.cxx/
 

@@ -1,3 +1,30 @@
+## 0.5.0
+
+> Note: This release rolls the bundled KDF to the `3.1.0-beta` line.
+
+ - **BREAKING** **BUILD**(kdf): pin the bundled artefact to KDF `main`
+   `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`) for all
+   seven native/WASM targets. This reprices EVM swap gas under the
+   Amsterdam/Bogota fork rules and is visible in fee estimates.
+ - **BREAKING** **BUILD**(kdf): require a full 40-character commit hash and
+   declare `required_platforms`, so a partial or missing platform fails the
+   build instead of shipping a stale artefact.
+ - **SECURITY**(build): restrict bundled KDF sources to the official Devbuilds
+   and Nebula mirrors. Keep `devbuilds.gleec.com` first for `main/` builds.
+ - **FEAT**(streaming): add typed `GASLESS_TRACE` events and rework the web and
+   IO event-stream transports around a single service lifecycle.
+ - **FEAT**(config): allow an `IKdfOperations` implementation to be injected,
+   and export `KdfExecutableFinder` and `KdfOperationsLocalExecutable` so a test
+   harness can drive the real binary through the framework's own lifecycle.
+ - **FIX**(android): align native LOAD segments to 16 KB pages (#355).
+ - **SECURITY**(logging): stop logging full activation parameters, and suppress
+   verbose RPC logging for GasFree requests, whose bodies carry provider
+   credentials and signed authorization material.
+ - **CHORE**(build): drop the committed `CMakeCache.txt`, `Makefile` and
+   `cmake_install.cmake`. The cache recorded absolute paths from the machine
+   that generated it, and CMake refuses to configure a directory whose cache
+   came from elsewhere (#362).
+
 ## 0.4.1
 
  - **CHORE**(build): update bundled KDF to staging commit `52ba4f9` and use the TRON coins source for release builds.

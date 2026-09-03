@@ -9,6 +9,14 @@ import 'package:komodo_defi_sdk/src/zcash_params/services/zcash_params_download_
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+/// Where `UnixZcashParamsDownloader` puts params for [home] on *this* host.
+///
+/// macOS uses `~/Library/Application Support/ZcashParams`; every other Unix
+/// uses `~/.zcash-params` (`unix_zcash_params_downloader.dart:126-136`).
+String _expectedParamsPath(String home) => Platform.isMacOS
+    ? '$home/Library/Application Support/ZcashParams'
+    : '$home/.zcash-params';
+
 // Helper function to run tests with a custom HOME environment variable
 Future<T> withEnvironmentVariable<T>(
   String key,
@@ -74,12 +82,11 @@ void main() {
 
         final path = await downloader.getParamsPath();
 
-        // Since we're running on macOS, the path will be treated as macOS
-        // even though it starts with /home/ - the logic checks Platform.isMacOS first
-        expect(
-          path,
-          equals('/home/testuser/Library/Application Support/ZcashParams'),
-        );
+        // `getParamsPath` branches on `Platform.isMacOS`, not on the shape of
+        // the home directory, so the expectation has to follow the host. These
+        // assertions used to hardcode the macOS branch and failed the moment
+        // the suite ran on a Linux CI runner.
+        expect(path, equals(_expectedParamsPath('/home/testuser')));
       });
 
       test('uses custom homeDirectoryOverride when provided', () async {
@@ -90,11 +97,8 @@ void main() {
 
         final path = await downloader.getParamsPath();
 
-        // Should use the custom home directory (macOS path since we're on macOS)
-        expect(
-          path,
-          equals('/custom/home/path/Library/Application Support/ZcashParams'),
-        );
+        // Should use the custom home directory, under this host's convention.
+        expect(path, equals(_expectedParamsPath('/custom/home/path')));
       });
 
       test(
@@ -132,11 +136,8 @@ void main() {
 
         final path = await downloader.getParamsPath();
 
-        // Should use macOS-specific path (since we're running on macOS and the path starts with /Users/)
-        expect(
-          path,
-          equals('/Users/testuser/Library/Application Support/ZcashParams'),
-        );
+        // Path shape follows the host platform, not the home directory's shape.
+        expect(path, equals(_expectedParamsPath('/Users/testuser')));
       });
     });
 

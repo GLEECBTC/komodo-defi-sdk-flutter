@@ -1,0 +1,37 @@
+name: komodo_defi_harness
+description: >-
+  Test harness for launching pre-authenticated Komodo DeFi Framework instances.
+  Boots a real KomodoDefiSdk against a scripted fake KDF so login, activation
+  and balance timings can be measured deterministically, in HD or iguana mode,
+  with no binary and no network.
+version: 0.1.0
+publish_to: none
+repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+  flutter: ">=3.35.0"
+
+resolution: workspace
+
+dependencies:
+  decimal: any
+  flutter:
+    sdk: flutter
+  # A test-only package (publish_to: none), so depending on flutter_test from
+  # lib/ is intentional: the harness must initialise the test binding and seed
+  # the secure-storage mock before anything touches a platform channel.
+  flutter_test:
+    sdk: flutter
+  flutter_secure_storage: any
+  # Closed in teardown: Hive is process-global and the SDK does not close its
+  # boxes, so a second harness in the same file would reuse the first one's.
+  hive_ce: any
+  komodo_defi_framework: any
+  komodo_defi_local_auth: any
+  komodo_defi_sdk: any
+  komodo_defi_types: any
+  path_provider_platform_interface: any
+
+dev_dependencies:
+  very_good_analysis: any

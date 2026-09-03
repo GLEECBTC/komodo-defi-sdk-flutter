@@ -21,6 +21,7 @@ export 'src/exported_rpc_types.dart';
 export 'src/fees/fee_management.dart';
 export 'src/komodo_defi_types_base.dart';
 export 'src/public_key/balance_strategy.dart';
+export 'src/public_key/hd_gap_limit.dart';
 export 'src/seed_node/seed_node.dart';
 // Trading and swap related high-level types used across SDKs
 export 'src/trading/swap_types.dart';

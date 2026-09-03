@@ -5,6 +5,28 @@ import 'package:test/test.dart';
 
 void main() {
   group('withdraw request serialization', () {
+    test('rejects ambiguous amount and max combinations', () {
+      expect(
+        () => WithdrawRequest(
+          rpcPass: 'rpc-pass',
+          coin: 'USDT-TRC20',
+          to: 'recipient',
+          amount: Decimal.one,
+          max: true,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => WithdrawRequest(
+          rpcPass: 'rpc-pass',
+          coin: 'USDT-TRC20',
+          to: 'recipient',
+          amount: null,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('serializes Tendermint fee requests as CosmosGas', () {
       final request = WithdrawInitRequest(
         rpcPass: 'rpc-pass',

@@ -29,7 +29,13 @@ class Erc20Protocol extends ProtocolClass {
   bool get isMemoSupported => false;
 
   @override
-  ActivationParams defaultActivationParams({PrivateKeyPolicy? privKeyPolicy}) {
+  ActivationParams defaultActivationParams({
+    PrivateKeyPolicy? privKeyPolicy,
+    // Ignored: an ERC-20 token rides its platform coin's HD account and
+    // never walks a gap of its own. The platform's walk is configured on
+    // [EthWithTokensActivationParams].
+    int? gapLimit,
+  }) {
     // For ERC20, we typically don't need child tokens in the default case
     // If you need to support child tokens, you can add an overloaded method
     return Erc20ActivationParams.fromJsonConfig(

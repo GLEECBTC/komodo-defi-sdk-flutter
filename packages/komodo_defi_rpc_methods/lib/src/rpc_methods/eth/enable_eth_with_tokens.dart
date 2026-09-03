@@ -189,6 +189,7 @@ class WalletAddress {
     required this.derivationPath,
     required this.chain,
     required this.balance,
+    this.gasfreeAddress,
   });
 
   factory WalletAddress.fromJson(JsonMap json) {
@@ -197,6 +198,7 @@ class WalletAddress {
       derivationPath: json.value<String>('derivation_path'),
       chain: json.value<String>('chain'),
       balance: TokenBalanceMap.fromJson(json.value<JsonMap>('balance')),
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
 
@@ -218,6 +220,7 @@ class WalletAddress {
         platformTicker: platformTicker,
         tickers: tickers,
       ),
+      gasfreeAddress: json.valueOrNull<String>('gasfree_address'),
     );
   }
 
@@ -225,12 +228,14 @@ class WalletAddress {
   final String derivationPath;
   final String chain;
   final TokenBalanceMap balance;
+  final String? gasfreeAddress;
 
   Map<String, dynamic> toJson() => {
     'address': address,
     'derivation_path': derivationPath,
     'chain': chain,
     'balance': balance.toJson(),
+    if (gasfreeAddress != null) 'gasfree_address': gasfreeAddress,
   };
 
   WalletAddress merge(WalletAddress other) {
@@ -241,6 +246,7 @@ class WalletAddress {
           : other.derivationPath,
       chain: chain.isNotEmpty ? chain : other.chain,
       balance: _aggregateTokenBalances([balance, other.balance]),
+      gasfreeAddress: gasfreeAddress ?? other.gasfreeAddress,
     );
   }
 }

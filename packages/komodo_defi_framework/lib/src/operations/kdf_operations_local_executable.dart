@@ -14,28 +14,59 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
   KdfOperationsLocalExecutable._(
     this._logCallback,
     this._kdfRemote, {
+    required Future<Directory> Function() temporaryDirectory,
     Duration startupTimeout = const Duration(seconds: 30),
     KdfExecutableFinder? executableFinder,
     this.executableName = 'kdf',
+    JsonMap Function(JsonMap params)? startParamsTransform,
   }) : _startupTimeout = startupTimeout,
+       _temporaryDirectory = temporaryDirectory,
+       _startParamsTransform = startParamsTransform,
        _executableFinder =
            executableFinder ?? KdfExecutableFinder(logCallback: _logCallback);
 
+  /// Creates operations that spawn the KDF executable.
+  ///
+  /// [config] now decides the RPC endpoint via `LocalConfig.rpcUrl`, so a
+  /// second instance on another port is a matter of constructing a second
+  /// config. This used to be a `static final Uri _url` pinned to
+  /// `127.0.0.1:7783`, which made the port unreachable from outside the class.
+  ///
+  /// The remaining parameters exist so a test harness can drive this class
+  /// instead of reimplementing it:
+  ///
+  /// - [executableFinder] was previously only settable through the private
+  ///   constructor, so a caller that knew exactly where the binary was had no
+  ///   way to say so.
+  /// - [temporaryDirectory] replaces a direct `getTemporaryDirectory()` call.
+  ///   That reached `path_provider`, i.e. a platform channel, which under
+  ///   `flutter test` resolves through whatever mock is installed - so the
+  ///   coins file silently followed a harness's own redirection.
+  /// - [startParamsTransform] is the one seam for adjusting startup JSON that
+  ///   the caller does not otherwise control (the auth layer builds it). Used
+  ///   by the harness to set `disable_p2p`; **never** use it for that in the
+  ///   app, which ships a DEX.
   factory KdfOperationsLocalExecutable.create({
     required void Function(String) logCallback,
     required LocalConfig config,
     Duration startupTimeout = const Duration(seconds: 30),
     String executableName = 'kdf',
+    KdfExecutableFinder? executableFinder,
+    Future<Directory> Function()? temporaryDirectory,
+    JsonMap Function(JsonMap params)? startParamsTransform,
   }) {
     return KdfOperationsLocalExecutable._(
       logCallback,
       KdfOperationsRemote.create(
         logCallback: logCallback,
-        rpcUrl: _url,
+        rpcUrl: config.rpcUrl,
         userpass: config.rpcPassword,
       ),
       startupTimeout: startupTimeout,
       executableName: executableName,
+      executableFinder: executableFinder,
+      temporaryDirectory: temporaryDirectory ?? getTemporaryDirectory,
+      startParamsTransform: startParamsTransform,
     );
   }
 
@@ -44,6 +75,15 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
   final void Function(String) _logCallback;
   final KdfExecutableFinder _executableFinder;
   final String executableName;
+  final Future<Directory> Function() _temporaryDirectory;
+  final JsonMap Function(JsonMap params)? _startParamsTransform;
+
+  /// The spawned process, or null when KDF is not running.
+  ///
+  /// Exposed so a caller that needs to guarantee the process dies - a test
+  /// harness registering signal handlers, for instance - can kill it by pid
+  /// rather than duplicating the whole class to get at it.
+  int? get processId => _process?.pid;
 
   // Use nullable fields instead of late, for the process and listeners,
   // because it is not guaranteed that they will be initialized before
@@ -68,8 +108,6 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       return false;
     }
   }
-
-  static final Uri _url = Uri.parse('http://127.0.0.1:7783');
 
   Future<Process> _startKdf(JsonMap params) async {
     final executablePath = (await _executableFinder.findExecutable(
@@ -98,12 +136,14 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
     Directory? coinsTempDir;
     try {
       final coinsList = params.value<List<JsonMap>>('coins');
-      final sensitiveArgs = JsonMap.of(params)..remove('coins');
+      var sensitiveArgs = JsonMap.of(params)..remove('coins');
+      final transform = _startParamsTransform;
+      if (transform != null) sensitiveArgs = transform(sensitiveArgs);
 
       // Store the coins list in a temp file to avoid command line argument and
       // environment variable value size limits (varies from 4-128 KB).
       // Pass the config directly to the executable as an argument.
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await _temporaryDirectory();
       coinsTempDir = await tempDir.createTemp('mm_coins_');
       final coinsConfigFile = File(p.join(coinsTempDir.path, 'kdf_coins.json'));
       await coinsConfigFile.writeAsString(

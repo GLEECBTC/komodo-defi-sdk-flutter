@@ -41,12 +41,16 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Anchored above, so package build output needs its own entry - this is what
+# let `packages/komodo_defi_framework` accumulate committed CMake output.
+packages/**/build/
 **/.plugin_symlinks/*
 
 # Web related
 web/dist/*.js
 web/dist/*.wasm
 web/dist/*LICENSE.txt
+/web/kdf/
 web/src/mm2/
 web/src/kdf/
 
@@ -86,6 +90,16 @@ linux/kdf/kdf
 macos/kdf
 **/.api_last_updated*
 .venv/
+
+# CMake build output. Configuring with the build directory inside the source
+# tree drops these next to the sources. A committed CMakeCache.txt is worse
+# than clutter: it pins absolute paths from the machine that generated it, and
+# CMake refuses to configure when they do not match.
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
 
 # Android C++ files
 **/.cxx

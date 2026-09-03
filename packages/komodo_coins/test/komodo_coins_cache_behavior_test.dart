@@ -135,7 +135,9 @@ void main() {
         () => mockDataFactory.createRepository(any(), any()),
       ).thenReturn(mockRepo);
       var localProviderCallCount = 0;
-      when(() => mockDataFactory.createLocalProvider(any())).thenAnswer((_) {
+      when(
+        () => mockDataFactory.createLocalProvider(any(), mockTransformer),
+      ).thenAnswer((_) {
         localProviderCallCount++;
         return localProviderCallCount == 1
             ? mockLocalProvider

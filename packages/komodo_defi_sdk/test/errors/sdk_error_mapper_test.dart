@@ -21,6 +21,148 @@ void main() {
       expect(sdkError.messageArgs, ['KMD', '1', '2']);
     });
 
+    test('maps GasFree custody shortfall to insufficient funds', () {
+      const error = GaslessWithdrawException(
+        type: GaslessWithdrawErrorType.insufficientGasFreeBalance,
+        errorData: {'coin': 'USDT-TRC20', 'available': '0', 'required': '8'},
+      );
+      final sdkError = mapper.map(error);
+
+      expect(sdkError.code, SdkErrorCode.insufficientFunds);
+      expect(sdkError.category, SdkErrorCategory.funds);
+      expect(sdkError.messageKey, 'withdrawGaslessInsufficientGasFreeBalance');
+      expect(sdkError.messageArgs, [
+        '',
+        '0',
+        'USDT-TRC20',
+        '8',
+        'USDT-TRC20',
+        'USDT-TRC20',
+      ]);
+      expect(sdkError.retryable, isFalse);
+      // Never the native-gas diagnosis: gasless fees are paid in the token.
+      expect(sdkError.code, isNot(SdkErrorCode.insufficientGas));
+      expect(sdkError.fallbackMessage, contains('custody balance has'));
+    });
+
+    test('maps GasFree activation shortfall with the activation fee', () {
+      const error = GaslessWithdrawException(
+        type: GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation,
+        errorData: {
+          'coin': 'USDT-TRC20',
+          'available': '2',
+          'required': '8',
+          'activation_fee': '1.5',
+        },
+      );
+      final sdkError = mapper.map(error);
+
+      expect(sdkError.code, SdkErrorCode.insufficientFunds);
+      expect(sdkError.category, SdkErrorCategory.funds);
+      expect(
+        sdkError.messageKey,
+        'withdrawGaslessInsufficientGasFreeBalanceForActivation',
+      );
+      expect(sdkError.messageArgs, [
+        '',
+        '2',
+        'USDT-TRC20',
+        '8',
+        'USDT-TRC20',
+        '1.5',
+        'USDT-TRC20',
+        'USDT-TRC20',
+      ]);
+      expect(sdkError.retryable, isFalse);
+      // The technical detail (folded into the fallback) keeps the full
+      // activation fee without inventing a provider-address echo. Matched as
+      // the amount plus the words rather than as one literal phrase, so a
+      // rewording of the sentence does not read as a lost fee.
+      expect(sdkError.fallbackMessage, contains('1.5'));
+      expect(sdkError.fallbackMessage, contains('activation fee'));
+      expect(sdkError.fallbackMessage, isNot(contains('TPRN')));
+    });
+
+    for (final entry in const {
+      GaslessWithdrawErrorType.unavailable: (
+        GaslessTransferErrorCode.providerUnavailable,
+        true,
+      ),
+      GaslessWithdrawErrorType.pendingTransfer: (
+        GaslessTransferErrorCode.pendingTransfer,
+        true,
+      ),
+      GaslessWithdrawErrorType.maxFeeExceeded: (
+        GaslessTransferErrorCode.maxFeeExceeded,
+        true,
+      ),
+      GaslessWithdrawErrorType.providerRejected: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+      GaslessWithdrawErrorType.invalidProviderResponse: (
+        GaslessTransferErrorCode.responseMismatch,
+        false,
+      ),
+      GaslessWithdrawErrorType.traceNotFound: (
+        GaslessTransferErrorCode.traceInvalid,
+        false,
+      ),
+      GaslessWithdrawErrorType.quoteExpired: (
+        GaslessTransferErrorCode.authorizationExpired,
+        true,
+      ),
+      GaslessWithdrawErrorType.insufficientGasFreeBalance: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+      GaslessWithdrawErrorType.insufficientGasFreeBalanceForActivation: (
+        GaslessTransferErrorCode.relayRejected,
+        false,
+      ),
+    }.entries) {
+      test('maps exact GasFree endpoint ${entry.key.wireValue}', () {
+        final sdkError = mapper.map(
+          GaslessWithdrawException(
+            type: entry.key,
+            errorData: const {
+              'coin': 'USDT-TRC20',
+              'available': '1',
+              'required': '2',
+              'activation_fee': '0.5',
+            },
+          ),
+        );
+
+        expect(sdkError.context?.extra['gaslessCode'], entry.value.$1.name);
+        expect(sdkError.retryable, entry.value.$2);
+        expect(
+          sdkError.source,
+          isA<GaslessTransferException>()
+              .having((error) => error.code, 'code', entry.value.$1)
+              .having(
+                (error) => error.stage,
+                'stage',
+                GaslessTransferStage.preview,
+              ),
+        );
+      });
+    }
+
+    test('maps GasFree maximum-fee failures to dedicated copy', () {
+      final sdkError = mapper.map(
+        const GaslessWithdrawException(
+          type: GaslessWithdrawErrorType.maxFeeExceeded,
+        ),
+      );
+
+      expect(sdkError.messageKey, 'sdk_errors.gasless_max_fee_exceeded');
+      expect(
+        sdkError.fallbackMessage,
+        'The GasFree quote exceeds the requested maximum fee',
+      );
+    });
+
     test('maps web3 timeout to network timeout', () {
       const error = Web3RpcErrorTimeoutException('timeout');
       final sdkError = mapper.map(error);

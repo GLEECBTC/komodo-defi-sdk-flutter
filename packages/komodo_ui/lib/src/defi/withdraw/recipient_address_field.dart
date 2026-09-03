@@ -77,6 +77,7 @@ class RecipientAddressField extends StatefulWidget {
     this.onQrScanned,
     this.validation,
     this.isValidating = false,
+    this.enabled = true,
     this.errorText,
     this.asset,
     super.key,
@@ -121,6 +122,9 @@ class RecipientAddressField extends StatefulWidget {
   /// is in progress. This is useful when validation requires asynchronous
   /// operations like network calls.
   final bool isValidating;
+
+  /// Whether the recipient can be edited, pasted, cleared, or scanned.
+  final bool enabled;
 
   /// Optional callback to provide custom error text.
   ///
@@ -251,13 +255,13 @@ class _RecipientAddressFieldState extends State<RecipientAddressField> {
         TextFormField(
           controller: _controller,
           focusNode: _focusNode,
+          enabled: widget.enabled,
           decoration: InputDecoration(
             hintText: 'Enter recipient address or scan QR code',
             filled: true,
-            fillColor:
-                _hasFocus
-                    ? theme.colorScheme.surface
-                    : theme.colorScheme.surface.withOpacity(0.7),
+            fillColor: _hasFocus
+                ? theme.colorScheme.surface
+                : theme.colorScheme.surface.withOpacity(0.7),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: _getStatusColor(theme)),
@@ -270,19 +274,18 @@ class _RecipientAddressFieldState extends State<RecipientAddressField> {
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(width: 2, color: _getStatusColor(theme)),
             ),
-            prefixIcon:
-                hasText && isValid
-                    ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
-                    : null,
+            prefixIcon: hasText && isValid
+                ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
+                : null,
             suffixIcon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_showPasteButton)
+                if (widget.enabled && _showPasteButton)
                   TextButton(
                     onPressed: _pasteFromClipboard,
                     child: const Text('Paste'),
                   )
-                else if (_controller.text.isNotEmpty)
+                else if (widget.enabled && _controller.text.isNotEmpty)
                   IconButton(
                     icon: const Icon(Icons.clear),
                     onPressed: () {
@@ -295,7 +298,7 @@ class _RecipientAddressFieldState extends State<RecipientAddressField> {
                     tooltip: 'Clear',
                   ),
                 const SizedBox(width: 4),
-                if (widget.onQrScanned != null)
+                if (widget.enabled && widget.onQrScanned != null)
                   IconButton(
                     icon: const Icon(Icons.qr_code_scanner),
                     onPressed: _scanQrCode,
@@ -311,6 +314,7 @@ class _RecipientAddressFieldState extends State<RecipientAddressField> {
             errorText: _getErrorText(),
           ),
           onChanged: (value) {
+            if (!widget.enabled) return;
             // Update UI state immediately
             setState(() {
               _showPasteButton = value.isEmpty;
@@ -496,10 +500,9 @@ class _RecipientAddressFieldState extends State<RecipientAddressField> {
 
     // Display only the start and end of the address for clarity
     final address = _controller.text;
-    final previewAddress =
-        address.length > 16
-            ? '${address.substring(0, 8)}...${address.substring(address.length - 8)}'
-            : address;
+    final previewAddress = address.length > 16
+        ? '${address.substring(0, 8)}...${address.substring(address.length - 8)}'
+        : address;
 
     return Container(
       width: double.infinity,

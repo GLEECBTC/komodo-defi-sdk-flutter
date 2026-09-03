@@ -9,11 +9,25 @@ import 'package:komodo_defi_sdk/src/transaction_history/strategies/etherscan_tra
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 class EthTaskActivationStrategy extends ProtocolActivationStrategy {
-  const EthTaskActivationStrategy(super.client, this.privKeyPolicy);
+  const EthTaskActivationStrategy(
+    super.client,
+    this.privKeyPolicy, {
+    this.hdGapLimit,
+    this.tronGaslessProvider,
+  });
 
   /// The private key management policy to use for this strategy.
   /// Used for external wallet support.
   final PrivateKeyPolicy privKeyPolicy;
+
+  /// The HD address gap KDF should walk during activation. See `HdGapLimit`.
+  final int? hdGapLimit;
+
+  /// Optional provider attached to task-based TRX activation.
+  ///
+  /// KDF accepts the same documented provider and token GasFree fields for
+  /// task and non-task activation requests.
+  final TronGaslessProviderConfig? tronGaslessProvider;
 
   @override
   Set<CoinSubClass> get supportedProtocols => {
@@ -84,8 +98,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
               asset,
             );
 
-      final tokenRequests =
-          children?.map((e) => TokensRequest(ticker: e.id.id)).toList() ?? [];
+      final tokenRequests = _tokenRequestsFor(asset, children);
       final activationParams = switch (asset.protocol) {
         final Erc20Protocol _ =>
           EthWithTokensActivationParams.fromJson(
@@ -94,6 +107,9 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
             erc20Tokens: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
+            // Sent explicitly: KDF defaults an absent gap_limit to 20, so
+            // omitting it left the ETH-family walk outside the gap policy.
+            gapLimit: hdGapLimit,
           ),
         final TrxProtocol _ =>
           TrxWithTokensActivationParams.fromJson(
@@ -102,6 +118,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
             tokenRequests: tokenRequests,
             txHistory: txHistoryFlag,
             privKeyPolicy: privKeyPolicy,
+            tronGaslessProvider: tronGaslessProvider,
           ),
         _ => throw UnsupportedError(
           'Unsupported platform protocol for task activation: '
@@ -198,6 +215,25 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
         stepCount: 5,
       );
     }
+  }
+
+  List<TokensRequest> _tokenRequestsFor(Asset asset, List<Asset>? children) {
+    final enableTronGasless =
+        asset.protocol is TrxProtocol && tronGaslessProvider != null;
+    return children?.map((child) {
+          final configuredGasless = child.protocol is Trc20Protocol
+              ? Trc20ActivationParams.fromJsonConfig(
+                  child.protocol.config,
+                ).gasless
+              : null;
+          return TokensRequest(
+            ticker: child.id.id,
+            gasless: enableTronGasless && configuredGasless?.enabled == true
+                ? configuredGasless
+                : null,
+          );
+        }).toList() ??
+        const [];
   }
 
   ({

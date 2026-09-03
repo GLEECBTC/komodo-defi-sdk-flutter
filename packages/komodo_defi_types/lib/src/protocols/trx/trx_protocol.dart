@@ -50,6 +50,8 @@ class TrxProtocol extends ProtocolClass {
   @override
   TrxWithTokensActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
+    // Ignored: see [Trc20Protocol.defaultActivationParams].
+    int? gapLimit,
   }) {
     return TrxWithTokensActivationParams.fromJson(
       config,

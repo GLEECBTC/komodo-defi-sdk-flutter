@@ -51,6 +51,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   void _emitAuthStateChange(KdfUser? user) {
     if (!_authStateController.isClosed && user != _lastEmittedUser) {
       _lastEmittedUser = user;
+      _authStateGeneration++;
       _authStateController.add(user);
     }
   }
@@ -89,10 +90,13 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
       '[$_sessionId] _registerNewUser: seed validation pipeline completed '
       'in ${seedValidationStopwatch.elapsedMilliseconds}ms',
     );
-    final currentUser = KdfUser(
-      walletId: walletId,
-      isBip39Seed: isBip39Seed,
-      metadata: {'isImported': isImported},
+    final currentUser = await _ensureAuthenticatedWalletIdentity(
+      KdfUser(
+        walletId: walletId,
+        isBip39Seed: isBip39Seed,
+        metadata: {'isImported': isImported},
+      ),
+      persist: false,
     );
     final secureStorageStopwatch = Stopwatch()..start();
     await _secureStorage.saveUser(currentUser);

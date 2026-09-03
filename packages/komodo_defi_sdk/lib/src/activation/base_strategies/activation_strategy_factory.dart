@@ -13,30 +13,51 @@ class ActivationStrategyFactory {
   /// This is used for external wallet support. E.g. trezor, wallet connect, etc
   /// [configService] The [ActivationConfigService] for resolving activation configuration.
   /// [activatedAssetsCache] The [ActivatedAssetsCache] to use for checking activation status.
+  /// [hdGapLimit] The HD address gap KDF should walk during activation. Omit
+  /// and each protocol falls back to the full BIP-44 gap. See `HdGapLimit`.
   static SmartAssetActivator createStrategy(
     ApiClient client,
     PrivateKeyPolicy privKeyPolicy,
     ActivationConfigService configService,
-    ActivatedAssetsCache activatedAssetsCache,
-  ) {
+    ActivatedAssetsCache activatedAssetsCache, {
+    TronGaslessProviderConfig? tronGaslessProvider,
+    int? hdGapLimit,
+  }) {
     return SmartAssetActivator(
       client,
       CompositeAssetActivator(client, [
         // BCH strategy needs to be before UTXO strategy to handle the special case
         // BchActivationStrategy(client),
-        UtxoActivationStrategy(client, privKeyPolicy),
-        EthTaskActivationStrategy(client, privKeyPolicy),
-        EthWithTokensActivationStrategy(client, privKeyPolicy),
-        Erc20ActivationStrategy(client, privKeyPolicy),
+        UtxoActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
+        EthTaskActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+          hdGapLimit: hdGapLimit,
+        ),
+        EthWithTokensActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+          hdGapLimit: hdGapLimit,
+        ),
+        Erc20ActivationStrategy(
+          client,
+          privKeyPolicy,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
         // SlpActivationStrategy(client),
         // Tendermint strategies follow same pattern as ETH: task -> platform -> tokens
         TendermintTaskActivationStrategy(client, privKeyPolicy),
         TendermintWithTokensActivationStrategy(client, privKeyPolicy),
         TendermintTokenActivationStrategy(client, privKeyPolicy),
-        QtumActivationStrategy(client, privKeyPolicy),
+        QtumActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
         SiaActivationStrategy(client),
         ZhtlcActivationStrategy(client, privKeyPolicy, configService),
-        CustomErc20ActivationStrategy(client),
+        CustomErc20ActivationStrategy(
+          client,
+          tronGaslessProvider: tronGaslessProvider,
+        ),
       ]),
       activatedAssetsCache,
     );

@@ -5,6 +5,7 @@ import 'dart:developer';
 import 'package:get_it/get_it.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
@@ -12,18 +13,87 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/activation_config/hive_adapters.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
+import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show CexMarketDataManager, MarketDataManager;
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/storage/secure_rpc_password_mixin.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 var _activationConfigHiveInitialized = false;
+
+/// Clears every wallet-scoped cache when a wallet is deleted.
+///
+/// `deleteWallet` removes the wallet from KDF and from secure storage, and
+/// nothing else - so derived addresses, activation preferences, the enabled
+/// asset list and transaction history all used to outlive the wallet they
+/// described. Transaction history also self-heals at open through
+/// [HiveTransactionStorage]'s garbage collector, but only on the next launch,
+/// and the other three stores have no equivalent.
+///
+/// Every purge is best-effort and independent: a cache that will not clear
+/// must not make a deleted wallet look undeleted, and must not stop the other
+/// caches from clearing.
+///
+/// Registered as an awaited [KomodoDefiAuth.onWalletDeletion] hook rather
+/// than a [KomodoDefiAuth.walletDeletions] listener: `deleteWallet` must not
+/// return while these purges are still running, or a caller that promptly
+/// recreates the same wallet has its freshly persisted caches swept away by
+/// the tail of the previous deletion.
+Future<void> _wireWalletDeletionPurge(GetIt container) async {
+  // Registered only when the SDK persists transaction history. Resolved from
+  // this container rather than a shared variable so concurrently
+  // bootstrapping SDK instances cannot hand each other their stores.
+  final transactionStorage = container.isRegistered<HiveTransactionStorage>()
+      ? container<HiveTransactionStorage>()
+      : null;
+  final auth = await container.getAsync<KomodoDefiLocalAuth>();
+  final assetHistory = container<AssetHistoryStorage>();
+  final pubkeys = await container.getAsync<PubkeyManager>();
+  final activationConfig = await container.getAsync<ActivationConfigService>();
+
+  auth.onWalletDeletion((walletId) async {
+    for (final purge in <(String, Future<void> Function())>[
+      (
+        'transaction history',
+        () async => transactionStorage?.purgeWallet(walletId),
+      ),
+      ('pubkeys', () => pubkeys.purgeWallet(walletId)),
+      ('activation config', () => activationConfig.repo.purgeWallet(walletId)),
+      ('asset history', () => assetHistory.clearWalletAssets(walletId)),
+    ]) {
+      try {
+        await purge.$2();
+      } on Object catch (error, stackTrace) {
+        log(
+          'Failed to purge ${purge.$1} for a deleted wallet: $error',
+          name: 'Bootstrap',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+  });
+}
+
+final class _SdkAssetConfigTransform implements CoinConfigTransform {
+  const _SdkAssetConfigTransform(this._transform);
+
+  final AssetConfigTransform _transform;
+
+  @override
+  bool needsTransform(JsonMap config) => true;
+
+  @override
+  JsonMap transform(JsonMap config) => _transform(JsonMap.unmodifiable(config));
+}
 
 Future<void> _ensureActivationConfigHiveInitialized() async {
   if (_activationConfigHiveInitialized) return;
@@ -43,6 +113,17 @@ Future<void> bootstrap({
   log('Bootstrap: Starting dependency injection setup...', name: 'Bootstrap');
   final stopwatch = Stopwatch()..start();
 
+  config.tronGaslessProvider?.validate();
+
+  container.registerSingleton(
+    GaslessCapabilityRegistry(
+      pinnedProviderAddress: config.tronGaslessProvider?.serviceProvider,
+    ),
+  );
+  container.registerSingleton<PendingGaslessTransferRepository>(
+    SecurePendingGaslessTransferRepository(),
+  );
+
   final rpcPassword = await SecureRpcPasswordMixin().ensureRpcPassword();
 
   // Framework and core dependencies
@@ -50,7 +131,7 @@ Future<void> bootstrap({
     if (kdfFramework != null) return kdfFramework;
 
     final resolvedHostConfig =
-        hostConfig ?? LocalConfig(https: true, rpcPassword: rpcPassword);
+        hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword);
 
     return KomodoDefiFramework.create(
       hostConfig: resolvedHostConfig,
@@ -78,7 +159,7 @@ Future<void> bootstrap({
     final auth = KomodoDefiLocalAuth(
       kdf: framework,
       hostConfig:
-          hostConfig ?? LocalConfig(https: true, rpcPassword: rpcPassword),
+          hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword),
     );
     await auth.ensureInitialized();
     return auth;
@@ -86,8 +167,22 @@ Future<void> bootstrap({
 
   // Asset history storage singletons
   container.registerLazySingleton(AssetHistoryStorage.new);
+  final assetConfigTransform = config.assetConfigTransform;
+  final coinConfigTransformer = assetConfigTransform == null
+      ? const CoinConfigTransformer()
+      : CoinConfigTransformer(
+          additionalTransforms: [
+            _SdkAssetConfigTransform(assetConfigTransform),
+          ],
+        );
   container.registerSingletonAsync<KomodoAssetsUpdateManager>(
-    () async => KomodoAssetsUpdateManager(),
+    () async => KomodoAssetsUpdateManager(
+      transformer: coinConfigTransformer,
+      // Application policy is a transient registry view. Persist only the
+      // normalized upstream config so changing provider/build policy cannot
+      // leave stale token enrollment in Hive.
+      persistenceTransformer: const CoinConfigTransformer(),
+    ),
   );
 
   // Activation configuration service (must be available before ActivationManager)
@@ -127,6 +222,7 @@ Future<void> bootstrap({
       auth: auth,
       assetLookup: assets,
       ttl: config.activatedAssetsCacheTtl,
+      fetchTimeout: config.activatedAssetsCacheFetchTimeout,
     );
   }, dependsOn: [ApiClient, KomodoDefiLocalAuth, AssetManager]);
 
@@ -171,6 +267,8 @@ Future<void> bootstrap({
         // as the asset manager
         container<KomodoAssetsUpdateManager>(),
         activatedAssetsCache,
+        tronGaslessProvider: config.tronGaslessProvider,
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
 
       return activationManager;
@@ -282,6 +380,28 @@ Future<void> bootstrap({
     return LegacyWithdrawalManager(client);
   }, dependsOn: [ApiClient]);
 
+  if (config.persistTransactionHistory) {
+    // Registered on the container - not handed around through shared state -
+    // so [_wireWalletDeletionPurge] resolves the same store this container's
+    // manager writes to, even when two SDK instances bootstrap concurrently.
+    //
+    // Acquired rather than constructed: the Hive box behind the default name
+    // is process-global, so containers over the same box name must share one
+    // store (one order index, refcounted close) instead of each adopting the
+    // open box with an index of its own.
+    container.registerSingletonAsync<HiveTransactionStorage>(() async {
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
+      return HiveTransactionStorage.acquire(
+        // Lets the store drop history belonging to wallets that no
+        // longer exist. Fails open: an error or an empty result means
+        // "do not know", never "delete everything".
+        knownWalletNamespaces: () async => (await auth.getUsers())
+            .map((user) => walletStorageNamespace(user.walletId))
+            .toSet(),
+      );
+    }, dependsOn: [KomodoDefiLocalAuth]);
+  }
+
   container.registerSingletonAsync<TransactionHistoryManager>(
     () async {
       final client = await container.getAsync<ApiClient>();
@@ -299,7 +419,11 @@ Future<void> bootstrap({
         activationCoordinator,
         pubkeyManager: pubkeys,
         eventStreamingManager: eventStreamingManager,
+        storage: config.persistTransactionHistory
+            ? await container.getAsync<HiveTransactionStorage>()
+            : InMemoryTransactionStorage(),
         assetHistoryStorage: container<AssetHistoryStorage>(),
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
     },
     dependsOn: [
@@ -309,6 +433,7 @@ Future<void> bootstrap({
       PubkeyManager,
       SharedActivationCoordinator,
       EventStreamingManager,
+      if (config.persistTransactionHistory) HiveTransactionStorage,
     ],
   );
 
@@ -318,15 +443,27 @@ Future<void> bootstrap({
       final assetProvider = await container.getAsync<AssetManager>();
       final feeManager = await container.getAsync<FeeManager>();
       final legacyManager = await container.getAsync<LegacyWithdrawalManager>();
-
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
+      final eventStreamingManager = await container
+          .getAsync<EventStreamingManager>();
       final activationCoordinator = await container
           .getAsync<SharedActivationCoordinator>();
+      final pubkeyManager = await container.getAsync<PubkeyManager>();
       return WithdrawalManager(
         client,
         assetProvider,
         feeManager,
         activationCoordinator,
         legacyManager,
+        gaslessCapabilities: container<GaslessCapabilityRegistry>(),
+        pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
+        eventStreamingManager: eventStreamingManager,
+        freshSourceAddressResolver: (asset) async {
+          final pubkeys = await pubkeyManager.getFreshPubkeys(asset);
+          return {for (final key in pubkeys.keys) key.address};
+        },
+        walletIdResolver: () async => (await auth.currentUser)?.walletId,
+        authStateChanges: auth.watchCurrentUser(),
       );
     },
     dependsOn: [
@@ -335,6 +472,9 @@ Future<void> bootstrap({
       SharedActivationCoordinator,
       FeeManager,
       LegacyWithdrawalManager,
+      KomodoDefiLocalAuth,
+      EventStreamingManager,
+      PubkeyManager,
     ],
   );
 
@@ -362,6 +502,8 @@ Future<void> bootstrap({
 
   // Wait for all async singletons to initialize
   await container.allReady();
+
+  await _wireWalletDeletionPurge(container);
 
   stopwatch.stop();
   log(

@@ -1,6 +1,5 @@
-import 'dart:collection';
-
 import 'package:collection/collection.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_merge_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
@@ -41,64 +40,78 @@ abstract interface class TransactionStorage {
 }
 
 class InMemoryTransactionStorage implements TransactionStorage {
-  InMemoryTransactionStorage() : _storage = {};
+  /// Creates an in-memory store.
+  ///
+  /// [maxTransactionsPerAsset] caps how many transactions are retained per
+  /// (wallet, asset) pair, evicting oldest-first. Defaults to `null`
+  /// (unbounded), which is the historical behaviour.
+  InMemoryTransactionStorage({int? maxTransactionsPerAsset})
+    : _storage = {},
+      _maxTransactionsPerAsset = maxTransactionsPerAsset;
 
-  static Future<InMemoryTransactionStorage> create() async {
-    final instance = InMemoryTransactionStorage();
-    await instance._initializeStorage();
-    return instance;
-  }
+  static Future<InMemoryTransactionStorage> create() async =>
+      InMemoryTransactionStorage();
 
   final _mutex = Mutex();
-  final Map<AssetTransactionHistoryId, SplayTreeMap<String, Transaction>>
-      _storage;
-  static const int? _maxTransactionsPerAsset = null;
+  final Map<AssetTransactionHistoryId, Map<String, Transaction>> _storage;
+  final int? _maxTransactionsPerAsset;
 
-  /// Compare transactions for ordering within the SplayTreeMap
-  /// 
-  /// Orders transactions by timestamp (newest first), with internalId as a 
-  /// tiebreaker for stable ordering. All transactions being compared must 
-  /// exist in the provided [transactions] map.
-  int _compareTransactions(
-    String a,
-    String b,
-    AssetTransactionHistoryId assetTxHistoryId,
-    Map<String, Transaction> transactions,
-  ) {
-    // Look up transactions only from the provided map
-    final txA = transactions[a];
-    final txB = transactions[b];
-
-    if (txA == null || txB == null) {
-      throw TransactionStorageException(
-        'Transaction not found in comparison: '
-        '${txA == null ? a : b} missing from transactions map',
-      );
-    }
-
-    // Order by timestamp descending, then by internalId for stable ordering
-    return txB.timestamp.compareTo(txA.timestamp) != 0
-        ? txB.timestamp.compareTo(txA.timestamp)
-        : b.compareTo(a);
+  /// Orders transactions newest-first, with `internalId` descending as a stable
+  /// tiebreaker for equal timestamps.
+  ///
+  /// This used to be a `SplayTreeMap` comparator that resolved each key through
+  /// a map captured when the tree was built. That made the tree's ordering
+  /// depend on a snapshot of its own contents, so any lookup for a key added
+  /// after construction - `existingMap[newInternalId]` on the second batch for
+  /// an asset, or `containsKey` in [getTransactionById] - threw
+  /// `Transaction not found in comparison`. In practice that meant every page
+  /// of history after the first failed to store. Ordering is now applied on
+  /// read over a plain map, which cannot go stale.
+  static int _compareTransactions(Transaction a, Transaction b) {
+    final byTimestamp = b.timestamp.compareTo(a.timestamp);
+    if (byTimestamp != 0) return byTimestamp;
+    return b.internalId.compareTo(a.internalId);
   }
 
-  Future<void> _initializeStorage() async {
-    await _mutex.protect(() async {
-      for (final assetTxHistoryId in _storage.keys) {
-        final assetTransactions =
-            _storage[assetTxHistoryId] ?? <String, Transaction>{};
-        // Convert existing map entries to a regular map for comparison function
-        final assetTxMap = <String, Transaction>{...assetTransactions};
-        _storage[assetTxHistoryId] = SplayTreeMap<String, Transaction>(
-          (a, b) =>
-              _compareTransactions(a, b, assetTxHistoryId, assetTxMap),
-        )..addAll(assetTxMap);
-      }
-    });
+  /// Returns this asset's transactions in display order.
+  ///
+  /// The caller must already hold [_mutex].
+  List<Transaction> _orderedLocked(AssetTransactionHistoryId assetHistoryId) {
+    final assetTransactions = _storage[assetHistoryId];
+    if (assetTransactions == null || assetTransactions.isEmpty) {
+      return const [];
+    }
+    return assetTransactions.values.toList()..sort(_compareTransactions);
+  }
+
+  /// Merges [incoming] into this asset's map, preserving the monotonic
+  /// balance-component semantics of
+  /// [TransactionMergeUtils.mergeTransactionFields].
+  ///
+  /// The caller must already hold [_mutex].
+  void _mergeIntoLocked(
+    AssetTransactionHistoryId assetHistoryId,
+    Iterable<Transaction> incoming,
+  ) {
+    final assetTransactions = _storage.putIfAbsent(
+      assetHistoryId,
+      () => <String, Transaction>{},
+    );
+    for (final transaction in incoming) {
+      assetTransactions.update(
+        transaction.internalId,
+        (existing) =>
+            TransactionMergeUtils.mergeTransactionFields(existing, transaction),
+        ifAbsent: () => transaction,
+      );
+    }
   }
 
   @override
-  Future<void> storeTransaction(Transaction transaction, WalletId walletId) async {
+  Future<void> storeTransaction(
+    Transaction transaction,
+    WalletId walletId,
+  ) async {
     if (transaction.internalId.isEmpty) {
       throw TransactionStorageException(
         'Transaction internal ID cannot be empty',
@@ -107,35 +120,13 @@ class InMemoryTransactionStorage implements TransactionStorage {
 
     try {
       await _mutex.protect(() async {
-        final assetHistoryId =
-            AssetTransactionHistoryId(walletId, transaction.assetId);
-        final newTxMap = {transaction.internalId: transaction};
-        
-        // Merge existing and new transactions into a single map BEFORE
-        // creating the SplayTreeMap. This prevents stack overflow by ensuring
-        // the comparison function has direct access to all transactions
-        // without needing to recursively look them up from storage.
-        _storage.update(
-          assetHistoryId,
-          (existingMap) {
-            // Create merged map with all transactions
-            final allTxMap = <String, Transaction>{
-              ...existingMap,
-              ...newTxMap,
-            };
-            
-            // Create SplayTreeMap with merged map for comparisons
-            return SplayTreeMap<String, Transaction>(
-              (a, b) => _compareTransactions(a, b, assetHistoryId, allTxMap),
-            )..addAll(allTxMap);
-          },
-          ifAbsent: () => SplayTreeMap<String, Transaction>(
-            (a, b) => _compareTransactions(a, b, assetHistoryId, newTxMap),
-          )..addAll(newTxMap),
+        final assetHistoryId = AssetTransactionHistoryId(
+          walletId,
+          transaction.assetId,
         );
+        _mergeIntoLocked(assetHistoryId, [transaction]);
+        _enforceStorageLimitLocked(transaction.assetId, walletId);
       });
-
-      await _enforceStorageLimit(transaction.assetId, walletId);
     } catch (e) {
       throw TransactionStorageException('Failed to store transaction', e);
     }
@@ -153,37 +144,29 @@ class InMemoryTransactionStorage implements TransactionStorage {
         final grouped = groupBy(transactions, (tx) => tx.assetId);
 
         for (final entry in grouped.entries) {
-          final newTxMap = Map.fromEntries(
-            entry.value.map((tx) => MapEntry(tx.internalId, tx)),
-          );
-          final assetHistoryId = AssetTransactionHistoryId(user, entry.key);
-
-          // Merge existing and new transactions into a single map BEFORE
-          // creating the SplayTreeMap. This prevents stack overflow by ensuring
-          // the comparison function has direct access to all transactions
-          // without needing to recursively look them up from storage.
-          _storage.update(
-            assetHistoryId,
-            (existingMap) {
-              // Create merged map with all transactions
-              final allTxMap = <String, Transaction>{
-                ...existingMap,
-                ...newTxMap,
-              };
-              
-              // Create SplayTreeMap with merged map for comparisons
-              return SplayTreeMap<String, Transaction>(
-                (a, b) => _compareTransactions(a, b, assetHistoryId, allTxMap),
-              )..addAll(allTxMap);
-            },
-            ifAbsent: () => SplayTreeMap<String, Transaction>(
-              (a, b) => _compareTransactions(a, b, assetHistoryId, newTxMap),
-            )..addAll(newTxMap),
+          // Collapse duplicates within the batch first so two perspectives of
+          // the same transfer arriving on one page merge rather than overwrite.
+          final newTxMap = <String, Transaction>{};
+          for (final transaction in entry.value) {
+            newTxMap.update(
+              transaction.internalId,
+              (existing) => TransactionMergeUtils.mergeTransactionFields(
+                existing,
+                transaction,
+              ),
+              ifAbsent: () => transaction,
+            );
+          }
+          _mergeIntoLocked(
+            AssetTransactionHistoryId(user, entry.key),
+            newTxMap.values,
           );
         }
 
+        // Already inside `_mutex.protect`: call the non-locking variant, or
+        // this deadlocks permanently. See [_enforceStorageLimitLocked].
         for (final assetId in grouped.keys) {
-          await _enforceStorageLimit(assetId, user);
+          _enforceStorageLimitLocked(assetId, user);
         }
       });
     } catch (e) {
@@ -201,8 +184,8 @@ class InMemoryTransactionStorage implements TransactionStorage {
   }) async {
     return _mutex.protect(() async {
       final assetTransactionsId = AssetTransactionHistoryId(user, assetId);
-      final assetTransactions = _storage[assetTransactionsId] ?? SplayTreeMap();
-      final total = assetTransactions.length;
+      var transactions = _orderedLocked(assetTransactionsId);
+      final total = transactions.length;
 
       if (total == 0) {
         return TransactionPage(
@@ -213,11 +196,10 @@ class InMemoryTransactionStorage implements TransactionStorage {
         );
       }
 
-      var transactions = assetTransactions.values.toList();
-
       if (fromId != null) {
-        final startIndex =
-            transactions.indexWhere((t) => t.internalId == fromId);
+        final startIndex = transactions.indexWhere(
+          (t) => t.internalId == fromId,
+        );
         if (startIndex == -1) {
           throw TransactionStorageException('Starting transaction not found');
         }
@@ -268,39 +250,49 @@ class InMemoryTransactionStorage implements TransactionStorage {
   Future<String?> getLatestTransactionId(AssetId assetId, WalletId user) async {
     return _mutex.protect(() async {
       final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
-      final transactions = _storage[assetTxHistoryId]?.values;
-      if (transactions == null || transactions.isEmpty) return null;
+      final transactions = _orderedLocked(assetTxHistoryId);
+      if (transactions.isEmpty) return null;
       return transactions.first.internalId;
     });
   }
 
-  Future<void> _enforceStorageLimit(AssetId assetId, WalletId user) async {
-    if (_maxTransactionsPerAsset == null) return;
+  /// Evicts the oldest transactions once an asset exceeds the configured cap.
+  ///
+  /// The caller **must** already hold [_mutex]. `package:mutex`'s [Mutex] is a
+  /// write-only [ReadWriteMutex] and is not reentrant: re-acquiring it from
+  /// inside a protected section blocks on a future that only `release()` can
+  /// complete, and `release()` is in the `finally` that is itself waiting. The
+  /// result is a permanent hang, not an exception, so every later call on this
+  /// instance would block forever too.
+  void _enforceStorageLimitLocked(AssetId assetId, WalletId user) {
+    final maxTransactions = _maxTransactionsPerAsset;
+    if (maxTransactions == null) return;
 
-    await _mutex.protect(() async {
-      final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
-      final assetTransactions = _storage[assetTxHistoryId];
-      if (assetTransactions == null) return;
+    final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
+    final assetTransactions = _storage[assetTxHistoryId];
+    if (assetTransactions == null) return;
 
-      if (assetTransactions.length > _maxTransactionsPerAsset!) {
-        final excess = assetTransactions.length - _maxTransactionsPerAsset!;
-        final sortedEntries = assetTransactions.entries.toList()
-          ..sort((a, b) {
-            final timestampComparison =
-                a.value.timestamp.compareTo(b.value.timestamp);
-            return timestampComparison != 0
-                ? timestampComparison
-                : a.value.internalId.compareTo(b.value.internalId);
-          });
+    if (assetTransactions.length > maxTransactions) {
+      final excess = assetTransactions.length - maxTransactions;
+      final sortedEntries = assetTransactions.entries.toList()
+        ..sort((a, b) {
+          final timestampComparison = a.value.timestamp.compareTo(
+            b.value.timestamp,
+          );
+          return timestampComparison != 0
+              ? timestampComparison
+              : a.value.internalId.compareTo(b.value.internalId);
+        });
 
-        final keysToRemove =
-            sortedEntries.take(excess).map((e) => e.key).toList();
+      final keysToRemove = sortedEntries
+          .take(excess)
+          .map((e) => e.key)
+          .toList();
 
-        for (final key in keysToRemove) {
-          assetTransactions.remove(key);
-        }
+      for (final key in keysToRemove) {
+        assetTransactions.remove(key);
       }
-    });
+    }
   }
 
   @override

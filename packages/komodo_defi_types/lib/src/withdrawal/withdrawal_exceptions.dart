@@ -15,7 +15,11 @@ class WithdrawalException implements Exception {
     final errorLower = error.toLowerCase();
 
     if (errorLower.contains('insufficient funds') ||
-        errorLower.contains('not enough funds')) {
+        errorLower.contains('not enough funds') ||
+        errorLower.contains('not sufficient balance') ||
+        (errorLower.contains('not enough') &&
+            (errorLower.contains('withdraw') ||
+                errorLower.contains('balance')))) {
       return WithdrawalErrorCode.insufficientFunds;
     }
 

@@ -137,6 +137,224 @@ void main() {
     });
   });
 
+  group('FeeInfo TronGasless serialization', () {
+    test('deserializes gasless fee details from withdraw response', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2.000000',
+        'activation_fee': '1.000000',
+        'total_token_fee': '3.000000',
+        'signed_max_fee': '5.000000',
+        'trace_id': null,
+      };
+
+      final feeInfo = FeeInfo.fromJson(json);
+
+      expect(feeInfo, isA<FeeInfoTronGasless>());
+      final gasless = feeInfo as FeeInfoTronGasless;
+      expect(gasless.coin, equals('USDT-TRC20'));
+      expect(gasless.feeMethod, equals('gasless'));
+      expect(gasless.providerName, equals('gasfree'));
+      expect(
+        gasless.gasfreeAddress,
+        equals('TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF'),
+      );
+      expect(gasless.transferFee, equals(Decimal.parse('2.000000')));
+      expect(gasless.activationFee, equals(Decimal.parse('1.000000')));
+      expect(gasless.totalTokenFee, equals(Decimal.parse('3.000000')));
+      expect(gasless.signedMaxFee, equals(Decimal.parse('5.000000')));
+      expect(gasless.totalFee, equals(Decimal.parse('3.000000')));
+    });
+
+    test('round-trips with required signed cap and omitted activation fee', () {
+      final feeInfo = FeeInfo.tronGasless(
+        coin: 'USDT-TRC20',
+        feeMethod: 'gasless',
+        providerName: 'gasfree',
+        gasfreeAddress: 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        transferFee: Decimal.parse('2'),
+        totalTokenFee: Decimal.parse('2'),
+        signedMaxFee: Decimal.parse('5'),
+      );
+
+      final json = feeInfo.toJson();
+
+      expect(json['type'], equals('TronGasless'));
+      expect(json['fee_method'], equals('gasless'));
+      expect(json['transfer_fee'], equals('2'));
+      expect(json['total_token_fee'], equals('2'));
+      expect(json.containsKey('activation_fee'), isFalse);
+      expect(json['signed_max_fee'], equals('5'));
+      expect(json, containsPair('trace_id', null));
+
+      // Re-parsing yields an equivalent variant.
+      expect(FeeInfo.fromJson(json), equals(feeInfo));
+    });
+
+    test('rejects undocumented GasFree fee fields', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2',
+        'total_token_fee': '2',
+        'signed_max_fee': '5',
+        'trace_id': null,
+        'request_id': 'must-not-be-accepted',
+      };
+
+      expect(() => FeeInfo.fromJson(json), throwsFormatException);
+    });
+
+    for (final field in const {
+      'coin',
+      'fee_method',
+      'provider_name',
+      'gasfree_address',
+      'transfer_fee',
+      'total_token_fee',
+      'signed_max_fee',
+      'trace_id',
+    }) {
+      test('rejects GasFree preview fee details missing $field', () {
+        final json = <String, dynamic>{
+          'type': 'TronGasless',
+          'coin': 'USDT-TRC20',
+          'fee_method': 'gasless',
+          'provider_name': 'gasfree',
+          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+          'transfer_fee': '2',
+          'total_token_fee': '2',
+          'signed_max_fee': '5',
+          'trace_id': null,
+        }..remove(field);
+
+        expect(() => FeeInfo.fromJson(json), throwsFormatException);
+      });
+    }
+
+    test('rejects a non-null preview trace', () {
+      final json = {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2',
+        'total_token_fee': '2',
+        'signed_max_fee': '5',
+        'trace_id': 'trace-belongs-to-submit',
+      };
+
+      expect(() => FeeInfo.fromJson(json), throwsFormatException);
+    });
+
+    test(
+      'rejects non-KDF provider identity and serialized zero activation',
+      () {
+        Map<String, dynamic> validJson() => {
+          'type': 'TronGasless',
+          'coin': 'USDT-TRC20',
+          'fee_method': 'gasless',
+          'provider_name': 'gasfree',
+          'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+          'transfer_fee': '2',
+          'total_token_fee': '2',
+          'signed_max_fee': '5',
+          'trace_id': null,
+        };
+
+        expect(
+          () => FeeInfo.fromJson(validJson()..['provider_name'] = 'GasFree'),
+          throwsFormatException,
+        );
+        expect(
+          () => FeeInfo.fromJson(validJson()..['activation_fee'] = '0'),
+          throwsFormatException,
+        );
+      },
+    );
+
+    test('rejects negative, inconsistent, and over-cap fee breakdowns', () {
+      Map<String, dynamic> feeJson({
+        String transferFee = '2',
+        String? activationFee,
+        String totalTokenFee = '2',
+        String signedMaxFee = '5',
+      }) => {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': transferFee,
+        if (activationFee != null) 'activation_fee': activationFee,
+        'total_token_fee': totalTokenFee,
+        'signed_max_fee': signedMaxFee,
+        'trace_id': null,
+      };
+
+      expect(
+        () => FeeInfo.fromJson(feeJson(transferFee: '-1')),
+        throwsFormatException,
+      );
+      expect(
+        () => FeeInfo.fromJson(feeJson(activationFee: '-1')),
+        throwsFormatException,
+      );
+      expect(
+        () => FeeInfo.fromJson(feeJson(activationFee: '1')),
+        throwsFormatException,
+      );
+      expect(
+        () => FeeInfo.fromJson(feeJson(signedMaxFee: '1')),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects non-string preview fee amounts and null activation fee', () {
+      Map<String, dynamic> validJson() => {
+        'type': 'TronGasless',
+        'coin': 'USDT-TRC20',
+        'fee_method': 'gasless',
+        'provider_name': 'gasfree',
+        'gasfree_address': 'TCtSt8fCkZcVdrGpaVHUr6P8EmdjysswMF',
+        'transfer_fee': '2',
+        'total_token_fee': '2',
+        'signed_max_fee': '5',
+        'trace_id': null,
+      };
+
+      for (final field in const {
+        'transfer_fee',
+        'total_token_fee',
+        'signed_max_fee',
+      }) {
+        final json = validJson()..[field] = 2;
+        expect(
+          () => FeeInfo.fromJson(json),
+          throwsFormatException,
+          reason: '$field must remain a KDF numeric string',
+        );
+      }
+
+      expect(
+        () => FeeInfo.fromJson(validJson()..['activation_fee'] = 1),
+        throwsFormatException,
+      );
+      expect(
+        () => FeeInfo.fromJson(validJson()..['activation_fee'] = null),
+        throwsFormatException,
+      );
+    });
+  });
+
   group('FeeInfo Tendermint compatibility', () {
     test('should serialize Tendermint fees as CosmosGas for requests', () {
       final feeInfo = FeeInfo.tendermint(

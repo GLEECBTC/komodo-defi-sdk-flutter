@@ -8,12 +8,12 @@ final assetTickersWithFaucet = UnmodifiableListView([
   'DOC',
   'MARTY',
   'IRISTEST',
-  'NUCLEUSTEST'
+  'NUCLEUSTEST',
 ]);
 
 extension AssetFaucetExtension on Asset {
   // TODO: Implement faucet functionality in SDK - using the faucet endpoint with hardcoded tickers as a fallback
-  // https://faucet.komodo.earth/faucet_coins 
+  // https://faucet.komodo.earth/faucet_coins
   bool get hasFaucet => assetTickersWithFaucet.contains(id.symbol.configSymbol);
 }
 

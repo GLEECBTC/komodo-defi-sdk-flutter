@@ -20,7 +20,13 @@ export 'package:komodo_defi_framework/src/services/seed_node_service.dart';
 export 'package:komodo_defi_framework/src/streaming/event_streaming_service.dart';
 export 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 
+// Exported so a test harness can drive the real binary through the framework's
+// own implementation instead of reimplementing its lifecycle. See
+// `komodo_defi_harness/lib/src/process_kdf_operations.dart`.
+export 'src/native/kdf_executable_finder.dart' show KdfExecutableFinder;
 export 'src/operations/kdf_operations_interface.dart';
+export 'src/operations/kdf_operations_local_executable.dart'
+    show KdfOperationsLocalExecutable;
 
 class KomodoDefiFramework implements ApiClient {
   static const Duration _versionProbeTimeout = Duration(seconds: 2);
@@ -47,18 +53,19 @@ class KomodoDefiFramework implements ApiClient {
     return KomodoDefiFramework._(
       hostConfig: hostConfig,
       externalLogger: externalLogger,
+      kdfOperations: kdfOperations,
       // client: KdfApiClient(this, rpcPassword: hostConfig.rpcPassword),
-    ).._kdfOperations = kdfOperations;
+    );
   }
   KomodoDefiFramework._({
     required IKdfHostConfig hostConfig,
     void Function(String)? externalLogger,
+    IKdfOperations? kdfOperations,
     // required KdfApiClient? client,
   }) : _hostConfig = hostConfig {
-    _kdfOperations = createKdfOperations(
-      hostConfig: hostConfig,
-      logCallback: _log,
-    );
+    _kdfOperations =
+        kdfOperations ??
+        createKdfOperations(hostConfig: hostConfig, logCallback: _log);
 
     if (externalLogger != null) {
       _initLogStream(externalLogger);
@@ -268,23 +275,26 @@ class KomodoDefiFramework implements ApiClient {
 
   @override
   Future<JsonMap> executeRpc(JsonMap request) async {
+    final method = request['method'] as String?;
+    final isGasless = _isGaslessRequest(method, request);
     if (!enableDebugLogging) {
       final response = (await _kdfOperations.mm2Rpc(
         request..setIfAbsentOrEmpty('userpass', _hostConfig.rpcPassword),
       )).ensureJson();
-      if (KdfLoggingConfig.verboseLogging) {
+      if (KdfLoggingConfig.verboseLogging && !isGasless) {
         _log('RPC response: ${response.toJsonString()}');
       }
       return response;
     }
 
     // Extract method name for logging
-    final method = request['method'] as String?;
     final stopwatch = Stopwatch()..start();
 
     // Log activation parameters before the call
-    if (method != null && _isActivationMethod(method)) {
+    if (method != null && _isActivationMethod(method) && !isGasless) {
       _logActivationParameters(method, request);
+    } else if (isGasless) {
+      _logger.info('[RPC] GasFree request started');
     }
 
     try {
@@ -298,14 +308,14 @@ class KomodoDefiFramework implements ApiClient {
       );
 
       // Log electrum-related methods with more detail
-      if (method != null && _isElectrumRelatedMethod(method)) {
+      if (method != null && _isElectrumRelatedMethod(method) && !isGasless) {
         _logger.info(
           '[ELECTRUM] Method: $method, Duration: ${stopwatch.elapsedMilliseconds}ms',
         );
         _logElectrumConnectionInfo(method, response);
       }
 
-      if (KdfLoggingConfig.verboseLogging) {
+      if (KdfLoggingConfig.verboseLogging && !isGasless) {
         _log('RPC response: ${response.toJsonString()}');
       }
       return response;
@@ -350,7 +360,8 @@ class KomodoDefiFramework implements ApiClient {
         resetHttpClient();
       } else {
         _logger.warning(
-          '[RPC] ${method ?? 'unknown'} failed after ${stopwatch.elapsedMilliseconds}ms: $e',
+          '[RPC] ${isGasless ? 'GasFree' : method ?? 'unknown'} '
+          'failed after ${stopwatch.elapsedMilliseconds}ms',
         );
       }
       rethrow;
@@ -369,6 +380,23 @@ class KomodoDefiFramework implements ApiClient {
     return method.contains('enable') ||
         method.contains('task::enable') ||
         method.contains('task_enable');
+  }
+
+  bool _isGaslessRequest(String? method, JsonMap request) =>
+      (method?.startsWith('gasless::') ?? false) ||
+      _containsGaslessConfiguration(request);
+
+  bool _containsGaslessConfiguration(Object? value) {
+    if (value is Map) {
+      if (value.containsKey('tron_gasless_provider') ||
+          value['fee_method'] == 'gasless' ||
+          value['relay_type'] == 'tron_gasfree') {
+        return true;
+      }
+      return value.values.any(_containsGaslessConfiguration);
+    }
+    if (value is Iterable) return value.any(_containsGaslessConfiguration);
+    return false;
   }
 
   void _logActivationParameters(String method, JsonMap request) {
@@ -427,12 +455,12 @@ class KomodoDefiFramework implements ApiClient {
 
         _logger.info('[ACTIVATION] Parameters: $paramsSummary');
 
-        // Log full activation params for detailed debugging
-        _logger.fine('[ACTIVATION] Full params: $activationParams');
+        // Never log full activation parameters: provider credentials, wallet
+        // material, or other secrets may be nested in this object.
       }
     } catch (e) {
       // Silently ignore logging errors
-      _logger.info('[ACTIVATION] Error logging parameters: $e');
+      _logger.info('[ACTIVATION] Parameter logging failed');
     }
   }
 
@@ -501,6 +529,9 @@ class KomodoDefiFramework implements ApiClient {
   ///
   /// NB! This does not stop the KDF operations or the KDF process.
   Future<void> dispose() async {
+    await _streamingService?.dispose();
+    _streamingService = null;
+
     // Cancel subscription first before closing the stream
     await _loggerSub?.cancel();
     _loggerSub = null;

@@ -62,9 +62,8 @@ class DevBuildsArtefactDownloader implements ArtefactDownloader {
           if (href == null) continue;
           attemptedFiles.add(href);
 
-          // Normalize href for directory indexes that include absolute paths
-          final hrefPath = Uri.tryParse(href)?.path ?? href;
-          final fileName = path.basename(hrefPath);
+          final fileName = apiArtifactFilenameFromListingHref(href);
+          if (fileName == null) continue;
 
           // Ignore wallet archives on Nebula index
           if (fileName.contains('wallet')) {
@@ -73,18 +72,15 @@ class DevBuildsArtefactDownloader implements ArtefactDownloader {
 
           final matches =
               matchingConfig.matches(fileName) &&
-              extensions.any(hrefPath.endsWith);
+              extensions.any(fileName.endsWith) &&
+              apiArtifactFilenameMatchesCommit(fileName, apiCommitHash);
           if (matches) {
-            final containsHash =
-                hrefPath.contains(fullHash) || hrefPath.contains(shortHash);
-            if (containsHash) {
-              // Build an absolute URL, regardless of whether href is
-              // already absolute or relative to the listing page.
-              final resolvedUrl = href.startsWith('http')
-                  ? href
-                  : listingUrl.resolve(href).toString();
-              resolvedCandidates[fileName] = resolvedUrl;
-            }
+            // Build an absolute URL, regardless of whether href is
+            // already absolute or relative to the listing page.
+            final resolvedUrl = href.startsWith('http')
+                ? href
+                : listingUrl.resolve(href).toString();
+            resolvedCandidates[fileName] = resolvedUrl;
           }
         }
 
@@ -123,7 +119,7 @@ class DevBuildsArtefactDownloader implements ArtefactDownloader {
     final response = await http.get(Uri.parse(url));
     response.throwIfNotSuccessResponse();
 
-    final zipFileName = path.basename(url);
+    final zipFileName = apiArtifactFilenameFromUrl(url);
     final zipFilePath = path.join(destinationPath, zipFileName);
 
     final directory = Directory(destinationPath);

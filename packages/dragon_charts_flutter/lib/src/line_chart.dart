@@ -21,13 +21,13 @@ class ChartExtent {
   const ChartExtent.withBounds({
     required this.min,
     required this.max,
-  })  : auto = false,
-        paddingPortion = 0;
+  }) : auto = false,
+       paddingPortion = 0;
 
   const ChartExtent.tight({this.paddingPortion = 0})
-      : auto = true,
-        min = null,
-        max = null;
+    : auto = true,
+      min = null,
+      max = null;
 
   final bool auto;
   final double paddingPortion;
@@ -103,7 +103,7 @@ class LineChart extends StatefulWidget {
   ///
   /// If not provided, a default tooltip will be used.
   final Widget Function(BuildContext, List<ChartData>, List<Color>)?
-      tooltipBuilder;
+  tooltipBuilder;
 
   /// The extent of the domain (x-axis) of the chart.
   ///
@@ -171,8 +171,10 @@ class _LineChartState extends State<LineChart>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: widget.animationDuration);
+    _controller = AnimationController(
+      vsync: this,
+      duration: widget.animationDuration,
+    );
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
     _controller
       ..addListener(() {
@@ -268,14 +270,22 @@ class _LineChartState extends State<LineChart>
     newMinY = widget.rangeExtent.min ?? newMinY;
     newMaxY = widget.rangeExtent.max ?? newMaxY;
 
-    minXAnimation =
-        Tween<double>(begin: minX, end: newMinX).animate(_controller);
-    maxXAnimation =
-        Tween<double>(begin: maxX, end: newMaxX).animate(_controller);
-    minYAnimation =
-        Tween<double>(begin: minY, end: newMinY).animate(_controller);
-    maxYAnimation =
-        Tween<double>(begin: maxY, end: newMaxY).animate(_controller);
+    minXAnimation = Tween<double>(
+      begin: minX,
+      end: newMinX,
+    ).animate(_controller);
+    maxXAnimation = Tween<double>(
+      begin: maxX,
+      end: newMaxX,
+    ).animate(_controller);
+    minYAnimation = Tween<double>(
+      begin: minY,
+      end: newMinY,
+    ).animate(_controller);
+    maxYAnimation = Tween<double>(
+      begin: maxY,
+      end: newMaxY,
+    ).animate(_controller);
 
     minX = newMinX;
     maxX = newMaxX;
@@ -520,7 +530,8 @@ class _LineChartState extends State<LineChart>
     Size tooltipSize,
     Size screenSize,
   ) {
-    var xPosition = widget.padding.left +
+    var xPosition =
+        widget.padding.left +
         globalPosition.dx -
         tooltipSize.width; // Initial offset to the left
     if (xPosition + tooltipSize.width > screenSize.width) {
@@ -542,7 +553,8 @@ class _LineChartState extends State<LineChart>
     Size tooltipSize,
     Size screenSize,
   ) {
-    var yPosition = widget.padding.top +
+    var yPosition =
+        widget.padding.top +
         globalPosition.dy -
         tooltipSize.height; // Initial offset to the top
     if (yPosition + tooltipSize.height > screenSize.height) {
@@ -587,8 +599,9 @@ class _LineChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dataElements = elements.whereType<ChartDataSeries>();
-    final nonDataElements =
-        elements.where((element) => element is! ChartDataSeries);
+    final nonDataElements = elements.where(
+      (element) => element is! ChartDataSeries,
+    );
 
     // Paint non-data elements (e.g., grid lines, axis labels)
     for (final element in nonDataElements) {

@@ -1,12 +1,12 @@
 {
     "projects": {
-        "default": "gleec-defi-sdk"
+        "default": "komodo-defi-sdk"
     },
     "targets": {
-        "gleec-defi-sdk": {
+        "komodo-defi-sdk": {
             "hosting": {
-                "gleec-sdk": [
-                    "gleec-sdk"
+                "kdf-sdk": [
+                    "komodo-defi-sdk"
                 ]
             }
         }

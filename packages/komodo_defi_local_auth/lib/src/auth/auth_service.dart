@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
@@ -43,15 +44,9 @@ abstract interface class IAuthService {
   /// Returns the [KdfUser] associated with the active wallet if KDF is running,
   /// otherwise null.
   ///
-  /// **Performance Note**: This method returns the last user emitted by health
-  /// checks (updated every 5 minutes) to reduce RPC load. This means the
-  /// returned value could be up to 5 minutes stale if the active wallet is
-  /// changed externally. For most use cases, this trade-off is acceptable and
-  /// significantly reduces RPC spam.
-  ///
-  /// NOTE: this function does not start/stop KDF or modify the active user,
-  /// so atomic read/write protection is not used within and not required when
-  /// calling this function.
+  /// The active wallet and its stable identity are verified against KDF on
+  /// every call. Identity verification and any persisted identity upgrade are
+  /// serialized with authentication state transitions.
   Future<KdfUser?> getActiveUser();
 
   /// Returns the [Mnemonic] for the active wallet, throws an [AuthException]
@@ -61,9 +56,8 @@ abstract interface class IAuthService {
   /// the plaintext mnemonic is returned, which requires the [walletPassword]
   /// to be provided.
   ///
-  /// NOTE: this function does not start/stop KDF or modify the active user,
-  /// so atomic read/write protection is not used within and not required when
-  /// calling this function.
+  /// The operation is serialized with authentication state transitions so a
+  /// mnemonic can never be returned for a wallet that is being signed out.
   Future<Mnemonic> getMnemonic({
     required bool encrypted,
     required String? walletPassword,
@@ -120,25 +114,49 @@ abstract interface class IAuthService {
 }
 
 class KdfAuthService implements IAuthService {
-  KdfAuthService(this._kdfFramework, this._hostConfig)
-    : _sessionId = const Uuid().v4() {
+  KdfAuthService(
+    this._kdfFramework,
+    this._hostConfig, {
+    SecureLocalStorage? secureStorage,
+  }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
+       _sessionId = const Uuid().v4() {
     _logger.info('[$_sessionId] KdfAuthService initialized');
     _startHealthCheck();
-    _subscribeToShutdownSignals();
+    unawaited(_lockWriteOperation(_subscribeToShutdownSignals));
   }
 
   final KomodoDefiFramework _kdfFramework;
   final IKdfHostConfig _hostConfig;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
-  final SecureLocalStorage _secureStorage = SecureLocalStorage();
+  final SecureLocalStorage _secureStorage;
   final ReadWriteMutex _authMutex = ReadWriteMutex();
   final Mutex _metadataMutex = Mutex();
   final Logger _logger = Logger('KdfAuthService');
   final String _sessionId;
 
   KdfUser? _lastEmittedUser;
+  int _authStateGeneration = 0;
   Timer? _healthCheckTimer;
+
+  /// Compound ids of wallets this session created without an imported mnemonic.
+  ///
+  /// Never persisted, and consumed when the wallet's first authenticated
+  /// session ends ([_stopKdf]) or the wallet is deleted ([deleteWallet]): the
+  /// whole meaning is "first sign-in", and a value that outlived it would keep
+  /// telling the address scan there is nothing to find long after the wallet
+  /// could have received funds - including on a re-import under the same name.
+  final Set<String> _walletsGeneratedThisSession = <String>{};
+
+  /// Rolling cost of [getActiveUser]; see [_recordActiveUserCall].
+  int _activeUserCalls = 0;
+  int _activeUserQueuedMs = 0;
+  int _activeUserHeldMs = 0;
+  DateTime? _activeUserWindowStart;
+
+  /// Short enough to resolve a login burst into several windows, long enough
+  /// that a steady-state app logs roughly nothing.
+  static const Duration _activeUserReportInterval = Duration(seconds: 5);
 
   // Single-flight guard for ensureKdfHealthy to prevent concurrent restarts
   Future<bool>? _ongoingHealthCheck;
@@ -204,14 +222,16 @@ class KdfAuthService implements IAuthService {
 
     _logger.info('[$_sessionId] signIn: KDF healthy, proceeding with login');
 
-    // [getActiveUser] performs a read lock, which should happen outside of
-    // the write lock to prevent deadlocks. If kdf is not running, null is
-    // returned, so we can safely call it here without any checks.
-    final activeUser = await getActiveUser();
-
     final user = await _lockWriteOperation<KdfUser>(() async {
       // Check if already signed in first
       if (await _kdfFramework.isRunning()) {
+        final KdfUser? activeUser;
+        try {
+          activeUser = await _resolveActiveUserWithinWriteLock();
+        } catch (_) {
+          await _clearFailedAuthenticatedKdfWithinWriteLock();
+          rethrow;
+        }
         if (activeUser?.walletId.name == walletName) {
           return activeUser!;
         }
@@ -241,9 +261,14 @@ class KdfAuthService implements IAuthService {
         allowWeakPassword: options.allowWeakPassword,
       );
 
-      final user = await _authenticateUser(config);
-      _emitAuthStateChange(user);
-      return user;
+      try {
+        final user = await _authenticateUser(config);
+        _emitAuthStateChange(user);
+        return user;
+      } catch (_) {
+        await _clearFailedAuthenticatedKdfWithinWriteLock();
+        rethrow;
+      }
     });
 
     return user;
@@ -273,7 +298,7 @@ class KdfAuthService implements IAuthService {
       );
 
       final walletExistsStopwatch = Stopwatch()..start();
-      await _runReadOperation(() async {
+      await _lockWriteOperation(() async {
         final walletExists = await _walletExists(walletName);
         if (walletExists) {
           throw AuthException(
@@ -320,15 +345,30 @@ class KdfAuthService implements IAuthService {
       return _lockWriteOperation(() async {
         final writePathStopwatch = Stopwatch()..start();
         final isImported = mnemonic != null;
-        final currentUser = await _registerNewUser(config, options, isImported);
+        late final KdfUser currentUser;
+        try {
+          currentUser = await _registerNewUser(config, options, isImported);
+          if (!isImported) {
+            // A wallet created here has no on-chain history by construction:
+            // the seed did not exist a moment ago. Recorded per session so the
+            // HD gap scan can be told so on this sign-in only.
+            _walletsGeneratedThisSession.add(
+              currentUser.walletId.compoundId,
+            );
+          }
+        } catch (_) {
+          await _clearFailedAuthenticatedKdfWithinWriteLock();
+          rethrow;
+        }
         writePathStopwatch.stop();
         _logger.info(
           '[$_sessionId] register: registration write path completed in '
           '${writePathStopwatch.elapsedMilliseconds}ms',
         );
-        _emitAuthStateChange(currentUser);
+        final sessionUser = _stampSessionFlags(currentUser)!;
+        _emitAuthStateChange(sessionUser);
         _invalidateUsersCache();
-        return currentUser;
+        return sessionUser;
       });
     } finally {
       registerStopwatch.stop();
@@ -343,54 +383,60 @@ class KdfAuthService implements IAuthService {
   Future<List<KdfUser>> getUsers() async {
     await _ensureKdfRunning();
 
-    return _runReadOperation(() async {
-      // Serve from cache if fresh
-      if (_usersCache != null &&
-          _usersCacheTimestamp != null &&
-          DateTime.now().difference(_usersCacheTimestamp!) < _usersCacheTtl) {
-        return _usersCache!;
-      }
+    return _lockWriteOperation(_getUsersWithinAuthLock);
+  }
 
-      final walletNames = await _runStartupSensitiveRpc(
-        phase: 'get_wallet_names',
-        operation: () => _client.rpc.wallet.getWalletNames(),
-      );
+  Future<List<KdfUser>> _getUsersWithinAuthLock() async {
+    // Serve from cache if fresh.
+    if (_usersCache != null &&
+        _usersCacheTimestamp != null &&
+        DateTime.now().difference(_usersCacheTimestamp!) < _usersCacheTtl) {
+      return _usersCache!;
+    }
 
-      final users = await Future.wait(
-        walletNames.walletNames.map((name) async {
-          final user = await _secureStorage.getUser(name);
-          if (user != null) return user;
+    final walletNames = await _runStartupSensitiveRpc(
+      phase: 'get_wallet_names',
+      operation: () => _client.rpc.wallet.getWalletNames(),
+    );
 
-          // Create new user record if none exists
-          final newUser = KdfUser(
-            walletId: WalletId.fromName(name, _fallbackAuthOptions),
-            isBip39Seed: true, // Default to true until verified otherwise
-          );
-          await _secureStorage.saveUser(newUser);
-          return newUser;
-        }),
-      );
+    final users = await Future.wait(
+      walletNames.walletNames.map((name) async {
+        final user = await _secureStorage.getUser(name);
+        if (user != null) return user;
 
-      _usersCache = users;
-      _usersCacheTimestamp = DateTime.now();
-      return users;
-    });
+        // Create a user record for a KDF wallet discovered before local auth
+        // metadata was persisted.
+        final newUser = KdfUser(
+          walletId: WalletId.fromName(name, _fallbackAuthOptions),
+          isBip39Seed: true,
+        );
+        await _secureStorage.saveUser(newUser);
+        return newUser;
+      }),
+    );
+
+    _usersCache = users;
+    _usersCacheTimestamp = DateTime.now();
+    return users;
   }
 
   Future<void> updateUserBip39Status(String walletName, bool isBip39) async {
-    final existingUser = await _secureStorage.getUser(walletName);
-    if (existingUser == null) return;
+    await _lockWriteOperation(() async {
+      final existingUser = await _secureStorage.getUser(walletName);
+      if (existingUser == null) return;
 
-    // Don't allow switching to HD if not BIP39
-    if (!isBip39 && existingUser.isHd) {
-      throw AuthException(
-        'Cannot use non-BIP39 seed with HD wallet',
-        type: AuthExceptionType.generalAuthError,
-      );
-    }
+      // Don't allow switching to HD if not BIP39
+      if (!isBip39 && existingUser.isHd) {
+        throw AuthException(
+          'Cannot use non-BIP39 seed with HD wallet',
+          type: AuthExceptionType.generalAuthError,
+        );
+      }
 
-    final updatedUser = existingUser.copyWith(isBip39Seed: isBip39);
-    await _secureStorage.saveUser(updatedUser);
+      final updatedUser = existingUser.copyWith(isBip39Seed: isBip39);
+      await _secureStorage.saveUser(updatedUser);
+      _invalidateUsersCache();
+    });
   }
 
   @override
@@ -408,12 +454,120 @@ class KdfAuthService implements IAuthService {
 
   @override
   Future<KdfUser?> getActiveUser() async {
-    return _runReadOperation(() async {
-      // Prefer last known user emitted by health checks to avoid extra RPCs
-      if (_lastEmittedUser != null) {
-        return _lastEmittedUser;
+    // `getActiveUser` is the hottest thing on the login path and the reason it
+    // is hot is invisible from any single call site: it is invoked from the
+    // auth write lock by nearly every SDK subsystem, and each invocation costs
+    // two RPCs (`get_wallet_names` then `get_public_key_hash`). Field logs
+    // showed ~480 identity RPCs for one login, and nothing in either repo
+    // could say where they came from.
+    //
+    // Three numbers make that legible: how many calls, how long they queued
+    // for the write lock, and how long they held it. Queue time is the one
+    // that matters most - it is serialised, so N callers pay for each other.
+    //
+    // Deliberately NOT a cache. `protectRead` was removed here as a GasFree
+    // security fix (see the note at [_resolveActiveUserWithinWriteLock]) and
+    // caching `currentUser` per auth generation would reintroduce exactly what
+    // that removal prevents. This measures the cost; it does not avoid it.
+    final queued = Stopwatch()..start();
+    return _lockWriteOperation(() async {
+      queued.stop();
+      final held = Stopwatch()..start();
+      try {
+        return _stampSessionFlags(await _resolveActiveUserWithinWriteLock());
+      } catch (error) {
+        // Clearing authentication here is the right response to an identity we
+        // cannot trust - KDF answering with a different wallet, or a malformed
+        // identity. It is the wrong response to not having been able to ask.
+        //
+        // This is a read-shaped accessor: `isSignedIn()` and six managers call
+        // it, some on a poll. Treating a dropped socket or a timeout as proof
+        // of a bad identity turns one transient blip on the loopback RPC into
+        // `kdfStop()` plus a forced sign-out, losing the whole session.
+        if (_isKdfUnreachable(error)) rethrow;
+        await _clearFailedAuthenticatedKdfWithinWriteLock();
+        rethrow;
+      } finally {
+        held.stop();
+        _recordActiveUserCall(
+          queued.elapsedMilliseconds,
+          held.elapsedMilliseconds,
+        );
       }
-      return _getActiveUser();
+    });
+  }
+
+  /// Re-applies session-scoped facts that are not persisted with the user.
+  ///
+  /// [KdfUser.isGeneratedThisSession] lives only in [_walletsGeneratedThisSession],
+  /// so a user read back from secure storage has it false. Stamped on the way
+  /// out of [getActiveUser] rather than written into storage, because the whole
+  /// meaning is "this session created it": a persisted value would keep telling
+  /// the HD address scan there is nothing to find long after the wallet could
+  /// have received funds.
+  KdfUser? _stampSessionFlags(KdfUser? user) {
+    if (user == null) return null;
+    if (!_walletsGeneratedThisSession.contains(user.walletId.compoundId)) {
+      return user;
+    }
+    return user.copyWith(isGeneratedThisSession: true);
+  }
+
+  /// Accumulates [getActiveUser] cost and reports it at INFO, rate-limited.
+  ///
+  /// Rate-limited rather than one line per call: a login issues hundreds of
+  /// these, and per-call logging would itself become a cost. Rate-limited
+  /// rather than a single end-of-login summary, because there is no clean
+  /// "login finished" moment - the amplification continues through activation,
+  /// and watching the count decay across successive windows is what tells you
+  /// whether the burst is login or something that never settles.
+  void _recordActiveUserCall(int queuedMs, int heldMs) {
+    _activeUserCalls++;
+    _activeUserQueuedMs += queuedMs;
+    _activeUserHeldMs += heldMs;
+
+    final now = DateTime.now();
+    final since = _activeUserWindowStart ??= now;
+    if (now.difference(since) < _activeUserReportInterval) return;
+
+    _logger.info(
+      '[$_sessionId] getActiveUser: $_activeUserCalls calls in '
+      '${now.difference(since).inMilliseconds}ms '
+      '(${_activeUserCalls * 2} identity RPCs), '
+      'lock queue ${_activeUserQueuedMs}ms, lock held ${_activeUserHeldMs}ms',
+    );
+    _activeUserCalls = 0;
+    _activeUserQueuedMs = 0;
+    _activeUserHeldMs = 0;
+    _activeUserWindowStart = now;
+  }
+
+  Future<KdfUser?> _resolveActiveUserWithinWriteLock() async {
+    // A cached identity is not authentication proof: KDF may have restarted
+    // in no-auth mode or switched wallets outside this service. Always bind
+    // security-sensitive wallet storage to a fresh active-wallet and
+    // public-key-hash response from the running KDF instance.
+    final user = await _getActiveUser();
+    _emitAuthStateChange(user);
+    return user;
+  }
+
+  Future<T> _runAuthenticatedWriteOperation<T>(
+    Future<T> Function(KdfUser activeUser) operation,
+  ) async {
+    return _lockWriteOperation(() async {
+      var activeUserResolutionCompleted = false;
+      try {
+        final activeUser = await _resolveActiveUserWithinWriteLock();
+        activeUserResolutionCompleted = true;
+        if (activeUser == null) throw AuthException.notSignedIn();
+        return operation(activeUser);
+      } catch (_) {
+        if (!activeUserResolutionCompleted) {
+          await _clearFailedAuthenticatedKdfWithinWriteLock();
+        }
+        rethrow;
+      }
     });
   }
 
@@ -425,19 +579,11 @@ class KdfAuthService implements IAuthService {
     required bool encrypted,
     required String? walletPassword,
   }) async {
-    return _runReadOperation(() async {
-      assert(
-        encrypted || walletPassword != null,
-        'walletPassword is required to retrieve plaintext mnemonic.',
-      );
-
-      if (await getActiveUser() == null) {
-        throw AuthException(
-          'No user signed in',
-          type: AuthExceptionType.unauthorized,
-        );
-      }
-
+    assert(
+      encrypted || walletPassword != null,
+      'walletPassword is required to retrieve plaintext mnemonic.',
+    );
+    return _runAuthenticatedWriteOperation((_) {
       return _getMnemonic(encrypted: encrypted, walletPassword: walletPassword);
     });
   }
@@ -447,14 +593,7 @@ class KdfAuthService implements IAuthService {
     required String currentPassword,
     required String newPassword,
   }) async {
-    return _runReadOperation(() async {
-      if (await getActiveUser() == null) {
-        throw AuthException(
-          'No user signed in',
-          type: AuthExceptionType.unauthorized,
-        );
-      }
-
+    return _runAuthenticatedWriteOperation((_) async {
       try {
         await _client.rpc.wallet.changeMnemonicPassword(
           currentPassword: currentPassword,
@@ -521,13 +660,19 @@ class KdfAuthService implements IAuthService {
     required String password,
   }) async {
     await _ensureKdfRunning();
-    return _runReadOperation(() async {
+    return _lockWriteOperation(() async {
       try {
         await _client.rpc.wallet.deleteWallet(
           walletName: walletName,
           password: password,
         );
         await _secureStorage.deleteUser(walletName);
+        // A wallet re-imported under this name is not the wallet this session
+        // generated - it may have any amount of history - so the marker must
+        // not outlive the deletion. Compound ids are `name` or `name:<hash>`.
+        _walletsGeneratedThisSession.removeWhere(
+          (id) => id == walletName || id.startsWith('$walletName:'),
+        );
         _invalidateUsersCache();
       } on MmRpcException catch (e) {
         throw _mapDeleteWalletRpcError(e);
@@ -714,13 +859,16 @@ class KdfAuthService implements IAuthService {
       await _shutdownSubscription?.cancel();
       _shutdownSubscription = null;
       await _stopKdf();
-      _authStateController.close();
+      await _authStateController.close();
       _lastEmittedUser = null;
     });
   }
 
   late final Future<KdfStartupConfig> _noAuthConfig =
-      KdfStartupConfig.noAuthStartup(rpcPassword: _hostConfig.rpcPassword);
+      KdfStartupConfig.noAuthStartup(
+        rpcPassword: _hostConfig.rpcPassword,
+        rpcPort: _hostConfig.port,
+      );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
     final mnemonic = await getMnemonic(
@@ -746,33 +894,32 @@ class KdfAuthService implements IAuthService {
     });
   }
 
-  /// Returns the [KdfUser] associated with the active wallet if authenticated,
-  /// otherwise throws an [AuthException].
-  Future<KdfUser> _activeUserOrThrow() async {
-    final activeUser = await getActiveUser();
-    if (activeUser == null) {
-      throw AuthException.notSignedIn();
-    }
-    return activeUser;
-  }
-
   @override
   Future<void> setActiveUserMetadata(Map<String, dynamic> metadata) async {
-    await _metadataMutex.protect(() async {
-      final activeUser = await _activeUserOrThrow();
-      final user = await _secureStorage.getUser(activeUser.walletId.name);
-      if (user == null) throw AuthException.notFound();
+    await _runAuthenticatedWriteOperation(
+      (activeUser) => _metadataMutex.protect(() async {
+        final user = await _secureStorage.getUser(activeUser.walletId.name);
+        if (user == null) throw AuthException.notFound();
 
-      final updatedUser = user.copyWith(metadata: metadata);
-      await _secureStorage.saveUser(updatedUser);
+        final persistedUser = user.copyWith(metadata: metadata);
+        await _secureStorage.saveUser(persistedUser);
 
-      // Update cache silently without triggering auth state change. Updating
-      // the storage and cache at the same time emulates the same behaviour as
-      // before. Update user metadata for any subsequent access without emitting
-      // auth state changes, as the metadata field is currently used for events
-      // like coin activation, wallet type (derivation), and seed backup status
-      _lastEmittedUser = updatedUser;
-    });
+        // Update cache silently without triggering auth state change. Updating
+        // the storage and cache at the same time emulates the same behaviour as
+        // before. Update user metadata for any subsequent access without
+        // emitting auth state changes, as the metadata field is currently used
+        // for events like coin activation, wallet type (derivation), and seed
+        // backup status.
+        //
+        // Keep the wallet identity from the current runtime session. In
+        // particular, an identity RPC outage intentionally produces a
+        // name-only runtime user so the encrypted GasFree journal remains
+        // locked. Reloading the stored identity into this cache would bypass
+        // that verification boundary after an otherwise unrelated metadata
+        // write.
+        _lastEmittedUser = activeUser.copyWith(metadata: metadata);
+      }),
+    );
   }
 
   @override
@@ -780,30 +927,31 @@ class KdfAuthService implements IAuthService {
     String key,
     dynamic Function(dynamic currentValue) transform,
   ) async {
-    await _metadataMutex.protect(() async {
-      final activeUser = await _activeUserOrThrow();
-      final user = await _secureStorage.getUser(activeUser.walletId.name);
-      if (user == null) throw AuthException.notFound();
+    await _runAuthenticatedWriteOperation(
+      (activeUser) => _metadataMutex.protect(() async {
+        final user = await _secureStorage.getUser(activeUser.walletId.name);
+        if (user == null) throw AuthException.notFound();
 
-      final metadata = JsonMap.from(user.metadata);
-      final transformed = transform(metadata[key]);
-      if (transformed == null) {
-        metadata.remove(key);
-      } else {
-        metadata[key] = transformed;
-      }
+        final metadata = JsonMap.from(user.metadata);
+        final transformed = transform(metadata[key]);
+        if (transformed == null) {
+          metadata.remove(key);
+        } else {
+          metadata[key] = transformed;
+        }
 
-      final updatedUser = user.copyWith(metadata: metadata);
-      await _secureStorage.saveUser(updatedUser);
-      _lastEmittedUser = updatedUser;
-    });
+        final persistedUser = user.copyWith(metadata: metadata);
+        await _secureStorage.saveUser(persistedUser);
+        _lastEmittedUser = activeUser.copyWith(metadata: metadata);
+      }),
+    );
   }
 
   @override
   Future<void> restoreSession(KdfUser user) async {
-    // Only attempt to restore the session if KDF is running
-    return _runReadOperation(() async {
+    return _lockWriteOperation(() async {
       try {
+        // Only attempt to restore the session if KDF is running.
         // Check if KDF is running
         if (!await _kdfFramework.isRunning()) {
           throw AuthException(
@@ -813,9 +961,9 @@ class KdfAuthService implements IAuthService {
         }
 
         // Verify the wallet exists in KDF
-        final wallets = await getUsers();
+        final wallets = await _getUsersWithinAuthLock();
         final walletExists = wallets.any(
-          (w) => w.walletId.name == user.walletId.name,
+          (wallet) => wallet.walletId.name == user.walletId.name,
         );
 
         if (!walletExists) {
@@ -825,12 +973,21 @@ class KdfAuthService implements IAuthService {
           );
         }
 
-        // Update internal state and emit auth state change
-        _lastEmittedUser = user;
-        _emitAuthStateChange(user);
-      } catch (e) {
+        final activeUser = await _getActiveUser();
+        if (activeUser == null ||
+            activeUser.walletId.name != user.walletId.name) {
+          throw AuthException(
+            'Active KDF wallet does not match the restored session',
+            type: AuthExceptionType.unauthorized,
+          );
+        }
+
+        // Update internal state and emit auth state change.
+        _emitAuthStateChange(activeUser);
+      } catch (error) {
+        await _clearFailedAuthenticatedKdfWithinWriteLock();
         throw AuthException(
-          'Failed to restore session: $e',
+          'Failed to restore session: $error',
           type: AuthExceptionType.generalAuthError,
         );
       }
@@ -881,7 +1038,10 @@ class KdfAuthService implements IAuthService {
     }
   }
 
-  Future<bool> _performHealthCheck() async {
+  Future<bool> _performHealthCheck() =>
+      _lockWriteOperation(_performHealthCheckWithinWriteLock);
+
+  Future<bool> _performHealthCheckWithinWriteLock() async {
     _logger.info('[$_sessionId] _performHealthCheck: Starting health check');
     final stopwatch = Stopwatch()..start();
 
@@ -966,7 +1126,7 @@ class KdfAuthService implements IAuthService {
       // Use _forceStartKdf instead of _ensureKdfRunning to bypass isRunning check
       _logger.info('[$_sessionId] _performHealthCheck: Force starting KDF');
       final restartStopwatch = Stopwatch()..start();
-      await _forceStartKdf();
+      await _forceStartKdfWithinWriteLock();
       restartStopwatch.stop();
       _logger.info(
         '[$_sessionId] _performHealthCheck: KDF force start completed in ${restartStopwatch.elapsedMilliseconds}ms',
@@ -1037,35 +1197,35 @@ class KdfAuthService implements IAuthService {
 
   /// Force starts KDF without checking isRunning() status
   /// This is needed when we've determined KDF is unhealthy but isRunning() returns stale true
-  Future<void> _forceStartKdf() async {
+  Future<void> _forceStartKdfWithinWriteLock() async {
     _logger.info(
       '[$_sessionId] _forceStartKdf: Starting KDF (bypassing isRunning check)',
     );
-    await _lockWriteOperation(() async {
-      final startStopwatch = Stopwatch()..start();
-      final result = await _kdfFramework.startKdf(await _noAuthConfig);
-      startStopwatch.stop();
-      _logger.info(
-        '[$_sessionId] _forceStartKdf: startKdf() returned ${result.name} in ${startStopwatch.elapsedMilliseconds}ms',
-      );
+    final startStopwatch = Stopwatch()..start();
+    final result = await _kdfFramework.startKdf(await _noAuthConfig);
+    startStopwatch.stop();
+    _logger.info(
+      '[$_sessionId] _forceStartKdf: startKdf() returned ${result.name} in '
+      '${startStopwatch.elapsedMilliseconds}ms',
+    );
 
-      if (!result.isStartingOrAlreadyRunning()) {
-        _logger.severe(
-          '[$_sessionId] _forceStartKdf: Failed to start KDF: ${result.name}',
-        );
-        throw KdfExtensions._mapStartupErrorToAuthException(result);
-      }
-
-      _kdfFramework.resetHttpClient();
-      _logger.info('[$_sessionId] _forceStartKdf: Waiting for RPC to be ready');
-      final waitStopwatch = Stopwatch()..start();
-      await _waitUntilKdfRpcReady();
-      waitStopwatch.stop();
-      _logger.info(
-        '[$_sessionId] _forceStartKdf: RPC ready after '
-        '${waitStopwatch.elapsedMilliseconds}ms',
+    if (!result.isStartingOrAlreadyRunning()) {
+      _logger.severe(
+        '[$_sessionId] _forceStartKdf: Failed to start KDF: ${result.name}',
       );
-    });
+      throw KdfExtensions._mapStartupErrorToAuthException(result);
+    }
+
+    _kdfFramework.resetHttpClient();
+    _logger.info('[$_sessionId] _forceStartKdf: Waiting for RPC to be ready');
+    final waitStopwatch = Stopwatch()..start();
+    await _waitUntilKdfRpcReady();
+    await _subscribeToShutdownSignals();
+    waitStopwatch.stop();
+    _logger.info(
+      '[$_sessionId] _forceStartKdf: RPC ready after '
+      '${waitStopwatch.elapsedMilliseconds}ms',
+    );
   }
 
   /// Verifies KDF is healthy by checking if it responds to a version RPC

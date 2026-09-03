@@ -36,11 +36,14 @@ jobs:
 
       - name: Determine branch from config
         id: determine-branch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           BRANCH=$(cat packages/komodo_defi_framework/app_build/build_config.json | jq -r '.api.branch')
           # If workflow dispatch provided a branch, use that instead
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.branch }}" ]]; then
-            BRANCH="${{ github.event.inputs.branch }}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$INPUT_BRANCH" ]]; then
+            BRANCH="$INPUT_BRANCH"
           fi
           echo "Using branch: $BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
@@ -63,12 +66,136 @@ jobs:
         run: |
           BRANCH="${{ steps.determine-branch.outputs.branch }}"
           CURRENT_COMMIT="${{ steps.current-details.outputs.commit }}"
+          SOURCE_URLS='${{ steps.get-source-urls.outputs.source_urls }}'
 
-          # Get latest commit for the branch
-          TOKEN=${{ secrets.GITHUB_TOKEN }}
-          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
-            "https://api.github.com/repos/GLEECBTC/komodo-defi-framework/commits/$BRANCH")
-          NEW_COMMIT=$(echo $RESPONSE | jq -r '.sha')
+          # KDF lives in the private GLEECBTC/kdf-internal repo, so a branch tip
+          # cannot be resolved through the GitHub API without a PAT. The dev-build
+          # mirrors publish a per-branch manifest carrying the commit each artefact
+          # was built from, which is the thing we actually roll to.
+          SAFE_BRANCH="${BRANCH//\//-}"
+          NEW_COMMIT=""
+          # `|| true` on every network probe below is load-bearing, and stays
+          # so even though the step currently survives without it. A missing
+          # manifest is an EXPECTED outcome here, not an error, and both probes
+          # are pipelines inside a command substitution: with `set -e` alone the
+          # pipeline reports its last command's status, so a 404 from curl is
+          # masked by jq (or by head) exiting 0. The moment anything adds
+          # `shell: bash` to this step or a `defaults.run.shell`, pipefail turns
+          # on, the masked failure surfaces, and the step dies here - before the
+          # next mirror, before the listing fallback, before the warning-only
+          # path. `flutter-tests.yml` in this repo already declares `shell: bash`,
+          # so that is one edit away. Keep these guards.
+          for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
+            MANIFEST="${SOURCE_URL%/}/$SAFE_BRANCH/manifest.json"
+            echo "Checking manifest: $MANIFEST"
+            CANDIDATE=$(curl -sf --max-time 30 "$MANIFEST" | jq -r '.commit // empty' || true)
+            if [[ -n "$CANDIDATE" ]]; then
+              NEW_COMMIT="$CANDIDATE"
+              echo "Resolved $NEW_COMMIT from $SOURCE_URL"
+              break
+            fi
+          done
+
+          # No manifest is published for every branch - `main` has none on any
+          # mirror, and that is not expected to change. Fall back to the branch
+          # directory listing, which names each artefact `kdf_<sha>-<target>.zip`.
+          # A 40-character name IS the full sha and rolls exactly like the
+          # manifest path; a short name can only prove a *newer build exists*,
+          # because it cannot satisfy `require_full_commit_hash` on its own.
+          NEW_SHORT=""
+          if [[ -z "$NEW_COMMIT" ]]; then
+            for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
+              # Ask for newest-first and take the first match, in document
+              # order. Do NOT sort the shas: they are hex, so a lexical sort is
+              # not chronological (`a1b2c3d` would sort before an older
+              # `f3efd2c`). If a mirror ignores the query it falls back to its
+              # default ordering, which is name-ascending and may pick the
+              # wrong build - a spurious "new build available" note for a
+              # short name, or a roll PR naming the wrong build for a full
+              # 40-char name. Rolls only ever open a PR, so a wrong pick is
+              # reviewed, not landed.
+              LISTING="${SOURCE_URL%/}/$SAFE_BRANCH/?sort=time&order=desc"
+              echo "No manifest; reading listing: $LISTING"
+              # Guarded for the same reason as the manifest probe above, and
+              # this one has a second failure mode: `grep` exits 1 when a
+              # listing simply has no artefact yet, so under pipefail even a
+              # successful fetch would kill the step.
+              CANDIDATE=$(curl -sf --max-time 30 "$LISTING" \
+                | grep -oE 'kdf_[0-9a-f]{7,40}-wasm\.zip' \
+                | sed -E 's/^kdf_([0-9a-f]+)-wasm\.zip$/\1/' \
+                | head -n 1 || true)
+              if [[ -n "$CANDIDATE" ]]; then
+                if [[ "${#CANDIDATE}" -eq 40 ]]; then
+                  # Already the full sha: promote it and let the roll job run
+                  # instead of parking on the report-only path below.
+                  NEW_COMMIT="$CANDIDATE"
+                  echo "Resolved full sha $NEW_COMMIT from the listing on $SOURCE_URL"
+                else
+                  NEW_SHORT="$CANDIDATE"
+                  echo "Resolved short sha $NEW_SHORT from $SOURCE_URL"
+                fi
+                break
+              fi
+            done
+          fi
+
+          if [[ -z "$NEW_COMMIT" && -z "$NEW_SHORT" ]]; then
+            # Neither a manifest nor a parseable listing. Not this repo's to
+            # fix, and this job is scheduled, so it must not turn the default
+            # branch red every midnight - but the pin cannot advance while it
+            # lasts, so say so where a human will see it.
+            echo "::warning::No mirror published a manifest or a readable listing for branch $BRANCH ($SAFE_BRANCH); the KDF pin cannot advance."
+            {
+              echo "### KDF roll skipped"
+              echo
+              echo "Neither \`$SAFE_BRANCH/manifest.json\` nor a readable"
+              echo "artefact listing was found, so the branch tip could not be"
+              echo "resolved. The pin stays at \`$CURRENT_COMMIT\`."
+              echo
+              echo "Mirrors checked:"
+              for SOURCE_URL in $(echo "$SOURCE_URLS" | jq -r '.[]'); do
+                echo "- \`${SOURCE_URL%/}/$SAFE_BRANCH/\`"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [[ -z "$NEW_COMMIT" ]]; then
+            # Listing-only path. Resolving the short sha to the full 40 chars
+            # needs the GitHub API against the private GLEECBTC/kdf-internal
+            # repo, which `secrets.GITHUB_TOKEN` cannot read - so the automated
+            # roll cannot complete here. Detecting the new build is still the
+            # useful half of this job: report it and hand over the exact command.
+            if [[ "${CURRENT_COMMIT:0:${#NEW_SHORT}}" == "$NEW_SHORT" ]]; then
+              echo "Listing short sha $NEW_SHORT matches the pin; nothing to do."
+              echo "has_updates=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "::warning::A newer KDF build ($NEW_SHORT) is published for $BRANCH, but rolling to it needs a full 40-char sha."
+            {
+              echo "### New KDF build available: \`$NEW_SHORT\`"
+              echo
+              echo "Pinned: \`$CURRENT_COMMIT\` — published: \`$NEW_SHORT\`."
+              echo
+              echo "\`$SAFE_BRANCH\` publishes no \`manifest.json\`, and the full"
+              echo "sha cannot be resolved here (the GitHub API for the private"
+              echo "\`GLEECBTC/kdf-internal\` repo needs a PAT, not"
+              echo "\`secrets.GITHUB_TOKEN\`). Roll it by hand:"
+              echo
+              echo '```bash'
+              echo "dart run packages/komodo_wallet_cli/bin/update_api_config.dart \\"
+              echo "  --branch $BRANCH --commit <full-40-char-sha-for-$NEW_SHORT> \\"
+              echo "  --source mirror --mirror-url $(echo "$SOURCE_URLS" | jq -r '.[0]') \\"
+              echo "  --platform all \\"
+              echo "  --config packages/komodo_defi_framework/app_build/build_config.json \\"
+              echo "  --output-dir packages/komodo_defi_framework/app_build/temp_downloads \\"
+              echo "  --strict --verbose"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
           echo "Current commit: $CURRENT_COMMIT"
           echo "Latest commit: $NEW_COMMIT"
@@ -133,11 +260,19 @@ jobs:
             fi
             
             echo "Using source type: $SOURCE_TYPE"
-            
-            # Try roll with this source
+
+            # Pin the exact commit the check job resolved and point the tool at
+            # the mirror being tried. Without --commit the tool re-resolves the
+            # branch tip on its own, so a tip that moved between the two jobs -
+            # or mirrors publishing different tips - could pin a different
+            # commit than the one this branch and PR are named for. Without
+            # --mirror-url every iteration of this loop would query the tool's
+            # default mirror rather than $SOURCE_URL.
             if dart bin/update_api_config.dart \
               --branch "$BRANCH" \
               --source "$SOURCE_TYPE" \
+              --commit "$NEW_COMMIT" \
+              --mirror-url "$SOURCE_URL" \
               --config ../komodo_defi_framework/app_build/build_config.json \
               --output-dir ../komodo_defi_framework/app_build/temp_downloads \
               --verbose; then

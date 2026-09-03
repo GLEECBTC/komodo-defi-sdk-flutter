@@ -13,6 +13,10 @@ class AddressSelectInput extends StatelessWidget {
     this.hint = 'Select Address',
     this.verified,
     this.onCopied,
+    this.displayAddress,
+    this.copyAddress,
+    this.balanceLabel,
+    this.copyTooltip = 'Copy address',
     super.key,
   });
 
@@ -24,6 +28,18 @@ class AddressSelectInput extends StatelessWidget {
   final bool Function(PubkeyInfo)? verified;
   final void Function(PubkeyInfo)? onCopied;
 
+  /// Overrides the address shown in the closed selector and search results.
+  final String Function(PubkeyInfo)? displayAddress;
+
+  /// Overrides the address copied from search results.
+  final String Function(PubkeyInfo)? copyAddress;
+
+  /// Overrides the balance/status text shown next to each address.
+  final String Function(PubkeyInfo)? balanceLabel;
+
+  /// Tooltip for the copy action in search results.
+  final String copyTooltip;
+
   Future<void> _showSearch(BuildContext context) async {
     final result = await showAddressSearch(
       context,
@@ -31,6 +47,10 @@ class AddressSelectInput extends StatelessWidget {
       assetNameLabel: assetName,
       verified: verified,
       onCopied: onCopied,
+      displayAddress: displayAddress,
+      copyAddress: copyAddress,
+      balanceLabel: balanceLabel,
+      copyTooltip: copyTooltip,
       searchHint: hint,
     );
 
@@ -43,6 +63,14 @@ class AddressSelectInput extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDisabled = onAddressSelected == null;
+    final selected = selectedAddress;
+    final selectedDisplayAddress = selected == null
+        ? null
+        : displayAddress?.call(selected) ?? selected.address;
+    final selectedBalanceLabel = selected == null
+        ? null
+        : balanceLabel?.call(selected) ??
+              '(${selected.balance.spendable} $assetName)';
 
     return Opacity(
       opacity: isDisabled ? 0.5 : 1.0,
@@ -66,18 +94,21 @@ class AddressSelectInput extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: selectedAddress != null
+                child: selected != null
                     ? Row(
                         children: [
-                          Text(
-                            selectedAddress!.formatted,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w500,
-                              letterSpacing: 0.5,
+                          Flexible(
+                            child: Text(
+                              formatCompactAddress(selectedDisplayAddress!),
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 0.5,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 4),
-                          if (verified?.call(selectedAddress!) ?? false) ...[
+                          if (verified?.call(selected) ?? false) ...[
                             Icon(
                               Icons.verified,
                               size: 16,
@@ -85,11 +116,14 @@ class AddressSelectInput extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                           ],
-                          Text(
-                            '(${selectedAddress!.balance.spendable} $assetName)',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.textTheme.bodySmall?.color
-                                  ?.withValues(alpha: 0.7),
+                          Flexible(
+                            child: Text(
+                              selectedBalanceLabel!,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.textTheme.bodySmall?.color
+                                    ?.withValues(alpha: 0.7),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),

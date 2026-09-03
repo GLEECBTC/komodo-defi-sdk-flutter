@@ -28,20 +28,6 @@ class SharedActivationCoordinator {
   /// Track pending activations to prevent duplicates
   final Map<AssetId, Completer<ActivationResult>> _pendingActivations = {};
 
-  /// Track active activation streams for joining
-  final Map<AssetId, StreamController<ActivationProgress>> _activeStreams = {};
-
-  /// Track failed activations
-  final Set<AssetId> _failedActivations = <AssetId>{};
-
-  /// Stream controller for broadcasting failed activations changes
-  final StreamController<Set<AssetId>> _failedActivationsController =
-      StreamController<Set<AssetId>>.broadcast();
-
-  /// Stream controller for broadcasting pending activations changes
-  final StreamController<Set<AssetId>> _pendingActivationsController =
-      StreamController<Set<AssetId>>.broadcast();
-
   /// Current wallet ID being tracked
   WalletId? _currentWalletId;
 
@@ -54,6 +40,7 @@ class SharedActivationCoordinator {
     // If the wallet ID has changed, reset all state
     if (_currentWalletId != newWalletId) {
       await _resetState();
+      _activationManager.resetActivationSessionState();
       _currentWalletId = newWalletId;
     }
   }
@@ -74,27 +61,84 @@ class SharedActivationCoordinator {
       }
     }
     _pendingActivations.clear();
+  }
 
-    // Close all active streams
-    for (final controller in _activeStreams.values) {
-      if (!controller.isClosed) {
-        controller.close();
-      }
+  /// Upper bound on one activation attempt, for assets whose activation is
+  /// expected to complete promptly.
+  ///
+  /// The protocol strategies poll KDF in `while (!isComplete)` loops with no
+  /// exit other than a terminal status, and they emit a progress event on every
+  /// iteration - so a stalled activation looks like a *healthy* one to any
+  /// inter-event timeout. Without a total deadline the completer below stays
+  /// pending forever, and because [activateAsset] hands that same completer to
+  /// every later caller, a retry re-joins the wedged attempt instead of
+  /// starting a new one. A caller-side `.timeout()` cannot fix that: Dart
+  /// timeouts do not cancel, so the entry in [_pendingActivations] survives.
+  ///
+  /// Deliberately shorter than the app's own per-attempt bound
+  /// (`CoinsRepo.activateAssetsSync`), so this fires first, clears the pending
+  /// entry, and lets the app's retry perform a genuinely fresh attempt. That
+  /// ordering is an invariant: raising either bound requires raising the app's
+  /// to stay above [evmActivationTimeout].
+  ///
+  /// This is a backstop against a *wedged* activation, not a UX deadline, so it
+  /// has to sit above the slowest activation that legitimately completes.
+  ///
+  /// The 8.2s BTC-segwit / 6.1s KMD figures this used to cite were measured
+  /// against the concurrent HD gap scan, which is **not** in the pinned KDF -
+  /// it is `407cf6c0a` / `ba4b3996e`, kdf-internal PR #18, still unmerged. The
+  /// pin (`main`, `f3efd2c`) walks the gap one address at a time, where the
+  /// same runs measured BTC-segwit 121.2s and KMD 46.9s
+  /// (`docs/KDF_LATENCY_REPORT.md`, `docs/KDF_PERF_STACK_DESCOPE.md`).
+  ///
+  /// Three minutes still holds for **software** wallets, because those numbers
+  /// were taken at `gap_limit: 20` and `HdGapLimit.resolve` sends
+  /// `software` = 3 (`newlyGeneratedFirstSignIn` = 1) for them, so the walk is
+  /// ~4 probes rather than 21 at a measured ~2.1s per gap unit.
+  ///
+  /// **Trezor is the exception and has the least headroom.** `HdGapLimit.resolve`
+  /// returns `hardware` = 20 for `PrivateKeyPolicy.trezor()`, so a hardware
+  /// wallet still walks the full gap - 121.2s of this 180s bound on BTC-segwit,
+  /// ~1.5x, not 6x. It is a backstop rather than a budget, so that is survivable,
+  /// but it is the number to re-measure before anyone shrinks this bound, and it
+  /// is why the bound must not shrink at all while the pin lacks PR #18.
+  static const Duration defaultActivationTimeout = Duration(minutes: 3);
+
+  /// The EVM family is far slower than everything else: `enable_eth_with_tokens`
+  /// is a single *synchronous* RPC that does HD address discovery inline, and it
+  /// was measured at 196.9-346.4s for ETH + 2 ERC-20 tokens on a fresh HD
+  /// wallet. A 60s bound - which this used to apply to every protocol - fired
+  /// mid-activation on every such login, published `failed`, and let the retry
+  /// issue a duplicate concurrent enable.
+  static const Duration evmActivationTimeout = Duration(minutes: 8);
+
+  /// ZHTLC activation legitimately runs for minutes (parameter download and
+  /// block scanning), so it is exempt - a deadline there would turn correct
+  /// slow progress into a failure.
+  Duration? _timeoutFor(Asset asset) {
+    if (asset.id.subClass == CoinSubClass.zhtlc) return null;
+    // Matches on the protocol class rather than the sub-class so that every
+    // member of the EVM family is covered, including ones added later: the
+    // whole avx20/bep20/matic/arbitrum/base/... arm maps to `Erc20Protocol`.
+    // TRX and TRC-20 route through `enable_eth_with_tokens` too.
+    final protocol = asset.protocol;
+    if (protocol is Erc20Protocol ||
+        protocol is TrxProtocol ||
+        protocol is Trc20Protocol) {
+      return evmActivationTimeout;
     }
-    _activeStreams.clear();
-
-    // Clear failed activations
-    _failedActivations.clear();
-
-    // Notify stream watchers of state changes
-    _broadcastPendingActivations();
-    _broadcastFailedActivations();
+    return defaultActivationTimeout;
   }
 
   /// Activate an asset with coordination across all managers.
   /// Returns a Future that completes when activation is finished.
   /// Multiple concurrent calls for the same asset will share the same result.
-  Future<ActivationResult> activateAsset(Asset asset) async {
+  ///
+  /// [timeout] overrides [defaultActivationTimeout] for this call.
+  Future<ActivationResult> activateAsset(
+    Asset asset, {
+    Duration? timeout,
+  }) async {
     if (_isDisposed) {
       throw StateError('SharedActivationCoordinator has been disposed');
     }
@@ -109,26 +153,92 @@ class SharedActivationCoordinator {
       return existingActivation.future;
     }
 
+    final shouldRefreshTronGaslessActivation = _activationManager
+        .shouldRefreshTronGaslessActivation(asset);
+
     // Check if asset is already active
     final isActive = await _activationManager.isAssetActive(asset.id);
-    if (isActive) {
-      return ActivationResult.success(asset.id);
+    if (isActive && !shouldRefreshTronGaslessActivation) {
+      return ActivationResult.alreadyActive(asset.id);
     }
 
     final completer = Completer<ActivationResult>();
+    // Attach a side listener before anything can fail it. The caller only gets
+    // `completer.future` if it reaches the `return` below, and callers that
+    // joined an in-flight attempt never reach this method at all - so an
+    // attempt can be in flight with a completer nobody is listening to.
+    // [_resetState] and [dispose] both complete pending attempts with an error,
+    // which would then escape as an unhandled async error: on a wallet switch
+    // or sign-out during login activations, i.e. exactly when several are in
+    // flight. Joiners still receive the error through their own subscription.
+    // `ActivationManager._registerActivation` does the same thing for the same
+    // reason.
+    unawaited(
+      completer.future.catchError(
+        (Object error) => ActivationResult.failure(asset.id, error.toString()),
+      ),
+    );
     _pendingActivations[asset.id] = completer;
 
     // Clear any previous failed status for this asset
-    if (_failedActivations.remove(asset.id)) {
-      _broadcastFailedActivations();
-    }
 
     // Broadcast that this asset is now pending
-    _broadcastPendingActivations();
+    final deadline = timeout ?? _timeoutFor(asset);
+    // Drive the activation in its own future so `completer.future` is returned
+    // to the caller synchronously. Awaiting the progress stream inline meant a
+    // stream that never emits and never closes suspended this method *before*
+    // the return - so the deadline timer below could complete the completer and
+    // the initiating caller would still wait forever. Joiners were unaffected,
+    // which is what made it easy to miss.
+    unawaited(_driveActivation(asset, completer, deadline));
+    return completer.future;
+  }
 
+  /// Runs one activation attempt to a terminal state and completes [completer].
+  ///
+  /// Split out of [activateAsset] purely so that method can return the future
+  /// without awaiting this one - see the comment at its call site.
+  Future<void> _driveActivation(
+    Asset asset,
+    Completer<ActivationResult> completer,
+    Duration? deadline,
+  ) async {
+    Timer? deadlineTimer;
     try {
-      // Subscribe to activation stream and wait for completion
+      if (deadline != null) {
+        deadlineTimer = Timer(deadline, () {
+          if (completer.isCompleted) return;
+          log(
+            'Activation of ${asset.id.id} exceeded ${deadline.inSeconds}s '
+            'without a terminal status; abandoning this attempt',
+            name: 'SharedActivationCoordinator',
+          );
+          final reason = 'Activation timed out after ${deadline.inSeconds}s';
+          // Release BOTH in-flight registrations. Clearing only the one below
+          // is not enough: the wedged generator is still suspended inside the
+          // hung status poll, so its own cleanup never runs and
+          // `ActivationManager._activationCompleters` keeps the dead completer.
+          // The next attempt would then be told "already in progress" and park
+          // on it - a fresh coordinator attempt that issues no new RPC, which
+          // is indistinguishable from the stall this deadline exists to break.
+          unawaited(_activationManager.abandonActivation(asset.id, reason));
+          completer.complete(ActivationResult.failure(asset.id, reason));
+          // Release the slot here rather than waiting for `finally`: if the
+          // progress stream is wedged mid-RPC the `await for` below never
+          // resumes, so `finally` never runs and the failed completer would
+          // stay registered - making every later attempt return this stale
+          // failure instead of retrying.
+          _removePendingActivation(asset.id, completer);
+        });
+      }
+
+      // Subscribe to activation stream and wait for completion.
+      //
+      // The `completer.isCompleted` check also breaks the loop when the
+      // deadline above fired: cancelling the `await for` tears down the
+      // strategy's poll loop instead of leaving it running unobserved.
       await for (final progress in _activationManager.activateAsset(asset)) {
+        if (completer.isCompleted) break;
         if (progress.isComplete) {
           if (progress.isSuccess) {
             // Wait for coin to actually become available before declaring success
@@ -139,8 +249,10 @@ class SharedActivationCoordinator {
                 completer.complete(result);
               }
             } catch (e) {
-              _failedActivations.add(asset.id);
-              _broadcastFailedActivations();
+              _activationManager.recordActivationFailure(
+                asset.id,
+                'Activation completed but the coin did not become available',
+              );
               final result = ActivationResult.failure(
                 asset.id,
                 'Activation completed but coin did not become available: $e',
@@ -150,8 +262,6 @@ class SharedActivationCoordinator {
               }
             }
           } else {
-            _failedActivations.add(asset.id);
-            _broadcastFailedActivations();
             final result = ActivationResult.failure(
               asset.id,
               progress.errorMessage ?? 'Unknown activation error',
@@ -165,8 +275,6 @@ class SharedActivationCoordinator {
       }
     } catch (e, stackTrace) {
       if (!completer.isCompleted) {
-        _failedActivations.add(asset.id);
-        _broadcastFailedActivations();
         log(
           'Activation failed for ${asset.id.id}: $e',
           name: 'SharedActivationCoordinator',
@@ -176,87 +284,58 @@ class SharedActivationCoordinator {
         completer.complete(ActivationResult.failure(asset.id, e.toString()));
       }
     } finally {
-      _pendingActivations.remove(asset.id);
-      _broadcastPendingActivations();
-    }
-
-    return completer.future;
-  }
-
-  /// Get activation progress stream for an asset.
-  /// Multiple subscribers will share the same stream.
-  Stream<ActivationProgress> activateAssetStream(Asset asset) {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-
-    // Check if there's already an active stream for this asset
-    var controller = _activeStreams[asset.id];
-    if (controller != null && !controller.isClosed) {
-      log(
-        'Joining existing activation stream for ${asset.id.id}',
-        name: 'SharedActivationCoordinator',
-      );
-      return controller.stream;
-    }
-
-    // Create new broadcast controller
-    controller = StreamController<ActivationProgress>.broadcast(
-      onCancel: () {
-        // Clean up when all listeners cancel
-        if (controller?.hasListener == false) {
-          _activeStreams.remove(asset.id);
-          controller?.close();
-        }
-      },
-    );
-    _activeStreams[asset.id] = controller;
-
-    // Start activation and forward progress to subscribers
-    _activationManager
-        .activateAsset(asset)
-        .listen(
-          (progress) {
-            final currentController = _activeStreams[asset.id];
-            if (currentController != null && !currentController.isClosed) {
-              currentController.add(progress);
-            }
-
-            // Clean up when activation completes
-            if (progress.isComplete) {
-              // For stream-based activation, we don't wait for coin availability
-              // as subscribers may want to handle this themselves
-              Timer.run(() {
-                final controllerToClose = _activeStreams.remove(asset.id);
-                if (controllerToClose != null && !controllerToClose.isClosed) {
-                  controllerToClose.close();
-                }
-              });
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            final currentController = _activeStreams[asset.id];
-            if (currentController != null && !currentController.isClosed) {
-              currentController.addError(error, stackTrace);
-              _activeStreams.remove(asset.id);
-              currentController.close();
-            }
-          },
-          onDone: () {
-            final controllerToClose = _activeStreams.remove(asset.id);
-            if (controllerToClose != null && !controllerToClose.isClosed) {
-              controllerToClose.close();
-            }
-          },
+      // The `await for` above only completes the completer when it sees a
+      // terminal `progress.isComplete`. A progress stream that ends without one
+      // - an activation strategy returning early, a controller closed by a
+      // session reset, an empty stream - falls straight through to here with
+      // the completer still pending, and `completer.future` below then never
+      // resolves.
+      //
+      // That future is awaited by every caller of this coordinator:
+      // `BalanceManager._ensureAssetActivated` (so the balance watcher never
+      // starts) and the wallet's login fan-out via `ensureAssetActivated` (so
+      // `Future.wait` over the whole batch never returns, the coin holds
+      // `activating` forever, and the app's post-login bookkeeping never runs).
+      // Anyone who joined through `_pendingActivations` hangs with it.
+      //
+      // Fail closed instead: a failure is recoverable - the caller retries, and
+      // the app's reconcile pass corrects the row if KDF did activate it after
+      // all - whereas a pending future is not.
+      if (!completer.isCompleted) {
+        log(
+          'Activation stream for ${asset.id.id} ended without a terminal '
+          'progress event; failing the activation rather than hanging',
+          name: 'SharedActivationCoordinator',
         );
-
-    return controller.stream;
+        _activationManager.recordActivationFailure(
+          asset.id,
+          'Activation stream ended without a terminal progress event',
+        );
+        completer.complete(
+          ActivationResult.failure(
+            asset.id,
+            'Activation stream ended without a terminal progress event',
+          ),
+        );
+      }
+      deadlineTimer?.cancel();
+      _removePendingActivation(asset.id, completer);
+    }
   }
 
-  /// Check if an asset is currently being activated
-  bool isActivationInProgress(AssetId assetId) {
-    return _pendingActivations.containsKey(assetId) ||
-        _activeStreams.containsKey(assetId);
+  /// Deregisters [completer] only if it is still the registered attempt.
+  ///
+  /// The deadline timer and the `finally` block can both reach here, and by
+  /// then a *new* attempt may already have registered its own completer. An
+  /// unconditional remove would deregister that live attempt, so every joiner
+  /// after it would start a duplicate activation.
+  void _removePendingActivation(
+    AssetId assetId,
+    Completer<ActivationResult> completer,
+  ) {
+    if (identical(_pendingActivations[assetId], completer)) {
+      _pendingActivations.remove(assetId);
+    }
   }
 
   /// Check if an asset is active (delegated to ActivationManager)
@@ -264,46 +343,24 @@ class SharedActivationCoordinator {
     return _activationManager.isAssetActive(assetId);
   }
 
-  /// Watch failed activations.
-  /// Returns a stream that emits the current set of failed asset IDs
-  /// whenever it changes.
-  Stream<Set<AssetId>> watchFailedActivations() {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-    return _failedActivationsController.stream;
-  }
+  /// Whether [assetId] was activated during this session rather than found
+  /// already enabled. See [ActivationManager.wasFreshlyActivated].
+  bool wasFreshlyActivated(AssetId assetId) =>
+      _activationManager.wasFreshlyActivated(assetId);
 
-  /// Watch pending activations.
-  /// Returns a stream that emits the current set of pending asset IDs
-  /// whenever it changes.
-  Stream<Set<AssetId>> watchPendingActivations() {
-    if (_isDisposed) {
-      throw StateError('SharedActivationCoordinator has been disposed');
-    }
-    return _pendingActivationsController.stream;
-  }
+  /// Current activation state of every asset the SDK has observed.
+  Map<AssetId, AssetActivationState> get activationStates =>
+      _activationManager.activationStates;
 
-  /// Get current set of failed activations
-  Set<AssetId> get failedActivations => Set<AssetId>.from(_failedActivations);
+  /// Current activation states, then every subsequent change.
+  ///
+  /// See [ActivationManager.watchActivationStates].
+  Stream<Map<AssetId, AssetActivationState>> watchActivationStates() =>
+      _activationManager.watchActivationStates();
 
-  /// Get current set of pending activations
-  Set<AssetId> get pendingActivations => _pendingActivations.keys.toSet();
-
-  /// Clear failed activation status for an asset
-  void clearFailedActivation(AssetId assetId) {
-    if (_failedActivations.remove(assetId)) {
-      _broadcastFailedActivations();
-    }
-  }
-
-  /// Clear all failed activations
-  void clearAllFailedActivations() {
-    if (_failedActivations.isNotEmpty) {
-      _failedActivations.clear();
-      _broadcastFailedActivations();
-    }
-  }
+  /// Current state for [assetId], then every subsequent change to it.
+  Stream<AssetActivationState?> watchActivationStateOf(AssetId assetId) =>
+      _activationManager.watchActivationStateOf(assetId);
 
   /// Wait for a coin to become available after activation completes.
   /// This addresses the timing issue where activation RPC completes successfully
@@ -355,20 +412,6 @@ class SharedActivationCoordinator {
     );
   }
 
-  /// Broadcast current failed activations to stream listeners
-  void _broadcastFailedActivations() {
-    if (!_failedActivationsController.isClosed) {
-      _failedActivationsController.add(Set<AssetId>.from(_failedActivations));
-    }
-  }
-
-  /// Broadcast current pending activations to stream listeners
-  void _broadcastPendingActivations() {
-    if (!_pendingActivationsController.isClosed) {
-      _pendingActivationsController.add(_pendingActivations.keys.toSet());
-    }
-  }
-
   /// Dispose of the coordinator and clean up resources
   Future<void> dispose() async {
     if (_isDisposed) return;
@@ -394,32 +437,36 @@ class SharedActivationCoordinator {
     _pendingActivations.clear();
 
     // Close all active streams
-    for (final controller in _activeStreams.values) {
-      if (!controller.isClosed) {
-        controller.close();
-      }
-    }
-    _activeStreams.clear();
-
     // Close state tracking streams
-    if (!_failedActivationsController.isClosed) {
-      _failedActivationsController.close();
-    }
-    if (!_pendingActivationsController.isClosed) {
-      _pendingActivationsController.close();
-    }
 
     // Clear state tracking sets
-    _failedActivations.clear();
   }
 }
 
 /// Result of an asset activation operation
 class ActivationResult {
-  const ActivationResult._(this.assetId, this.isSuccess, this.errorMessage);
+  const ActivationResult._(
+    this.assetId,
+    this.isSuccess,
+    this.errorMessage, {
+    this.wasAlreadyActive = false,
+  });
 
+  /// Activation ran and succeeded.
   factory ActivationResult.success(AssetId assetId) {
     return ActivationResult._(assetId, true, null);
+  }
+
+  /// The asset was already enabled in KDF, so nothing was activated.
+  ///
+  /// Distinguished from [ActivationResult.success] because callers need to
+  /// know whether KDF just did the work an activation implies. In particular a
+  /// UTXO activation carries `scan_policy: scan_if_new_wallet` with
+  /// `gap_limit: 20`, so a *fresh* activation has already walked the address
+  /// gap - and a caller that then asks for `task::scan_for_new_addresses`
+  /// makes KDF walk it a second time for nothing.
+  factory ActivationResult.alreadyActive(AssetId assetId) {
+    return ActivationResult._(assetId, true, null, wasAlreadyActive: true);
   }
 
   factory ActivationResult.failure(AssetId assetId, String errorMessage) {
@@ -429,6 +476,9 @@ class ActivationResult {
   final AssetId assetId;
   final bool isSuccess;
   final String? errorMessage;
+
+  /// Whether the asset was already enabled, i.e. this call activated nothing.
+  final bool wasAlreadyActive;
 
   bool get isFailure => !isSuccess;
 

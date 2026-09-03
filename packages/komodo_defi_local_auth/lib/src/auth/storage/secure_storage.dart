@@ -1,6 +1,7 @@
 // lib/src/auth/secure_storage.dart
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -12,12 +13,20 @@ abstract class Storage {
 
 class SecureLocalStorage {
   factory SecureLocalStorage() => _instance;
-  SecureLocalStorage._();
+  SecureLocalStorage._()
+    : _storage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(
+          encryptedSharedPreferences: true,
+          resetOnError: false,
+        ),
+      );
+
+  @visibleForTesting
+  SecureLocalStorage.withStorage(this._storage);
+
   static final SecureLocalStorage _instance = SecureLocalStorage._();
 
-  final FlutterSecureStorage _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+  final FlutterSecureStorage _storage;
 
   static const _userPrefix = 'user_';
   static const String _lastActiveWalletNameKey = 'lastActiveWalletName';

@@ -4,11 +4,100 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+/// Keys that make up the Tron gas-free relay payload, sent verbatim as
+/// `tx_json` to `send_raw_transaction`. Matches KDF's
+/// `TronGasfreeRelayPayload`, which rejects unknown fields.
+const Set<String> _tronGasfreeRelayPayloadKeys = {
+  'relay_type',
+  'chain_id',
+  'coin',
+  'hd_from',
+  'from_address',
+  'gasfree_address',
+  'verifying_contract',
+  'signed_authorization',
+  'created_at',
+};
+
+const Set<String> _tronGasfreeTransactionDetailsKeys = {
+  'from',
+  'to',
+  'total_amount',
+  'spent_by_me',
+  'received_by_me',
+  'my_balance_change',
+  'block_height',
+  'timestamp',
+  'fee_details',
+  'internal_id',
+  'kmd_rewards',
+  'transaction_type',
+  'memo',
+};
+
+const Set<String> _tronGasfreeWithdrawResultKeys = {
+  ..._tronGasfreeRelayPayloadKeys,
+  ..._tronGasfreeTransactionDetailsKeys,
+};
+
+const Set<String> _requiredTronGasfreeWithdrawResultKeys = {
+  'relay_type',
+  'chain_id',
+  'coin',
+  'from_address',
+  'gasfree_address',
+  'verifying_contract',
+  'signed_authorization',
+  'created_at',
+  'from',
+  'to',
+  'total_amount',
+  'spent_by_me',
+  'received_by_me',
+  'my_balance_change',
+  'block_height',
+  'timestamp',
+  'fee_details',
+  'internal_id',
+  'transaction_type',
+  'memo',
+};
+
+void _validateTronGasfreeWithdrawResult(JsonMap json) {
+  final unknownKeys = json.keys.where(
+    (key) => !_tronGasfreeWithdrawResultKeys.contains(key),
+  );
+  if (unknownKeys.isNotEmpty) {
+    throw FormatException(
+      'GasFree withdraw result contains undocumented fields: '
+      '${unknownKeys.join(', ')}',
+    );
+  }
+  final missingKeys = _requiredTronGasfreeWithdrawResultKeys.where(
+    (key) => !json.containsKey(key),
+  );
+  if (missingKeys.isNotEmpty) {
+    throw FormatException(
+      'GasFree withdraw result is missing required fields: '
+      '${missingKeys.join(', ')}',
+    );
+  }
+}
+
+/// Extracts the gas-free relay payload subset from a withdraw result so it can
+/// be broadcast via `send_raw_transaction`.
+TronGasfreeRelayPayload _extractTronGasfreeRelayPayload(JsonMap json) {
+  final payload = <String, dynamic>{};
+  for (final key in _tronGasfreeRelayPayloadKeys) {
+    final value = json[key];
+    if (value != null) payload[key] = value;
+  }
+  return TronGasfreeRelayPayload.fromJson(payload);
+}
+
 /// Raw API response for a withdrawal operation
 class WithdrawResult {
   WithdrawResult({
-    this.txHex,
-    this.txJson,
     required this.txHash,
     required this.from,
     required this.to,
@@ -17,19 +106,54 @@ class WithdrawResult {
     required this.timestamp,
     required this.fee,
     required this.coin,
+    this.txHex,
+    this.txJson,
     this.internalId,
     this.kmdRewards,
     this.memo,
-  }) : assert(
-         txHex != null || txJson != null,
-         'Either txHex or txJson must be provided',
-       );
+    this.transactionType = 'StandardTransfer',
+  }) {
+    if (txHex == null && txJson == null) {
+      throw ArgumentError('Either txHex or txJson must be provided');
+    }
+  }
 
   factory WithdrawResult.fromJson(JsonMap json) {
+    // KDF serializes TransactionData::Unsigned through TransactionDetails'
+    // serde(flatten), so a GasFree relay is always at the result's top level.
+    // A nested relay would be a locally fabricated compatibility shape and
+    // must not be accepted. Standard platform-specific JSON transactions
+    // (including SIA) continue to use tx_json.
+    final nestedTxJson = json.valueOrNull<JsonMap>('tx_json');
+    final nestedRelayType = nestedTxJson?.valueOrNull<String>('relay_type');
+    if (nestedRelayType == TronGasfreeRelayPayload.relayTypeValue) {
+      throw const FormatException(
+        'GasFree relay payload must be flattened into the withdrawal result',
+      );
+    }
+    final relaySource = json;
+    final isGaslessRelay =
+        relaySource.valueOrNull<String>('relay_type') ==
+        TronGasfreeRelayPayload.relayTypeValue;
+    if (isGaslessRelay && nestedTxJson != null) {
+      throw const FormatException(
+        'GasFree withdrawal result must not also contain tx_json',
+      );
+    }
+    if (isGaslessRelay) {
+      _validateTronGasfreeWithdrawResult(json);
+    }
+    final relayPayload = isGaslessRelay
+        ? _extractTronGasfreeRelayPayload(relaySource)
+        : null;
+    final txJson = relayPayload?.toJson() ?? nestedTxJson;
+
     return WithdrawResult(
       txHex: json.valueOrNull<String>('tx_hex'),
-      txJson: json.valueOrNull<JsonMap>('tx_json'),
-      txHash: json.value<String>('tx_hash'),
+      txJson: txJson,
+      txHash: isGaslessRelay
+          ? json.valueOrNull<String>('tx_hash')
+          : json.value<String>('tx_hash'),
       from: List<String>.from(json.value('from')),
       to: List<String>.from(json.value('to')),
       balanceChanges: BalanceChanges.fromJson(json),
@@ -37,17 +161,22 @@ class WithdrawResult {
       timestamp: json.value<int>('timestamp'),
       fee: FeeInfo.fromJson(json.value<JsonMap>('fee_details')),
       coin: json.value<String>('coin'),
-      internalId: json.valueOrNull<String>('internal_id'),
+      internalId: isGaslessRelay
+          ? json.value<String>('internal_id')
+          : json.valueOrNull<String>('internal_id'),
       kmdRewards: json.containsKey('kmd_rewards')
           ? KmdRewards.fromJson(json.value<JsonMap>('kmd_rewards'))
           : null,
       memo: json.valueOrNull<String>('memo'),
+      transactionType: isGaslessRelay
+          ? json.value<String>('transaction_type')
+          : json.valueOrNull<String>('transaction_type') ?? 'StandardTransfer',
     );
   }
 
   final String? txHex;
   final JsonMap? txJson;
-  final String txHash;
+  final String? txHash;
   final List<String> from;
   final List<String> to;
   final BalanceChanges balanceChanges;
@@ -58,22 +187,41 @@ class WithdrawResult {
   final String? internalId;
   final KmdRewards? kmdRewards;
   final String? memo;
+  final String transactionType;
 
-  JsonMap toJson() => {
-    if (txHex != null) 'tx_hex': txHex,
-    if (txJson != null) 'tx_json': txJson,
-    'tx_hash': txHash,
-    'from': from,
-    'to': to,
-    ...balanceChanges.toJson(),
-    'block_height': blockHeight,
-    'timestamp': timestamp,
-    'fee_details': fee.toJson(),
-    'coin': coin,
-    if (internalId != null) 'internal_id': internalId,
-    if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
-    if (memo != null) 'memo': memo,
-  };
+  /// Strictly typed relay payload for a GasFree withdraw preview.
+  TronGasfreeRelayPayload? get gaslessRelayPayload {
+    final relayJson = txJson;
+    if (relayJson == null ||
+        relayJson['relay_type'] != TronGasfreeRelayPayload.relayTypeValue) {
+      return null;
+    }
+    return TronGasfreeRelayPayload.fromJson(relayJson);
+  }
+
+  JsonMap toJson() {
+    final relayPayload = gaslessRelayPayload;
+    return {
+      if (txHex != null) 'tx_hex': txHex,
+      if (relayPayload != null)
+        ...relayPayload.toJson()
+      else if (txJson != null)
+        'tx_json': txJson,
+      if (txHash != null) 'tx_hash': txHash,
+      'from': from,
+      'to': to,
+      ...balanceChanges.toJson(),
+      'block_height': blockHeight,
+      'timestamp': timestamp,
+      'fee_details': fee.toJson(),
+      'coin': coin,
+      if (relayPayload != null || internalId != null)
+        'internal_id': internalId ?? '',
+      if (kmdRewards != null) 'kmd_rewards': kmdRewards!.toJson(),
+      if (relayPayload != null) 'transaction_type': transactionType,
+      if (relayPayload != null || memo != null) 'memo': memo,
+    };
+  }
 }
 
 /// Domain model for a successful withdrawal operation
@@ -85,10 +233,15 @@ class WithdrawalResult extends Equatable {
     required this.toAddress,
     required this.fee,
     this.kmdRewardsEligible = false,
+    this.confirmationBlockHeight,
+    this.confirmedAt,
+    this.gaslessFinalFee,
+    this.gaslessTraceId,
   });
 
   /// Create a domain model from API response
   factory WithdrawalResult.fromWithdrawResult(WithdrawResult result) {
+    final isGaslessPreview = result.gaslessRelayPayload != null;
     return WithdrawalResult(
       txHash: result.txHash,
       balanceChanges: result.balanceChanges,
@@ -98,15 +251,37 @@ class WithdrawalResult extends Equatable {
       kmdRewardsEligible:
           result.kmdRewards != null &&
           Decimal.parse(result.kmdRewards!.amount) > Decimal.zero,
+      confirmationBlockHeight: !isGaslessPreview && result.blockHeight > 0
+          ? result.blockHeight
+          : null,
+      confirmedAt: !isGaslessPreview && result.timestamp > 0
+          ? DateTime.fromMillisecondsSinceEpoch(
+              result.timestamp * 1000,
+              isUtc: true,
+            )
+          : null,
     );
   }
 
-  final String txHash;
+  final String? txHash;
   final BalanceChanges balanceChanges;
   final String coin;
   final String toAddress;
   final FeeInfo fee;
   final bool kmdRewardsEligible;
+  final int? confirmationBlockHeight;
+  final DateTime? confirmedAt;
+
+  /// Authoritative token fee reported by `gasless::trace_status`.
+  ///
+  /// This is intentionally separate from GasFree preview fee details.
+  final Decimal? gaslessFinalFee;
+
+  /// Trace identifier accepted by KDF for a GasFree relay.
+  ///
+  /// This is domain-only receipt metadata and is never part of fee preview
+  /// serialization.
+  final String? gaslessTraceId;
 
   /// Convenience getter for the withdrawal amount (abs of net change)
   Decimal get amount => balanceChanges.netChange.abs();
@@ -119,6 +294,10 @@ class WithdrawalResult extends Equatable {
     toAddress,
     fee,
     kmdRewardsEligible,
+    confirmationBlockHeight,
+    confirmedAt,
+    gaslessFinalFee,
+    gaslessTraceId,
   ];
 }
 
@@ -132,6 +311,9 @@ class WithdrawalProgress extends Equatable {
     this.errorMessage,
     this.taskId,
     this.sdkError,
+    this.gaslessState,
+    this.gaslessTransferState,
+    this.submission,
   });
 
   final WithdrawalStatus status;
@@ -142,6 +324,14 @@ class WithdrawalProgress extends Equatable {
   final String? taskId;
   final SdkError? sdkError;
 
+  /// Relay lifecycle state for a gas-free (gasless) transfer, so consumers
+  /// can render their own (e.g. localized) status copy instead of the English
+  /// [message]. Null for standard withdrawals and for gasless progress events
+  /// that precede relay submission and trace reconciliation.
+  final GaslessTraceState? gaslessState;
+  final GaslessTransferState? gaslessTransferState;
+  final WithdrawalSubmission? submission;
+
   @override
   List<Object?> get props => [
     status,
@@ -151,7 +341,55 @@ class WithdrawalProgress extends Equatable {
     errorMessage,
     taskId,
     sdkError,
+    gaslessState,
+    gaslessTransferState,
+    submission,
   ];
+}
+
+/// Preferred fee rail for withdrawals that support alternative fee payment.
+///
+/// `native` keeps the coin's normal fee behavior; `gasless` routes a TRC20
+/// transfer through the GasFree provider with the fee paid in the token.
+enum WithdrawalFeeMethod {
+  native,
+  gasless;
+
+  String get jsonValue => switch (this) {
+    WithdrawalFeeMethod.native => 'native',
+    WithdrawalFeeMethod.gasless => 'gasless',
+  };
+}
+
+/// Caller-supplied constraints for gas-free (gasless) TRC20 withdrawals.
+///
+/// Serializes to the KDF `gasless` withdraw option object.
+class GaslessWithdrawalOptions extends Equatable {
+  const GaslessWithdrawalOptions({
+    this.maxFee,
+    this.deadlineSeconds,
+    this.fallbackToNative = false,
+  });
+
+  /// Maximum provider fee, in the token's own units, the user will accept.
+  /// When null, the provider's default cap applies.
+  final Decimal? maxFee;
+
+  /// Permit deadline, in seconds from now.
+  final int? deadlineSeconds;
+
+  /// Whether to fall back to a native (TRX-funded) transfer when gasless is
+  /// unavailable.
+  final bool fallbackToNative;
+
+  JsonMap toJson() => {
+    if (maxFee != null) 'max_fee': maxFee.toString(),
+    if (deadlineSeconds != null) 'deadline_seconds': deadlineSeconds,
+    'fallback_to_native': fallbackToNative,
+  };
+
+  @override
+  List<Object?> get props => [maxFee, deadlineSeconds, fallbackToNative];
 }
 
 /// Parameters for initiating a withdrawal
@@ -168,9 +406,15 @@ class WithdrawParameters extends Equatable {
     this.ibcSourceChannel,
     this.expirationSeconds,
     this.isMax,
+    this.feeMethod,
+    this.gaslessOptions,
   }) : assert(
          amount != null || (isMax ?? false),
-         'Amount must be non-null when not using max',
+         'Amount must be specified when isMax is false',
+       ),
+       assert(
+         amount == null || !(isMax ?? false),
+         'Amount must be omitted when isMax is true',
        );
 
   final String asset;
@@ -185,17 +429,26 @@ class WithdrawParameters extends Equatable {
   final int? expirationSeconds;
   final bool? isMax;
 
+  /// Preferred fee rail (e.g. `gasless` for gas-free TRC20 transfers).
+  final WithdrawalFeeMethod? feeMethod;
+
+  /// Constraints for a gasless withdrawal. Only used when
+  /// [feeMethod] is [WithdrawalFeeMethod.gasless].
+  final GaslessWithdrawalOptions? gaslessOptions;
+
   JsonMap toJson() => {
     'coin': asset,
     'to': toAddress,
     if (fee != null) 'fee': fee!.toJson(),
-    if (amount != null) 'amount': amount.toString(),
+    if (!(isMax ?? false) && amount != null) 'amount': amount.toString(),
     if (isMax != null) 'max': isMax,
     if (from != null) 'from': from!.toRpcParams(),
     if (memo != null) 'memo': memo,
     if (ibcTransfer != null) 'ibc_transfer': ibcTransfer,
     if (ibcSourceChannel != null) 'ibc_source_channel': ibcSourceChannel,
     if (expirationSeconds != null) 'expiration_seconds': expirationSeconds,
+    if (feeMethod != null) 'fee_method': feeMethod!.jsonValue,
+    if (gaslessOptions != null) 'gasless': gaslessOptions!.toJson(),
   };
 
   @override
@@ -211,6 +464,8 @@ class WithdrawParameters extends Equatable {
     ibcSourceChannel,
     expirationSeconds,
     isMax,
+    feeMethod,
+    gaslessOptions,
   ];
 }
 

@@ -10,6 +10,8 @@ This directory contains the artifact configuration used by `komodo_wallet_build_
 ## Key fields (JSON)
 
 - `api.api_commit_hash` – commit hash of the KDF artifacts to fetch
+- `api.require_full_commit_hash` – reject short or symbolic release pins
+- `api.required_platforms` – platforms that must have explicit manifest entries
 - `api.source_urls` – list of base URLs to download from (GitHub API, CDN)
 - `api.platforms.*.matching_pattern` – regex to match artifact names per platform
 - `api.platforms.*.valid_zip_sha256_checksums` – allow-list of artifact checksums
@@ -30,9 +32,41 @@ Paths in the config are relative to that package directory.
 
 ## Updating artifacts
 
-1. Update `api_commit_hash` and (optionally) checksums
-2. Run the build transformer (via Flutter asset transformers or CLI)
-3. Commit the updated artifacts if your workflow requires vendoring
+1. Run the strict config updater against the branch-scoped build mirror with an
+   exact full commit. It downloads every required platform archive, calculates
+   SHA-256 locally, and replaces the manifest allow-lists:
+
+   ```sh
+   dart run packages/komodo_wallet_cli/bin/update_api_config.dart \
+     --branch feat/tron-gasfree \
+     --commit bd413dcfea73c9de2e85903323946a378b180fa7 \
+     --source mirror \
+     --mirror-url https://devbuilds.gleec.com \
+     --platform all \
+     --config packages/komodo_defi_framework/app_build/build_config.json \
+     --output-dir packages/komodo_defi_framework/app_build/temp_downloads \
+     --strict \
+     --verbose
+   ```
+
+2. Compare the calculated values with each archive's individual `.sha256`
+   sidecar. Do not use the mirror's aggregate `SHA256SUMS` file as a release
+   authority.
+3. Synchronize this directory's reference YAML with the canonical JSON.
+4. Run the build transformer (via Flutter asset transformers or CLI). It writes
+   an `.api_last_updated_<platform>` marker containing the exact archive name,
+   accepted archive SHA-256, manifest checksums, extracted core-artifact
+   SHA-256, and complete runtime-set SHA-256 for every platform.
+5. Confirm the marker's commit and checksum match the manifest before packaging.
+   Future builds recompute both extracted digests; legacy, incomplete, missing,
+   or tampered markers are stale and cannot be bypassed by disabling downloads.
+
+`OVERRIDE_DEFI_API_DOWNLOAD=false` disables downloading only. It cannot bypass
+provenance validation: a missing, malformed, stale-commit, or checksum-mismatched
+marker still fails the build.
+
+Android CMake recalculates `libkdf.a` SHA-256 and compares it with that marker,
+so changing or relabelling an extracted library also fails before linking.
 
 ## Tips
 
@@ -40,34 +74,44 @@ Paths in the config are relative to that package directory.
 - Use `--concurrent` for faster downloads in development
 - Override behavior per build via env `OVERRIDE_DEFI_API_DOWNLOAD=true|false`
 
-### Using Nebula mirror and short commit hashes
+### Official build mirrors
 
-- You can add Nebula as an additional source in `api.source_urls`:
+The committed `api.source_urls` must contain only the official KDF mirrors,
+Devbuilds and Nebula, in this fallback order:
 
 ```
 "source_urls": [
-    "https://api.github.com/repos/GLEECBTC/komodo-defi-framework",
     "https://devbuilds.gleec.com",
     "https://nebula.decker.im"
 ]
 ```
 
-- The downloader expects branch-scoped directory listings (e.g., `.../dev/`) on both devbuilds and Nebula mirrors and will fallback to the base listing when available. It searches for artifacts that match the platform patterns and contain either the full commit hash or a 7-char short hash.
-- To pin a specific commit (e.g., `4025b8c`) without changing branches, update `api.api_commit_hash` or use the CLI with `--commit`:
+- A `https://api.github.com/repos/<owner>/<repo>` entry selects the GitHub
+  release downloader instead of a mirror. KDF now lives in the private
+  `GLEECBTC/kdf-internal`, whose branches are not reachable without a token, so
+  no GitHub entry is configured by default.
+
+- The downloader expects branch-scoped directory listings (e.g.,
+  `.../dev/`) on both devbuilds and Nebula mirrors and falls back to the base
+  listing when available. Archive names may contain the full commit or its
+  seven-character prefix, but `api.api_commit_hash` must remain the resolved
+  full 40-character lowercase SHA.
+- To pin a specific commit without changing branches, use the strict updater
+  with its full SHA:
 
 ```bash
 dart run packages/komodo_wallet_cli/bin/update_api_config.dart \
   --source mirror \
   --mirror-url https://nebula.decker.im \
-  --commit 4025b8c \
+  --commit bd413dcfea73c9de2e85903323946a378b180fa7 \
   --config packages/komodo_defi_framework/app_build/build_config.json \
   --output-dir packages/komodo_defi_framework/app_build/temp_downloads \
+  --strict \
   --verbose
 ```
 
-- To switch to a different Nebula commit in the future, either:
-  - Edit `api.api_commit_hash` in `build_config.json` to the new short/full hash, or
-  - Re-run the CLI with a different `--commit <hash>` value.
+- To switch commits, rerun the updater with a different full `--commit <sha>`.
+  Do not hand-edit a short hash into the canonical manifest.
 
 Notes:
 - Nebula index includes additional files like `komodo-wallet-*`; these are automatically ignored by the downloader.

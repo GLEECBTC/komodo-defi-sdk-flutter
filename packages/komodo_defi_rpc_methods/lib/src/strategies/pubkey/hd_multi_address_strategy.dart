@@ -7,9 +7,31 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 mixin HDWalletMixin on PubkeyStrategy {
   KdfUser get kdfUser;
 
-  int get _gapLimit => 20;
+  /// The gap KDF enforces when *creating* an address, and the basis for how
+  /// many more addresses the UI offers.
+  ///
+  /// Deliberately NOT the scan gap. `task::get_new_address` refuses once there
+  /// are already `gap_limit` unused addresses in a row
+  /// (`mm2src/coins/rpc_command/get_new_address.rs:615-617`), so lowering this
+  /// would cap how many unused addresses a user may hold - at
+  /// `HdGapLimit.newlyGeneratedFirstSignIn` they could create exactly one and
+  /// then be refused. Address creation is a user action with no node-load
+  /// problem; the repeating scan is the one that needed bounding.
+  int get _gapLimit => HdGapLimit.hardware;
+
+  /// The gap used when *scanning* for addresses that already exist on chain.
+  ///
+  /// Supplied per wallet - see [HdGapLimit]. Defaults to the full BIP-44 gap so
+  /// a strategy constructed without one never silently narrows discovery.
+  int get scanGapLimit => HdGapLimit.hardware;
   Duration get _scanPollInterval => const Duration(milliseconds: 250);
   Duration get _scanTimeout => const Duration(seconds: 20);
+  Duration get _accountBalancePollInterval => const Duration(milliseconds: 100);
+
+  /// Deliberately more generous than [_scanTimeout]: a wallet with many
+  /// derived addresses can legitimately take a while. This is a hang guard,
+  /// not a latency budget.
+  Duration get _accountBalanceTimeout => const Duration(seconds: 60);
 
   @override
   bool get supportsMultipleAddresses => true;
@@ -33,7 +55,7 @@ mixin HDWalletMixin on PubkeyStrategy {
     final initResponse = await client.rpc.hdWallet.scanForNewAddressesInit(
       assetId.id,
       accountId: 0,
-      gapLimit: _gapLimit,
+      gapLimit: scanGapLimit,
     );
 
     final startedAt = DateTime.now();
@@ -75,17 +97,29 @@ mixin HDWalletMixin on PubkeyStrategy {
       accountIndex: 0,
     );
 
-    AccountBalanceInfo? result;
-    while (result == null) {
+    final startedAt = DateTime.now();
+    while (true) {
       final status = await client.rpc.hdWallet.accountBalanceStatus(
         taskId: initResponse.taskId,
         forgetIfFinished: false,
       );
-      result = (status.details..throwIfError).data;
+      final result = (status.details..throwIfError).data;
+      // Return as soon as the task resolves. The delay used to run
+      // unconditionally after the assignment, so every call paid an extra
+      // 100ms even when the first poll already succeeded - once per asset on
+      // every fresh pubkey fetch.
+      if (result != null) return result;
 
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // Guard against a task that never resolves. Without this the loop is
+      // unbounded, unlike scanForNewAddresses above.
+      if (DateTime.now().difference(startedAt) >= _accountBalanceTimeout) {
+        throw TimeoutException(
+          'Timed out fetching account balance for ${assetId.id}',
+        );
+      }
+
+      await Future<void>.delayed(_accountBalancePollInterval);
     }
-    return result;
   }
 
   Future<AssetPubkeys> convertBalanceInfoToAssetPubkeys(
@@ -100,6 +134,7 @@ mixin HDWalletMixin on PubkeyStrategy {
             chain: addr.chain,
             balance: addr.balance.balanceOf(assetId.id),
             coinTicker: assetId.id,
+            gasfreeAddress: addr.gasfreeAddress,
           ),
         )
         .toList();
@@ -124,10 +159,16 @@ mixin HDWalletMixin on PubkeyStrategy {
 
 /// HD wallet strategy for context private key wallets
 class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
-  ContextPrivKeyHDWalletStrategy({required this.kdfUser});
+  ContextPrivKeyHDWalletStrategy({
+    required this.kdfUser,
+    this.scanGapLimit = HdGapLimit.hardware,
+  });
 
   @override
   final KdfUser kdfUser;
+
+  @override
+  final int scanGapLimit;
 
   @override
   /// Get the new address for the given asset ID and client.
@@ -154,6 +195,7 @@ class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
       chain: newAddress.chain,
       balance: coinBalance,
       coinTicker: assetId.id,
+      gasfreeAddress: newAddress.gasfreeAddress,
     );
   }
 
@@ -174,6 +216,9 @@ class ContextPrivKeyHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
 
 /// HD wallet strategy for Trezor wallets
 class TrezorHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
+  /// No `scanGapLimit` parameter: hardware wallets always use the full BIP-44
+  /// gap. Their seed is expected to have been used by other software, which is
+  /// exactly the history a short gap fails to find.
   TrezorHDWalletStrategy({required this.kdfUser});
 
   @override
@@ -189,6 +234,7 @@ class TrezorHDWalletStrategy extends PubkeyStrategy with HDWalletMixin {
       chain: newAddress.chain,
       balance: newAddress.balance,
       coinTicker: assetId.id,
+      gasfreeAddress: newAddress.gasfreeAddress,
     );
   }
 
