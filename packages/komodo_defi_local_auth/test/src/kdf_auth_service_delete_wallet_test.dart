@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' show ClientException;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
@@ -318,10 +318,9 @@ void main() {
         });
         _FakeKdfOperations? captured;
         final service = _createService(
-          walletNamesResponseHandler: () =>
-              Future<Map<String, dynamic>>.error(
-                ClientException('Connection closed before full header'),
-              ),
+          walletNamesResponseHandler: () => Future<Map<String, dynamic>>.error(
+            ClientException('Connection closed before full header'),
+          ),
           onOperationsCreated: (operations) => captured = operations,
         );
         addTearDown(service.dispose);
@@ -515,6 +514,76 @@ void main() {
         );
         expect(persistedUser.walletId.pubkeyHash, _publicKeyHash);
         expect(persistedUser.metadata['activationCount'], 2);
+      },
+    );
+
+    test(
+      'scoped metadata rejects a confirmation after switching wallets',
+      () async {
+        final walletA = _testUser().copyWith(
+          walletId: _testUser().walletId.copyWith(pubkeyHash: _publicKeyHash),
+          metadata: const {'has_backup': false},
+        );
+        final walletB = walletA.copyWith(
+          walletId: walletA.walletId.copyWith(
+            name: 'other-wallet',
+            pubkeyHash: _secondPublicKeyHash,
+          ),
+        );
+        FlutterSecureStorage.setMockInitialValues(<String, String>{
+          for (final wallet in [walletA, walletB])
+            'user_${wallet.walletId.name}': jsonEncode(wallet.toJson()),
+        });
+        var activeWallet = walletA;
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          walletNamesResponseHandler: () async => {
+            'mmrpc': '2.0',
+            'result': {
+              'wallet_names': [walletA.walletId.name, walletB.walletId.name],
+              'activated_wallet': activeWallet.walletId.name,
+            },
+          },
+          publicKeyHashResponseHandler: () async => {
+            'mmrpc': '2.0',
+            'result': {'public_key_hash': activeWallet.walletId.pubkeyHash},
+          },
+          onOperationsCreated: (value) => operations = value,
+        );
+        addTearDown(service.dispose);
+
+        final expectedWalletId = (await service.getActiveUser())!.walletId;
+        activeWallet = walletB;
+        var transformed = false;
+        await expectLater(
+          service.updateActiveUserMetadataKey('has_backup', (_) {
+            transformed = true;
+            return true;
+          }, expectedWalletId: expectedWalletId),
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+
+        expect(transformed, isFalse);
+        expect(operations.stopCount, 0);
+        for (final wallet in [walletA, walletB]) {
+          final persisted = await const FlutterSecureStorage().read(
+            key: 'user_${wallet.walletId.name}',
+          );
+          expect(
+            KdfUser.fromJson(
+              (jsonDecode(persisted!) as Map).cast<String, dynamic>(),
+            ).metadata['has_backup'],
+            isFalse,
+          );
+        }
+
+        // A confirmation belonging to the active wallet still succeeds.
+        await service.updateActiveUserMetadataKey(
+          'has_backup',
+          (_) => true,
+          expectedWalletId: walletB.walletId,
+        );
+        expect((await service.getActiveUser())!.metadata['has_backup'], isTrue);
       },
     );
 

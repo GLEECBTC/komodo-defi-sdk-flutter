@@ -13,6 +13,8 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import 'transaction_fixtures.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
 class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
@@ -33,6 +35,7 @@ class _BlockingStrategy extends TransactionHistoryStrategy {
   _BlockingStrategy(this.response);
 
   final Completer<MyTxHistoryResponse> response;
+  final started = Completer<void>();
 
   @override
   Set<Type> get supportedPaginationModes => const {PagePagination};
@@ -42,7 +45,10 @@ class _BlockingStrategy extends TransactionHistoryStrategy {
     ApiClient client,
     Asset asset,
     TransactionPagination pagination,
-  ) => response.future;
+  ) {
+    if (!started.isCompleted) started.complete();
+    return response.future;
+  }
 
   @override
   bool supportsAsset(Asset asset) => true;
@@ -254,6 +260,206 @@ void main() {
     );
     expect(storage.storedWallets, isEmpty);
   });
+
+  test(
+    'degraded auth events preserve in-flight history and its wallet namespace',
+    () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final storage = _RecordingStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+      final strategyResponse = Completer<MyTxHistoryResponse>();
+      final strategy = _BlockingStrategy(strategyResponse);
+      KdfUser? currentUser = hashAWallet;
+      final asset = _asset();
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(
+        () => assetHistory.getWalletAssets(hashAWallet.walletId),
+      ).thenAnswer((_) async => {'ATOM'});
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [strategy],
+      );
+      addTearDown(() async {
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      final pending = manager.getTransactionHistory(asset);
+      await strategy.started.future;
+
+      // A failed identity RPC returns and emits a name-only runtime user.
+      // Exercise the emitted event too: currentUser-only tests do not reach
+      // the auth listener that closes streams and replaces the storage scope.
+      currentUser = nameOnlyWallet;
+      authChanges.add(nameOnlyWallet);
+      strategyResponse.complete(_historyResponse());
+
+      expect((await pending).transactions.single.internalId, 'internal-a');
+      expect(
+        (await manager.getTransactionHistory(
+          asset,
+        )).transactions.single.internalId,
+        'internal-a',
+      );
+      expect(storage.storedWallets, [
+        hashAWallet.walletId,
+        hashAWallet.walletId,
+      ]);
+      verify(() => activation.activateAsset(asset)).called(1);
+    },
+  );
+
+  test(
+    'late activation cannot mark the next wallet asset as activated',
+    () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final storage = _RecordingStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+      final activationStarted = Completer<void>();
+      final activationResponse = Completer<ActivationResult>();
+      final strategyResponse = Completer<MyTxHistoryResponse>()
+        ..complete(_historyResponse());
+      KdfUser? currentUser = walletA;
+      final asset = _asset();
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      for (final wallet in [walletA, walletB]) {
+        when(
+          () => assetHistory.getWalletAssets(wallet.walletId),
+        ).thenAnswer((_) async => {'ATOM'});
+      }
+      when(() => activation.activateAsset(asset)).thenAnswer((_) {
+        if (!activationStarted.isCompleted) {
+          activationStarted.complete();
+          return activationResponse.future;
+        }
+        return Future.value(ActivationResult.success(asset.id));
+      });
+
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [_BlockingStrategy(strategyResponse)],
+      );
+      addTearDown(() async {
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      final pending = manager.getTransactionHistory(asset);
+      final rejected = expectLater(
+        pending,
+        throwsA(isA<WalletChangedDisconnectException>()),
+      );
+      await activationStarted.future;
+      currentUser = walletB;
+      authChanges.add(walletB);
+      activationResponse.complete(ActivationResult.success(asset.id));
+      await rejected;
+
+      await manager.getTransactionHistory(asset);
+      verify(() => activation.activateAsset(asset)).called(2);
+      expect(storage.storedWallets, [walletB.walletId]);
+    },
+  );
+
+  test(
+    'merged history closes when the wallet changes during its initial fetch',
+    () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final storage = InMemoryTransactionStorage();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+      final strategyResponse = Completer<MyTxHistoryResponse>();
+      final strategy = _BlockingStrategy(strategyResponse);
+      KdfUser? currentUser = walletA;
+      final asset = _asset();
+      final cached = testTransaction(assetId: asset.id, internalId: 'cached-a');
+      await storage.storeTransaction(cached, walletA.walletId);
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(() => activation.activateAsset(asset)).thenAnswer(
+        (_) async => currentUser == walletA
+            ? ActivationResult.success(asset.id)
+            : ActivationResult.failure(asset.id, 'Unexpected wallet B stream'),
+      );
+
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [strategy],
+      );
+      final batches = <List<Transaction>>[];
+      final errors = <Object>[];
+      final completed = Completer<void>();
+      final subscription = manager
+          .watchTransactionHistoryMerged(asset)
+          .listen(batches.add, onError: errors.add, onDone: completed.complete);
+      addTearDown(() async {
+        await subscription.cancel();
+        await manager.dispose();
+        await authChanges.close();
+      });
+
+      await strategy.started.future;
+      expect(batches.single.single.internalId, 'cached-a');
+      currentUser = walletB;
+      authChanges.add(walletB);
+      strategyResponse.complete(_historyResponse());
+
+      await completed.future.timeout(const Duration(seconds: 2));
+      expect(errors, isEmpty);
+      expect(batches, hasLength(1));
+      verify(() => activation.activateAsset(asset)).called(1);
+    },
+  );
 
   test(
     'auth enrichment makes a later same-name hash reject stale history',

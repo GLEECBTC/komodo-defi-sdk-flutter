@@ -198,8 +198,9 @@ class _FakeAuthService implements IAuthService {
   @override
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) async => throw UnimplementedError();
+    dynamic Function(dynamic currentValue) transform, {
+    WalletId? expectedWalletId,
+  }) async => throw UnimplementedError();
 
   @override
   Future<void> updatePassword({

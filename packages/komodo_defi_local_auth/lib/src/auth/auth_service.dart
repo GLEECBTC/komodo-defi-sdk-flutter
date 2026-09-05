@@ -93,10 +93,13 @@ abstract interface class IAuthService {
   ///
   /// This is safe to call concurrently — a dedicated metadata mutex
   /// serialises all read-modify-write cycles.
+  /// If [expectedWalletId] is provided, a different active identity is rejected
+  /// under the authentication write lock before metadata can be changed.
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  );
+    dynamic Function(dynamic currentValue) transform, {
+    WalletId? expectedWalletId,
+  });
 
   /// Attempts to restore a user session without requiring password authentication
   /// Only works if the KDF API is running and the wallet exists
@@ -352,9 +355,7 @@ class KdfAuthService implements IAuthService {
             // A wallet created here has no on-chain history by construction:
             // the seed did not exist a moment ago. Recorded per session so the
             // HD gap scan can be told so on this sign-in only.
-            _walletsGeneratedThisSession.add(
-              currentUser.walletId.compoundId,
-            );
+            _walletsGeneratedThisSession.add(currentUser.walletId.compoundId);
           }
         } catch (_) {
           await _clearFailedAuthenticatedKdfWithinWriteLock();
@@ -925,10 +926,17 @@ class KdfAuthService implements IAuthService {
   @override
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) async {
+    dynamic Function(dynamic currentValue) transform, {
+    WalletId? expectedWalletId,
+  }) async {
     await _runAuthenticatedWriteOperation(
       (activeUser) => _metadataMutex.protect(() async {
+        if (expectedWalletId != null &&
+            activeUser.walletId != expectedWalletId) {
+          throw const WalletChangedDisconnectException(
+            'Wallet changed before updating wallet metadata',
+          );
+        }
         final user = await _secureStorage.getUser(activeUser.walletId.name);
         if (user == null) throw AuthException.notFound();
 

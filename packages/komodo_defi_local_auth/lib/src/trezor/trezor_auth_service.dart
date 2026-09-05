@@ -111,8 +111,13 @@ class TrezorAuthService implements IAuthService {
   @override
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) => _authService.updateActiveUserMetadataKey(key, transform);
+    dynamic Function(dynamic currentValue) transform, {
+    WalletId? expectedWalletId,
+  }) => _authService.updateActiveUserMetadataKey(
+    key,
+    transform,
+    expectedWalletId: expectedWalletId,
+  );
 
   @override
   Future<void> restoreSession(KdfUser user) =>

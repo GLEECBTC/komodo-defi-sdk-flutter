@@ -191,7 +191,13 @@ abstract interface class KomodoDefiAuth {
   ///
   /// print('Custom tokens: $tokenJson');
 
-  Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value);
+  /// [expectedWalletId] binds the write to a previously observed wallet.
+  /// A mismatch throws [WalletChangedDisconnectException] before persistence.
+  Future<void> setOrRemoveActiveUserKeyValue(
+    String key,
+    dynamic value, {
+    WalletId? expectedWalletId,
+  });
 
   /// Atomically reads the current value of [key] from the active user's
   /// metadata, applies [transform], and writes the result back.
@@ -682,8 +688,16 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
-  Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value) async {
-    await _authService.updateActiveUserMetadataKey(key, (_) => value);
+  Future<void> setOrRemoveActiveUserKeyValue(
+    String key,
+    dynamic value, {
+    WalletId? expectedWalletId,
+  }) async {
+    await _authService.updateActiveUserMetadataKey(
+      key,
+      (_) => value,
+      expectedWalletId: expectedWalletId,
+    );
   }
 
   @override
