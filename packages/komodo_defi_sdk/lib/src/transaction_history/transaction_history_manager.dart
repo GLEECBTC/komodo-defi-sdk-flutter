@@ -140,6 +140,16 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       return;
     }
 
+    // Identity RPC outages emit a name-only user for the same live session.
+    // Preserve its verified cache namespace and subscriptions, just as the
+    // capture path does. A sign-out or a different wallet still invalidates
+    // every operation below.
+    if (currentWalletId != null &&
+        nextWallet != null &&
+        isDegradedWalletIdentity(currentWalletId, nextWallet)) {
+      return;
+    }
+
     // Invalidate first: cancellation is best-effort and queued callbacks may
     // still complete after a wallet switch.
     _walletGeneration++;
@@ -309,8 +319,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         // assume empty transaction history to reduce RPC spam
         if (isFirstTimeEnabling && isNewWallet) {
           // Still need to activate the asset
-          await _ensureAssetActivated(asset);
-          await _requireWalletContextCurrent(walletContext);
+          await _ensureAssetActivated(asset, walletContext);
 
           // Mark asset as seen after activation
           await _assetHistoryStorage.addAssetToWallet(
@@ -365,8 +374,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // repeatedly, without assuming that persisted history implies KDF has the
       // coin enabled right now - it does not, on a cold start.
       if (!_activatedThisSession.contains(asset.id)) {
-        await _ensureAssetActivated(asset);
-        await _requireWalletContextCurrent(walletContext);
+        await _ensureAssetActivated(asset, walletContext);
       }
 
       // Get appropriate strategy for the asset
@@ -443,8 +451,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     try {
-      await _ensureAssetActivated(asset);
-      await _requireWalletContextCurrent(walletContext);
+      await _ensureAssetActivated(asset, walletContext);
     } catch (e) {
       if (e is ActivationFailedException ||
           e is WalletChangedDisconnectException) {
@@ -531,11 +538,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     Asset asset, {
     Transaction Function(Transaction transaction)? transform,
   }) async* {
+    final walletContext = await _captureWalletContext();
     final reconciler = TransactionListReconciler();
     var merged = <Transaction>[];
     var emittedInitial = false;
 
     await for (final batch in getTransactionsStreamed(asset)) {
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       final incoming = transform == null
           ? batch
           : batch.map(transform).toList(growable: false);
@@ -545,10 +554,15 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     if (!emittedInitial) {
+      if (!await _isWalletContextCurrent(walletContext)) return;
       yield const <Transaction>[];
     }
 
+    // Historical fetching may finish because its wallet changed. Never
+    // attach the retained rows to a live stream from the next wallet.
+    if (!await _isWalletContextCurrent(walletContext)) return;
     await for (final transaction in watchTransactions(asset)) {
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       final normalized = transform?.call(transaction) ?? transaction;
       merged = reconciler.merge(existing: merged, incoming: [normalized]);
       yield List<Transaction>.unmodifiable(merged);
@@ -739,7 +753,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _streamControllers.remove(asset.id);
   }
 
-  Future<void> _ensureAssetActivated(Asset asset) async {
+  Future<void> _ensureAssetActivated(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
     final activationResult = await _activationCoordinator.activateAsset(asset);
     if (activationResult.isFailure) {
       throw ActivationFailedException(
@@ -747,6 +764,15 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         message: activationResult.errorMessage ?? 'Unknown activation error',
         errorCode: 'ACTIVATION_FAILED',
         originalError: activationResult.errorMessage,
+      );
+    }
+    await _requireWalletContextCurrent(walletContext);
+    // Wasm queues async-return completions. An auth event can invalidate the
+    // successful check before this continuation resumes, so do not yield
+    // between the final session check and recording its activation marker.
+    if (!_isWalletContextCurrentSync(walletContext)) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed while activating transaction history',
       );
     }
     _activatedThisSession.add(asset.id);
@@ -784,8 +810,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
     // Ensure asset is activated before subscribing
     try {
-      await _ensureAssetActivated(asset);
-      await _requireWalletContextCurrent(walletContext);
+      await _ensureAssetActivated(asset, walletContext);
     } catch (e) {
       final controller = _streamControllers[asset.id];
       if (controller != null && !controller.isClosed) {
@@ -946,8 +971,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
-      await _ensureAssetActivated(asset);
-      await _requireWalletContextCurrent(walletContext);
+      await _ensureAssetActivated(asset, walletContext);
       final response = await _client.rpc.wallet.myBalance(coin: asset.id.id);
       await _requireWalletContextCurrent(walletContext);
       final custodyChanged = await _custodyBalanceChanged(asset, walletContext);
@@ -1041,8 +1065,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     if (!_isWalletContextCurrentSync(walletContext)) return;
 
     try {
-      await _ensureAssetActivated(asset);
-      await _requireWalletContextCurrent(walletContext);
+      await _ensureAssetActivated(asset, walletContext);
       final strategy = _strategyFactory.forAsset(asset);
       final latestId = await _storage.getLatestTransactionId(
         asset.id,
@@ -1230,8 +1253,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       await _requireWalletContextCurrent(walletContext);
 
       // Ensure asset is active (no-op if already active)
-      await _ensureAssetActivated(asset);
-      await _requireWalletContextCurrent(walletContext);
+      await _ensureAssetActivated(asset, walletContext);
 
       final strategy = _strategyFactory.forAsset(asset);
       // Fetch the first page to update the most recent txs' confirmations

@@ -1,3 +1,22 @@
+## 0.8.0-rc.1
+
+Release candidate for the wallet-identity hotfix. Metadata writes have a breaking
+API change; this is not a source-compatible patch of 0.7.0.
+
+ - **FIX**(history): preserve verified wallet identity and active history streams
+   during degraded same-wallet authentication events.
+ - **FIX**(history): retain one wallet context across historical and live results
+   so a wallet switch cannot carry the previous wallet's rows into the new stream.
+ - **FIX**(history): recheck the wallet session synchronously before recording
+   activation. On WebAssembly, an auth event can run after asynchronous
+   validation completes and otherwise mark the replacement wallet activated.
+ - **BREAKING** **FIX**(auth): `sdk.auth` metadata setters and atomic updates
+   require the original `expectedWalletId`. Writes fail closed when identity
+   cannot be verified or the active wallet changes. See the
+   [local-auth migration guidance](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
+ - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0-rc.1`.
+ - **TEST**(history): run wallet-race regressions in Chrome/WebAssembly in CI.
+
 ## 0.7.0
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.

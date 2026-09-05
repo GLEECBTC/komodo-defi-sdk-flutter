@@ -80,23 +80,36 @@ abstract interface class IAuthService {
 
   /// Method to store custom metadata for the user.
   ///
-  /// Overwrites any existing metadata.
+  /// Overwrites any existing metadata. Prefer [updateActiveUserMetadataKey]
+  /// when changing individual keys to avoid overwriting concurrent updates.
+  ///
+  /// [expectedWalletId] must be the verified identity captured when the
+  /// operation began. An unavailable or different active identity throws
+  /// [WalletChangedDisconnectException] under the authentication write lock.
   ///
   /// This does not emit an auth state change event.
   ///
   /// NB: This is intended to only be a short-term solution until the SDK
   /// is fully integrated with KW. This may be deprecated in the future.
-  Future<void> setActiveUserMetadata(JsonMap metadata);
+  Future<void> setActiveUserMetadata(
+    JsonMap metadata, {
+    required WalletId expectedWalletId,
+  });
 
   /// Atomically reads the current value of [key] from the active user's
   /// metadata, applies [transform] to it, and writes the result back.
   ///
   /// This is safe to call concurrently — a dedicated metadata mutex
   /// serialises all read-modify-write cycles.
+  /// [expectedWalletId] must be the verified identity captured when the
+  /// operation began. An unavailable or different active identity throws
+  /// [WalletChangedDisconnectException] under the authentication write lock
+  /// before [transform] runs or metadata can be changed.
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  );
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  });
 
   /// Attempts to restore a user session without requiring password authentication
   /// Only works if the KDF API is running and the wallet exists
@@ -352,9 +365,7 @@ class KdfAuthService implements IAuthService {
             // A wallet created here has no on-chain history by construction:
             // the seed did not exist a moment ago. Recorded per session so the
             // HD gap scan can be told so on this sign-in only.
-            _walletsGeneratedThisSession.add(
-              currentUser.walletId.compoundId,
-            );
+            _walletsGeneratedThisSession.add(currentUser.walletId.compoundId);
           }
         } catch (_) {
           await _clearFailedAuthenticatedKdfWithinWriteLock();
@@ -895,9 +906,13 @@ class KdfAuthService implements IAuthService {
   }
 
   @override
-  Future<void> setActiveUserMetadata(Map<String, dynamic> metadata) async {
+  Future<void> setActiveUserMetadata(
+    Map<String, dynamic> metadata, {
+    required WalletId expectedWalletId,
+  }) async {
     await _runAuthenticatedWriteOperation(
       (activeUser) => _metadataMutex.protect(() async {
+        _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
         final user = await _secureStorage.getUser(activeUser.walletId.name);
         if (user == null) throw AuthException.notFound();
 
@@ -925,10 +940,12 @@ class KdfAuthService implements IAuthService {
   @override
   Future<void> updateActiveUserMetadataKey(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) async {
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  }) async {
     await _runAuthenticatedWriteOperation(
       (activeUser) => _metadataMutex.protect(() async {
+        _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
         final user = await _secureStorage.getUser(activeUser.walletId.name);
         if (user == null) throw AuthException.notFound();
 
@@ -945,6 +962,23 @@ class KdfAuthService implements IAuthService {
         _lastEmittedUser = activeUser.copyWith(metadata: metadata);
       }),
     );
+  }
+
+  void _ensureMetadataWalletIdentity(
+    WalletId expectedWalletId,
+    WalletId activeWalletId,
+  ) {
+    // Name-only identities can compare equal after a wallet is recreated with
+    // a different seed. Both identities must include a verified public-key
+    // hash; the caller's expected identity cannot be recovered from storage.
+    if (!(expectedWalletId.pubkeyHash?.trim().isNotEmpty ?? false) ||
+        !(activeWalletId.pubkeyHash?.trim().isNotEmpty ?? false) ||
+        activeWalletId != expectedWalletId) {
+      throw const WalletChangedDisconnectException(
+        'Wallet identity is unavailable or changed '
+        'before updating wallet metadata',
+      );
+    }
   }
 
   @override

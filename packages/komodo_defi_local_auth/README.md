@@ -10,6 +10,14 @@ Authentication and wallet management on top of the Komodo DeFi Framework. This p
 dart pub add komodo_defi_local_auth
 ```
 
+This checkout prepares `0.6.0-rc.1`, which requires the
+[metadata-write migration](#migrating-metadata-writes). Test it from a pinned
+checkout before publication. Once published, opt in explicitly:
+
+```sh
+flutter pub add komodo_defi_local_auth:0.6.0-rc.1
+```
+
 ## Getting started
 
 ```dart
@@ -50,6 +58,46 @@ final sdk = KomodoDefiSdk();
 await sdk.initialize();
 await sdk.auth.signIn(walletName: 'my_wallet', password: 'pass');
 ```
+
+## Migrating metadata writes
+
+Metadata writes now require a non-null `expectedWalletId`. This is a breaking
+change for callers and custom auth implementations. It applies to
+`KomodoDefiAuth.setOrRemoveActiveUserKeyValue`,
+`KomodoDefiAuth.updateActiveUserKeyValue`, and the underlying `IAuthService`
+methods `setActiveUserMetadata` and `updateActiveUserMetadataKey`.
+
+Capture the authenticated wallet identity when the operation starts, before
+showing a backup prompt, exporting a wallet, or starting background setup. Carry
+that same identity through every write and any rollback:
+
+```dart
+final user = await auth.currentUser;
+if (user == null || !(user.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
+  return; // Restart the operation once wallet identity can be verified.
+}
+final expectedWalletId = user.walletId;
+
+// Perform the work for this wallet, retaining expectedWalletId across awaits.
+await auth.setOrRemoveActiveUserKeyValue(
+  'has_backup',
+  true,
+  expectedWalletId: expectedWalletId,
+);
+```
+
+The service checks both the expected identity and the freshly resolved active
+identity under the authentication write lock. A missing or empty public-key hash
+or a wallet mismatch throws `WalletChangedDisconnectException` before the
+metadata transform or write. A name alone is insufficient because another wallet
+can later reuse it. An identity lookup outage leaves ordinary wallet access
+available but prevents these writes until identity can be verified.
+
+On rejection, abort the stale operation. Do not fill in the parameter by reading
+the latest active wallet immediately before persistence, or retry with that
+wallet's identity. Custom implementations and test doubles must accept and
+forward the required argument. Prefer atomic key updates to replacing the whole
+metadata map, which can still overwrite concurrent changes for the same wallet.
 
 ## License
 
