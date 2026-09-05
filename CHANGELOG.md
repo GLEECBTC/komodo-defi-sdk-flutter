@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## Unreleased
+
+ - **BREAKING** **FIX**(auth): metadata writes through `komodo_defi_local_auth`
+   and `KomodoDefiSdk.auth` require the wallet identity captured at the start of
+   the operation. Missing public-key hashes and changed wallets are rejected
+   under the authentication write lock. Callers and custom auth implementations
+   must migrate; see [the guide](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes).
+
 ## 2026-09-01
 
 ### Changes

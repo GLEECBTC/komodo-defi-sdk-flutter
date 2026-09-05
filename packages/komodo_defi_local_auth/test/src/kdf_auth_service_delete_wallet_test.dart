@@ -433,89 +433,198 @@ void main() {
       expect(operations.stopCount, 0);
     });
 
-    test(
-      'setActiveUserMetadata keeps an unverified stored identity locked',
-      () async {
-        final storedUser = _testUser().copyWith(
-          walletId: WalletId.withPubkeyHash(
-            _testUser().walletId.name,
-            _testUser().walletId.authOptions,
-            _publicKeyHash,
-          ),
-        );
+    for (final writeKind in _MetadataWriteKind.values) {
+      test('${writeKind.name} rejects degraded runtime identity without '
+          'changing stored identity or metadata', () async {
+        final storedUser = _verifiedTestUser();
+        final storedJson = jsonEncode(storedUser.toJson());
         FlutterSecureStorage.setMockInitialValues(<String, String>{
-          'user_${storedUser.walletId.name}': jsonEncode(storedUser.toJson()),
+          'user_${storedUser.walletId.name}': storedJson,
         });
+        late _FakeKdfOperations operations;
         final service = _createService(
           publicKeyHashResponse: {
             'mmrpc': '2.0',
             'error': 'get_public_key_hash is unavailable',
           },
+          onOperationsCreated: (value) => operations = value,
         );
         addTearDown(service.dispose);
 
         expect((await service.getActiveUser())?.walletId.pubkeyHash, isNull);
+        var transformed = false;
+        await expectLater(
+          _writeMetadata(
+            service,
+            writeKind,
+            storedUser.walletId,
+            onTransform: (_) => transformed = true,
+          ),
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
 
-        await service.setActiveUserMetadata({'seedBackupConfirmed': true});
-
+        expect(transformed, isFalse);
+        expect(operations.stopCount, 0);
+        expect(await operations.isRunning(), isTrue);
         final runtimeUser = await service.getActiveUser();
         expect(runtimeUser?.walletId.pubkeyHash, isNull);
-        expect(runtimeUser?.metadata['seedBackupConfirmed'], isTrue);
+        expect(runtimeUser?.metadata, storedUser.metadata);
+        expect(
+          await const FlutterSecureStorage().read(
+            key: 'user_${storedUser.walletId.name}',
+          ),
+          storedJson,
+        );
+      });
 
+      test(
+        '${writeKind.name} rejects name-only identity captured before '
+        'same-name wallet replacement during an identity RPC outage',
+        () async {
+          final originalUser = _verifiedTestUser();
+          FlutterSecureStorage.setMockInitialValues(<String, String>{
+            'user_${originalUser.walletId.name}': jsonEncode(
+              originalUser.toJson(),
+            ),
+          });
+          late _FakeKdfOperations operations;
+          final service = _createService(
+            publicKeyHashResponse: {
+              'mmrpc': '2.0',
+              'error': 'get_public_key_hash is unavailable',
+            },
+            onOperationsCreated: (value) => operations = value,
+          );
+          addTearDown(service.dispose);
+
+          // Capture the real degraded value callers receive, not an
+          // artificially forged ID. Equality alone cannot distinguish it
+          // from a replacement wallet with the same display name.
+          final expectedWalletId = (await service.getActiveUser())!.walletId;
+          expect(expectedWalletId.pubkeyHash, isNull);
+          final replacementUser = originalUser.copyWith(
+            walletId: originalUser.walletId.copyWith(
+              pubkeyHash: _secondPublicKeyHash,
+            ),
+            metadata: const {'has_backup': false, 'replacement': true},
+          );
+          final replacementJson = jsonEncode(replacementUser.toJson());
+          await const FlutterSecureStorage().write(
+            key: 'user_${replacementUser.walletId.name}',
+            value: replacementJson,
+          );
+
+          var transformed = false;
+          await expectLater(
+            _writeMetadata(
+              service,
+              writeKind,
+              expectedWalletId,
+              onTransform: (_) => transformed = true,
+            ),
+            throwsA(isA<WalletChangedDisconnectException>()),
+          );
+
+          expect(transformed, isFalse);
+          expect(operations.stopCount, 0);
+          expect(await operations.isRunning(), isTrue);
+          expect(
+            await const FlutterSecureStorage().read(
+              key: 'user_${replacementUser.walletId.name}',
+            ),
+            replacementJson,
+          );
+          final runtimeUser = await service.getActiveUser();
+          expect(runtimeUser?.walletId.name, replacementUser.walletId.name);
+          expect(runtimeUser?.walletId.pubkeyHash, isNull);
+          expect(runtimeUser?.metadata, replacementUser.metadata);
+        },
+      );
+
+      final validWalletId = _verifiedTestUser().walletId;
+      final invalidExpectedIdentities = <String, WalletId>{
+        'name-only': _testUser().walletId,
+        'empty hash': validWalletId.copyWith(pubkeyHash: ''),
+        'whitespace hash': validWalletId.copyWith(pubkeyHash: ' \t '),
+        'different hash': validWalletId.copyWith(
+          pubkeyHash: _secondPublicKeyHash,
+        ),
+        'different authentication options': validWalletId.copyWith(
+          authOptions: const AuthOptions(
+            derivationMethod: DerivationMethod.iguana,
+          ),
+        ),
+      };
+      for (final entry in invalidExpectedIdentities.entries) {
+        test('${writeKind.name} rejects ${entry.key} expected identity '
+            'without signing out the verified active wallet', () async {
+          final storedUser = _verifiedTestUser();
+          final storedJson = jsonEncode(storedUser.toJson());
+          FlutterSecureStorage.setMockInitialValues(<String, String>{
+            'user_${storedUser.walletId.name}': storedJson,
+          });
+          late _FakeKdfOperations operations;
+          final service = _createService(
+            onOperationsCreated: (value) => operations = value,
+          );
+          addTearDown(service.dispose);
+          var transformed = false;
+
+          await expectLater(
+            _writeMetadata(
+              service,
+              writeKind,
+              entry.value,
+              onTransform: (_) => transformed = true,
+            ),
+            throwsA(isA<WalletChangedDisconnectException>()),
+          );
+
+          expect(transformed, isFalse);
+          expect(operations.stopCount, 0);
+          expect(await operations.isRunning(), isTrue);
+          expect(
+            (await service.getActiveUser())?.walletId,
+            storedUser.walletId,
+          );
+          expect(
+            await const FlutterSecureStorage().read(
+              key: 'user_${storedUser.walletId.name}',
+            ),
+            storedJson,
+          );
+        });
+      }
+
+      test('${writeKind.name} accepts matching verified identity', () async {
+        final storedUser = _verifiedTestUser();
+        FlutterSecureStorage.setMockInitialValues(<String, String>{
+          'user_${storedUser.walletId.name}': jsonEncode(storedUser.toJson()),
+        });
+        final service = _createService();
+        addTearDown(service.dispose);
+        final expectedWalletId = (await service.getActiveUser())!.walletId;
+
+        await _writeMetadata(
+          service,
+          writeKind,
+          expectedWalletId,
+          onTransform: (current) => expect(current, isFalse),
+        );
+
+        final runtimeUser = await service.getActiveUser();
+        expect(runtimeUser?.walletId, expectedWalletId);
+        expect(runtimeUser?.metadata, {'has_backup': true});
         final persisted = await const FlutterSecureStorage().read(
           key: 'user_${storedUser.walletId.name}',
         );
         final persistedUser = KdfUser.fromJson(
           (jsonDecode(persisted!) as Map).cast<String, dynamic>(),
         );
-        expect(persistedUser.walletId.pubkeyHash, _publicKeyHash);
-        expect(persistedUser.metadata['seedBackupConfirmed'], isTrue);
-      },
-    );
-
-    test(
-      'updateActiveUserMetadataKey keeps an unverified stored identity locked',
-      () async {
-        final storedUser = _testUser().copyWith(
-          walletId: WalletId.withPubkeyHash(
-            _testUser().walletId.name,
-            _testUser().walletId.authOptions,
-            _publicKeyHash,
-          ),
-          metadata: const {'activationCount': 1},
-        );
-        FlutterSecureStorage.setMockInitialValues(<String, String>{
-          'user_${storedUser.walletId.name}': jsonEncode(storedUser.toJson()),
-        });
-        final service = _createService(
-          publicKeyHashResponse: {
-            'mmrpc': '2.0',
-            'error': 'get_public_key_hash is unavailable',
-          },
-        );
-        addTearDown(service.dispose);
-
-        expect((await service.getActiveUser())?.walletId.pubkeyHash, isNull);
-
-        await service.updateActiveUserMetadataKey(
-          'activationCount',
-          (current) => (current as int) + 1,
-        );
-
-        final runtimeUser = await service.getActiveUser();
-        expect(runtimeUser?.walletId.pubkeyHash, isNull);
-        expect(runtimeUser?.metadata['activationCount'], 2);
-
-        final persisted = await const FlutterSecureStorage().read(
-          key: 'user_${storedUser.walletId.name}',
-        );
-        final persistedUser = KdfUser.fromJson(
-          (jsonDecode(persisted!) as Map).cast<String, dynamic>(),
-        );
-        expect(persistedUser.walletId.pubkeyHash, _publicKeyHash);
-        expect(persistedUser.metadata['activationCount'], 2);
-      },
-    );
+        expect(persistedUser.walletId, expectedWalletId);
+        expect(persistedUser.metadata, {'has_backup': true});
+      });
+    }
 
     test(
       'scoped metadata rejects a confirmation after switching wallets',
@@ -614,7 +723,7 @@ void main() {
 
         final metadataWrite = service.setActiveUserMetadata({
           'seedBackupConfirmed': true,
-        });
+        }, expectedWalletId: storedUser.walletId);
         await identityRequestStarted.future;
 
         var signOutCompleted = false;
@@ -1005,3 +1114,29 @@ KdfUser _testUser() {
     isBip39Seed: true,
   );
 }
+
+KdfUser _verifiedTestUser() => _testUser().copyWith(
+  walletId: _testUser().walletId.copyWith(pubkeyHash: _publicKeyHash),
+  metadata: const {'has_backup': false},
+);
+
+enum _MetadataWriteKind { replaceMetadata, updateMetadataKey }
+
+Future<void> _writeMetadata(
+  KdfAuthService service,
+  _MetadataWriteKind kind,
+  WalletId expectedWalletId, {
+  void Function(dynamic currentValue)? onTransform,
+}) => switch (kind) {
+  _MetadataWriteKind.replaceMetadata => service.setActiveUserMetadata({
+    'has_backup': true,
+  }, expectedWalletId: expectedWalletId),
+  _MetadataWriteKind.updateMetadataKey => service.updateActiveUserMetadataKey(
+    'has_backup',
+    (current) {
+      onTransform?.call(current);
+      return true;
+    },
+    expectedWalletId: expectedWalletId,
+  ),
+};

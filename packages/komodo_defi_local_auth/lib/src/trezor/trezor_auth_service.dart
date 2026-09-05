@@ -105,14 +105,19 @@ class TrezorAuthService implements IAuthService {
   );
 
   @override
-  Future<void> setActiveUserMetadata(JsonMap metadata) =>
-      _authService.setActiveUserMetadata(metadata);
+  Future<void> setActiveUserMetadata(
+    JsonMap metadata, {
+    required WalletId expectedWalletId,
+  }) => _authService.setActiveUserMetadata(
+    metadata,
+    expectedWalletId: expectedWalletId,
+  );
 
   @override
   Future<void> updateActiveUserMetadataKey(
     String key,
     dynamic Function(dynamic currentValue) transform, {
-    WalletId? expectedWalletId,
+    required WalletId expectedWalletId,
   }) => _authService.updateActiveUserMetadataKey(
     key,
     transform,

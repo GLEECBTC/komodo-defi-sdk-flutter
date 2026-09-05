@@ -171,6 +171,9 @@ abstract interface class KomodoDefiAuth {
   ///
   /// Example:
   /// final _komodoDefiSdk = KomodoDefiSdk.global;
+  /// final user = await _komodoDefiSdk.auth.currentUser;
+  /// if (user == null) return;
+  /// final expectedWalletId = user.walletId;
   ///
   ///   await _komodoDefiSdk.auth.setOrRemoveActiveUserKeyValue(
   ///   'custom_tokens',
@@ -184,6 +187,7 @@ abstract interface class KomodoDefiAuth {
   ///       }
   ///     ],
   ///   }.toJsonString(),
+  ///   expectedWalletId: expectedWalletId,
   /// );
   /// final tokenJson = (await _komodoDefiSdk.auth.currentUser)
   ///     ?.metadata
@@ -191,22 +195,29 @@ abstract interface class KomodoDefiAuth {
   ///
   /// print('Custom tokens: $tokenJson');
 
-  /// [expectedWalletId] binds the write to a previously observed wallet.
-  /// A mismatch throws [WalletChangedDisconnectException] before persistence.
+  /// [expectedWalletId] must be the verified identity captured when the
+  /// operation began, before any asynchronous work whose result is being saved.
+  /// A missing public-key hash in either identity, or a mismatch with the
+  /// freshly resolved active wallet, throws [WalletChangedDisconnectException]
+  /// before metadata is changed. Do not retry against a replacement wallet.
   Future<void> setOrRemoveActiveUserKeyValue(
     String key,
     dynamic value, {
-    WalletId? expectedWalletId,
+    required WalletId expectedWalletId,
   });
 
   /// Atomically reads the current value of [key] from the active user's
   /// metadata, applies [transform], and writes the result back.
   ///
   /// Safe to call concurrently — uses a dedicated metadata mutex internally.
+  /// [expectedWalletId] follows the same identity requirements as
+  /// [setOrRemoveActiveUserKeyValue]. Identity is checked before [transform]
+  /// runs, while the authentication write lock is held.
   Future<void> updateActiveUserKeyValue(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  );
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  });
 
   /// Provides PIN to a Trezor hardware device during authentication.
   ///
@@ -691,7 +702,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   Future<void> setOrRemoveActiveUserKeyValue(
     String key,
     dynamic value, {
-    WalletId? expectedWalletId,
+    required WalletId expectedWalletId,
   }) async {
     await _authService.updateActiveUserMetadataKey(
       key,
@@ -703,9 +714,14 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   @override
   Future<void> updateActiveUserKeyValue(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) async {
-    await _authService.updateActiveUserMetadataKey(key, transform);
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  }) async {
+    await _authService.updateActiveUserMetadataKey(
+      key,
+      transform,
+      expectedWalletId: expectedWalletId,
+    );
   }
 
   @override

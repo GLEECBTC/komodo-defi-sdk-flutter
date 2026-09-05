@@ -1,3 +1,13 @@
+## Unreleased
+
+ - **BREAKING** **FIX**(auth): require `expectedWalletId` on metadata setters
+   and atomic updates, including custom auth implementations. Capture the
+   original wallet identity before asynchronous work and forward it through
+   every write. See [migration guidance](README.md#migrating-metadata-writes).
+ - **FIX**(auth): reject metadata writes when either identity lacks a verified
+   public-key hash, preventing stale confirmations from reaching a different
+   wallet recreated under the same name during an identity lookup outage.
+
 ## 0.5.0
 
  - **FEAT**(auth): add `KomodoDefiAuth.onWalletDeletion`, an awaited hook that

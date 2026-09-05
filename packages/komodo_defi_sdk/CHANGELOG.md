@@ -1,3 +1,10 @@
+## Unreleased
+
+ - **BREAKING** **FIX**(auth): `sdk.auth` metadata setters and atomic updates
+   require the original `expectedWalletId`. Writes fail closed when identity
+   cannot be verified or the active wallet changes. See the
+   [local-auth migration guidance](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
+
 ## 0.7.0
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.
