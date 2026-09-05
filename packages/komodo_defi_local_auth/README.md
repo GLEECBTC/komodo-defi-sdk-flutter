@@ -10,6 +10,14 @@ Authentication and wallet management on top of the Komodo DeFi Framework. This p
 dart pub add komodo_defi_local_auth
 ```
 
+This checkout prepares `0.6.0-rc.1`, which requires the
+[metadata-write migration](#migrating-metadata-writes). Test it from a pinned
+checkout before publication. Once published, opt in explicitly:
+
+```sh
+flutter pub add komodo_defi_local_auth:0.6.0-rc.1
+```
+
 ## Getting started
 
 ```dart

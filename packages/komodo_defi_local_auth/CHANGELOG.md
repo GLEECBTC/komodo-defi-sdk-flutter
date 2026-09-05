@@ -1,4 +1,7 @@
-## Unreleased
+## 0.6.0-rc.1
+
+Release candidate for verified metadata writes. Callers and custom authentication
+implementations must migrate before adopting this version.
 
  - **BREAKING** **FIX**(auth): require `expectedWalletId` on metadata setters
    and atomic updates, including custom auth implementations. Capture the

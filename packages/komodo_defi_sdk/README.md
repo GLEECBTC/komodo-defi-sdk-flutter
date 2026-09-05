@@ -21,6 +21,17 @@ High-level, opinionated SDK for building cross-platform Komodo DeFi wallets and 
 dart pub add komodo_defi_sdk
 ```
 
+### Wallet-identity release candidate
+
+This checkout prepares `0.8.0-rc.1`. It requires local-auth `0.6.0-rc.1` and the
+[metadata-write migration](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
+Test the RC from a pinned checkout before publication. Once the RC is published,
+opt in explicitly:
+
+```sh
+flutter pub add komodo_defi_sdk:0.8.0-rc.1
+```
+
 ## Quick start
 
 ```dart

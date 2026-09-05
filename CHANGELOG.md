@@ -3,13 +3,55 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## Unreleased
+## 2026-09-05 — wallet-identity release candidate
 
- - **BREAKING** **FIX**(auth): metadata writes through `komodo_defi_local_auth`
-   and `KomodoDefiSdk.auth` require the wallet identity captured at the start of
-   the operation. Missing public-key hashes and changed wallets are rejected
-   under the authentication write lock. Callers and custom auth implementations
-   must migrate; see [the guide](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes).
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - [`komodo_defi_sdk` - `v0.8.0-rc.1`](#komodo_defi_sdk---v080-rc1)
+ - [`komodo_defi_local_auth` - `v0.6.0-rc.1`](#komodo_defi_local_auth---v060-rc1)
+
+Packages with other changes:
+
+ - There are no other package version changes in this release candidate.
+
+---
+
+#### `komodo_defi_sdk` - `v0.8.0-rc.1`
+
+ - **BREAKING** **FIX**(auth): metadata writes through `KomodoDefiSdk.auth`
+   require the verified wallet identity captured when the operation starts.
+   Reject stale operations before they can update a replacement wallet.
+ - **FIX**(history): retain verified identity and active history streams during
+   degraded same-wallet authentication events.
+ - **FIX**(history): retain one wallet context across historical and live results
+   so old-wallet rows cannot enter a replacement wallet's stream.
+ - **FIX**(history): validate the wallet before recording activation and recheck
+   the session synchronously immediately before the marker is added. This also
+   closes the asynchronous return gap on WebAssembly.
+ - **TEST**(history): cover wallet switching during activation in native and
+   Chrome/WebAssembly tests, including the Wasm suite in CI.
+ - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0-rc.1`.
+
+#### `komodo_defi_local_auth` - `v0.6.0-rc.1`
+
+ - **BREAKING** **FIX**(auth): require `expectedWalletId` for metadata setters
+   and atomic updates, including custom auth implementations and Trezor
+   forwarding. Callers must capture the original identity before asynchronous
+   work and retain it through every write and rollback.
+ - **FIX**(auth): reject missing public-key hashes and changed wallets under the
+   authentication write lock, before transformation or persistence. This prevents
+   a stale confirmation from updating a different seed recreated under the same
+   name during an identity lookup outage.
+ - **DOCS**(auth): document [caller migration](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes)
+   and explicit prerelease adoption.
+
+These versions prepare the release candidate in [PR #374](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/374).
+They do not indicate that packages have been published. The KDF binary, coin
+configuration pins, and stored-data format are unchanged.
 
 ## 2026-09-01
 
