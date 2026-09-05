@@ -397,6 +397,95 @@ void main() {
     },
   );
 
+  for (final microtaskDepth in [1, 2]) {
+    test(
+      'wallet switch after activation validation cannot skip next activation '
+      '($microtaskDepth microtasks)',
+      () async {
+        final client = _MockApiClient();
+        final auth = _MockAuth();
+        final assetProvider = _MockAssetProvider();
+        final activation = _MockActivationCoordinator();
+        final pubkeys = _MockPubkeyManager();
+        final streaming = _MockEventStreamingManager();
+        final assetHistory = _MockAssetHistoryStorage();
+        final storage = _RecordingStorage();
+        final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+        final switched = Completer<void>();
+        final strategyResponse = Completer<MyTxHistoryResponse>()
+          ..complete(_historyResponse());
+        KdfUser? currentUser = walletA;
+        var activationCompleted = false;
+        var switchScheduled = false;
+        final asset = _asset();
+
+        void switchAfterMicrotasks(int remaining) {
+          scheduleMicrotask(() {
+            if (remaining > 0) {
+              switchAfterMicrotasks(remaining - 1);
+            } else {
+              currentUser = walletB;
+              authChanges.add(walletB);
+              switched.complete();
+            }
+          });
+        }
+
+        when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+        when(() => auth.currentUser).thenAnswer((_) async {
+          final user = currentUser;
+          if (activationCompleted && !switchScheduled) {
+            switchScheduled = true;
+            // Wasm queues async-return completions. These timings deliver the
+            // auth event after the final identity comparison, while its
+            // successful result is still reaching the activation continuation.
+            // Native scheduling instead adds then clears the old marker; both
+            // runtimes must activate the asset again for wallet B.
+            switchAfterMicrotasks(microtaskDepth);
+          }
+          return user;
+        });
+        when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+        for (final wallet in [walletA, walletB]) {
+          when(
+            () => assetHistory.getWalletAssets(wallet.walletId),
+          ).thenAnswer((_) async => {'ATOM'});
+        }
+        when(() => activation.activateAsset(asset)).thenAnswer((_) {
+          activationCompleted = true;
+          return Future.value(ActivationResult.success(asset.id));
+        });
+
+        final manager = TransactionHistoryManager(
+          client,
+          auth,
+          assetProvider,
+          activation,
+          pubkeyManager: pubkeys,
+          eventStreamingManager: streaming,
+          storage: storage,
+          assetHistoryStorage: assetHistory,
+          transactionHistoryStrategies: [_BlockingStrategy(strategyResponse)],
+        );
+        addTearDown(() async {
+          await manager.dispose();
+          await authChanges.close();
+        });
+
+        final rejected = expectLater(
+          manager.getTransactionHistory(asset),
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        await switched.future;
+        await rejected;
+
+        await manager.getTransactionHistory(asset);
+        verify(() => activation.activateAsset(asset)).called(2);
+        expect(storage.storedWallets, [walletB.walletId]);
+      },
+    );
+  }
+
   test(
     'merged history closes when the wallet changes during its initial fetch',
     () async {

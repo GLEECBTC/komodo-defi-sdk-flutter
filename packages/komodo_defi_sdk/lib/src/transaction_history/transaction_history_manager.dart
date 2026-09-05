@@ -767,6 +767,14 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       );
     }
     await _requireWalletContextCurrent(walletContext);
+    // Wasm queues async-return completions. An auth event can invalidate the
+    // successful check before this continuation resumes, so do not yield
+    // between the final session check and recording its activation marker.
+    if (!_isWalletContextCurrentSync(walletContext)) {
+      throw const WalletChangedDisconnectException(
+        'Wallet changed while activating transaction history',
+      );
+    }
     _activatedThisSession.add(asset.id);
   }
 

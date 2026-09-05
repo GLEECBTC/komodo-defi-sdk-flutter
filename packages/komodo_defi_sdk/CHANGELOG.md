@@ -1,5 +1,8 @@
 ## Unreleased
 
+ - **FIX**(history): recheck the wallet session synchronously before recording
+   activation. On WebAssembly, an auth event can run after asynchronous
+   validation completes and otherwise mark the replacement wallet activated.
  - **BREAKING** **FIX**(auth): `sdk.auth` metadata setters and atomic updates
    require the original `expectedWalletId`. Writes fail closed when identity
    cannot be verified or the active wallet changes. See the
