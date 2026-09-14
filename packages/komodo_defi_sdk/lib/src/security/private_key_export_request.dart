@@ -10,7 +10,6 @@ class PrivateKeyExportRequest {
     this.startIndex,
     this.endIndex,
     this.accountIndex,
-    this.allowTronActiveKey = true,
   });
 
   /// Explicit targets, or activated/pending/failed assets when omitted.
@@ -28,10 +27,7 @@ class PrivateKeyExportRequest {
   /// HD account, defaulting to zero for offline export.
   final int? accountIndex;
 
-  /// Allows explicitly limited export of the active TRON signing address.
-  final bool allowTronActiveKey;
-
-  /// A range request cannot be fulfilled by one activated TRON key.
+  /// Whether the caller explicitly selected HD address or account coverage.
   bool get hasExplicitRange =>
       startIndex != null || endIndex != null || accountIndex != null;
 

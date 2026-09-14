@@ -489,7 +489,6 @@ Future<void> bootstrap({
         auth,
         assetProvider,
         activationCoordinator,
-        pubkeyManager: await container.getAsync<PubkeyManager>(),
       );
     },
     dependsOn: [
@@ -497,7 +496,6 @@ Future<void> bootstrap({
       KomodoDefiLocalAuth,
       AssetManager,
       SharedActivationCoordinator,
-      PubkeyManager,
     ],
   );
 

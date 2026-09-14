@@ -6,7 +6,6 @@ enum PrivateKeyExportCoverageKind {
   offlineHdRange,
   offlineAccount,
   legacyWallet,
-  activeAddressOnly,
 }
 
 class PrivateKeyExportCoverage {
@@ -43,20 +42,13 @@ class PrivateKeyExportCoverage {
 enum PrivateKeyExportFailure {
   unsupportedProtocol,
   assetUnavailable,
-  activationPending,
-  activationFailed,
-  platformNotEnabled,
-  invalidPlatform,
-  metadataUnverified,
   invalidResponse,
   rpcFailed,
-  requestedCoverageUnavailable,
 }
 
 class PrivateKeyExportOutcome {
   PrivateKeyExportOutcome.success({
     required this.assetId,
-    required this.signingAssetId,
     required List<PrivateKey> keys,
     required PrivateKeyExportCoverage coverage,
   }) : keys = List.unmodifiable(keys),
@@ -66,15 +58,11 @@ class PrivateKeyExportOutcome {
   const PrivateKeyExportOutcome.unavailable({
     required this.assetId,
     required this.failure,
-    this.signingAssetId,
   }) : keys = const [],
        coverage = null;
 
   final AssetId assetId;
 
-  /// Asset whose RPC supplied this signing key. Offline token exports use
-  /// their own configuration; an online TRC20 export uses its TRON platform.
-  final AssetId? signingAssetId;
   final List<PrivateKey> keys;
   final PrivateKeyExportCoverage? coverage;
   final PrivateKeyExportFailure? failure;
@@ -83,7 +71,6 @@ class PrivateKeyExportOutcome {
   /// Intentional recovery-file serialization. Do not use for diagnostics.
   Map<String, dynamic> toJson() => {
     'asset_id': assetId.toJson(),
-    if (signingAssetId != null) 'signing_asset_id': signingAssetId!.toJson(),
     if (coverage != null) 'coverage': coverage!.toJson(),
     if (failure != null) 'unavailable_reason': failure!.name,
     'keys': keys.map((key) => key.toJson()).toList(),
@@ -100,11 +87,6 @@ class PrivateKeyExportResult {
   final List<PrivateKeyExportOutcome> outcomes;
   bool get isComplete => outcomes.every((outcome) => outcome.isSuccess);
   bool get hasKeys => outcomes.any((outcome) => outcome.isSuccess);
-  bool get hasLimitedCoverage => outcomes.any(
-    (outcome) =>
-        outcome.coverage?.kind ==
-        PrivateKeyExportCoverageKind.activeAddressOnly,
-  );
   Map<AssetId, List<PrivateKey>> get keysByAsset => Map.unmodifiable({
     for (final outcome in outcomes)
       if (outcome.isSuccess) outcome.assetId: outcome.keys,
@@ -113,7 +95,6 @@ class PrivateKeyExportResult {
   /// Intentional recovery-file serialization. Do not use for diagnostics.
   Map<String, dynamic> toJson() => {
     'complete': isComplete,
-    'limited_coverage': hasLimitedCoverage,
     'assets': outcomes.map((outcome) => outcome.toJson()).toList(),
   };
 
