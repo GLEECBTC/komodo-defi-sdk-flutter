@@ -6,7 +6,6 @@ import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dar
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/security/private_key_export_request.dart';
 import 'package:komodo_defi_sdk/src/security/security_manager.dart';
-import 'package:komodo_defi_sdk/src/security/tron_export_key.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
@@ -108,8 +107,6 @@ void main() {
   final trx = tron();
   final usdt = token(trx);
   final btc = utxo('BTC');
-  final scalar = '0' * 63 + '1'; // Public fixture, used only with mock RPCs.
-  final key = TronExportKey.parse(scalar);
   late _Client client;
   late _Auth auth;
   late _Activation activation;
@@ -118,8 +115,6 @@ void main() {
   late int generation;
   late KdfUser? user;
   late Map<AssetId, AssetActivationState> states;
-  late List<String> enabled;
-  late List<Map<String, dynamic>> metadata;
 
   setUpAll(() {
     registerFallbackValue(trx.id);
@@ -151,49 +146,14 @@ void main() {
     when(
       () => assets.fromId(any()),
     ).thenAnswer((call) => catalog[call.positionalArguments[0]]);
-    when(() => assets.findAssetsByConfigId(any())).thenAnswer(
-      (call) => catalog.values
-          .where((a) => a.id.id == call.positionalArguments[0])
-          .toSet(),
-    );
     when(
       () => assets.getActivatedAssets(),
     ).thenAnswer((_) async => [btc, trx, usdt]);
-    enabled = ['TRX', 'USDT-TRC20'];
-    metadata = [
-      {
-        'address': key.address,
-        'derivation_path': "m/44'/195'/0'/0/7",
-        'chain': 'External',
-      },
-    ];
     client = _Client();
     client.respond = (request) {
       switch (request['method']) {
         case 'get_private_keys':
           return offline((request['params'] as Map)['coins'][0] as String);
-        case 'get_enabled_coins':
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'coins': [
-                for (final ticker in enabled) {'ticker': ticker},
-              ],
-            },
-          };
-        case 'show_priv_key':
-          return {
-            'result': {'coin': request['coin'], 'priv_key': scalar},
-          };
-        case 'account_balance':
-          return {
-            'mmrpc': '2.0',
-            'result': {
-              'account_index': 0,
-              'total_pages': 1,
-              'addresses': metadata,
-            },
-          };
         default:
           throw StateError('Unexpected RPC');
       }
@@ -202,116 +162,203 @@ void main() {
   });
 
   test(
-    'mixed export preserves offline range and verifies one shared active TRON key',
+    'mixed export keeps BTC and reports TRX and TRC20 unsupported',
     () async {
       final result = await manager.exportPrivateKeys();
-      expect(result.isComplete, isTrue);
-      expect(result.hasLimitedCoverage, isTrue);
+      expect(result.isComplete, isFalse);
+      expect(result.hasKeys, isTrue);
+      expect(result.keysByAsset.keys, [btc.id]);
       expect(result.keysByAsset[btc.id], hasLength(11));
-      expect(
-        result.keysByAsset[trx.id]!.single.hdInfo!.derivationPath,
-        "m/44'/195'/0'/0/7",
-      );
-      expect(result.keysByAsset[usdt.id]!.single.privateKey, scalar);
-      expect(result.outcomes.last.signingAssetId, trx.id);
-      expect(
-        client.requests.where((r) => r['method'] == 'show_priv_key'),
-        hasLength(1),
-      );
-      expect(
-        client.requests.any((r) => (r['method'] as String).contains('enable')),
-        isTrue,
-      ); // get_enabled_coins only
-      expect(client.requests.map((r) => r['method']).toSet(), {
+      expect(result.outcomes.map((outcome) => outcome.assetId), [
+        btc.id,
+        trx.id,
+        usdt.id,
+      ]);
+      for (final outcome in result.outcomes.skip(1)) {
+        expect(outcome.failure, PrivateKeyExportFailure.unsupportedProtocol);
+        expect(outcome.keys, isEmpty);
+        expect(outcome.coverage, isNull);
+      }
+      expect(client.requests.map((request) => request['method']), [
         'get_private_keys',
-        'get_enabled_coins',
-        'show_priv_key',
-        'account_balance',
-      });
+      ]);
+      expect((client.requests.single['params'] as Map)['coins'], ['BTC']);
     },
   );
 
-  test('valid scalar and public address vector, leading zeros preserved', () {
-    expect(key.privateKey, scalar);
-    expect(key.address, 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC');
-    expect(key.publicKey.startsWith('0479be667e'), isTrue);
-    for (final invalid in ['', '00', '0' * 64, 'f' * 64, 'z' * 64]) {
-      expect(() => TronExportKey.parse(invalid), throwsFormatException);
+  for (final hdWallet in [true, false]) {
+    for (final asset in [trx, usdt]) {
+      test(
+        '${asset.id.id} export is unsupported without RPC (HD=$hdWallet)',
+        () async {
+          if (!hdWallet) {
+            user = const KdfUser(
+              walletId: WalletId(
+                name: 'fixture',
+                pubkeyHash: 'verified-public-identity',
+                authOptions: AuthOptions(
+                  derivationMethod: DerivationMethod.iguana,
+                ),
+              ),
+              isBip39Seed: true,
+            );
+          }
+          final result = await manager.exportPrivateKeys(
+            request: PrivateKeyExportRequest(assets: [asset.id]),
+          );
+          expect(result.hasKeys, isFalse);
+          expect(
+            result.outcomes.single.failure,
+            PrivateKeyExportFailure.unsupportedProtocol,
+          );
+          expect(result.outcomes.single.coverage, isNull);
+          await expectLater(
+            manager.getPrivateKey(asset.id),
+            throwsA(isA<UnsupportedError>()),
+          );
+          expect(client.requests, isEmpty);
+          verifyNever(() => assets.getActivatedAssets());
+          verifyNoMoreInteractions(activation);
+        },
+      );
     }
-  });
-
-  test('partial export retains BTC when TRON metadata is unrelated', () async {
-    metadata = [
-      {
-        'address': 'unrelated',
-        'derivation_path': "m/44'/195'/0'/0/0",
-        'chain': 'External',
-      },
-    ];
-    final result = await manager.exportPrivateKeys();
-    expect(result.isComplete, isFalse);
-    expect(result.keysByAsset.keys, [btc.id]);
-    expect(
-      result.outcomes.last.failure,
-      PrivateKeyExportFailure.metadataUnverified,
-    );
-  });
+  }
 
   test(
-    'same address with wrong coin path cannot authenticate a TRON key',
+    'TRON HD address 777 remains unsupported without scanning metadata',
     () async {
-      metadata.single['derivation_path'] = "m/44'/60'/0'/0/7";
-      final result = await manager.exportPrivateKeys();
-      expect(
-        result.outcomes[1].failure,
-        PrivateKeyExportFailure.metadataUnverified,
+      final result = await manager.exportPrivateKeys(
+        request: PrivateKeyExportRequest(
+          assets: [trx.id, usdt.id],
+          startIndex: 777,
+          endIndex: 777,
+        ),
       );
+      expect(result.hasKeys, isFalse);
+      expect(
+        result.outcomes.map((outcome) => outcome.failure),
+        everyElement(PrivateKeyExportFailure.unsupportedProtocol),
+      );
+      await expectLater(
+        manager.getPrivateKeys(
+          assets: [trx.id, usdt.id],
+          startIndex: 777,
+          endIndex: 777,
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      expect(client.requests, isEmpty);
+      verifyNoMoreInteractions(activation);
     },
   );
 
-  test(
-    'unactivated and failed assets do not trigger activation or key retrieval',
-    () async {
-      states[trx.id] = AssetActivationState.failed(trx.id);
-      enabled = [];
-      final result = await manager.exportPrivateKeys();
-      expect(
-        result.outcomes[1].failure,
-        PrivateKeyExportFailure.activationFailed,
+  test('strict mixed export rejects TRON before deriving any keys', () async {
+    for (final targets in [
+      [btc.id, trx.id],
+      [usdt.id, btc.id],
+    ]) {
+      await expectLater(
+        manager.getPrivateKeys(assets: targets),
+        throwsA(isA<UnsupportedError>()),
       );
-      expect(
-        result.outcomes[2].failure,
-        PrivateKeyExportFailure.activationFailed,
-      );
-      expect(
-        client.requests.any((r) => r['method'] == 'show_priv_key'),
-        isFalse,
-      );
-    },
-  );
-
-  test('explicit range refuses narrower TRON substitution', () async {
-    final result = await manager.exportPrivateKeys(
-      request: PrivateKeyExportRequest(
-        assets: [trx.id],
-        startIndex: 7,
-        endIndex: 7,
-      ),
-    );
-    expect(
-      result.outcomes.single.failure,
-      PrivateKeyExportFailure.requestedCoverageUnavailable,
-    );
+    }
     expect(client.requests, isEmpty);
   });
 
-  test('strict compatibility map never invokes online fallback', () async {
-    client.respond = (_) => {'error': 'unsupported synthetic protocol'};
-    await expectLater(
-      manager.getPrivateKeys(assets: [trx.id]),
-      throwsA(anything),
+  test(
+    'TRON IDs remain unsupported when their catalog metadata is missing',
+    () async {
+      for (final asset in [trx, usdt]) {
+        when(() => assets.fromId(asset.id)).thenReturn(null);
+        final result = await manager.exportPrivateKeys(
+          request: PrivateKeyExportRequest(assets: [asset.id]),
+        );
+        expect(
+          result.outcomes.single.failure,
+          PrivateKeyExportFailure.unsupportedProtocol,
+        );
+        await expectLater(
+          manager.getPrivateKey(asset.id),
+          throwsA(isA<UnsupportedError>()),
+        );
+      }
+      expect(client.requests, isEmpty);
+    },
+  );
+
+  test(
+    'TRON protocol remains unsupported with a retained non-TRON ID',
+    () async {
+      for (final asset in [trx, usdt]) {
+        final retained = asset.copyWith(
+          id: asset.id.copyWith(subClass: CoinSubClass.utxo),
+        );
+        when(() => assets.fromId(retained.id)).thenReturn(retained);
+        final result = await manager.exportPrivateKeys(
+          request: PrivateKeyExportRequest(assets: [retained.id]),
+        );
+        expect(
+          result.outcomes.single.failure,
+          PrivateKeyExportFailure.unsupportedProtocol,
+        );
+        await expectLater(
+          manager.getPrivateKey(retained.id),
+          throwsA(isA<UnsupportedError>()),
+        );
+      }
+      expect(client.requests, isEmpty);
+    },
+  );
+
+  test('legacy BTC export remains available through both APIs', () async {
+    user = const KdfUser(
+      walletId: WalletId(
+        name: 'fixture',
+        pubkeyHash: 'verified-public-identity',
+        authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+      ),
+      isBip39Seed: true,
     );
-    expect(client.requests.map((r) => r['method']), ['get_private_keys']);
+    client.respond = (_) => {
+      'mmrpc': '2.0',
+      'result': [
+        {
+          'coin': 'BTC',
+          'pubkey': 'synthetic-public',
+          'address': 'synthetic-address',
+          'priv_key': 'synthetic-private',
+        },
+      ],
+    };
+    final result = await manager.exportPrivateKeys(
+      request: PrivateKeyExportRequest(assets: [btc.id]),
+    );
+    expect(result.isComplete, isTrue);
+    expect(
+      result.outcomes.single.coverage!.kind,
+      PrivateKeyExportCoverageKind.legacyWallet,
+    );
+    expect(result.keysByAsset[btc.id]!.single.hdInfo, isNull);
+    final strict = await manager.getPrivateKey(btc.id);
+    expect(strict[btc.id]!.single.privateKey, 'synthetic-private');
+    expect(client.requests.map((request) => request['method']), [
+      'get_private_keys',
+      'get_private_keys',
+    ]);
+  });
+
+  test('pending and failed TRON activation stays unsupported', () async {
+    states[trx.id] = AssetActivationState.activating(trx.id);
+    states[usdt.id] = AssetActivationState.failed(usdt.id);
+    final result = await manager.exportPrivateKeys();
+    expect(result.outcomes.first.isSuccess, isTrue);
+    expect(
+      result.outcomes.skip(1).map((outcome) => outcome.failure),
+      everyElement(PrivateKeyExportFailure.unsupportedProtocol),
+    );
+    expect(client.requests.map((request) => request['method']), [
+      'get_private_keys',
+    ]);
   });
 
   test('default mode still validates malformed range before RPC', () async {
@@ -375,12 +422,11 @@ void main() {
     'diagnostics stay redacted while deliberate recovery JSON retains keys',
     () async {
       final result = await manager.exportPrivateKeys();
-      {
-        expect(result.toString(), isNot(contains(scalar)));
-        expect(result.outcomes.toString(), isNot(contains(scalar)));
-        expect(result.keysByAsset.toString(), isNot(contains(scalar)));
-        expect(jsonEncode(result.toJson()), contains(scalar));
-      }
+      const secret = 'synthetic-private-0';
+      expect(result.toString(), isNot(contains(secret)));
+      expect(result.outcomes.toString(), isNot(contains(secret)));
+      expect(result.keysByAsset.toString(), isNot(contains(secret)));
+      expect(jsonEncode(result.toJson()), contains(secret));
     },
   );
   test(
@@ -412,160 +458,6 @@ void main() {
       );
     },
   );
-
-  test(
-    'session change during enabled read prevents secret retrieval',
-    () async {
-      client.respond = (request) {
-        generation++;
-        return {
-          'mmrpc': '2.0',
-          'result': {
-            'coins': [
-              {'ticker': 'TRX'},
-            ],
-          },
-        };
-      };
-      await expectLater(
-        manager.exportPrivateKeys(
-          request: PrivateKeyExportRequest(assets: [trx.id]),
-        ),
-        throwsA(isA<PrivateKeyExportSessionChangedException>()),
-      );
-      expect(client.requests.map((request) => request['method']), [
-        'get_enabled_coins',
-      ]);
-    },
-  );
-
-  test(
-    'session change during fresh metadata discards retrieved TRON key',
-    () async {
-      final respond = client.respond;
-      client.respond = (request) {
-        if (request['method'] == 'account_balance') generation++;
-        return respond(request);
-      };
-      await expectLater(
-        manager.exportPrivateKeys(
-          request: PrivateKeyExportRequest(assets: [trx.id]),
-        ),
-        throwsA(isA<PrivateKeyExportSessionChangedException>()),
-      );
-    },
-  );
-
-  test(
-    'deactivation after key retrieval produces an unavailable outcome',
-    () async {
-      final respond = client.respond;
-      client.respond = (request) {
-        if (request['method'] == 'show_priv_key') enabled = [];
-        return respond(request);
-      };
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [trx.id]),
-      );
-      expect(result.hasKeys, isFalse);
-      expect(
-        result.outcomes.single.failure,
-        PrivateKeyExportFailure.assetUnavailable,
-      );
-    },
-  );
-
-  test('malformed online scalar produces no key or parser detail', () async {
-    final respond = client.respond;
-    client.respond = (request) => request['method'] == 'show_priv_key'
-        ? {
-            'result': {'coin': 'TRX', 'priv_key': 'SYNTHETIC_INVALID_SECRET'},
-          }
-        : respond(request);
-    final result = await manager.exportPrivateKeys(
-      request: PrivateKeyExportRequest(assets: [trx.id]),
-    );
-    expect(result.hasKeys, isFalse);
-    expect(
-      result.outcomes.single.failure,
-      PrivateKeyExportFailure.invalidResponse,
-    );
-    expect(
-      jsonEncode(result.toJson()).contains('SYNTHETIC_INVALID_SECRET'),
-      isFalse,
-    );
-  });
-
-  test(
-    'legacy TRON verifies owner address and never uses GasFree address',
-    () async {
-      user = const KdfUser(
-        walletId: WalletId(
-          name: 'fixture',
-          pubkeyHash: 'verified-public-identity',
-          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-        ),
-        isBip39Seed: true,
-      );
-      final respond = client.respond;
-      client.respond = (request) => request['method'] == 'my_balance'
-          ? {
-              'coin': 'TRX',
-              'address': key.address,
-              'gasfree_address': 'custody-address',
-              'balance': '0',
-              'unspendable_balance': '0',
-            }
-          : respond(request);
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [trx.id]),
-      );
-      expect(result.isComplete, isTrue);
-      expect(result.keysByAsset[trx.id]!.single.publicKeyAddress, key.address);
-      expect(result.keysByAsset[trx.id]!.single.hdInfo, isNull);
-      expect(
-        client.requests.any(
-          (request) => request['method'] == 'account_balance',
-        ),
-        isFalse,
-      );
-    },
-  );
-
-  test(
-    'unknown platform and unrecognized network fail before online key RPC',
-    () async {
-      enabled = ['USDT-TRC20'];
-      when(() => assets.findAssetsByConfigId('TRX')).thenReturn({});
-      final unknown = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(
-        unknown.outcomes.single.failure,
-        PrivateKeyExportFailure.invalidPlatform,
-      );
-      final alternate = tron(network: 'Unknown');
-      when(() => assets.fromId(trx.id)).thenReturn(alternate);
-      final invalid = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [trx.id]),
-      );
-      expect(
-        invalid.outcomes.single.failure,
-        PrivateKeyExportFailure.invalidPlatform,
-      );
-      expect(client.requests, isEmpty);
-    },
-  );
-
-  test('pending assets remain explicit in default export coverage', () async {
-    states[trx.id] = AssetActivationState.activating(trx.id);
-    final result = await manager.exportPrivateKeys();
-    expect(
-      result.outcomes[1].failure,
-      PrivateKeyExportFailure.activationPending,
-    );
-    expect(result.outcomes[0].isSuccess, isTrue);
-  });
 
   test(
     'shielded account preserves viewing key and alternate derivation metadata',
@@ -748,285 +640,6 @@ void main() {
       await disposal;
     },
   );
-  test(
-    'TRC20 does not export while its signing platform activation is pending',
-    () async {
-      enabled = ['USDT-TRC20'];
-      states[trx.id] = AssetActivationState.activating(trx.id);
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(
-        result.outcomes.single.failure,
-        PrivateKeyExportFailure.activationPending,
-      );
-      expect(client.requests, isEmpty);
-    },
-  );
-
-  test(
-    'TRON verifies fresh path against current config with retained AssetId',
-    () async {
-      final retained = trx.copyWith(
-        id: trx.id.copyWith(derivationPath: "m/44'/999'"),
-      );
-      when(() => assets.fromId(trx.id)).thenReturn(retained);
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [trx.id]),
-      );
-      expect(result.isComplete, isTrue);
-      expect(
-        result.keysByAsset[trx.id]!.single.hdInfo!.derivationPath,
-        "m/44'/195'/0'/0/7",
-      );
-    },
-  );
-
-  for (final hdWallet in [true, false]) {
-    test('TRC20 exports its verified parent key when only the token is listed '
-        '(HD=$hdWallet)', () async {
-      enabled = ['USDT-TRC20'];
-      if (!hdWallet) {
-        user = const KdfUser(
-          walletId: WalletId(
-            name: 'fixture',
-            pubkeyHash: 'verified-public-identity',
-            authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-          ),
-          isBip39Seed: true,
-        );
-        final respond = client.respond;
-        client.respond = (request) => request['method'] == 'my_balance'
-            ? {
-                'coin': 'TRX',
-                'address': key.address,
-                'gasfree_address': 'custody-address',
-                'balance': '0',
-                'unspendable_balance': '0',
-              }
-            : respond(request);
-      }
-
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-
-      expect(result.isComplete, isTrue);
-      expect(result.hasLimitedCoverage, isTrue);
-      expect(result.keysByAsset.keys, [usdt.id]);
-      final outcome = result.outcomes.single;
-      expect(outcome.signingAssetId, trx.id);
-      expect(
-        outcome.coverage!.kind,
-        PrivateKeyExportCoverageKind.activeAddressOnly,
-      );
-      final exported = outcome.keys.single;
-      expect(exported.assetId, usdt.id);
-      expect(exported.privateKey, scalar);
-      expect(exported.publicKeyAddress, key.address);
-      if (hdWallet) {
-        expect(exported.hdInfo!.derivationPath, "m/44'/195'/0'/0/7");
-        expect(outcome.coverage!.derivationPath, "m/44'/195'/0'/0/7");
-        expect(outcome.coverage!.accountIndex, 0);
-        expect(outcome.coverage!.chain, 'External');
-      } else {
-        expect(exported.hdInfo, isNull);
-        expect(outcome.coverage!.derivationPath, isNull);
-      }
-      expect(client.requests.map((request) => request['method']), [
-        'get_enabled_coins',
-        'show_priv_key',
-        if (hdWallet) 'account_balance' else 'my_balance',
-        'get_enabled_coins',
-      ]);
-      expect(client.requests[1]['coin'], 'TRX');
-      expect(
-        hdWallet
-            ? (client.requests[2]['params'] as Map)['coin']
-            : client.requests[2]['coin'],
-        'TRX',
-      );
-    });
-  }
-
-  test(
-    'TRC20 export remains available when only TRX disappears during retrieval',
-    () async {
-      final respond = client.respond;
-      client.respond = (request) {
-        if (request['method'] == 'show_priv_key') enabled = ['USDT-TRC20'];
-        return respond(request);
-      };
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(result.isComplete, isTrue);
-      expect(result.outcomes.single.signingAssetId, trx.id);
-      expect(result.keysByAsset[usdt.id]!.single.privateKey, scalar);
-      expect(
-        client.requests.where(
-          (request) => request['method'] == 'get_enabled_coins',
-        ),
-        hasLength(2),
-      );
-    },
-  );
-
-  for (final remaining in [
-    <String>[],
-    ['TRX'],
-    ['OTHER-TRC20'],
-  ]) {
-    test('TRC20 export discards the key when its token disappears '
-        '(remaining=$remaining)', () async {
-      enabled = ['USDT-TRC20'];
-      final respond = client.respond;
-      client.respond = (request) {
-        if (request['method'] == 'show_priv_key') enabled = remaining;
-        return respond(request);
-      };
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(result.hasKeys, isFalse);
-      expect(
-        result.outcomes.single.failure,
-        PrivateKeyExportFailure.assetUnavailable,
-      );
-      expect(
-        client.requests.where(
-          (request) => request['method'] == 'show_priv_key',
-        ),
-        hasLength(1),
-      );
-    });
-  }
-
-  for (final (tickers, failure) in [
-    (<String>[], PrivateKeyExportFailure.platformNotEnabled),
-    (['OTHER-TRC20'], PrivateKeyExportFailure.platformNotEnabled),
-    (['TRX'], PrivateKeyExportFailure.assetUnavailable),
-    (['TRX', 'OTHER-TRC20'], PrivateKeyExportFailure.assetUnavailable),
-  ]) {
-    test(
-      'TRC20 export requires its own freshly enabled ticker (enabled=$tickers)',
-      () async {
-        enabled = tickers;
-        final result = await manager.exportPrivateKeys(
-          request: PrivateKeyExportRequest(assets: [usdt.id]),
-        );
-        expect(result.hasKeys, isFalse);
-        expect(result.outcomes.single.failure, failure);
-        expect(client.requests.map((request) => request['method']), [
-          'get_enabled_coins',
-        ]);
-      },
-    );
-  }
-
-  test('direct TRX export still requires its own enabled ticker', () async {
-    enabled = ['USDT-TRC20'];
-    final result = await manager.exportPrivateKeys(
-      request: PrivateKeyExportRequest(assets: [trx.id]),
-    );
-    expect(result.hasKeys, isFalse);
-    expect(
-      result.outcomes.single.failure,
-      PrivateKeyExportFailure.platformNotEnabled,
-    );
-    expect(client.requests.map((request) => request['method']), [
-      'get_enabled_coins',
-    ]);
-  });
-
-  test('token-only activation cannot bypass an ambiguous platform', () async {
-    enabled = ['USDT-TRC20'];
-    when(
-      () => assets.findAssetsByConfigId('TRX'),
-    ).thenReturn({trx, trx.copyWith(isWalletOnly: false)});
-    final result = await manager.exportPrivateKeys(
-      request: PrivateKeyExportRequest(assets: [usdt.id]),
-    );
-    expect(result.hasKeys, isFalse);
-    expect(
-      result.outcomes.single.failure,
-      PrivateKeyExportFailure.invalidPlatform,
-    );
-    expect(client.requests, isEmpty);
-  });
-
-  test('token-only activation cannot bypass a mismatched parent ID', () async {
-    enabled = ['USDT-TRC20'];
-    final mismatched = usdt.copyWith(id: usdt.id.copyWith(parentId: btc.id));
-    when(() => assets.fromId(usdt.id)).thenReturn(mismatched);
-    final result = await manager.exportPrivateKeys(
-      request: PrivateKeyExportRequest(assets: [usdt.id]),
-    );
-    expect(result.hasKeys, isFalse);
-    expect(
-      result.outcomes.single.failure,
-      PrivateKeyExportFailure.invalidPlatform,
-    );
-    expect(client.requests, isEmpty);
-  });
-
-  for (final method in ['show_priv_key', 'account_balance', 'my_balance']) {
-    test('token-only export fails closed when parent $method fails', () async {
-      enabled = ['USDT-TRC20'];
-      if (method == 'my_balance') {
-        user = const KdfUser(
-          walletId: WalletId(
-            name: 'fixture',
-            pubkeyHash: 'verified-public-identity',
-            authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
-          ),
-          isBip39Seed: true,
-        );
-      }
-      final respond = client.respond;
-      client.respond = (request) {
-        if (request['method'] == method) {
-          throw StateError('Synthetic RPC failure');
-        }
-        return respond(request);
-      };
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(result.hasKeys, isFalse);
-      expect(
-        result.outcomes.single.failure,
-        PrivateKeyExportFailure.metadataUnverified,
-      );
-      expect(
-        client.requests.where((request) => request['method'] == method),
-        isNotEmpty,
-      );
-    });
-  }
-
-  for (final field in ['address', 'derivation_path']) {
-    test('token-only export rejects mismatched parent $field', () async {
-      enabled = ['USDT-TRC20'];
-      metadata.single[field] = field == 'address'
-          ? 'unrelated-address'
-          : "m/44'/60'/0'/0/7";
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [usdt.id]),
-      );
-      expect(result.hasKeys, isFalse);
-      expect(
-        result.outcomes.single.failure,
-        PrivateKeyExportFailure.metadataUnverified,
-      );
-      expect(
-        client.requests.where(
-          (request) => request['method'] == 'show_priv_key',
-        ),
-        hasLength(1),
-      );
-    });
-  }
   test(
     'capabilities cannot cross managers with identical wallet and generation',
     () async {

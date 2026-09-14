@@ -18,13 +18,11 @@ patch of 0.7.0.
    [local-auth migration guidance](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
  - **FEAT**(security): add `SecurityManager.exportPrivateKeys`, exporting each
    offline-supported asset independently with concurrency limited to two.
- - **FEAT**(security): for an already-activated TRON or TRC20 asset, resolve the
-   actual signing platform, validate the returned scalar, and match its derived
-   owner address and HD path against fresh KDF metadata. Coverage is the
-   currently activated address; no activation or full-HD fallback is implied.
- - **FIX**(security): accept an enabled TRC20 token when KDF omits its TRX
-   platform from the enabled-coins response, preserving fresh token activation
-   checks and signing-key verification throughout export.
+ - **FIX**(security): report TRON/TRC20 private-key export as
+   `unsupportedProtocol` until KDF supports `get_private_keys` for TRON.
+   Both structured and strict export reject these protocols before issuing an
+   RPC. Remove the active-key fallback, scalar/address derivation, HD metadata
+   searches and direct PointyCastle dependency.
  - **SECURITY**(security): bind export capabilities to a verified wallet
    identity, the manager that issued them, and a source-owned authentication
    generation that revokes synchronously before an authentication transition.
@@ -38,8 +36,9 @@ patch of 0.7.0.
    `komodo_defi_framework` `^0.6.0` and `komodo_coin_updates`
    `^2.1.1`.
  - **TEST**(history): run wallet-race regressions in Chrome/WebAssembly in CI.
- - **TEST**(security): cover structured export, typed legacy RPC and the
-   bundled KDF at TRON HD indices 0 and 7.
+ - **TEST**(security): cover structured export, session invalidation and
+   TRON/TRC20 rejection without RPC calls while retaining successful exports
+   for supported assets in a mixed selection.
 
  - **FIX**(activation): bind completion and coordinator work to the originating
    wallet session, rejecting delayed results after a wallet switch (#376).

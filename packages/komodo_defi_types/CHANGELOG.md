@@ -2,7 +2,11 @@
 
  - **FEAT**(private-keys): add the structured per-asset export result types used
    by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
-   `zDerivationPath` on private-key metadata.
+   `zDerivationPath` on private-key metadata. Coverage describes supported
+   offline exports; TRON/TRC20 return `unsupportedProtocol`. Remove the
+   active-address coverage, limited-coverage flag, separate signing-asset
+   attribution, TRON opt-in and TRON-only failure categories from the
+   unreleased export API.
  - **FEAT**(diagnostics): add `DiagnosticSanitizer` for metadata-only
    diagnostics, and expose the shared sensitive-field taxonomy through
    `SecurityUtils.isSensitiveDiagnosticKey`.

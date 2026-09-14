@@ -4,7 +4,6 @@
 // ignore_for_file: unused_field, unused_element
 
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
-import 'package:komodo_defi_rpc_methods/src/rpc_methods/wallet/show_priv_key.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// A class that provides a library of RPC methods used by the Komodo DeFi
@@ -109,11 +108,6 @@ class WalletMethods extends BaseRpcMethodNamespace {
 
   Future<GetPublicKeyHashResponse> getPublicKeyHash([String? rpcPass]) =>
       execute(GetPublicKeyHashRequest(rpcPass: rpcPass));
-
-  /// Exports only the owner key selected when [coin] was activated.
-  /// Does not support selecting an HD path or address range.
-  Future<ShowPrivKeyResponse> showPrivKey(String coin, {String? rpcPass}) =>
-      execute(ShowPrivKeyRequest(coin: coin, rpcPass: rpcPass));
 
   /// Gets private keys for the specified coins
   ///

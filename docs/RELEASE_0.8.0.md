@@ -125,27 +125,32 @@ See [Dragon Logs migration guidance](../packages/dragon_logs/README.md#migrating
 
 ## Private-key export coverage
 
-Use `SecurityManager.exportPrivateKeys` and inspect every asset's outcome,
-signing asset and coverage. Preserve unavailable outcomes and limited-coverage
-labels in the consumer UI and exported manifest. Do not describe a successful
-subset as a complete wallet backup.
+Use `SecurityManager.exportPrivateKeys` and inspect every asset's outcome and
+coverage. Preserve unavailable outcomes and the reported account/range in the
+consumer UI and exported manifest. Do not describe a successful subset as a
+complete wallet backup.
 
 | Coverage | Meaning |
 | --- | --- |
 | `offlineHdRange` | The explicitly reported HD account/range, not all accounts or addresses. |
 | `offlineAccount` | The reported shielded account, including supported shielded key metadata. |
 | `legacyWallet` | The supported asset's legacy key. |
-| `activeAddressOnly` | The currently activated TRON signing address only. |
 
-TRON/TRC20 export requires an already activated requested asset. A validated
-TRC20 token may be exported when KDF lists the token but omits TRX. Direct TRX
-export still requires TRX itself. The SDK retrieves the parent signing key,
-validates the scalar, and verifies the derived owner address and HD path against
-fresh KDF metadata. It rechecks the requested token and wallet session after
-retrieval. Missing activation, unsupported mappings, failed RPCs or mismatched
-metadata produce no key. Export does not activate assets, derive an offline
-TRON fallback, export GasFree custody keys or claim full HD coverage. SIA
-export remains unsupported; hardware-wallet secrets are not exportable.
+TRON/TRC20 private-key export is temporarily unsupported until KDF implements
+`get_private_keys` for TRON. Structured export reports `unsupportedProtocol`
+for each requested TRON/TRC20 asset and continues exporting supported assets.
+The strict `getPrivateKeys` API rejects selections containing these protocols
+before issuing an RPC. This applies to activated and inactive assets, legacy
+and HD wallets, and every address index. Consumer apps must disable TRON/TRC20
+private-key display and export, including older backup paths.
+
+The temporary `show_priv_key` and `account_balance_read` wrappers, private-key
+address derivation and HD metadata searches have been removed. Consumers of
+this unreleased API must also remove `allowTronActiveKey`, `activeAddressOnly`,
+`hasLimitedCoverage`, `limited_coverage`, `signingAssetId` and the TRON-only
+failure categories. Exported keys are attributed directly to the requested
+asset. SIA export remains unsupported; hardware-wallet secrets are not
+exportable.
 
 An export session belongs to the verified wallet, authentication generation and
 issuing manager. Retain it through the operation and recheck it immediately

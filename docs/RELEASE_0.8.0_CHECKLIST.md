@@ -7,8 +7,11 @@ Distribution remains a pinned GitHub checkout/submodule.
 
 ## Preparation contents
 
-- [x] Carry the token-only TRC20 export correction in a separate commit,
-  addressing [review r3989703779](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/375#discussion_r3989703779).
+- [x] Remove the temporary TRON/TRC20 private-key export workaround following
+  [the September 14 review](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/382#issuecomment-5662538367).
+  Structured export reports `unsupportedProtocol`; strict export rejects these
+  protocols before an RPC. The earlier token-only export correction is
+  superseded by this removal.
 - [x] Carry native export retention across storage instances in a separate
   commit, addressing [review r3989814001](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/375#discussion_r3989814001).
 - [x] Promote the seven candidates and all 19 dependency constraints that
@@ -59,7 +62,31 @@ Required artefacts remain web, iOS, macOS, Android ARMv7, Android AArch64,
 Linux and Windows. Native cache provenance was verified by the transformer;
 this is not equivalent to executing the app on all seven targets.
 
-## Validation results
+## TRON export removal validation — 2026-09-14
+
+The removal was validated with Flutter 3.41.4 / Dart 3.11.1:
+
+| Check | Result |
+| --- | --- |
+| Full SDK package suite | 944 passed, 1 existing skip |
+| RPC methods package suite | 237 passed |
+| Types package suite | 183 passed, 3 existing skips |
+| Export regressions within the SDK suite | 26 passed |
+| SDK package analysis | No errors; 11 warnings and 822 infos remain in existing code |
+
+The export regressions cover both wallet modes, TRX/TRC20 rejection before
+RPC, HD index 777, missing catalog metadata, mixed selections and retained
+offline-export/session guards. No changed source has an analysis error or
+warning. An independent read-only review found no actionable issues.
+This validation covers the removal; the wider release evidence below remains
+scoped to the earlier preparation tree.
+
+## Historical validation results — 2026-09-11
+
+These results describe the original release-preparation tree before the
+September 14 TRON/TRC20 export removal. Counts include tests for the now-removed
+workaround and must not be used as validation of the current tree. The obsolete
+pinned-KDF export contract and its execution wrapper have been removed.
 
 The standalone SDK workspace resolved with `flutter pub get --offline` using
 Flutter 3.41.4. Each direct package below ran
@@ -85,17 +112,18 @@ All 16 package suites passed (2,359 tests, 15 existing skips).
 | `komodo_wallet_build_transformer` | 113 | 0 |
 | `komodo_wallet_cli` | 30 | 0 |
 
-The SDK suite includes all 49 private-key export regressions. Native logging
-includes 24 privacy/retention tests and two existing logger tests. The SDK's
-opt-in KDF contract skip was exercised separately below; its other skip is the
-existing balance-cache reattachment fixture. Market-data live API tests,
-types benchmarks and opt-in harness cases retain their existing skip policy.
+The historical SDK suite included all 49 private-key export regressions.
+Native logging included 24 privacy/retention tests and two existing logger tests.
+The SDK's former opt-in KDF contract skip was exercised separately below; that
+contract is now removed. Its other skip was the existing balance-cache
+reattachment fixture. Market-data live API tests, types benchmarks and opt-in
+harness cases retained their existing skip policy.
 
 | Additional check | Result |
 | --- | --- |
 | Browser logging privacy | 10 passed in Chrome |
 | Six CI Wasm wallet/GasFree race files | 164 passed in Chrome/Wasm |
-| Pinned KDF active TRON export, HD indices 0 and 7 | 1 passed using the pinned macOS executable and synthetic local fixtures |
+| Former pinned KDF active TRON export, HD indices 0 and 7 | Historical: 1 passed with synthetic local fixtures; workaround and contract test removed on September 14 |
 | Harness replay, HD | 28 passed, 3 skipped |
 | Harness replay, legacy/Iguana | 28 passed, 3 skipped |
 | SDK example web release build | Passed; embedded KDF and coin pins match the table above |
@@ -146,7 +174,11 @@ Dex Dungeon's remaining 24 tests pass. The failure is
 `MissingPluginException` on `xyz.luan/audioplayers.global`, not an SDK export
 failure. The playground application itself builds successfully for web.
 
-## Reproduce the additional gates
+## Reproduce the retained additional gates
+
+The deleted TRON export contract is excluded from these commands. Running the
+retained gates on the current tree produces new evidence; the historical counts
+above are not expected totals for the revised suite.
 
 Use Flutter 3.41.4 on `PATH`. On macOS, configure the existing Chrome wrapper:
 
@@ -171,8 +203,6 @@ flutter test --no-pub --platform chrome --wasm --reporter expanded \
   test/withdrawals/withdrawal_manager_gasless_test.dart \
   test/withdrawals/gasless_submission_lock_web_test.dart \
   test/withdrawals/pending_gasless_transfer_repository_web_test.dart
-KDF_EXPORT_TEST_BINARY="$PWD/../komodo_defi_framework/macos/bin/kdf" \
-  flutter test --no-pub test/security/tron_export_kdf_contract_test.dart
 ```
 
 Run replay from `packages/komodo_defi_harness`, leaving `KDF_HARNESS` empty:

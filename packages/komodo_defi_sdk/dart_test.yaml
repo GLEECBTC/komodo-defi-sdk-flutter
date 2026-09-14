@@ -1,4 +1,0 @@
-tags:
-  kdf-process:
-    # Opt in with KDF_EXPORT_TEST_BINARY pointing to the reviewed binary.
-    timeout: 2m

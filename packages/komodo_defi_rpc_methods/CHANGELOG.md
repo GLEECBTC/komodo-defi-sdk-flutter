@@ -1,10 +1,7 @@
 ## 0.7.0 (unreleased)
 
- - **FEAT**(wallet): add the typed `show_priv_key` request and response, and
-   `rpc.wallet.showPrivKey`, so a single activated asset can be exported without
-   the wallet-wide `get_private_keys` payload.
- - **FEAT**(hd-wallet): add `AccountBalanceReadRequest` for read-only account
-   balance queries during export verification.
+ - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
+   `account_balance_read` wrappers used by the removed TRON export workaround.
  - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
    and key metadata, and preserve strict account/range semantics in
    `get_private_keys`.
