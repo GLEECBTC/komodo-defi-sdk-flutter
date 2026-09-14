@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:dragon_logs/src/logger/persisted_logger.dart';
 // import 'package:dragon_logs/src/performance/performance_metrics.dart';
 
@@ -13,15 +16,60 @@ class DragonLogs {
   Map<String, dynamic>? _metadata = {};
 
   static final _logger = PersistedLogger();
+  static Future<void>? _initialization;
 
   /// Initializes the DragonLogs system.
   ///
   /// This method should be called before any logging operation. It sets up
   /// the logger and ensures any old logs that exceed the maximum storage size
   /// are deleted.
-  static Future<void> init() async {
-    await _logger.init();
-    await _logger.logStorage.deleteOldLogs(_maxLogStorageSize);
+  static Future<void> init({
+    String? storageNamespace,
+    bool purgeLegacy = false,
+  }) {
+    final result = () async {
+      await _logger.init(
+        storageNamespace: storageNamespace,
+        purgeLegacy: purgeLegacy,
+      );
+      await _logger.logStorage.deleteOldLogs(_maxLogStorageSize);
+    }();
+    _initialization = result;
+    return result;
+  }
+
+  static Future<void> _requireReady() async {
+    final initialization = _initialization;
+    if (initialization == null) throw StateError('Log storage is not ready');
+    await initialization;
+  }
+
+  /// Writes one caller-sanitized JSON object without legacy message or metadata
+  /// decoration. The caller is responsible for the record's privacy schema.
+  static Future<void> writeRecord(String record) async {
+    await _requireReady();
+    if (record.contains('\n') || record.contains('\r')) {
+      throw ArgumentError('A log record must occupy one line');
+    }
+    try {
+      if (jsonDecode(record) is! Map<String, dynamic>) {
+        throw const FormatException();
+      }
+    } on FormatException {
+      throw ArgumentError('A log record must be a JSON object');
+    }
+    await _logger.writeRecord(record);
+  }
+
+  /// Stops background flushing and closes storage before another namespace can
+  /// be selected. Pending records stay in their original namespace.
+  static Future<void> dispose() async {
+    try {
+      await _logger.dispose();
+    } finally {
+      _initialization = null;
+      _instance._metadata = null;
+    }
   }
 
   /// Sets the session metadata for the logger.
@@ -42,8 +90,9 @@ class DragonLogs {
   ///
   /// - Returns: A stream emitting each a non-uniform chunk of the logs. The
   ///  stream is closed when all logs have been emitted.
-  static Stream<String> exportLogsStream() {
-    return _logger.exportLogsStream();
+  static Stream<String> exportLogsStream() async* {
+    await _requireReady();
+    yield* _logger.exportLogsStream();
   }
 
   /// Exports all logs as a single concatenated string.
@@ -68,13 +117,16 @@ class DragonLogs {
   /// the logs in a specific directory (e.g. default downloads directory)
   ///
   /// - Returns: A future that completes once the user has saved the logs.
-  static Future<void> exportLogsToDownload() =>
-      _logger.logStorage.exportLogsToDownload();
+  static Future<void> exportLogsToDownload() async {
+    await _requireReady();
+    await _logger.logStorage.exportLogsToDownload();
+  }
 
   /// Gets the size of the log storage folder.
   ///
   /// - Returns: A future that completes with the size in bytes.
   static Future<int> getLogFolderSize() async {
+    await _requireReady();
     return _logger.logStorage.getLogFolderSize();
   }
 
@@ -87,7 +139,9 @@ class DragonLogs {
 
   /// Clears all logs.
   static Future<void> clearLogs() async {
+    await _requireReady();
     await _logger.logStorage.deleteOldLogs(0);
+    await _logger.logStorage.deleteExportedFiles();
   }
 
   /// A summary of the logger's performance metrics.
@@ -101,9 +155,9 @@ class DragonLogs {
 /// - Parameter [message]: The message to be logged.
 /// - Parameter [key]: An optional key to categorize the log. Defaults to 'LOG'.
 void log(String message, [String key = 'LOG']) {
-  DragonLogs._logger.log(
-    key,
-    message,
-    metadata: DragonLogs._instance._metadata,
+  unawaited(
+    DragonLogs._logger
+        .log(key, message, metadata: DragonLogs._instance._metadata)
+        .catchError((Object _) {}),
   );
 }

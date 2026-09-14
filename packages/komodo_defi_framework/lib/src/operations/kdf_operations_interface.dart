@@ -192,7 +192,7 @@ class JsonRpcErrorResponse extends MapBase<String, dynamic>
   Map<String, dynamic> toJson() => _map;
 
   @override
-  String toString() => toJson().toJsonString();
+  String toString() => 'JsonRpcErrorResponse(code: $code)';
 }
 
 class ConnectionError extends JsonRpcErrorResponse {

@@ -36,6 +36,7 @@ class CoinKeyInfo {
     required this.publicKeySecp256k1,
     required this.publicKeyAddress,
     required this.privKey,
+    this.viewingKey,
   });
 
   factory CoinKeyInfo.fromJson(JsonMap json) {
@@ -44,6 +45,7 @@ class CoinKeyInfo {
       publicKeySecp256k1: json.value<String>('pubkey'),
       publicKeyAddress: json.value<String>('address'),
       privKey: json.value<String>('priv_key'),
+      viewingKey: json.valueOrNull<String>('viewing_key'),
     );
   }
 
@@ -51,6 +53,7 @@ class CoinKeyInfo {
   final String publicKeySecp256k1;
   final String publicKeyAddress;
   final String privKey;
+  final String? viewingKey;
 
   JsonMap toJson() {
     return {
@@ -58,8 +61,12 @@ class CoinKeyInfo {
       'pubkey': publicKeySecp256k1,
       'address': publicKeyAddress,
       'priv_key': privKey,
+      if (viewingKey != null) 'viewing_key': viewingKey,
     };
   }
+
+  @override
+  String toString() => 'CoinKeyInfo(<redacted>)';
 }
 
 /// Information about an HD address with derivation path
@@ -69,6 +76,8 @@ class HdAddressInfo {
     required this.publicKeySecp256k1,
     required this.publicKeyAddress,
     required this.privKey,
+    this.viewingKey,
+    this.zDerivationPath,
   });
 
   factory HdAddressInfo.fromJson(JsonMap json) {
@@ -77,6 +86,8 @@ class HdAddressInfo {
       publicKeySecp256k1: json.value<String>('pubkey'),
       publicKeyAddress: json.value<String>('address'),
       privKey: json.value<String>('priv_key'),
+      viewingKey: json.valueOrNull<String>('viewing_key'),
+      zDerivationPath: json.valueOrNull<String>('z_derivation_path'),
     );
   }
 
@@ -84,6 +95,8 @@ class HdAddressInfo {
   final String publicKeySecp256k1;
   final String publicKeyAddress;
   final String privKey;
+  final String? viewingKey;
+  final String? zDerivationPath;
 
   JsonMap toJson() {
     return {
@@ -91,8 +104,13 @@ class HdAddressInfo {
       'pubkey': publicKeySecp256k1,
       'address': publicKeyAddress,
       'priv_key': privKey,
+      if (viewingKey != null) 'viewing_key': viewingKey,
+      if (zDerivationPath != null) 'z_derivation_path': zDerivationPath,
     };
   }
+
+  @override
+  String toString() => 'HdAddressInfo(<redacted>)';
 }
 
 /// Information about a coin's HD wallet addresses
@@ -118,6 +136,9 @@ class HdCoinKeyInfo {
       'addresses': addresses.map((addr) => addr.toJson()).toList(),
     };
   }
+
+  @override
+  String toString() => 'HdCoinKeyInfo(<redacted>)';
 }
 
 /// Request class for getting private keys
@@ -154,6 +175,8 @@ class GetPrivateKeysRequest
   @override
   GetPrivateKeysResponse parse(JsonMap json) =>
       GetPrivateKeysResponse.parse(json);
+  @override
+  String toString() => 'GetPrivateKeysRequest(<redacted>)';
 }
 
 /// Response class for getting private keys
@@ -213,11 +236,13 @@ class GetPrivateKeysResponse extends BaseResponse {
 
   @override
   JsonMap toJson() {
-    final result =
-        isHdResponse
-            ? hdKeys!.map((key) => key.toJson()).toList()
-            : standardKeys!.map((key) => key.toJson()).toList();
+    final result = isHdResponse
+        ? hdKeys!.map((key) => key.toJson()).toList()
+        : standardKeys!.map((key) => key.toJson()).toList();
 
     return {'mmrpc': mmrpc, 'result': result};
   }
+
+  @override
+  String toString() => 'GetPrivateKeysResponse(<redacted>)';
 }

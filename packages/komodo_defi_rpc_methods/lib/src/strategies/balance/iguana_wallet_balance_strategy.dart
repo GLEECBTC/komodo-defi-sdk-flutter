@@ -43,8 +43,9 @@ class IguananaWalletBalanceStrategy extends BalanceStrategy {
             retryCount++;
 
             // Calculate jittered backoff delay - adds randomness to prevent thundering herd
-            final baseDelay =
-                math.min(500 * math.pow(2, retryCount), 2000).toInt();
+            final baseDelay = math
+                .min(500 * math.pow(2, retryCount), 2000)
+                .toInt();
             final jitter = _random.nextInt(baseDelay ~/ 2);
             final delay = Duration(milliseconds: baseDelay + jitter);
 
@@ -57,7 +58,7 @@ class IguananaWalletBalanceStrategy extends BalanceStrategy {
             );
 
             log(
-              'Retrying balance fetch for $assetId after delay of ${delay.inMilliseconds}ms. '
+              'Retrying balance fetch after delay of ${delay.inMilliseconds}ms. '
               'Attempt ${retryCount + 1}/${_maxRetries + 1} with timeout ${timeout.inSeconds}s',
             );
 
@@ -112,9 +113,7 @@ class IguananaWalletBalanceStrategy extends BalanceStrategy {
             consecutiveErrors++;
 
             // Log the error
-            log(
-              'Error fetching balance for $assetId (attempt $consecutiveErrors): $e',
-            );
+            log('Balance fetch failed (attempt $consecutiveErrors)');
 
             // Only propagate error if it persists
             if (consecutiveErrors > 2) {

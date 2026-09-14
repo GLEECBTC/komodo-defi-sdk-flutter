@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:developer' show log;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 
@@ -148,14 +147,11 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for ETH platform activation
       if (KdfLoggingConfig.verboseLogging) {
-        log(
-          '[RPC] Activating platform asset: ${asset.id.id}',
-          name: 'EthWithTokensActivationStrategy',
-        );
+        log('Activation started', name: 'EthWithTokensActivationStrategy');
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Activation summary: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'gasless_provider_configured': tronGaslessProvider != null, 'priv_key_policy': privKeyPolicy.runtimeType.toString()})}',
+          'Activation progress event',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -167,7 +163,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          '[RPC] Successfully activated platform asset: ${asset.id.id} with ${children?.length ?? 0} tokens',
+          'Activation progress event',
           name: 'EthWithTokensActivationStrategy',
         );
       }

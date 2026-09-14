@@ -10,13 +10,36 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 import 'package:mutex/mutex.dart';
-import 'package:uuid/uuid.dart';
 
 part 'auth_service_auth_extension.dart';
 part 'auth_service_kdf_extension.dart';
 part 'auth_service_operations_extension.dart';
 
 abstract interface class IAuthService {
+  /// Synchronous revision of the authentication session.
+  ///
+  /// Capture before asynchronous sensitive work and compare before using its
+  /// result. A changed revision invalidates that work, even for the same
+  /// wallet.
+  int get authGeneration;
+
+  /// Synchronously reports revisions before asynchronous transitions continue.
+  Stream<int> get authGenerationChanges;
+
+  /// Whether an authentication transition is pending or this service is
+  /// disposed. Either condition prevents starting sensitive operations.
+  bool get isAuthTransitionInProgress;
+
+  /// Revokes work tied to the previous authentication revision.
+  void invalidateAuthSession();
+
+  /// Starts a nested transition and synchronously revokes the previous
+  /// revision.
+  void beginAuthTransition();
+
+  /// Completes one transition started by [beginAuthTransition].
+  void endAuthTransition();
+
   Future<List<KdfUser>> getUsers();
 
   Future<KdfUser> signIn({
@@ -131,9 +154,8 @@ class KdfAuthService implements IAuthService {
     this._kdfFramework,
     this._hostConfig, {
     SecureLocalStorage? secureStorage,
-  }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
-       _sessionId = const Uuid().v4() {
-    _logger.info('[$_sessionId] KdfAuthService initialized');
+  }) : _secureStorage = secureStorage ?? SecureLocalStorage() {
+    _logger.info('KdfAuthService initialized');
     _startHealthCheck();
     unawaited(_lockWriteOperation(_subscribeToShutdownSignals));
   }
@@ -146,10 +168,55 @@ class KdfAuthService implements IAuthService {
   final ReadWriteMutex _authMutex = ReadWriteMutex();
   final Mutex _metadataMutex = Mutex();
   final Logger _logger = Logger('KdfAuthService');
-  final String _sessionId;
 
   KdfUser? _lastEmittedUser;
   int _authStateGeneration = 0;
+  int _authTransitionDepth = 0;
+  bool _isDisposed = false;
+  final _authGenerationController = StreamController<int>.broadcast(sync: true);
+
+  @override
+  int get authGeneration => _authStateGeneration;
+
+  @override
+  Stream<int> get authGenerationChanges => _authGenerationController.stream;
+
+  @override
+  bool get isAuthTransitionInProgress =>
+      _isDisposed || _authTransitionDepth > 0;
+
+  @override
+  void invalidateAuthSession() {
+    _authStateGeneration++;
+    if (!_authGenerationController.isClosed) {
+      _authGenerationController.add(_authStateGeneration);
+    }
+  }
+
+  @override
+  void beginAuthTransition() {
+    // Subscribers must see the busy state when the synchronous epoch arrives.
+    _authTransitionDepth++;
+    invalidateAuthSession();
+  }
+
+  @override
+  void endAuthTransition() {
+    if (_authTransitionDepth <= 0) {
+      throw StateError('No authentication transition is in progress');
+    }
+    _authTransitionDepth--;
+  }
+
+  Future<T> _runAuthTransition<T>(Future<T> Function() operation) async {
+    beginAuthTransition();
+    try {
+      return await operation();
+    } finally {
+      endAuthTransition();
+    }
+  }
+
   Timer? _healthCheckTimer;
 
   /// Compound ids of wallets this session created without an imported mnemonic.
@@ -195,27 +262,30 @@ class KdfAuthService implements IAuthService {
     required String walletName,
     required String password,
     required AuthOptions options,
+  }) => _runAuthTransition(
+    () => _signIn(walletName: walletName, password: password, options: options),
+  );
+
+  Future<KdfUser> _signIn({
+    required String walletName,
+    required String password,
+    required AuthOptions options,
   }) async {
-    _logger.info(
-      '[$_sessionId] signIn: Starting login for wallet: $walletName',
-    );
+    invalidateAuthSession();
+    _logger.info('signIn: Starting login for wallet: omitted');
 
     // Proactively ensure KDF is healthy before attempting login
     // This prevents login attempts while KDF is down or restarting
     final isHealthy = await ensureKdfHealthy().timeout(
       const Duration(seconds: 3),
       onTimeout: () {
-        _logger.warning(
-          '[$_sessionId] signIn: Health check timed out after 3s',
-        );
+        _logger.warning('signIn: Health check timed out after 3s');
         return false;
       },
     );
 
     if (!isHealthy) {
-      _logger.warning(
-        '[$_sessionId] signIn: KDF not healthy, retrying after 1s',
-      );
+      _logger.warning('signIn: KDF not healthy, retrying after 1s');
       // Wait and retry once
       await Future<void>.delayed(const Duration(milliseconds: 1000));
       final retryHealthy = await ensureKdfHealthy().timeout(
@@ -223,9 +293,7 @@ class KdfAuthService implements IAuthService {
         onTimeout: () => false,
       );
       if (!retryHealthy) {
-        _logger.severe(
-          '[$_sessionId] signIn: KDF still not healthy after retry',
-        );
+        _logger.severe('signIn: KDF still not healthy after retry');
         throw AuthException(
           'KDF is not available. Please try again.',
           type: AuthExceptionType.apiConnectionError,
@@ -233,7 +301,7 @@ class KdfAuthService implements IAuthService {
       }
     }
 
-    _logger.info('[$_sessionId] signIn: KDF healthy, proceeding with login');
+    _logger.info('signIn: KDF healthy, proceeding with login');
 
     final user = await _lockWriteOperation<KdfUser>(() async {
       // Check if already signed in first
@@ -295,10 +363,25 @@ class KdfAuthService implements IAuthService {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+  }) => _runAuthTransition(
+    () => _register(
+      walletName: walletName,
+      password: password,
+      options: options,
+      mnemonic: mnemonic,
+    ),
+  );
+
+  Future<KdfUser> _register({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+    Mnemonic? mnemonic,
   }) async {
-    _logger.info(
-      '[$_sessionId] register: Starting registration for wallet: $walletName',
-    );
+    invalidateAuthSession();
+    _logger.info('register: Starting registration for wallet: omitted');
     final registerStopwatch = Stopwatch()..start();
 
     try {
@@ -306,7 +389,7 @@ class KdfAuthService implements IAuthService {
       await _ensureKdfRunning();
       ensureStartStopwatch.stop();
       _logger.info(
-        '[$_sessionId] register: ensure no-auth start completed in '
+        'register: ensure no-auth start completed in '
         '${ensureStartStopwatch.elapsedMilliseconds}ms',
       );
 
@@ -322,7 +405,7 @@ class KdfAuthService implements IAuthService {
       });
       walletExistsStopwatch.stop();
       _logger.info(
-        '[$_sessionId] register: wallet existence read completed in '
+        'register: wallet existence read completed in '
         '${walletExistsStopwatch.elapsedMilliseconds}ms',
       );
 
@@ -335,13 +418,13 @@ class KdfAuthService implements IAuthService {
         await signOut();
         stopStopwatch.stop();
         _logger.info(
-          '[$_sessionId] register: stop phase completed in '
+          'register: stop phase completed in '
           '${stopStopwatch.elapsedMilliseconds}ms',
         );
       } else {
         stopStopwatch.stop();
         _logger.info(
-          '[$_sessionId] register: no active session to stop '
+          'register: no active session to stop '
           '(${stopStopwatch.elapsedMilliseconds}ms)',
         );
       }
@@ -373,7 +456,7 @@ class KdfAuthService implements IAuthService {
         }
         writePathStopwatch.stop();
         _logger.info(
-          '[$_sessionId] register: registration write path completed in '
+          'register: registration write path completed in '
           '${writePathStopwatch.elapsedMilliseconds}ms',
         );
         final sessionUser = _stampSessionFlags(currentUser)!;
@@ -384,7 +467,7 @@ class KdfAuthService implements IAuthService {
     } finally {
       registerStopwatch.stop();
       _logger.info(
-        '[$_sessionId] register: Finished in '
+        'register: Finished in '
         '${registerStopwatch.elapsedMilliseconds}ms',
       );
     }
@@ -451,7 +534,12 @@ class KdfAuthService implements IAuthService {
   }
 
   @override
-  Future<void> signOut() async {
+  Future<void> signOut() => _runAuthTransition(_signOut);
+
+  Future<void> _signOut() async {
+    // Revoke pending results before waiting for authentication operations or
+    // the runtime to stop. Stream delivery alone is asynchronous and too late.
+    invalidateAuthSession();
     await _lockWriteOperation(() async {
       await _stopKdf();
       _emitAuthStateChange(null);
@@ -542,10 +630,9 @@ class KdfAuthService implements IAuthService {
     if (now.difference(since) < _activeUserReportInterval) return;
 
     _logger.info(
-      '[$_sessionId] getActiveUser: $_activeUserCalls calls in '
-      '${now.difference(since).inMilliseconds}ms '
-      '(${_activeUserCalls * 2} identity RPCs), '
-      'lock queue ${_activeUserQueuedMs}ms, lock held ${_activeUserHeldMs}ms',
+      'getActiveUser: ${_activeUserCalls} calls in omittedms '
+      '(omitted identity RPCs), lock queue ${_activeUserQueuedMs}ms, '
+      'lock held ${_activeUserHeldMs}ms',
     );
     _activeUserCalls = 0;
     _activeUserQueuedMs = 0;
@@ -813,6 +900,9 @@ class KdfAuthService implements IAuthService {
   }
 
   String? _extractRpcErrorType(Object error) {
+    if (error is JsonRpcErrorResponse) {
+      return error.error;
+    }
     if (error is MmRpcException) {
       return error.errorType;
     }
@@ -823,6 +913,9 @@ class KdfAuthService implements IAuthService {
   }
 
   String? _extractRpcErrorMessage(Object error) {
+    if (error is JsonRpcErrorResponse) {
+      return error.message;
+    }
     if (error is MnemonicRpcErrorInvalidPasswordException) {
       return error.value;
     }
@@ -862,7 +955,17 @@ class KdfAuthService implements IAuthService {
   Stream<KdfUser?> get authStateChanges => _authStateController.stream;
 
   @override
-  Future<void> dispose() async {
+  Future<void> dispose() => _runAuthTransition(() async {
+    try {
+      await _dispose();
+    } finally {
+      await _authGenerationController.close();
+    }
+  });
+
+  Future<void> _dispose() async {
+    _isDisposed = true;
+    invalidateAuthSession();
     // Wait for running operations to complete before disposing. Write lock can
     // only be acquired once the active read/write operations complete.
     await _lockWriteOperation(() async {
@@ -982,7 +1085,12 @@ class KdfAuthService implements IAuthService {
   }
 
   @override
-  Future<void> restoreSession(KdfUser user) async {
+  Future<void> restoreSession(KdfUser user) =>
+      _runAuthTransition(() => _restoreSession(user));
+
+  Future<void> _restoreSession(KdfUser user) async {
+    // Restoring the same wallet still establishes a new session boundary.
+    invalidateAuthSession();
     return _lockWriteOperation(() async {
       try {
         // Only attempt to restore the session if KDF is running.
@@ -1033,7 +1141,8 @@ class KdfAuthService implements IAuthService {
     // Single-flight guard: if a health check is already in progress, return that future
     if (_ongoingHealthCheck != null) {
       _logger.info(
-        '[$_sessionId] ensureKdfHealthy: Health check already in progress, awaiting result',
+        'ensureKdfHealthy: Health check already in progress, awaiting '
+        'result',
       );
       return _ongoingHealthCheck!;
     }
@@ -1045,7 +1154,8 @@ class KdfAuthService implements IAuthService {
       final timeSinceLastCheck = now.difference(_lastHealthCheckCompleted!);
       if (timeSinceLastCheck.inSeconds < 2) {
         _logger.info(
-          '[$_sessionId] ensureKdfHealthy: In cooldown period (${timeSinceLastCheck.inSeconds}s since last check)',
+          'ensureKdfHealthy: In cooldown period '
+          '(${timeSinceLastCheck.inSeconds}s since last check)',
         );
         return _lastHealthCheckResult ?? false;
       }
@@ -1063,7 +1173,8 @@ class KdfAuthService implements IAuthService {
         _lastHealthCheckAttempt!,
       );
       _logger.info(
-        '[$_sessionId] ensureKdfHealthy: Completed in ${elapsed.inMilliseconds}ms, result=$result',
+        'ensureKdfHealthy: Completed in ${elapsed.inMilliseconds}ms, '
+        'result=omitted',
       );
       return result;
     } finally {
@@ -1076,8 +1187,9 @@ class KdfAuthService implements IAuthService {
       _lockWriteOperation(_performHealthCheckWithinWriteLock);
 
   Future<bool> _performHealthCheckWithinWriteLock() async {
-    _logger.info('[$_sessionId] _performHealthCheck: Starting health check');
+    _logger.info('_performHealthCheck: Starting health check');
     final stopwatch = Stopwatch()..start();
+    var restartTransitionStarted = false;
 
     try {
       // First check if KDF is healthy with a short timeout
@@ -1085,7 +1197,7 @@ class KdfAuthService implements IAuthService {
         const Duration(seconds: 2),
         onTimeout: () {
           _logger.warning(
-            '[$_sessionId] _performHealthCheck: isHealthy() timed out after 2s',
+            '_performHealthCheck: isHealthy() timed out after 2s',
           );
           return false;
         },
@@ -1095,13 +1207,14 @@ class KdfAuthService implements IAuthService {
         // Double verification: even if isHealthy() returns true, verify with version() RPC
         // This prevents false positives where native status reports "running" but HTTP is down
         _logger.info(
-          '[$_sessionId] _performHealthCheck: Initial check passed, performing double verification',
+          '_performHealthCheck: Initial check passed, performing double '
+          'verification',
         );
         final doubleCheck = await _verifyKdfHealthy().timeout(
           const Duration(seconds: 2),
           onTimeout: () {
             _logger.warning(
-              '[$_sessionId] _performHealthCheck: Double verification timed out',
+              '_performHealthCheck: Double verification timed out',
             );
             return false;
           },
@@ -1110,154 +1223,157 @@ class KdfAuthService implements IAuthService {
         if (doubleCheck) {
           stopwatch.stop();
           _logger.info(
-            '[$_sessionId] _performHealthCheck: KDF is healthy (double verified) in ${stopwatch.elapsedMilliseconds}ms',
+            '_performHealthCheck: KDF is healthy (double verified) in '
+            '${stopwatch.elapsedMilliseconds}ms',
           );
           return true;
         }
 
         _logger.warning(
-          '[$_sessionId] _performHealthCheck: Double verification failed, KDF not actually healthy',
+          '_performHealthCheck: Double verification failed, KDF not '
+          'actually healthy',
         );
       }
 
+      beginAuthTransition();
+      restartTransitionStarted = true;
       _logger.warning(
-        '[$_sessionId] _performHealthCheck: KDF is not healthy, forcing full restart',
+        '_performHealthCheck: KDF is not healthy, forcing full restart',
       );
 
       // Use _lastEmittedUser instead of calling _getActiveUser() RPC when KDF is down
       // This avoids blocking on a dead KDF
       final hadAuthenticatedUser = _lastEmittedUser != null;
-      _logger.info(
-        '[$_sessionId] _performHealthCheck: hadAuthenticatedUser=$hadAuthenticatedUser',
-      );
+      _logger.info('_performHealthCheck: hadAuthenticatedUser=omitted');
 
       // FORCE a full stop->start cycle when we've determined KDF is unhealthy
       // Don't trust isRunning() as it can be stale after iOS backgrounding
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Forcing clean shutdown (ignoring isRunning status)',
+        '_performHealthCheck: Forcing clean shutdown (ignoring '
+        'isRunning status)',
       );
       try {
         await _stopKdf().timeout(
           const Duration(seconds: 2),
           onTimeout: () {
-            _logger.warning(
-              '[$_sessionId] _performHealthCheck: kdfStop() timed out',
-            );
+            _logger.warning('_performHealthCheck: kdfStop() timed out');
           },
         );
       } catch (e) {
         _logger.warning(
-          '[$_sessionId] _performHealthCheck: Error during shutdown: $e (continuing with restart)',
+          '_performHealthCheck: Error during shutdown: '
+          '${DiagnosticSanitizer.safeError(e)} (continuing with restart)',
         );
         // KDF might already be dead, continue with restart
       }
 
       // Reset HTTP client unconditionally to drop stale keep-alive connections
-      _logger.info('[$_sessionId] _performHealthCheck: Resetting HTTP client');
+      _logger.info('_performHealthCheck: Resetting HTTP client');
       _kdfFramework.resetHttpClient();
 
       // Force restart KDF in no-auth mode (we don't have the password)
       // Use _forceStartKdf instead of _ensureKdfRunning to bypass isRunning check
-      _logger.info('[$_sessionId] _performHealthCheck: Force starting KDF');
+      _logger.info('_performHealthCheck: Force starting KDF');
       final restartStopwatch = Stopwatch()..start();
       await _forceStartKdfWithinWriteLock();
       restartStopwatch.stop();
       _logger.info(
-        '[$_sessionId] _performHealthCheck: KDF force start completed in ${restartStopwatch.elapsedMilliseconds}ms',
+        '_performHealthCheck: KDF force start completed in '
+        '${restartStopwatch.elapsedMilliseconds}ms',
       );
 
       // Reset HTTP client again after restart to ensure no stale sockets
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Resetting HTTP client again after restart',
+        '_performHealthCheck: Resetting HTTP client again after restart',
       );
       _kdfFramework.resetHttpClient();
 
       // Add 200ms delay after restart before verification to avoid race where
       // native status reports "up" but HTTP listener hasn't bound yet
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Waiting 200ms for HTTP listener to bind',
+        '_performHealthCheck: Waiting 200ms for HTTP listener to bind',
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
       // Check if restart was successful with a strong health check (version RPC)
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Verifying KDF health with version check',
+        '_performHealthCheck: Verifying KDF health with version check',
       );
       final verifyStopwatch = Stopwatch()..start();
       final isHealthyAfterRestart = await _verifyKdfHealthy().timeout(
         const Duration(seconds: 2),
         onTimeout: () {
-          _logger.warning(
-            '[$_sessionId] _performHealthCheck: Health verification timed out',
-          );
+          _logger.warning('_performHealthCheck: Health verification timed out');
           return false;
         },
       );
       verifyStopwatch.stop();
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Health verification took ${verifyStopwatch.elapsedMilliseconds}ms, result=$isHealthyAfterRestart',
+        '_performHealthCheck: Health verification took '
+        '${verifyStopwatch.elapsedMilliseconds}ms, '
+        'result=${isHealthyAfterRestart}',
       );
 
       // If we had an authenticated user, emit logged-out state
       // This will trigger the UI to show re-authentication prompt
       if (hadAuthenticatedUser && _lastEmittedUser != null) {
-        _logger.info(
-          '[$_sessionId] _performHealthCheck: Emitting logged-out state',
-        );
+        _logger.info('_performHealthCheck: Emitting logged-out state');
         _emitAuthStateChange(null);
       }
 
       stopwatch.stop();
       _logger.info(
-        '[$_sessionId] _performHealthCheck: Health check completed in ${stopwatch.elapsedMilliseconds}ms, result=$isHealthyAfterRestart',
+        '_performHealthCheck: Health check completed in '
+        '${stopwatch.elapsedMilliseconds}ms, '
+        'result=${isHealthyAfterRestart}',
       );
       return isHealthyAfterRestart;
     } catch (e) {
       stopwatch.stop();
       _logger.severe(
-        '[$_sessionId] _performHealthCheck: Error during health check after ${stopwatch.elapsedMilliseconds}ms: $e',
+        '_performHealthCheck: Error during health check after '
+        '${stopwatch.elapsedMilliseconds}ms: '
+        '${DiagnosticSanitizer.safeError(e)}',
       );
       // If we can't restart KDF and had an authenticated user, emit logged-out state
       if (_lastEmittedUser != null) {
         _logger.info(
-          '[$_sessionId] _performHealthCheck: Emitting logged-out state due to error',
+          '_performHealthCheck: Emitting logged-out state due to error',
         );
         _emitAuthStateChange(null);
       }
       // Log the error but don't throw - return false to indicate failure
       return false;
+    } finally {
+      if (restartTransitionStarted) endAuthTransition();
     }
   }
 
   /// Force starts KDF without checking isRunning() status
   /// This is needed when we've determined KDF is unhealthy but isRunning() returns stale true
   Future<void> _forceStartKdfWithinWriteLock() async {
-    _logger.info(
-      '[$_sessionId] _forceStartKdf: Starting KDF (bypassing isRunning check)',
-    );
+    _logger.info('_forceStartKdf: Starting KDF (bypassing isRunning check)');
     final startStopwatch = Stopwatch()..start();
     final result = await _kdfFramework.startKdf(await _noAuthConfig);
     startStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _forceStartKdf: startKdf() returned ${result.name} in '
+      '_forceStartKdf: startKdf() returned omitted in '
       '${startStopwatch.elapsedMilliseconds}ms',
     );
 
     if (!result.isStartingOrAlreadyRunning()) {
-      _logger.severe(
-        '[$_sessionId] _forceStartKdf: Failed to start KDF: ${result.name}',
-      );
+      _logger.severe('_forceStartKdf: Failed to start KDF: omitted');
       throw KdfExtensions._mapStartupErrorToAuthException(result);
     }
 
     _kdfFramework.resetHttpClient();
-    _logger.info('[$_sessionId] _forceStartKdf: Waiting for RPC to be ready');
+    _logger.info('_forceStartKdf: Waiting for RPC to be ready');
     final waitStopwatch = Stopwatch()..start();
     await _waitUntilKdfRpcReady();
     await _subscribeToShutdownSignals();
     waitStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _forceStartKdf: RPC ready after '
+      '_forceStartKdf: RPC ready after '
       '${waitStopwatch.elapsedMilliseconds}ms',
     );
   }
@@ -1271,7 +1387,8 @@ class KdfAuthService implements IAuthService {
       return true;
     } catch (e) {
       _logger.warning(
-        '[$_sessionId] _verifyKdfHealthy: Version check failed: $e',
+        '_verifyKdfHealthy: Version check failed: '
+        '${DiagnosticSanitizer.safeError(e)}',
       );
       return false;
     }

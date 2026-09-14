@@ -578,9 +578,7 @@ class HiveTransactionStorage
     AssetId? scopedAssetId,
   }) async {
     if (keys.isEmpty) return const [];
-    final records = await Future.wait(
-      keys.map((key) => _readRecord(box, key)),
-    );
+    final records = await Future.wait(keys.map((key) => _readRecord(box, key)));
 
     final transactions = <Transaction>[];
     for (var i = 0; i < keys.length; i++) {
@@ -796,10 +794,8 @@ class HiveTransactionStorage
 
   static void _logError(String message, Object error, StackTrace stackTrace) {
     developer.log(
-      message,
+      'Transaction storage operation failed',
       name: 'HiveTransactionStorage',
-      error: error,
-      stackTrace: stackTrace,
     );
   }
 }

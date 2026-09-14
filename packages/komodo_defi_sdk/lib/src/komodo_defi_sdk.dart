@@ -655,7 +655,7 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       try {
         await fn(_container<T>());
       } catch (e) {
-        log('Error disposing $T: $e');
+        log('SDK component disposal failed');
       }
     }
   }

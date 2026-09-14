@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:developer' show log;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 
@@ -128,14 +127,8 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for ETH task-based activation
       if (KdfLoggingConfig.verboseLogging) {
-        log(
-          '[RPC] Activating platform asset (task-based): ${asset.id.id}',
-          name: 'EthTaskActivationStrategy',
-        );
-        log(
-          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'activation_params': activationParams.toRpcParams(), 'priv_key_policy': privKeyPolicy.toJson()})}',
-          name: 'EthTaskActivationStrategy',
-        );
+        log('Activation started', name: 'EthTaskActivationStrategy');
+        log('Activation request prepared', name: 'EthTaskActivationStrategy');
       }
 
       final taskResponse = await client.rpc.erc20.enableEthInit(
@@ -144,10 +137,7 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
       );
 
       if (KdfLoggingConfig.verboseLogging) {
-        log(
-          '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
-          name: 'EthTaskActivationStrategy',
-        );
+        log('Activation task started', name: 'EthTaskActivationStrategy');
       }
 
       yield ActivationProgress(

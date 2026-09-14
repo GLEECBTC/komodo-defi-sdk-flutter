@@ -12,13 +12,19 @@ import 'mock_path_provider_platform.dart';
 void main() {
   group('Log export tests', () {
     WidgetsFlutterBinding.ensureInitialized();
+    late Directory documents;
     setUp(() async {
-      PathProviderPlatform.instance = MockPathProviderPlatform();
+      documents = await Directory.systemTemp.createTemp('dragon-export-test-');
+      PathProviderPlatform.instance = MockPathProviderPlatform(
+        documentsPath: documents.path,
+      );
       await DragonLogs.init();
     });
 
     tearDown(() async {
       await DragonLogs.clearLogs();
+      await DragonLogs.dispose();
+      await documents.delete(recursive: true);
     });
 
     test('Test log export', () async {
@@ -26,11 +32,9 @@ void main() {
         log('test', 'test message $i');
       }
 
-      for (int i = 0; i < 100; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-      final logs =
-          await DragonLogs.exportLogsStream().asyncMap((event) => event).join();
+      final logs = await DragonLogs.exportLogsStream()
+          .asyncMap((event) => event)
+          .join();
       expect(logs, isNotNull);
       expect(logs.length, greaterThan(0));
     });
@@ -52,22 +56,21 @@ void main() {
           final currentDate = date.add(Duration(seconds: j));
           logFileSink.writeln('test message $j at $currentDate');
         }
-        logFileSink.close();
+        await logFileSink.close();
       }
 
       // export the logs and check that they are in order
-      final logs = await DragonLogs.exportLogsStream()
-          .asyncMap((event) => '$event\n')
-          .join();
+      // Export chunks need not end at a record boundary.
+      final logs = await DragonLogs.exportLogsStream().join();
 
       final logMessages = logs.split('\n');
-      final logDates =
-          logMessages.where((element) => element.contains(' at ')).map((
-        logMessage,
-      ) {
-        final date = logMessage.split(' at ')[1];
-        return DateTime.parse(date);
-      }).toList();
+      final logDates = logMessages
+          .where((element) => element.contains(' at '))
+          .map((logMessage) {
+            final date = logMessage.split(' at ')[1];
+            return DateTime.parse(date);
+          })
+          .toList();
 
       for (int i = 0; i < logDates.length - 1; i++) {
         expect(logDates[i].isBefore(logDates[i + 1]), isTrue);

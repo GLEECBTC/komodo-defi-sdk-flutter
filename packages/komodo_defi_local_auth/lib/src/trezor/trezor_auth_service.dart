@@ -78,6 +78,25 @@ class TrezorAuthService implements IAuthService {
 
   // IAuthService implementation - delegate to composed auth service
   @override
+  int get authGeneration => _authService.authGeneration;
+
+  @override
+  Stream<int> get authGenerationChanges => _authService.authGenerationChanges;
+
+  @override
+  bool get isAuthTransitionInProgress =>
+      _authService.isAuthTransitionInProgress;
+
+  @override
+  void invalidateAuthSession() => _authService.invalidateAuthSession();
+
+  @override
+  void beginAuthTransition() => _authService.beginAuthTransition();
+
+  @override
+  void endAuthTransition() => _authService.endAuthTransition();
+
+  @override
   Future<List<KdfUser>> getUsers() => _authService.getUsers();
 
   @override

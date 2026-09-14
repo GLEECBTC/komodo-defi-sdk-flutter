@@ -164,6 +164,9 @@ void main() {
     setUp(() {
       client = _MockApiClient();
       auth = _MockAuth();
+      when(
+        () => auth.authStateChanges,
+      ).thenAnswer((_) => const Stream<KdfUser?>.empty());
       assetHistory = _MockAssetHistory();
       assetLookup = _MockAssetLookup();
       balanceManager = _MockBalanceManager();
@@ -549,7 +552,10 @@ void main() {
       });
 
       final manager = buildManager();
-      final pending = manager.activateAssets([parent, child]).toList();
+      final pending = expectLater(
+        manager.activateAssets([parent, child]).toList(),
+        throwsA(isA<WalletChangedDisconnectException>()),
+      );
       await statusStarted.future;
       manager.resetActivationSessionState();
       currentUser = const KdfUser(
@@ -562,9 +568,9 @@ void main() {
       );
       statusResponse.complete(_availableStatus());
 
-      final progress = await pending;
-      expect(progress.last.isError, isTrue);
+      await pending;
       expect(capabilities.statusFor(child.id), isNull);
+      expect(manager.activationStates, isEmpty);
       expect(capabilities.isReady(child.id), isFalse);
     });
   });

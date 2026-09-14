@@ -20,6 +20,21 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 ///
 /// NB: Pubkey address
 abstract interface class KomodoDefiAuth {
+  /// Synchronous revision of the underlying authentication session.
+  ///
+  /// Capture before asynchronous sensitive work and compare before using its
+  /// result. Session transitions invalidate it even when the wallet is the
+  /// same.
+  /// The revision is instance-local and is not a persisted wallet identifier.
+  int get authGeneration;
+
+  /// Synchronous invalidations for immediately clearing sensitive UI state.
+  Stream<int> get authGenerationChanges;
+
+  /// Sensitive work cannot start while an authentication transition is pending
+  /// or after this service is disposed.
+  bool get isAuthTransitionInProgress;
+
   /// Ensures that the local authentication system has been initialized.
   ///
   /// This method must be called before interacting with authentication features.
@@ -322,6 +337,34 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   bool _initialized = false;
 
   @override
+  int get authGeneration => _authService.authGeneration;
+
+  @override
+  Stream<int> get authGenerationChanges => _authService.authGenerationChanges;
+
+  @override
+  bool get isAuthTransitionInProgress =>
+      _authService.isAuthTransitionInProgress;
+
+  Future<T> _runAuthTransition<T>(Future<T> Function() operation) async {
+    _authService.beginAuthTransition();
+    try {
+      return await operation();
+    } finally {
+      _authService.endAuthTransition();
+    }
+  }
+
+  Stream<T> _runAuthTransitionStream<T>(Stream<T> Function() operation) async* {
+    _authService.beginAuthTransition();
+    try {
+      yield* operation();
+    } finally {
+      _authService.endAuthTransition();
+    }
+  }
+
+  @override
   Future<void> ensureInitialized() async {
     if (_initialized) return;
     await _authService.getActiveUser();
@@ -331,6 +374,16 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   // Save AuthOptions when registering or signing in
   @override
   Future<KdfUser> signIn({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+  }) => _runAuthTransition(
+    () => _signIn(walletName: walletName, password: password, options: options),
+  );
+
+  Future<KdfUser> _signIn({
     required String walletName,
     required String password,
     AuthOptions options = const AuthOptions(
@@ -366,6 +419,20 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
 
   @override
   Stream<AuthenticationState> signInStream({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+  }) => _runAuthTransitionStream(
+    () => _signInStream(
+      walletName: walletName,
+      password: password,
+      options: options,
+    ),
+  );
+
+  Stream<AuthenticationState> _signInStream({
     required String walletName,
     required String password,
     AuthOptions options = const AuthOptions(
@@ -423,6 +490,22 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+  }) => _runAuthTransition(
+    () => _register(
+      walletName: walletName,
+      password: password,
+      options: options,
+      mnemonic: mnemonic,
+    ),
+  );
+
+  Future<KdfUser> _register({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+    Mnemonic? mnemonic,
   }) async {
     await ensureInitialized();
     await _assertAuthState(false);
@@ -457,6 +540,22 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
 
   @override
   Stream<AuthenticationState> registerStream({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+    Mnemonic? mnemonic,
+  }) => _runAuthTransitionStream(
+    () => _registerStream(
+      walletName: walletName,
+      password: password,
+      options: options,
+      mnemonic: mnemonic,
+    ),
+  );
+
+  Stream<AuthenticationState> _registerStream({
     required String walletName,
     required String password,
     AuthOptions options = const AuthOptions(
@@ -561,7 +660,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
-  Future<void> signOut() async {
+  Future<void> signOut() => _runAuthTransition(_signOut);
+
+  Future<void> _signOut() async {
     await ensureInitialized();
     await _assertAuthState(true);
 
@@ -595,9 +696,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       );
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while retrieving the mnemonic: $e',
+        'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,
       );
     }
@@ -609,15 +710,15 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     await _assertAuthState(true);
 
     try {
-      return _authService.getMnemonic(
+      return await _authService.getMnemonic(
         encrypted: false,
         walletPassword: walletPassword,
       );
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while retrieving the mnemonic: $e',
+        'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,
       );
     }
@@ -679,7 +780,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
             await hook(deleted);
           } on Object catch (error) {
             log(
-              'Wallet-deletion hook failed: $error',
+              'Wallet-deletion hook failed (${error.runtimeType})',
               name: 'KomodoDefiLocalAuth',
             );
           }
@@ -811,7 +912,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
-  Future<void> dispose() async {
+  Future<void> dispose() => _runAuthTransition(_dispose);
+
+  Future<void> _dispose() async {
     await _walletDeletions.close();
     await _authService.dispose();
   }
