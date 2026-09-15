@@ -46,6 +46,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   }
 
   void _emitAuthStateChange(KdfUser? user) {
+    if (!isAuthTransitionInProgress) _sessions.observe(user);
     if (!_authStateController.isClosed && user != _lastEmittedUser) {
       _lastEmittedUser = user;
       invalidateAuthSession();
@@ -59,6 +60,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     KdfStartupConfig config,
     AuthOptions authOptions,
     bool isImported,
+    Map<String, dynamic> initialMetadata,
   ) async {
     _logger.info('_registerNewUser: Restarting KDF for omitted');
     final restartStopwatch = Stopwatch()..start();
@@ -88,7 +90,11 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
       KdfUser(
         walletId: walletId,
         isBip39Seed: isBip39Seed,
-        metadata: {'isImported': isImported},
+        metadata: {
+          ...initialMetadata,
+          'isImported': isImported,
+          walletEntryIdMetadataKey: const Uuid().v4(),
+        },
       ),
       persist: false,
     );
@@ -187,8 +193,13 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
       }
 
       // Update stored user with verified BIP39 status
-      updatedUser = currentUser.copyWith(isBip39Seed: true);
-      await _secureStorage.saveUser(updatedUser);
+      updatedUser = (await _secureStorage.updateUser(
+        currentUser.walletId.name,
+        (stored) {
+          if (stored == null) throw AuthException.notFound();
+          return stored.copyWith(isBip39Seed: true);
+        },
+      ))!;
     } catch (e) {
       await _stopKdf();
       throw AuthException(

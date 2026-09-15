@@ -8,6 +8,8 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import '../helpers/withdrawal_auth_fixture.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
 class _MockAssetProvider extends Mock implements IAssetProvider {}
@@ -86,7 +88,9 @@ void main() {
         feeManager,
         activationCoordinator,
         legacyManager,
+        auth: WithdrawalAuthFixture(),
       );
+      addTearDown(manager.dispose);
       siaAsset = _createSiaAsset();
 
       when(

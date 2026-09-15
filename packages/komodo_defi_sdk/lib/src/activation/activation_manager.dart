@@ -5,8 +5,10 @@ import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
-import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart'
+    show isSameStableWallet;
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
@@ -34,13 +36,25 @@ class ActivationManager {
     this._configService,
     this._assetsUpdateManager,
     this._activatedAssetsCache, {
+    ActivationPolicy? activationPolicy,
     TronGaslessProviderConfig? tronGaslessProvider,
     GaslessCapabilityRegistry? gaslessCapabilities,
-  }) : _tronGaslessProvider = tronGaslessProvider,
+  }) : _activationPolicy = activationPolicy ?? ActivationPolicy(),
+       _tronGaslessProvider = tronGaslessProvider,
        _gaslessCapabilities =
            gaslessCapabilities ?? GaslessCapabilityRegistry() {
-    _authSubscription = _auth.authStateChanges.listen(_observeWallet);
+    _authSubscription = _auth.watchSessionContext().listen(_observeSession);
+    _policySubscription = _activationPolicy.changes.listen(_onPolicyChanged);
+    _onPolicyChanged(_activationPolicy.current);
   }
+
+  final ActivationPolicy _activationPolicy;
+  late final StreamSubscription<ActivationPolicySnapshot> _policySubscription;
+  Future<void>? _policyReconciliation;
+  Future<void>? _policyRecovery;
+  final Set<AssetId> _policySuspendedAssets = {};
+  final Map<AssetId, Future<void> Function()> _runtimeRecovery = {};
+  Timer? _policyRetryTimer;
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
@@ -81,83 +95,45 @@ class ActivationManager {
   int _activationSessionGeneration = 0;
   bool _isDisposed = false;
 
-  late final StreamSubscription<KdfUser?> _authSubscription;
-  WalletId? _currentWalletId;
-  int _walletObservationRevision = 0;
+  late final StreamSubscription<AuthSessionContext?> _authSubscription;
+  AuthSessionContext? _session;
 
-  void _observeWallet(KdfUser? user) {
+  void _observeSession(AuthSessionContext? session) {
     if (_isDisposed) return;
-    _walletObservationRevision++;
-    final previous = _currentWalletId;
-    final next = user?.walletId;
-    if (previous != null && next != null) {
-      if (isSameStableWallet(previous, next)) {
-        _currentWalletId = preferEnrichedWalletIdentity(previous, next);
-        return;
-      }
-      if (isDegradedWalletIdentity(previous, next)) return;
+    if (session == null ||
+        (_session != null && !_auth.isSessionContextCurrent(_session!))) {
+      resetActivationSessionState();
     }
-    if (previous != null || next == null) resetActivationSessionState();
-    _currentWalletId = next;
+    _session = session;
   }
 
-  Future<({WalletOperationContext context, bool isGeneratedThisSession})>
+  Future<({_ActivationWalletContext context, bool isGeneratedThisSession})>
   _captureWalletContext() async {
-    final generation = _activationSessionGeneration;
-    final observationRevision = _walletObservationRevision;
+    final context = await _auth.captureSessionContext();
     final user = await _auth.currentUser;
-    final observedWallet = _currentWalletId;
-    // The first accepted identity does not advance the session generation.
-    // A delayed initial read must still lose to a conflicting auth event or
-    // concurrent capture, without resetting that newer wallet's state.
-    if (generation != _activationSessionGeneration ||
-        _isDisposed ||
-        (observationRevision != _walletObservationRevision &&
-            observedWallet != null &&
-            (user == null ||
-                !walletIdentityContinuesSession(
-                  observedWallet,
-                  user.walletId,
-                )))) {
-      throw const WalletChangedDisconnectException(
-        'Wallet changed during asset activation',
-      );
-    }
-    _observeWallet(user);
-    final walletId = _currentWalletId;
-    if (user == null || walletId == null) {
-      throw const WalletChangedDisconnectException(
-        'No wallet signed in during asset activation',
-      );
-    }
+    _auth.ensureSessionContextCurrent(context);
+    _observeSession(context);
     return (
-      context: WalletOperationContext(
-        walletId: walletId,
-        generation: _activationSessionGeneration,
-      ),
-      isGeneratedThisSession: user.isGeneratedThisSession,
+      context: _ActivationWalletContext(context, _activationSessionGeneration),
+      isGeneratedThisSession: user!.isGeneratedThisSession,
     );
   }
 
-  bool _isWalletContextCurrent(WalletOperationContext context) =>
-      !_isDisposed && context.generation == _activationSessionGeneration;
+  bool _isWalletContextCurrent(_ActivationWalletContext context) =>
+      !_isDisposed &&
+      context.generation == _activationSessionGeneration &&
+      _auth.isSessionContextCurrent(context.session);
 
-  void _requireWalletContextCurrentSync(WalletOperationContext context) {
+  void _requireWalletContextCurrentSync(_ActivationWalletContext context) {
     if (!_isWalletContextCurrent(context)) {
-      throw const WalletChangedDisconnectException(
-        'Wallet changed during asset activation',
-      );
+      throw const AuthSessionChangedException();
     }
   }
 
   Future<void> _requireWalletContextCurrent(
-    WalletOperationContext context,
+    _ActivationWalletContext context,
   ) async {
-    _requireWalletContextCurrentSync(context);
-    final user = await _auth.currentUser;
-    // A delayed read for A must not move the accepted identity back from B.
-    _requireWalletContextCurrentSync(context);
-    _observeWallet(user);
+    await _auth.captureSessionContext();
     _requireWalletContextCurrentSync(context);
   }
 
@@ -349,7 +325,7 @@ class ActivationManager {
   /// be forgotten at a call site.
   Future<Set<AssetId>> _readActivatedAssetIds({
     bool forceRefresh = false,
-    WalletOperationContext? walletContext,
+    _ActivationWalletContext? walletContext,
   }) async {
     final generation = _activationSessionGeneration;
     final ids = await _activatedAssetsCache.getActivatedAssetIds(
@@ -391,6 +367,145 @@ class ActivationManager {
         );
   }
 
+  /// Checks a new activation against the host policy.
+  void ensureActivationAllowed(AssetId assetId) =>
+      _activationPolicy.ensureAllowed(assetId);
+
+  /// Retains an SDK service's specialized activation parameters for recovery.
+  /// The registration expires at the next runtime session boundary.
+  @internal
+  void registerRuntimeRecovery(
+    AssetId assetId, {
+    required AuthSessionContext session,
+    required Future<void> Function() recover,
+  }) {
+    _auth.ensureSessionContextCurrent(session);
+    if (_isDisposed) throw StateError('ActivationManager has been disposed');
+    _runtimeRecovery[assetId] = recover;
+  }
+
+  void _onPolicyChanged(ActivationPolicySnapshot snapshot) {
+    for (final state in _activationStates.values.toList()) {
+      if (!state.isActivating || !snapshot.isBlocked(state.assetId)) continue;
+      cancelActivation(
+        state.assetId.parentId ?? state.assetId,
+        reason: 'Asset activation is restricted',
+      );
+    }
+    _maintainPolicy();
+  }
+
+  void _maintainPolicy() {
+    if (_isDisposed) return;
+    unawaited(_reconcileRestrictedAssets());
+    unawaited(_resumePolicySuspendedAssets());
+    if (_activationPolicy.current.blockedAssets.isNotEmpty ||
+        _policySuspendedAssets.isNotEmpty) {
+      _policyRetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) {
+        _maintainPolicy();
+      });
+    } else {
+      _policyRetryTimer?.cancel();
+      _policyRetryTimer = null;
+    }
+  }
+
+  Future<void> _reconcileRestrictedAssets() {
+    if (_policyReconciliation != null) return _policyReconciliation!;
+    late final Future<void> pending;
+    pending = _disableRestrictedAssets().whenComplete(() {
+      if (identical(_policyReconciliation, pending)) {
+        _policyReconciliation = null;
+      }
+    });
+    return _policyReconciliation = pending;
+  }
+
+  Future<void> _resumePolicySuspendedAssets() {
+    if (_policyRecovery != null) return _policyRecovery!;
+    late final Future<void> pending;
+    pending = _restoreRuntimeAssets().whenComplete(() {
+      if (identical(_policyRecovery, pending)) _policyRecovery = null;
+    });
+    return _policyRecovery = pending;
+  }
+
+  Future<void> _restoreRuntimeAssets() async {
+    if (_isDisposed ||
+        _policySuspendedAssets.isEmpty ||
+        _activationPolicy.current.status != ActivationPolicyStatus.ready) {
+      return;
+    }
+    try {
+      final session = await _auth.captureSessionContext();
+      for (final id in _policySuspendedAssets.toList()) {
+        _auth.ensureSessionContextCurrent(session);
+        if (_isDisposed || !_activationPolicy.current.canActivate(id)) continue;
+        final asset = _assetLookup.fromId(id);
+        if (asset == null) continue;
+        // This restores runtime availability only. Wallet selection is owned
+        // separately and is never rewritten by policy suspension or recovery.
+        final specializedRecovery = _runtimeRecovery[id];
+        if (specializedRecovery != null) {
+          await specializedRecovery();
+          _auth.ensureSessionContextCurrent(session);
+          _policySuspendedAssets.remove(id);
+        } else {
+          final result = await activateAsset(asset).last;
+          _auth.ensureSessionContextCurrent(session);
+          if (result.isSuccess) _policySuspendedAssets.remove(id);
+        }
+      }
+    } on WalletChangedDisconnectException {
+      // Recovery belongs to the session that held these enabled assets.
+    } on ActivationPolicyException {
+      // The next successful policy snapshot resumes the remaining assets.
+    } on Object {
+      _logger.warning('Unable to restore policy-suspended assets; will retry');
+    }
+  }
+
+  Future<void> _disableRestrictedAssets() async {
+    if (_isDisposed || _activationPolicy.current.blockedAssets.isEmpty) return;
+    try {
+      final session = await _auth.captureSessionContext();
+      final enabled = await _activatedAssetsCache.getActivatedAssetIds(
+        forceRefresh: true,
+      );
+      _auth.ensureSessionContextCurrent(session);
+      final restricted =
+          enabled.where(_activationPolicy.current.isBlocked).toList()..sort(
+            (a, b) => (a.parentId == null ? 1 : 0).compareTo(
+              b.parentId == null ? 1 : 0,
+            ),
+          );
+      for (final id in restricted) {
+        _auth.ensureSessionContextCurrent(session);
+        if (!_activationPolicy.current.isBlocked(id)) continue;
+        try {
+          await _client.post(DisableCoinRequest(coin: id.id));
+          _auth.ensureSessionContextCurrent(session);
+          _policySuspendedAssets.add(id);
+          _activationStates.remove(id);
+          _freshlyActivated.remove(id);
+          _activatedAssetsCache.invalidate();
+          _emitActivationStates();
+        } on WalletChangedDisconnectException {
+          rethrow;
+        } on Object {
+          _logger.warning('Unable to disable a restricted asset; will retry');
+        }
+      }
+      _activatedAssetsCache.invalidate();
+      // Policy may have recovered while disable_coin was in flight.
+      _maintainPolicy();
+    } on WalletChangedDisconnectException {
+      // Reconciliation belongs to the session that started it.
+    } on Object {
+      _logger.warning('Unable to reconcile restricted runtime assets');
+    }
+  }
+
   /// Activate a single asset
   Stream<ActivationProgress> activateAsset(Asset asset) {
     final parentId = asset.id.parentId;
@@ -420,6 +535,10 @@ class ActivationManager {
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
     _activationSessionGeneration++;
+    _policySuspendedAssets.clear();
+    _runtimeRecovery.clear();
+    _policyRecovery = null;
+    _policyReconciliation = null;
     _freshlyActivated.clear();
     final staleCompleters = _activationCompleters.values.toList();
     _activationCompleters.clear();
@@ -531,7 +650,7 @@ class ActivationManager {
 
     for (final group in groups) {
       _requireWalletContextCurrentSync(walletContext);
-      final activationSessionGeneration = walletContext.generation;
+      final activationSessionGeneration = _activationSessionGeneration;
       final pendingCancellation = _currentCancellation(group.primary.id);
       if (pendingCancellation != null) {
         yield ActivationProgress.error(
@@ -568,6 +687,10 @@ class ActivationManager {
         // An already-active token cannot be reconfigured in place. Probe its
         // activation-scoped GasFree status; `GaslessNotConfigured` is retained
         // as `reactivation_required` while Standard TRON remains available.
+      }
+
+      for (final asset in [group.primary, ...group.children]) {
+        _activationPolicy.ensureAllowed(asset.id);
       }
 
       // Register activation attempt.
@@ -673,6 +796,9 @@ class ActivationManager {
           hdGapLimit: hdGapLimit,
         );
 
+        for (final asset in [group.primary, ...group.children]) {
+          _activationPolicy.ensureAllowed(asset.id);
+        }
         var completionHandled = false;
         final activationStream =
             activationStatus.isComplete &&
@@ -687,6 +813,11 @@ class ActivationManager {
           // Progress is often purely local. The auth subscription fences these
           // events without an identity RPC for every strategy progress update.
           _requireWalletContextCurrentSync(walletContext);
+          for (final asset in [group.primary, ...group.children]) {
+            if (_activationPolicy.current.isBlocked(asset.id)) {
+              _activationPolicy.ensureAllowed(asset.id);
+            }
+          }
           final cancellation = _cancellationFor(group.primary.id, registration);
           if (cancellation != null) {
             final cancellationError = ActivationCancelledException(
@@ -801,6 +932,8 @@ class ActivationManager {
         }
       } on WalletChangedDisconnectException {
         rethrow;
+      } on ActivationPolicyException {
+        rethrow;
       } catch (e, st) {
         await _requireWalletContextCurrent(walletContext);
         _requireWalletContextCurrentSync(walletContext);
@@ -838,6 +971,12 @@ class ActivationManager {
           stackTrace: st,
         );
       } finally {
+        if (_activationPolicy.current.isBlocked(group.primary.id) ||
+            group.children.any(
+              (asset) => _activationPolicy.current.isBlocked(asset.id),
+            )) {
+          unawaited(_reconcileRestrictedAssets());
+        }
         activationStopwatch.stop();
         // The outcome is read back from the state map rather than tracked in a
         // local, so this reports what consumers will actually observe -
@@ -920,7 +1059,7 @@ class ActivationManager {
   /// Check if asset and its children are already activated.
   Future<ActivationProgress> _checkActivationStatus(
     _AssetGroup group, {
-    required WalletOperationContext walletContext,
+    required _ActivationWalletContext walletContext,
     bool forceRefresh = false,
   }) async {
     try {
@@ -1018,7 +1157,7 @@ class ActivationManager {
   Future<ActivationProgress?> _tryRecoverAlreadyActivated(
     _AssetGroup group,
     Object error,
-    WalletOperationContext walletContext,
+    _ActivationWalletContext walletContext,
   ) async {
     if (!_isAlreadyActivatedError(error)) {
       return null;
@@ -1041,7 +1180,7 @@ class ActivationManager {
   }
 
   Future<void> _requireCompletionContext(
-    WalletOperationContext walletContext,
+    _ActivationWalletContext walletContext,
     _GaslessActivationContext? gaslessContext,
   ) async {
     if (gaslessContext != null) {
@@ -1057,7 +1196,7 @@ class ActivationManager {
     _AssetGroup group,
     ActivationProgress progress,
     Completer<void> completer, {
-    required WalletOperationContext walletContext,
+    required _ActivationWalletContext walletContext,
     _GaslessActivationContext? gaslessContext,
   }) async {
     await _requireCompletionContext(walletContext, gaslessContext);
@@ -1392,6 +1531,8 @@ class ActivationManager {
 
     _isDisposed = true;
     await _authSubscription.cancel();
+    await _policySubscription.cancel();
+    _policyRetryTimer?.cancel();
     await _protectedOperation(() async {
       // Complete any pending completers with errors
       final completers = List<Completer<void>>.from(
@@ -1487,4 +1628,13 @@ class _ActivationCancellation {
   final Completer<void> completer;
   final int sessionGeneration;
   final String reason;
+}
+
+/// Manager resets revoke requests even when the authenticated wallet
+/// stays open.
+final class _ActivationWalletContext {
+  const _ActivationWalletContext(this.session, this.generation);
+  final AuthSessionContext session;
+  final int generation;
+  WalletId get walletId => session.walletId;
 }

@@ -81,12 +81,27 @@ gitlink and dependency files. Do not use a floating `dev` reference or
 
 ## Wallet identity and authentication
 
-Metadata setters and atomic updates require `expectedWalletId`, captured from
-the authenticated user before the operation starts. Carry it across prompts,
-awaits and rollbacks. Both expected and current identities must have a verified
-public-key hash; a wallet name alone is insufficient. A stale or unverifiable
-write throws `WalletChangedDisconnectException` before transformation or
-persistence. Abort that operation instead of retrying against the new wallet.
+Capture `sdk.auth.captureSessionContext()` for asynchronous runtime work and
+check `isSessionContextCurrent` before using its result. The SDK's activation,
+pubkey, balance and history managers, and GasFree withdrawal paths, enforce this
+boundary. A temporary missing hash or metadata refresh keeps the runtime session.
+Logout, replacement, reauthentication and signing-context changes revoke it, including
+when reauthentication returns to the same wallet.
+
+A runtime context is not fresh identity proof. Use `updateMetadataForSession`
+for a metadata write that spans a prompt or await; it verifies identity again
+inside the persistence lock. `AuthIdentityUnavailableException` allows retrying
+the original operation while that session remains current.
+`AuthSessionChangedException` requires discarding it. Both extend
+`WalletChangedDisconnectException`. Older metadata setters still require a
+verified `expectedWalletId`; migrate asynchronous callers to the session API.
+
+`register(initialMetadata: ...)` owns creation, duplicate-name checking and
+metadata persistence before publishing the user. A duplicate returns
+`AuthExceptionType.walletAlreadyExists`; it never becomes implicit login.
+Choose `signIn` explicitly for an existing wallet. SDK-owned metadata remains
+authoritative. Authentication adapters must delegate session capture and checks
+to their SDK auth owner and preserve synchronous revocation at actual transitions.
 
 See the [metadata-write migration](../packages/komodo_defi_local_auth/README.md#migrating-metadata-writes)
 for a complete example. Custom authentication implementations and test doubles
@@ -95,6 +110,54 @@ in the [authentication lifecycle migration](../packages/komodo_defi_local_auth/R
 Auth transitions revoke export capabilities before asynchronous work continues,
 even when the transition returns to the same wallet. Keep the SDK's serialized
 transition behavior when adapting a custom auth implementation.
+
+## Selection, activation and policy
+
+Use `sdk.walletAssets` for persistent selection and `sdk.activateAsset`
+for runtime activation. NFT-only activation does not alter selection or suppress
+activation events. A failed selection read is unavailable, not an empty wallet.
+Inspect typed activation outcomes instead of inferring causes from a boolean.
+
+Hosts that require an external eligibility policy must supply
+`KomodoDefiSdkConfig.initialActivationPolicy` before `initialize`, then publish
+policy changes through the SDK activation-policy contract. Start with loading
+until the lookup succeeds; setting policy after initialization leaves restored
+recovery free to activate assets too early. SDK standalone consumers default to
+ready. Preserve selected assets while policy defers or deactivates runtime work.
+
+## Wallet deletion and retained recovery
+
+Prepare deletion with `sdk.walletDeletion.prepare(walletName)`, present its
+pending-transfer or unavailable-recovery warning, then pass that exact review
+to `delete(acknowledgedReview: ..., password: ...)`. Handle `busy`,
+`reviewChanged` and `targetChanged` explicitly. Raw SDK auth deletion requires
+the manager's one-use review permit. Directly constructed `WithdrawalManager`
+instances now require `auth`; wallet-ID resolvers cannot represent reauthentication.
+
+Deletion retains unresolved encrypted GasFree records and discovery metadata.
+It does not cancel a transfer. Recovery requires re-importing the same signing
+identity on the same device/origin and storage. Browser Web Locks coordinate
+cooperating contexts; native submission leases coordinate one isolate. A live
+submission holds its lease until local journal writes settle, without waiting
+for blockchain settlement.
+
+## Bounded encrypted history
+
+The SDK owns history keys, storage, pruning and disposal. Values and indexes
+are encrypted, and database keys are opaque keyed identifiers. Defaults retain
+1,000 transactions per wallet/asset, 20,000 globally and 64 MiB of logical data
+including indexes. Key or storage failure uses bounded memory. The SDK attempts
+to delete the old plaintext cache, logs cleanup failures and retries on later
+opens. It never reads or migrates that cache; history is rebuilt from providers.
+
+Hive's AES-CBC encryption does not authenticate ciphertext. The current web
+secure-storage backend keeps its own encryption key in browser storage, so a
+copy of all storage for the origin remains recoverable. Physical native
+Keychain/Keystore storage has not yet been verified; native tests mock it.
+
+Storage returns `CachedTransactionPage`: `cachedCount` describes retained rows,
+not a provider total. Keep provider pagination and completeness separate from
+cache retention so older network history remains accessible after eviction.
 
 ## Diagnostic storage lifecycle
 

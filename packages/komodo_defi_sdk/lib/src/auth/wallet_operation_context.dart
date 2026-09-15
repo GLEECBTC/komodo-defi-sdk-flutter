@@ -1,9 +1,11 @@
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Captures the authenticated wallet and manager generation at the start of an
 /// asynchronous operation.
 ///
-/// Managers increment their generation as soon as authentication changes. A
+/// Managers advance generations at runtime session boundaries. Revoked SDK
+/// tokens reject results immediately, before asynchronous reset delivery. A
 /// result fetched for an older generation must never populate a cache, emit to
 /// a new wallet's stream, or be written under a newly resolved wallet ID.
 final class WalletOperationContext {
@@ -11,22 +13,26 @@ final class WalletOperationContext {
   const WalletOperationContext({
     required this.walletId,
     required this.generation,
+    required this.session,
   });
 
   /// Stable wallet identity captured before the asynchronous work starts.
   final WalletId walletId;
 
+  /// SDK-issued runtime session; revocation also covers same-wallet login.
+  final AuthSessionContext session;
+
   /// Manager generation captured with [walletId].
   final int generation;
 }
 
-/// Checks whether [current] can safely continue the [previous] wallet session.
+/// Checks whether [current] has the same stable wallet identity as [previous].
 ///
 /// Once both identities have a public-key hash, the hash remains stable across
 /// wallet renames. During the name-only to enriched transition, the wallet name
 /// is the only available compatibility key. The reverse transition is
-/// deliberately rejected: losing an established hash must advance the owning
-/// manager's generation before any later same-name identity is accepted.
+/// deliberately rejected here; [isDegradedWalletIdentity] handles an identity
+/// outage within a separately verified SDK runtime session.
 ///
 /// Derivation and private-key policy must match so an operation or cache cannot
 /// cross address or signing modes. Password-strength acceptance is not wallet
@@ -71,9 +77,9 @@ bool isSameStableWallet(WalletId previous, WalletId current) {
 ///
 /// Managers that use the wallet identity only to *scope caches* must not read
 /// that rejection as a wallet switch and throw away their state: a real switch
-/// always passes through a `null` user first (KDF is stopped for the outgoing
-/// wallet), so a same-name, same-options observation within a live session is
-/// the same wallet.
+/// is detected by the SDK-issued [AuthSessionContext], including replacement
+/// and same-wallet reauthentication. This identity comparison alone cannot
+/// establish runtime continuity.
 ///
 /// Returns false for anything else, including a name change, a hash change, or
 /// a derivation/private-key policy change.
@@ -99,8 +105,7 @@ bool isDegradedWalletIdentity(WalletId previous, WalletId current) {
 /// post-await guards must extend the same tolerance - otherwise an operation
 /// admitted under a degraded identity dies at its first checkpoint, during
 /// the exact blip the tolerance exists for. A real wallet switch still fails
-/// this check: it always passes through a `null` user or a different
-/// name/hash/options first.
+/// the owning SDK session check, even if its name/hash/options are unchanged.
 ///
 /// Asymmetric like [isSameStableWallet]: pass the previously accepted
 /// identity first and the newly observed identity second.
