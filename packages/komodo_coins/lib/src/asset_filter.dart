@@ -46,7 +46,7 @@ class NoAssetFilterStrategy extends AssetFilterStrategy {
 /// This includes assets that are not UTXO-based or EVM-based tokens.
 /// ETH, AVAX, BNB, FTM, etc. are excluded as they currently fail to
 /// activate on Trezor.
-/// ERC20, Arbitrum, and MATIC explicitly do not support Trezor via KDF
+/// ERC20, Arbitrum, and Polygon explicitly do not support Trezor via KDF
 /// at this time, so they are also excluded.
 class TrezorAssetFilterStrategy extends AssetFilterStrategy {
   const TrezorAssetFilterStrategy({this.hiddenAssets = const {}})
