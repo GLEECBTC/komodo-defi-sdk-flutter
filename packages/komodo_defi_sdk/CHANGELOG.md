@@ -5,6 +5,9 @@ remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-over
 Metadata writes have a breaking API change; this is not a source-compatible
 patch of 0.7.0.
 
+ - **FIX**(history): decode the legacy `matic` `sub_class` name as
+   `CoinSubClass.polygon`, so transaction history stored before the rename is
+   not downgraded to `CoinSubClass.unknown`.
  - **FIX**(history): preserve verified wallet identity and active history streams
    during degraded same-wallet authentication events.
  - **FIX**(history): retain one wallet context across historical and live results
