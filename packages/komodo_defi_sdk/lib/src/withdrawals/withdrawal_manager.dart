@@ -10,6 +10,7 @@ import 'package:komodo_defi_framework/komodo_defi_framework.dart'
         GaslessTraceEvent,
         GaslessTraceEventState,
         KdfEvent;
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
@@ -130,19 +131,21 @@ class WithdrawalManager {
     this._feeManager,
     this._activationCoordinator,
     this._legacyManager, {
+    required KomodoDefiLocalAuth auth,
     GaslessCapabilityRegistry? gaslessCapabilities,
     PendingGaslessTransferRepository? pendingGaslessTransfers,
     EventStreamingManager? eventStreamingManager,
     Future<Set<String>> Function(Asset asset)? freshSourceAddressResolver,
-    Future<WalletId?> Function()? walletIdResolver,
-    Stream<KdfUser?>? authStateChanges,
-  }) : _gaslessCapabilities =
+  }) : _auth = auth,
+       _gaslessCapabilities =
            gaslessCapabilities ?? GaslessCapabilityRegistry(),
        _pendingGaslessTransfers = pendingGaslessTransfers,
        _eventStreamingManager = eventStreamingManager,
-       _freshSourceAddressResolver = freshSourceAddressResolver,
-       _walletIdResolver = walletIdResolver {
-    _gaslessAuthSubscription = authStateChanges?.listen(
+       _freshSourceAddressResolver = freshSourceAddressResolver {
+    _sessionSubscription = _auth.watchSessionContext().listen(
+      _handleSessionChanged,
+    );
+    _gaslessAuthSubscription = _auth.watchCurrentUser().listen(
       _handleGaslessAuthStateChanged,
     );
   }
@@ -167,6 +170,7 @@ class WithdrawalManager {
   static const int _gaslessDeadlineClockSkewSeconds = 5;
 
   final ApiClient _client;
+  final KomodoDefiLocalAuth _auth;
   final IAssetProvider _assetProvider;
   final SharedActivationCoordinator _activationCoordinator;
   final FeeManager _feeManager;
@@ -175,7 +179,6 @@ class WithdrawalManager {
   final PendingGaslessTransferRepository? _pendingGaslessTransfers;
   final EventStreamingManager? _eventStreamingManager;
   final Future<Set<String>> Function(Asset asset)? _freshSourceAddressResolver;
-  final Future<WalletId?> Function()? _walletIdResolver;
   final Map<String, WalletId> _pendingGaslessWallets = <String, WalletId>{};
   // Own the submission lease before the reservation becomes visible. Browser
   // leases span tabs; native leases span managers within the same isolate.
@@ -198,7 +201,11 @@ class WithdrawalManager {
     final owner = _activeGaslessSubmissions[key];
     if (owner == null) return;
     try {
-      await owner.lease?.release();
+      await Future.wait([
+        if (owner.lease != null) owner.lease!.release(),
+        if (owner.walletLease != null) owner.walletLease!.release(),
+        if (owner.globalLease != null) owner.globalLease!.release(),
+      ]);
     } finally {
       _activeGaslessSubmissions.remove(key);
       if (!owner.completed.isCompleted) owner.completed.complete();
@@ -208,6 +215,8 @@ class WithdrawalManager {
   final math.Random _secureRandom = math.Random.secure();
   final _activeWithdrawals = <int, StreamController<WithdrawalProgress>>{};
   StreamSubscription<KdfUser?>? _gaslessAuthSubscription;
+  StreamSubscription<AuthSessionContext?>? _sessionSubscription;
+  AuthSessionContext? _runtimeSession;
   final StreamController<int> _walletGenerationChanges =
       StreamController<int>.broadcast(sync: true);
   StreamSubscription<WithdrawalProgress>? _gaslessReconciliationSubscription;
@@ -291,6 +300,8 @@ class WithdrawalManager {
     // lease is released. Never await the consumer-controlled async* lifetime.
     await Future.wait(owners);
     await stopGaslessReconciliation();
+    await _sessionSubscription?.cancel();
+    _sessionSubscription = null;
     await _gaslessAuthSubscription?.cancel();
     _gaslessAuthSubscription = null;
     await _walletGenerationChanges.close();
@@ -363,44 +374,96 @@ class WithdrawalManager {
 
   /// Stops an active recovery cycle while retaining the encrypted journal.
   Future<void> stopGaslessReconciliation() async {
-    await _gaslessReconciliationSubscription?.cancel();
+    final subscription = _gaslessReconciliationSubscription;
     _gaslessReconciliationSubscription = null;
+    try {
+      await subscription?.cancel();
+    } on WalletChangedDisconnectException {
+      // Cancellation revokes the old session's in-flight status reads.
+    } on _WithdrawalManagerDisposed {
+      // Disposal also revokes a cycle while it captures fresh identity.
+    }
+  }
+
+  bool _bindRuntimeSession(AuthSessionContext? session) {
+    if (_isDisposed) return false;
+    if (session != null && !_auth.isSessionContextCurrent(session)) {
+      return false;
+    }
+    // A queued null event must not revoke a newer session already captured.
+    if (session == null &&
+        _runtimeSession != null &&
+        _auth.isSessionContextCurrent(_runtimeSession!)) {
+      return false;
+    }
+    if (_runtimeSession == session) {
+      if (session != null) _currentWalletId = session.walletId;
+      return false;
+    }
+    _runtimeSession = session;
+    _walletGeneration++;
+    _currentWalletId = session?.walletId;
+    _gaslessCapabilities.ensureWalletSession(session?.walletId.pubkeyHash);
+    if (!_walletGenerationChanges.isClosed) {
+      _walletGenerationChanges.add(_walletGeneration);
+    }
+    return true;
+  }
+
+  void _handleSessionChanged(AuthSessionContext? session) {
+    if (!_bindRuntimeSession(session)) return;
+    final generation = _walletGeneration;
+    unawaited(
+      (() async {
+        await stopGaslessReconciliation();
+        if (!_isDisposed &&
+            generation == _walletGeneration &&
+            session != null &&
+            _auth.isSessionContextCurrent(session) &&
+            (session.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
+          await startGaslessReconciliation();
+        }
+      })().catchError((Object _) {
+        log(
+          'GasFree recovery deferred until identity and storage are available',
+        );
+      }),
+    );
   }
 
   void _handleGaslessAuthStateChanged(KdfUser? user) {
     if (_isDisposed) return;
-    final nextWallet = user?.walletId;
-    final hasStableIdentity =
-        nextWallet?.pubkeyHash?.trim().isNotEmpty ?? false;
-    _gaslessCapabilities.ensureWalletSession(nextWallet?.pubkeyHash);
-    if (!_sameOptionalWallet(_currentWalletId, nextWallet)) {
+    if (!(user?.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
+      // GasFree authorization needs a fresh hash even while the SDK preserves
+      // its runtime session. Revoke sensitive reads/probes without resetting
+      // ordinary asset activation or the SDK-issued session token.
       _walletGeneration++;
-      _currentWalletId = nextWallet;
+      _currentWalletId = user?.walletId;
+      _gaslessCapabilities.ensureWalletSession(null);
       if (!_walletGenerationChanges.isClosed) {
         _walletGenerationChanges.add(_walletGeneration);
       }
-    } else if (_currentWalletId != null && nextWallet != null) {
-      _currentWalletId = preferEnrichedWalletIdentity(
-        _currentWalletId!,
-        nextWallet,
-      );
+      unawaited(stopGaslessReconciliation());
+      return;
     }
-    unawaited(() async {
-      await stopGaslessReconciliation();
-      // A name-only auth fallback is sufficient for Standard wallet access,
-      // but cannot decrypt or own a GasFree journal. Wait for enrichment
-      // instead of surfacing a storage failure or touching unresolved work.
-      if (hasStableIdentity) await startGaslessReconciliation();
-    }());
-  }
-
-  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
-    if (previous == null || current == null) return previous == current;
-    return isSameStableWallet(previous, current);
+    // Fresh identity availability may recover without changing the runtime
+    // session. Metadata refreshes must not cancel an existing recovery cycle.
+    unawaited(
+      startGaslessReconciliation().catchError((Object _) {
+        log('GasFree recovery will retry after identity becomes available');
+      }),
+    );
   }
 
   Future<WalletOperationContext> _captureWalletContext() async {
-    final wallet = await _untilDisposed(() => _walletIdResolver?.call());
+    final session = await _untilDisposed(_auth.captureSessionContext);
+    // Bind before awaiting a fresh proof; a queued initial session event must
+    // not invalidate this operation. Auth streams own automatic reconciliation.
+    _bindRuntimeSession(session);
+    final wallet = await _untilDisposed(
+      () async => (await _auth.currentUser)?.walletId,
+    );
+    _auth.ensureSessionContextCurrent(session);
     _requireNotDisposed();
     if (wallet == null) {
       throw StateError('GasFree requires an authenticated wallet');
@@ -428,6 +491,7 @@ class WithdrawalManager {
       _currentWalletId = preferEnrichedWalletIdentity(current, wallet);
     }
     return WalletOperationContext(
+      session: session,
       walletId: wallet,
       generation: _walletGeneration,
     );
@@ -449,6 +513,7 @@ class WithdrawalManager {
 
   Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
     if (_isDisposed ||
+        !_auth.isSessionContextCurrent(context.session) ||
         context.generation != _walletGeneration ||
         _currentWalletId == null ||
         !isSameStableWallet(context.walletId, _currentWalletId!)) {
@@ -456,11 +521,14 @@ class WithdrawalManager {
     }
     final WalletId? current;
     try {
-      current = await _untilDisposed(() => _walletIdResolver?.call());
+      current = await _untilDisposed(
+        () async => (await _auth.currentUser)?.walletId,
+      );
     } on _WithdrawalManagerDisposed {
       return false;
     }
     return !_isDisposed &&
+        _auth.isSessionContextCurrent(context.session) &&
         current != null &&
         context.generation == _walletGeneration &&
         isSameStableWallet(context.walletId, current);
@@ -470,9 +538,10 @@ class WithdrawalManager {
     WalletOperationContext context,
   ) async {
     if (await _isWalletContextCurrent(context)) return;
-    throw const WalletChangedDisconnectException(
-      'Wallet changed during GasFree transfer',
-    );
+    if (!_auth.isSessionContextCurrent(context.session)) {
+      throw const AuthSessionChangedException();
+    }
+    throw const AuthIdentityUnavailableException();
   }
 
   Future<void> _requireGaslessStatusContextCurrent(
@@ -509,7 +578,7 @@ class WithdrawalManager {
     if (_isDisposed ||
         _gaslessReconciliationStarting ||
         _gaslessReconciliationSubscription != null ||
-        await _walletIdResolver?.call() == null ||
+        await _auth.currentUser == null ||
         _isDisposed) {
       return;
     }
@@ -1298,7 +1367,9 @@ class WithdrawalManager {
             );
         response = prepared == null
             ? await submit()
-            : await _untilDisposed(submit);
+            : await _untilDisposed(
+                () => submit().timeout(const Duration(seconds: 30)),
+              );
       } on _WithdrawalManagerDisposed {
         // The remote relay may still finish. Preserve the existing durable
         // unresolved reservation. Disposal cancels only local continuation.
@@ -2239,7 +2310,7 @@ class WithdrawalManager {
   /// Unresolved GasFree transfers for the currently signed-in wallet.
   Future<List<PendingGaslessTransfer>> listPendingGaslessTransfers() async {
     final repository = _pendingGaslessTransfers;
-    if (repository == null || _walletIdResolver == null) {
+    if (repository == null) {
       return const <PendingGaslessTransfer>[];
     }
     final walletContext = await _captureWalletContext();
@@ -2277,7 +2348,7 @@ class WithdrawalManager {
   /// instead. Returns whether a record was removed.
   Future<bool> discardPendingGaslessTransfer(String journalId) async {
     final repository = _pendingGaslessTransfers;
-    if (repository == null || _walletIdResolver == null) return false;
+    if (repository == null) return false;
 
     final walletContext = await _captureWalletContext();
     final walletId = walletContext.walletId;
@@ -2345,7 +2416,7 @@ class WithdrawalManager {
   /// Wallet-scoped journal updates for app-wide pending activity surfaces.
   Stream<List<PendingGaslessTransfer>> watchPendingGaslessTransfers() async* {
     final repository = _pendingGaslessTransfers;
-    if (repository == null || _walletIdResolver == null) {
+    if (repository == null) {
       yield const <PendingGaslessTransfer>[];
       return;
     }
@@ -2404,7 +2475,7 @@ class WithdrawalManager {
     String identity,
   ) async* {
     final repository = _pendingGaslessTransfers;
-    if (repository == null || _walletIdResolver == null) {
+    if (repository == null) {
       throw StateError('No signed-in wallet is available for reconciliation');
     }
     final walletContext = await _captureWalletContext();
@@ -2762,6 +2833,16 @@ class WithdrawalManager {
     _activeGaslessSubmissions[activeKey] = owner;
     final bool reserved;
     try {
+      // The global shared lease also protects deletion of legacy catalog
+      // entries whose recovery namespace cannot yet be established.
+      owner.globalLease = await tryAcquireGaslessWalletLease('*');
+      if (owner.globalLease == null) {
+        throw StateError('Wallet deletion is in progress');
+      }
+      owner.walletLease = await tryAcquireGaslessWalletLease(activeKey.$1);
+      if (owner.walletLease == null) {
+        throw StateError('Wallet deletion is in progress');
+      }
       final lease = await tryAcquireGaslessSubmissionLease(
         activeKey.$1,
         activeKey.$2,
@@ -2902,7 +2983,7 @@ class WithdrawalManager {
     final repository = _pendingGaslessTransfers;
     final walletId =
         _pendingGaslessWallets[transfer.journalId] ??
-        await _walletIdResolver?.call();
+        (await _auth.currentUser)?.walletId;
     if (repository == null || walletId == null) return false;
     _pendingGaslessWallets[transfer.journalId] = walletId;
     final traceId = transfer.traceId;
@@ -2929,7 +3010,9 @@ class WithdrawalManager {
   Future<bool> _isWalletIdCurrent(WalletId original) async {
     if (_isDisposed) return false;
     try {
-      final current = await _untilDisposed(() => _walletIdResolver?.call());
+      final current = await _untilDisposed(
+        () async => (await _auth.currentUser)?.walletId,
+      );
       return !_isDisposed &&
           current != null &&
           isSameStableWallet(original, current);
@@ -2948,7 +3031,7 @@ class WithdrawalManager {
         (transfer.traceId == null
             ? null
             : _pendingGaslessWallets[transfer.traceId]) ??
-        await _walletIdResolver?.call();
+        (await _auth.currentUser)?.walletId;
     if (walletId == null) return;
     _pendingGaslessWallets[transfer.journalId] = walletId;
     final traceId = transfer.traceId;
@@ -3346,6 +3429,8 @@ final class _WithdrawalManagerDisposed implements Exception {
 
 final class _GaslessSubmissionOwner {
   GaslessSubmissionLease? lease;
+  GaslessSubmissionLease? walletLease;
+  GaslessSubmissionLease? globalLease;
   final Completer<void> completed = Completer<void>();
 }
 

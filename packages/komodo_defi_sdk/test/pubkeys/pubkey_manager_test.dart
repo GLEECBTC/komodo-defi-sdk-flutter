@@ -11,9 +11,13 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import '../helpers/runtime_auth_fixture.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -276,7 +280,7 @@ void main() {
     );
 
     test('unbanPubkeys delegates to RPC and returns result', () async {
-      // auth not required here
+      when(() => auth.currentUser).thenAnswer((_) async => nonHdUser());
       stubWalletMyBalance(address: 'cosmos1abc', coin: tendermintAsset.id.id);
 
       final res = await manager.unbanPubkeys(const UnbanBy.all());
@@ -612,12 +616,11 @@ void main() {
     test(
       'dispose swallows auth subscription cancel errors and is idempotent',
       () async {
-        // Arrange auth stream that returns a subscription whose cancel throws
-        when(
-          () => auth.authStateChanges,
-        ).thenAnswer((_) => _StreamWithThrowingCancel<KdfUser?>());
-
-        final manager = PubkeyManager(client, auth, activation);
+        final manager = PubkeyManager(
+          client,
+          _ThrowingSessionAuth(),
+          activation,
+        );
 
         // Act + Assert: dispose does not throw even if cancel throws
         await manager.dispose();
@@ -2143,4 +2146,10 @@ class _StreamWithThrowingCancel<T> extends Stream<T> {
   }) {
     return _ThrowingCancelSubscription<T>();
   }
+}
+
+class _ThrowingSessionAuth extends Mock implements KomodoDefiLocalAuth {
+  @override
+  Stream<AuthSessionContext?> watchSessionContext() =>
+      _StreamWithThrowingCancel<AuthSessionContext?>();
 }

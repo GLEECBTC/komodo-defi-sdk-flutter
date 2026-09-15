@@ -112,13 +112,31 @@ String gaslessSubmissionLockName(String walletNamespace, String journalId) =>
 Future<GaslessSubmissionLease?> tryAcquireGaslessSubmissionLease(
   String walletNamespace,
   String journalId,
-) async {
+) => _tryAcquireLease(gaslessSubmissionLockName(walletNamespace, journalId));
+
+/// Stable wallet lifecycle lock name, shared by submissions and deletion.
+String gaslessWalletLockName(String walletNamespace) =>
+    'gleec-gasfree-wallet-lifecycle:$walletNamespace';
+
+/// Submissions share a wallet lease; deletion requires exclusive ownership.
+Future<GaslessSubmissionLease?> tryAcquireGaslessWalletLease(
+  String walletNamespace, {
+  bool exclusive = false,
+}) => _tryAcquireLease(
+  gaslessWalletLockName(walletNamespace),
+  mode: exclusive ? 'exclusive' : 'shared',
+);
+
+Future<GaslessSubmissionLease?> _tryAcquireLease(
+  String name, {
+  String mode = 'exclusive',
+}) async {
   final acquired = Completer<GaslessSubmissionLease?>();
   final release = Completer<JSAny?>();
   late final Future<JSAny?> requestCompleted;
   final request = web.window.navigator.locks.request(
-    gaslessSubmissionLockName(walletNamespace, journalId),
-    web.LockOptions(ifAvailable: true),
+    name,
+    web.LockOptions(ifAvailable: true, mode: mode),
     Zone.current.bindUnaryCallback((web.Lock? lock) {
       if (lock == null) {
         acquired.complete(null);

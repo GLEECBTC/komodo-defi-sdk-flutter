@@ -33,7 +33,10 @@ class TransactionKeyParts {
   final bool idTokenIsHashed;
 }
 
-/// Builds and decomposes the Hive keys used by the persisted transaction store.
+/// Builds the in-memory ordering keys stored inside encrypted cache envelopes.
+///
+/// These keys contain sensitive metadata and must never be used as Hive keys.
+/// The persistent store derives opaque HMAC keys from their identity fields.
 ///
 /// The layout is fixed-width up to the trailing ID so that a key can be
 /// decomposed with three `indexOf` calls, and so that no component can bleed
@@ -95,8 +98,7 @@ abstract final class TransactionStorageKey {
 
   /// Returns the wallet token for an already-computed storage [namespace].
   ///
-  /// Lets callers that hold namespaces rather than [WalletId]s - the
-  /// wallet garbage collector, for one - compare against key prefixes.
+  /// Lets callers with a namespace compare against in-memory key prefixes.
   static String tokenForNamespace(String namespace) => _digest(namespace);
 
   /// Returns the opaque token identifying [assetId].

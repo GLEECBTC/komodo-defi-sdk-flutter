@@ -4,6 +4,7 @@
 // as a suite of its own.
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/history_cache_key_provider.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Builds a [WalletId] varying only the axes that storage isolation depends on.
@@ -81,4 +82,13 @@ Transaction testTransaction({
     fee: fee,
     memo: memo,
   );
+}
+
+/// Stable synthetic key for encrypted Hive tests, never production storage.
+final testHistoryCacheKeys = TestHistoryCacheKeyProvider();
+
+class TestHistoryCacheKeyProvider implements HistoryCacheKeyProvider {
+  @override
+  Future<List<int>> loadOrCreate(String cacheName) async =>
+      List<int>.generate(32, (index) => index);
 }

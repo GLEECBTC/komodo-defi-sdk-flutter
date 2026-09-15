@@ -18,6 +18,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 import 'package:web/web.dart' as web;
 
+import '../helpers/withdrawal_auth_fixture.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
 class _MockAssetProvider extends Mock implements IAssetProvider {}
@@ -85,18 +87,118 @@ PendingGaslessTransfer _pending() {
   );
 }
 
-WithdrawalManager _manager(PendingGaslessTransferRepository repository) =>
-    WithdrawalManager(
-      _MockApiClient(),
-      _MockAssetProvider(),
-      _MockFeeManager(),
-      _MockActivationCoordinator(),
-      _MockLegacyWithdrawalManager(),
-      pendingGaslessTransfers: repository,
-      walletIdResolver: () async => _wallet,
-    );
+WithdrawalManager _manager(PendingGaslessTransferRepository repository) {
+  final manager = WithdrawalManager(
+    _MockApiClient(),
+    _MockAssetProvider(),
+    _MockFeeManager(),
+    _MockActivationCoordinator(),
+    _MockLegacyWithdrawalManager(),
+    pendingGaslessTransfers: repository,
+    auth: WithdrawalAuthFixture(walletResolver: () async => _wallet),
+  );
+  addTearDown(manager.dispose);
+  return manager;
+}
 
 void main() {
+  test('wallet deletion coordinates with another browser context', () async {
+    final namespace = walletStorageNamespace(_wallet);
+    final frame = web.HTMLIFrameElement();
+    web.document.body!.appendChild(frame);
+    // External JS interop methods cannot be torn off by the Wasm compiler.
+    // ignore: unnecessary_lambdas
+    addTearDown(() => frame.remove());
+    final acquired = Completer<void>();
+    final release = Completer<JSAny?>();
+    final request = frame.contentWindow!.navigator.locks
+        .request(
+          gaslessWalletLockName(namespace),
+          web.LockOptions(mode: 'shared'),
+          Zone.current.bindUnaryCallback((web.Lock? lock) {
+            expect(lock, isNotNull);
+            acquired.complete();
+            return release.future.toJS;
+          }).toJS,
+        )
+        .toDart;
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete();
+      await request;
+    });
+    await acquired.future;
+    expect(
+      await tryAcquireGaslessWalletLease(namespace, exclusive: true),
+      isNull,
+    );
+    final concurrentSubmission = await tryAcquireGaslessWalletLease(namespace);
+    expect(concurrentSubmission, isNotNull);
+    await concurrentSubmission!.release();
+    release.complete();
+    await request;
+    final deletion = await tryAcquireGaslessWalletLease(
+      namespace,
+      exclusive: true,
+    );
+    expect(deletion, isNotNull);
+    addTearDown(deletion!.release);
+    var competingSubmissionGranted = false;
+    await frame.contentWindow!.navigator.locks
+        .request(
+          gaslessWalletLockName(namespace),
+          web.LockOptions(mode: 'shared', ifAvailable: true),
+          Zone.current.bindUnaryCallback((web.Lock? lock) {
+            competingSubmissionGranted = lock != null;
+            return null;
+          }).toJS,
+        )
+        .toDart;
+    expect(competingSubmissionGranted, isFalse);
+    final independent = await tryAcquireGaslessWalletLease('another-wallet');
+    expect(independent, isNotNull);
+    await independent!.release();
+  });
+
+  test(
+    'a closed browser context releases its wallet submission lease',
+    () async {
+      final namespace = walletStorageNamespace(_wallet);
+      final frame = web.HTMLIFrameElement();
+      web.document.body!.appendChild(frame);
+      // External JS interop methods cannot be torn off by the Wasm compiler.
+      // ignore: unnecessary_lambdas
+      addTearDown(() => frame.remove());
+      final acquired = Completer<void>();
+      final held = Completer<JSAny?>();
+      final request = frame.contentWindow!.navigator.locks
+          .request(
+            gaslessWalletLockName(namespace),
+            web.LockOptions(mode: 'shared'),
+            Zone.current.bindUnaryCallback((web.Lock? lock) {
+              acquired.complete();
+              return held.future.toJS;
+            }).toJS,
+          )
+          .toDart;
+      unawaited(request.then<void>((_) {}, onError: (Object _) {}));
+      addTearDown(() {
+        if (!held.isCompleted) held.complete();
+      });
+      await acquired.future;
+      expect(
+        await tryAcquireGaslessWalletLease(namespace, exclusive: true),
+        isNull,
+      );
+      frame.remove();
+      final recovered = await tryAcquireGaslessWalletLease(
+        namespace,
+        exclusive: true,
+      );
+      expect(recovered, isNotNull);
+      await recovered!.release();
+    },
+  );
+
   test(
     'discard refuses an external Web Lock until its owner releases',
     () async {

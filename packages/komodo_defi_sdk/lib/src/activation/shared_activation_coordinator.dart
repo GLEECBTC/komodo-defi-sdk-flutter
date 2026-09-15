@@ -3,7 +3,6 @@ import 'dart:developer' show log;
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
-import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Shared coordinator for asset activations across all managers.
@@ -18,46 +17,32 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// verification before declaring activation successful.
 class SharedActivationCoordinator {
   SharedActivationCoordinator(this._activationManager, this._auth) {
-    // Listen for auth state changes
-    _authSubscription = _auth.authStateChanges.listen((user) {
-      _authRevision++;
-      _handleAuthStateChanged(user);
-    });
+    _authSubscription = _auth.watchSessionContext().listen(
+      _handleSessionChanged,
+    );
   }
 
   final ActivationManager _activationManager;
   final KomodoDefiLocalAuth _auth;
-  StreamSubscription<KdfUser?>? _authSubscription;
+  StreamSubscription<AuthSessionContext?>? _authSubscription;
 
   /// Track pending activations to prevent duplicates
   final Map<AssetId, Completer<ActivationResult>> _pendingActivations = {};
 
-  /// Current wallet ID being tracked
-  WalletId? _currentWalletId;
-  int _walletGeneration = 0;
-  int _authRevision = 0;
-
+  AuthSessionContext? _session;
   bool _isDisposed = false;
 
-  /// Handle authentication state changes
-  void _handleAuthStateChanged(KdfUser? user) {
+  void _handleSessionChanged(AuthSessionContext? session) {
     if (_isDisposed) return;
-    final next = user?.walletId;
-    final previous = _currentWalletId;
-    if (previous != null && next != null) {
-      if (isSameStableWallet(previous, next)) {
-        _currentWalletId = preferEnrichedWalletIdentity(previous, next);
-        return;
-      }
-      if (isDegradedWalletIdentity(previous, next)) return;
+    if (session == null ||
+        (_session != null && !_auth.isSessionContextCurrent(_session!))) {
+      _resetState();
     }
-    if (previous != null || next == null) _resetState();
-    _currentWalletId = next;
+    _session = session;
   }
 
   /// Reset all internal state when wallet changes
   void _resetState() {
-    _walletGeneration++;
     log(
       'Resetting SharedActivationCoordinator state due to wallet change',
       name: 'SharedActivationCoordinator',
@@ -100,7 +85,8 @@ class SharedActivationCoordinator {
   /// it is `407cf6c0a` / `ba4b3996e`, kdf-internal PR #18, still unmerged. The
   /// pin (`main`, `f3efd2c`) walks the gap one address at a time, where the
   /// same runs measured BTC-segwit 121.2s and KMD 46.9s
-  /// (`docs/KDF_LATENCY_REPORT.md`, `docs/KDF_PERF_STACK_DESCOPE.md`).
+  /// The wallet repository documents repeatable measurement in
+  /// `docs/WALLET_LOAD_MEASUREMENT.md`; remeasure before lowering these bounds.
   ///
   /// Three minutes still holds for **software** wallets, because those numbers
   /// were taken at `gap_limit: 20` and `HdGapLimit.resolve` sends
@@ -154,25 +140,9 @@ class SharedActivationCoordinator {
       throw StateError('SharedActivationCoordinator has been disposed');
     }
 
-    // Seed before consulting the pending registry: the first auth-stream
-    // event may arrive after an activation started, or a new wallet may be
-    // observable through currentUser before its stream event is delivered.
-    final entryGeneration = _walletGeneration;
-    final authRevision = _authRevision;
-    final user = await _auth.currentUser;
-    final observedWallet = _currentWalletId;
-    if (_isDisposed ||
-        user == null ||
-        entryGeneration != _walletGeneration ||
-        (authRevision != _authRevision &&
-            observedWallet != null &&
-            !walletIdentityContinuesSession(observedWallet, user.walletId))) {
-      throw const WalletChangedDisconnectException(
-        'Wallet changed during asset activation',
-      );
-    }
-    _handleAuthStateChanged(user);
-    final walletGeneration = _walletGeneration;
+    final session = await _auth.captureSessionContext();
+    _auth.ensureSessionContextCurrent(session);
+    _handleSessionChanged(session);
 
     // Check if activation is already in progress
     final existingActivation = _pendingActivations[asset.id];
@@ -186,7 +156,7 @@ class SharedActivationCoordinator {
 
     // Check if asset is already active
     final isActive = await _activationManager.isAssetActive(asset.id);
-    if (_isDisposed || walletGeneration != _walletGeneration) {
+    if (_isDisposed || !_auth.isSessionContextCurrent(session)) {
       throw const WalletChangedDisconnectException(
         'Wallet changed during asset activation',
       );
@@ -195,6 +165,7 @@ class SharedActivationCoordinator {
       return ActivationResult.alreadyActive(asset.id);
     }
 
+    _activationManager.ensureActivationAllowed(asset.id);
     final completer = Completer<ActivationResult>();
     // Attach a side listener before anything can fail it. The caller only gets
     // `completer.future` if it reaches the `return` below, and callers that
@@ -223,7 +194,7 @@ class SharedActivationCoordinator {
     // the return - so the deadline timer below could complete the completer and
     // the initiating caller would still wait forever. Joiners were unaffected,
     // which is what made it easy to miss.
-    unawaited(_driveActivation(asset, completer, deadline));
+    unawaited(_driveActivation(asset, completer, deadline, session));
     return completer.future;
   }
 
@@ -235,6 +206,7 @@ class SharedActivationCoordinator {
     Asset asset,
     Completer<ActivationResult> completer,
     Duration? deadline,
+    AuthSessionContext session,
   ) async {
     Timer? deadlineTimer;
     try {
@@ -265,6 +237,7 @@ class SharedActivationCoordinator {
         });
       }
 
+      _auth.ensureSessionContextCurrent(session);
       // Subscribe to activation stream and wait for completion.
       //
       // The `completer.isCompleted` check also breaks the loop when the
@@ -272,11 +245,13 @@ class SharedActivationCoordinator {
       // strategy's poll loop instead of leaving it running unobserved.
       await for (final progress in _activationManager.activateAsset(asset)) {
         if (completer.isCompleted) break;
+        _auth.ensureSessionContextCurrent(session);
         if (progress.isComplete) {
           if (progress.isSuccess) {
             // Wait for coin to actually become available before declaring success
             try {
               await _waitForCoinAvailability(asset.id);
+              _auth.ensureSessionContextCurrent(session);
               final result = ActivationResult.success(asset.id);
               if (!completer.isCompleted) {
                 completer.complete(result);
@@ -310,7 +285,9 @@ class SharedActivationCoordinator {
     } catch (e) {
       if (!completer.isCompleted) {
         log('Activation failed', name: 'SharedActivationCoordinator');
-        completer.complete(ActivationResult.failure(asset.id, e.toString()));
+        completer.complete(
+          ActivationResult.failure(asset.id, e.toString(), cause: e),
+        );
       }
     } finally {
       // The `await for` above only completes the completer when it sees a
@@ -479,6 +456,7 @@ class ActivationResult {
     this.isSuccess,
     this.errorMessage, {
     this.wasAlreadyActive = false,
+    this.cause,
   });
 
   /// Activation ran and succeeded.
@@ -498,17 +476,40 @@ class ActivationResult {
     return ActivationResult._(assetId, true, null, wasAlreadyActive: true);
   }
 
-  factory ActivationResult.failure(AssetId assetId, String errorMessage) {
-    return ActivationResult._(assetId, false, errorMessage);
+  /// Activation failed, retaining its typed cause when available.
+  factory ActivationResult.failure(
+    AssetId assetId,
+    String errorMessage, {
+    Object? cause,
+  }) {
+    return ActivationResult._(assetId, false, errorMessage, cause: cause);
   }
 
+  /// The requested asset.
   final AssetId assetId;
+
+  /// Whether the asset is available after this operation.
   final bool isSuccess;
+
+  /// A readable failure explanation, or null for a successful operation.
   final String? errorMessage;
+
+  /// The original failure, preserved for callers that handle typed outcomes.
+  final Object? cause;
+
+  /// Throws the typed cause when available, preserving policy/session failures.
+  void throwIfFailed() {
+    if (isSuccess) return;
+    final error = cause;
+    if (error is Exception) throw error;
+    if (error is Error) throw error;
+    throw AssetActivationException(assetId, errorMessage);
+  }
 
   /// Whether the asset was already enabled, i.e. this call activated nothing.
   final bool wasAlreadyActive;
 
+  /// Whether this operation failed to make the asset available.
   bool get isFailure => !isSuccess;
 
   @override
@@ -517,4 +518,18 @@ class ActivationResult {
         ? 'ActivationResult.success(${assetId.id})'
         : 'ActivationResult.failure(${assetId.id}, $errorMessage)';
   }
+}
+
+/// A terminal activation failure without a more specific typed cause.
+final class AssetActivationException implements Exception {
+  /// Describes a failure that did not provide a more specific exception.
+  const AssetActivationException(this.assetId, this.message);
+
+  /// The asset whose activation failed.
+  final AssetId assetId;
+
+  /// A readable explanation when one was supplied by the activation service.
+  final String? message;
+  @override
+  String toString() => message ?? 'Asset activation failed';
 }

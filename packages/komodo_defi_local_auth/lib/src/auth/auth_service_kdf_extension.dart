@@ -90,7 +90,8 @@ extension KdfExtensions on KdfAuthService {
         type: AuthExceptionType.internalError,
       );
     }
-    if (storedIdentity == resolvedIdentity &&
+    if (!persist &&
+        storedIdentity == resolvedIdentity &&
         (user.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
       // Preserve an already-authenticated identity byte-for-byte. Earlier
       // preview builds could have stored uppercase hex and used those bytes
@@ -104,8 +105,31 @@ extension KdfExtensions on KdfAuthService {
     );
     if (persist) {
       try {
-        await _secureStorage.saveUser(identifiedUser);
+        final persisted = await _secureStorage.updateUser(user.walletId.name, (
+          current,
+        ) {
+          if (current == null) throw AuthException.notFound();
+          final currentHash = current.walletId.pubkeyHash?.trim().toLowerCase();
+          if (currentHash != null &&
+              currentHash.isNotEmpty &&
+              currentHash != resolvedIdentity) {
+            throw AuthException(
+              'Stored wallet identity changed during verification',
+              type: AuthExceptionType.internalError,
+            );
+          }
+          return currentHash == resolvedIdentity
+              ? current
+              : current.copyWith(
+                  walletId: current.walletId.copyWith(
+                    pubkeyHash: resolvedIdentity,
+                  ),
+                );
+        });
         _invalidateUsersCache();
+        return persisted!;
+      } on AuthException {
+        rethrow;
       } catch (error) {
         // Identity persistence is required for GasFree journal access, but a
         // local secure-storage write failure must not stop an otherwise
