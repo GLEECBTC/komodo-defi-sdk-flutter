@@ -2172,7 +2172,18 @@ void main() {
         expect(ownershipProof, {
           _coin: {_sourceAddress},
         });
-        verify(() => repository.list(_wallet)).called(1);
+        // Binding the session also starts a recovery cycle that reads the same
+        // journal, so assert the ordering rather than an exact call count.
+        verifyInOrder([
+          () => repository.listAmbiguousLegacyTransfers(_wallet),
+          () => repository.resolveAmbiguousLegacyTransfers(
+            _wallet,
+            ownedSourceAddressesByAsset: any(
+              named: 'ownedSourceAddressesByAsset',
+            ),
+          ),
+          () => repository.list(_wallet),
+        ]);
       },
     );
 
