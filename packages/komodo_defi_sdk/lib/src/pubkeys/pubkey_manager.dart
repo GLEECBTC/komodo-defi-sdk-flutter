@@ -122,7 +122,10 @@ class PubkeyManager implements IPubkeyManager {
   // we can restart watchers after auth changes without requiring new listeners
   final Map<AssetId, Asset> _watchedAssets = {};
   // Deduplicate concurrent getPubkeys requests within one wallet generation.
-  final Map<(AssetId, int), Future<AssetPubkeys>> _inFlightPubkeyRequests = {};
+  //
+  // Holds an *outcome*, never a failed future. See [_fetchFreshPubkeys].
+  final Map<(AssetId, int), Future<_PubkeyFetchOutcome>>
+  _inFlightPubkeyRequests = {};
   final Map<String, DateTime> _hdAddressScanRetryAfter = {};
   static const Duration _hdAddressScanRetryCooldown = Duration(minutes: 2);
 
@@ -197,7 +200,7 @@ class PubkeyManager implements IPubkeyManager {
     final inFlightKey = (asset.id, walletContext.generation);
     final existing = _inFlightPubkeyRequests[inFlightKey];
     if (existing != null) {
-      final pubkeys = await existing;
+      final pubkeys = (await existing).unwrap();
       await _requireWalletContextCurrent(walletContext);
       return pubkeys;
     }
@@ -449,9 +452,9 @@ class PubkeyManager implements IPubkeyManager {
   ) async {
     final inFlightKey = (asset.id, walletContext.generation);
     final existing = _inFlightPubkeyRequests[inFlightKey];
-    if (existing != null) return existing;
+    if (existing != null) return (await existing).unwrap();
 
-    final future = () async {
+    final fetch = () async {
       await _requireWalletContextCurrent(walletContext);
       await _activateForContext(asset, walletContext);
       await _requireWalletContextCurrent(walletContext);
@@ -486,12 +489,28 @@ class PubkeyManager implements IPubkeyManager {
       return raw;
     }();
 
+    // The shared future must complete with a *value*, even when the fetch
+    // fails, because its callers do not all sit in the same error zone.
+    // `retry()` runs each attempt inside its own `runZonedGuarded`, and work it
+    // dispatches un-awaited - the activation manager's balance pre-cache -
+    // keeps running in that zone after the attempt returns. Dart refuses to
+    // deliver a future's *error* across an error-zone boundary: rather than
+    // completing the cross-zone listener, `_propagateToListeners` reports the
+    // error as uncaught in the zone that created the future and abandons that
+    // listener's future forever. So the outcome travels as a value and each
+    // caller rethrows it in its own zone, which also makes the entry safe to
+    // drop without `ignore()` on reset.
+    final future = fetch.then(
+      _PubkeyFetchOutcome.success,
+      onError: _PubkeyFetchOutcome.failure,
+    );
+
     _inFlightPubkeyRequests[inFlightKey] = future;
     try {
-      return await future;
+      return (await future).unwrap();
     } finally {
       if (identical(_inFlightPubkeyRequests[inFlightKey], future)) {
-        _inFlightPubkeyRequests.remove(inFlightKey)?.ignore();
+        _inFlightPubkeyRequests.remove(inFlightKey);
       }
     }
   }
@@ -1150,5 +1169,28 @@ class PubkeyManager implements IPubkeyManager {
 
     _watchedAssets.clear();
     _logger.fine('Disposed');
+  }
+}
+
+/// The result of one shared pubkey fetch, carried as a value so it can cross
+/// error zones. See [PubkeyManager._fetchFreshPubkeys].
+class _PubkeyFetchOutcome {
+  const _PubkeyFetchOutcome._(this._pubkeys, this._error, this._stackTrace);
+
+  factory _PubkeyFetchOutcome.success(AssetPubkeys pubkeys) =>
+      _PubkeyFetchOutcome._(pubkeys, null, null);
+
+  factory _PubkeyFetchOutcome.failure(Object error, StackTrace stackTrace) =>
+      _PubkeyFetchOutcome._(null, error, stackTrace);
+
+  final AssetPubkeys? _pubkeys;
+  final Object? _error;
+  final StackTrace? _stackTrace;
+
+  /// Returns the pubkeys, or rethrows the original error in the caller's zone.
+  AssetPubkeys unwrap() {
+    final error = _error;
+    if (error != null) Error.throwWithStackTrace(error, _stackTrace!);
+    return _pubkeys!;
   }
 }
