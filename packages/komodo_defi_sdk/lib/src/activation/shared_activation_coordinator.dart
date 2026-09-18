@@ -26,8 +26,10 @@ class SharedActivationCoordinator {
   final KomodoDefiLocalAuth _auth;
   StreamSubscription<AuthSessionContext?>? _authSubscription;
 
-  /// Track pending activations to prevent duplicates
-  final Map<AssetId, Completer<ActivationResult>> _pendingActivations = {};
+  /// Track pending activations to prevent duplicates.
+  ///
+  /// Holds an *outcome*, never a failed future. See [_ActivationOutcome].
+  final Map<AssetId, Completer<_ActivationOutcome>> _pendingActivations = {};
 
   AuthSessionContext? _session;
   bool _isDisposed = false;
@@ -51,8 +53,11 @@ class SharedActivationCoordinator {
     // Cancel all pending activations
     for (final completer in _pendingActivations.values) {
       if (!completer.isCompleted) {
-        completer.completeError(
-          StateError('Wallet changed, activation cancelled'),
+        completer.complete(
+          _ActivationOutcome.error(
+            StateError('Wallet changed, activation cancelled'),
+            StackTrace.current,
+          ),
         );
       }
     }
@@ -148,7 +153,7 @@ class SharedActivationCoordinator {
     final existingActivation = _pendingActivations[asset.id];
     if (existingActivation != null) {
       log('Joining existing activation', name: 'SharedActivationCoordinator');
-      return existingActivation.future;
+      return (await existingActivation.future).unwrap();
     }
 
     final shouldRefreshTronGaslessActivation = _activationManager
@@ -166,22 +171,14 @@ class SharedActivationCoordinator {
     }
 
     _activationManager.ensureActivationAllowed(asset.id);
-    final completer = Completer<ActivationResult>();
-    // Attach a side listener before anything can fail it. The caller only gets
-    // `completer.future` if it reaches the `return` below, and callers that
-    // joined an in-flight attempt never reach this method at all - so an
-    // attempt can be in flight with a completer nobody is listening to.
-    // [_resetState] and [dispose] both complete pending attempts with an error,
-    // which would then escape as an unhandled async error: on a wallet switch
-    // or sign-out during login activations, i.e. exactly when several are in
-    // flight. Joiners still receive the error through their own subscription.
-    // `ActivationManager._registerActivation` does the same thing for the same
-    // reason.
-    unawaited(
-      completer.future.catchError(
-        (Object error) => ActivationResult.failure(asset.id, error.toString()),
-      ),
-    );
+    // Never completed with an error - see [_ActivationOutcome]. That also
+    // removes the need for a side listener on an attempt nobody is waiting on:
+    // the caller only gets this future if it reaches the `return` below, and
+    // [_resetState] and [dispose] both terminate pending attempts on a wallet
+    // switch or sign-out during login activations, i.e. exactly when several
+    // are in flight. A future that carries a value has no unhandled error to
+    // report.
+    final completer = Completer<_ActivationOutcome>();
     _pendingActivations[asset.id] = completer;
 
     // Clear any previous failed status for this asset
@@ -195,7 +192,7 @@ class SharedActivationCoordinator {
     // the initiating caller would still wait forever. Joiners were unaffected,
     // which is what made it easy to miss.
     unawaited(_driveActivation(asset, completer, deadline, session));
-    return completer.future;
+    return (await completer.future).unwrap();
   }
 
   /// Runs one activation attempt to a terminal state and completes [completer].
@@ -204,7 +201,7 @@ class SharedActivationCoordinator {
   /// without awaiting this one - see the comment at its call site.
   Future<void> _driveActivation(
     Asset asset,
-    Completer<ActivationResult> completer,
+    Completer<_ActivationOutcome> completer,
     Duration? deadline,
     AuthSessionContext session,
   ) async {
@@ -227,7 +224,11 @@ class SharedActivationCoordinator {
           // on it - a fresh coordinator attempt that issues no new RPC, which
           // is indistinguishable from the stall this deadline exists to break.
           unawaited(_activationManager.abandonActivation(asset.id, reason));
-          completer.complete(ActivationResult.failure(asset.id, reason));
+          completer.complete(
+            _ActivationOutcome.result(
+              ActivationResult.failure(asset.id, reason),
+            ),
+          );
           // Release the slot here rather than waiting for `finally`: if the
           // progress stream is wedged mid-RPC the `await for` below never
           // resumes, so `finally` never runs and the failed completer would
@@ -254,7 +255,7 @@ class SharedActivationCoordinator {
               _auth.ensureSessionContextCurrent(session);
               final result = ActivationResult.success(asset.id);
               if (!completer.isCompleted) {
-                completer.complete(result);
+                completer.complete(_ActivationOutcome.result(result));
               }
             } catch (e) {
               if (completer.isCompleted) break;
@@ -267,7 +268,7 @@ class SharedActivationCoordinator {
                 'Activation completed but coin did not become available: $e',
               );
               if (!completer.isCompleted) {
-                completer.complete(result);
+                completer.complete(_ActivationOutcome.result(result));
               }
             }
           } else {
@@ -276,7 +277,7 @@ class SharedActivationCoordinator {
               progress.errorMessage ?? 'Unknown activation error',
             );
             if (!completer.isCompleted) {
-              completer.complete(result);
+              completer.complete(_ActivationOutcome.result(result));
             }
           }
           break;
@@ -286,7 +287,9 @@ class SharedActivationCoordinator {
       if (!completer.isCompleted) {
         log('Activation failed', name: 'SharedActivationCoordinator');
         completer.complete(
-          ActivationResult.failure(asset.id, e.toString(), cause: e),
+          _ActivationOutcome.result(
+            ActivationResult.failure(asset.id, e.toString(), cause: e),
+          ),
         );
       }
     } finally {
@@ -318,9 +321,11 @@ class SharedActivationCoordinator {
           'Activation stream ended without a terminal progress event',
         );
         completer.complete(
-          ActivationResult.failure(
-            asset.id,
-            'Activation stream ended without a terminal progress event',
+          _ActivationOutcome.result(
+            ActivationResult.failure(
+              asset.id,
+              'Activation stream ended without a terminal progress event',
+            ),
           ),
         );
       }
@@ -337,7 +342,7 @@ class SharedActivationCoordinator {
   /// after it would start a duplicate activation.
   void _removePendingActivation(
     AssetId assetId,
-    Completer<ActivationResult> completer,
+    Completer<_ActivationOutcome> completer,
   ) {
     if (identical(_pendingActivations[assetId], completer)) {
       _pendingActivations.remove(assetId);
@@ -435,8 +440,11 @@ class SharedActivationCoordinator {
     // Cancel all pending activations
     for (final completer in _pendingActivations.values) {
       if (!completer.isCompleted) {
-        completer.completeError(
-          StateError('SharedActivationCoordinator disposed'),
+        completer.complete(
+          _ActivationOutcome.error(
+            StateError('SharedActivationCoordinator disposed'),
+            StackTrace.current,
+          ),
         );
       }
     }
@@ -532,4 +540,46 @@ final class AssetActivationException implements Exception {
   final String? message;
   @override
   String toString() => message ?? 'Asset activation failed';
+}
+
+/// The settled result of one shared activation attempt, carried as a *value*
+/// so it can cross an error zone. See
+/// [SharedActivationCoordinator._pendingActivations].
+///
+/// A single completer is shared by every caller waiting on the same asset, and
+/// those callers do not all sit in the same error zone:
+/// `PubkeyManager._activateForContext` reaches
+/// [SharedActivationCoordinator.activateAsset] from inside `retry()`, which
+/// runs each attempt in its own `runZonedGuarded`, and work dispatched
+/// un-awaited from an attempt keeps running in that zone afterwards.
+///
+/// Dart refuses to deliver a future's *error* across an error-zone boundary:
+/// rather than completing the cross-zone listener, `_propagateToListeners`
+/// reports the error as uncaught in the zone that created the future and
+/// abandons that listener's future forever - so a joiner from another zone used
+/// to hang until the coordinator's own deadline fired, and the pubkey path has
+/// no deadline at all. Carrying the outcome as a value and rethrowing it in
+/// each caller's own zone is the same remedy `PubkeyManager` applies to its
+/// shared pubkey fetch.
+class _ActivationOutcome {
+  const _ActivationOutcome._(this._result, this._error, this._stackTrace);
+
+  /// The attempt reached a terminal state, successful or not.
+  factory _ActivationOutcome.result(ActivationResult result) =>
+      _ActivationOutcome._(result, null, null);
+
+  /// The attempt was terminated without a result, e.g. by a wallet change.
+  factory _ActivationOutcome.error(Object error, StackTrace stackTrace) =>
+      _ActivationOutcome._(null, error, stackTrace);
+
+  final ActivationResult? _result;
+  final Object? _error;
+  final StackTrace? _stackTrace;
+
+  /// Returns the result, or rethrows the original error in the caller's zone.
+  ActivationResult unwrap() {
+    final error = _error;
+    if (error != null) Error.throwWithStackTrace(error, _stackTrace!);
+    return _result!;
+  }
 }

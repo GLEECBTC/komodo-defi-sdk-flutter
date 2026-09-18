@@ -73,7 +73,9 @@ class ActivationManager {
   static const _operationTimeout = Duration(seconds: 30);
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
-  final Map<AssetId, Completer<void>> _activationCompleters = {};
+  /// Holds an *outcome*, never a failed future. See [_ActivationJoinOutcome].
+  final Map<AssetId, Completer<_ActivationJoinOutcome>> _activationCompleters =
+      {};
 
   /// Assets this session actually activated, as opposed to found already
   /// enabled.
@@ -270,11 +272,14 @@ class ActivationManager {
     await _protectedOperation(() async {
       final completer = _activationCompleters.remove(assetId);
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(
-          ActivationFailedException(
-            assetId: assetId,
-            message: reason,
-            errorCode: 'ACTIVATION_ABANDONED',
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            ActivationFailedException(
+              assetId: assetId,
+              message: reason,
+              errorCode: 'ACTIVATION_ABANDONED',
+            ),
+            StackTrace.current,
           ),
         );
       }
@@ -556,9 +561,12 @@ class ActivationManager {
 
     for (final completer in staleCompleters) {
       if (!completer.isCompleted) {
-        completer.completeError(
-          const WalletChangedDisconnectException(
-            'Wallet changed during asset activation',
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            const WalletChangedDisconnectException(
+              'Wallet changed during asset activation',
+            ),
+            StackTrace.current,
           ),
         );
       }
@@ -707,7 +715,7 @@ class ActivationManager {
       if (!registration.shouldStartActivation) {
         debugPrint('Activation already in progress');
         try {
-          await primaryCompleter.future;
+          (await primaryCompleter.future).unwrap();
           await _requireWalletContextCurrent(walletContext);
           _requireWalletContextCurrentSync(walletContext);
         } on WalletChangedDisconnectException {
@@ -825,7 +833,12 @@ class ActivationManager {
               message: cancellation.reason,
             );
             if (!primaryCompleter.isCompleted) {
-              primaryCompleter.completeError(cancellationError);
+              primaryCompleter.complete(
+                _ActivationJoinOutcome.error(
+                  cancellationError,
+                  StackTrace.current,
+                ),
+              );
             }
             // Cancellation is a terminal path of its own, so it has to write
             // the state map like the error path below does. Leaving the group
@@ -922,7 +935,9 @@ class ActivationManager {
               group.primary.id,
             );
             if (!primaryCompleter.isCompleted) {
-              primaryCompleter.completeError(mappedError);
+              primaryCompleter.complete(
+                _ActivationJoinOutcome.error(mappedError, StackTrace.current),
+              );
             }
             yield ActivationProgress.error(
               message: mappedError.fallbackMessage,
@@ -943,7 +958,7 @@ class ActivationManager {
         _requireWalletContextCurrentSync(walletContext);
         if (recoveredProgress != null) {
           if (!primaryCompleter.isCompleted) {
-            primaryCompleter.complete();
+            primaryCompleter.complete(const _ActivationJoinOutcome.success());
           }
           _setActivationStates(_groupStates(group, _activeState));
           yield recoveredProgress;
@@ -953,7 +968,9 @@ class ActivationManager {
         debugPrint('Activation failed');
         final mappedError = _mapError(e, group.primary.id);
         if (!primaryCompleter.isCompleted) {
-          primaryCompleter.completeError(mappedError);
+          primaryCompleter.complete(
+            _ActivationJoinOutcome.error(mappedError, StackTrace.current),
+          );
         }
         _setActivationStates(
           _groupStates(
@@ -1140,11 +1157,10 @@ class ActivationManager {
         );
       }
 
-      final completer = Completer<void>();
-      // A sole activation attempt has no joiner awaiting this future. Attach a
-      // side listener so completing it with an error does not become an
-      // unhandled zone error; concurrent joiners still receive the same error.
-      unawaited(completer.future.catchError((Object _) {}));
+      // Never completed with an error - see [_ActivationJoinOutcome] - so a
+      // sole activation attempt with no joiner awaiting this future cannot
+      // produce an unhandled zone error when it is failed.
+      final completer = Completer<_ActivationJoinOutcome>();
       _activationCompleters[assetId] = completer;
       return _ActivationRegistration(
         completer: completer,
@@ -1195,7 +1211,7 @@ class ActivationManager {
   Future<void> _handleActivationComplete(
     _AssetGroup group,
     ActivationProgress progress,
-    Completer<void> completer, {
+    Completer<_ActivationJoinOutcome> completer, {
     required _ActivationWalletContext walletContext,
     _GaslessActivationContext? gaslessContext,
   }) async {
@@ -1259,7 +1275,9 @@ class ActivationManager {
         );
       }
       _activatedAssetsCache.invalidate();
-      if (!completer.isCompleted) completer.complete();
+      if (!completer.isCompleted) {
+        completer.complete(const _ActivationJoinOutcome.success());
+      }
     } else {
       _setActivationStates(
         _groupStates(
@@ -1272,7 +1290,12 @@ class ActivationManager {
         ),
       );
       if (!completer.isCompleted) {
-        completer.completeError(progress.errorMessage ?? 'Unknown error');
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            progress.errorMessage ?? 'Unknown error',
+            StackTrace.current,
+          ),
+        );
       }
     }
   }
@@ -1535,12 +1558,17 @@ class ActivationManager {
     _policyRetryTimer?.cancel();
     await _protectedOperation(() async {
       // Complete any pending completers with errors
-      final completers = List<Completer<void>>.from(
+      final completers = List<Completer<_ActivationJoinOutcome>>.from(
         _activationCompleters.values,
       );
       for (final completer in completers) {
         if (!completer.isCompleted) {
-          completer.completeError('ActivationManager disposed');
+          completer.complete(
+            _ActivationJoinOutcome.error(
+              'ActivationManager disposed',
+              StackTrace.current,
+            ),
+          );
         }
       }
 
@@ -1613,7 +1641,7 @@ class _ActivationRegistration {
     required this.shouldStartActivation,
   });
 
-  final Completer<void> completer;
+  final Completer<_ActivationJoinOutcome> completer;
   final int sessionGeneration;
   final bool shouldStartActivation;
 }
@@ -1625,7 +1653,7 @@ class _ActivationCancellation {
     required this.reason,
   });
 
-  final Completer<void> completer;
+  final Completer<_ActivationJoinOutcome> completer;
   final int sessionGeneration;
   final String reason;
 }
@@ -1637,4 +1665,42 @@ final class _ActivationWalletContext {
   final AuthSessionContext session;
   final int generation;
   WalletId get walletId => session.walletId;
+}
+
+/// The settled state of one shared activation attempt, carried as a *value* so
+/// it can cross an error zone. See [ActivationManager._activationCompleters].
+///
+/// A single completer is shared by every caller that joins an attempt for the
+/// same primary asset, and those callers do not all sit in the same error zone:
+/// `retry()` runs each of its attempts inside its own `runZonedGuarded`, and
+/// work dispatched un-awaited from an attempt keeps running in that zone
+/// afterwards.
+///
+/// Dart refuses to deliver a future's *error* across an error-zone boundary:
+/// rather than completing the cross-zone listener, `_propagateToListeners`
+/// reports the error as uncaught in the zone that created the future and
+/// abandons that listener's future forever. A joiner from another zone then
+/// never resumes, so its `async*` generator yields nothing further and the
+/// coordinator waiting on it only recovers when its own deadline fires. The
+/// outcome travels as a value instead, and each caller rethrows it in its own
+/// zone - the same remedy applied to the coordinator's own
+/// `_pendingActivations` and to `PubkeyManager`'s shared pubkey fetch.
+class _ActivationJoinOutcome {
+  const _ActivationJoinOutcome._(this._error, this._stackTrace);
+
+  /// The attempt reached a successful terminal state.
+  const _ActivationJoinOutcome.success() : this._(null, null);
+
+  /// The attempt failed, or was abandoned or cancelled.
+  const _ActivationJoinOutcome.error(Object error, StackTrace stackTrace)
+    : this._(error, stackTrace);
+
+  final Object? _error;
+  final StackTrace? _stackTrace;
+
+  /// Rethrows the original failure, if any, in the caller's zone.
+  void unwrap() {
+    final error = _error;
+    if (error != null) Error.throwWithStackTrace(error, _stackTrace!);
+  }
 }
