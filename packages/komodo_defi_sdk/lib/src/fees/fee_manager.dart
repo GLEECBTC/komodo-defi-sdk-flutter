@@ -93,7 +93,7 @@ class FeeManager {
   /// TODO: Enable when the fee estimation API endpoints become available.
   ///
   /// Parameters:
-  /// - [coin] - The ticker symbol of the coin (e.g., 'ETH', 'MATIC')
+  /// - [coin] - The ticker symbol of the coin (e.g., 'ETH', 'POL')
   /// - [estimatorType] - The type of estimator to use (default: simple)
   ///
   /// Returns a [Future<EthEstimatedFeePerGas>] containing gas fee estimates at

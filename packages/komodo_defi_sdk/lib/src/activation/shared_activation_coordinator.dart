@@ -121,7 +121,7 @@ class SharedActivationCoordinator {
     if (asset.id.subClass == CoinSubClass.zhtlc) return null;
     // Matches on the protocol class rather than the sub-class so that every
     // member of the EVM family is covered, including ones added later: the
-    // whole avx20/bep20/matic/arbitrum/base/... arm maps to `Erc20Protocol`.
+    // whole avx20/bep20/polygon/arbitrum/base/... arm maps to `Erc20Protocol`.
     // TRX and TRC-20 route through `enable_eth_with_tokens` too.
     final protocol = asset.protocol;
     if (protocol is Erc20Protocol ||

@@ -29,7 +29,7 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
-    CoinSubClass.matic,
+    CoinSubClass.polygon,
     CoinSubClass.avx20,
     CoinSubClass.hrc20,
     CoinSubClass.moonbeam,
