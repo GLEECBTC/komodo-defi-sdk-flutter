@@ -1,14 +1,12 @@
 ## 0.6.0 (unreleased)
 
  - **BREAKING**(coins): rename `CoinSubClass.matic` to `CoinSubClass.polygon`
-   and return `POL` from its `ticker`, following the
+   and return `POL` from its `ticker` and `iconTicker`, following the
    MATIC -> POL rename in the coins configuration. `formatted` ("Polygon") and
    `tokenStandardSuffix` ("PLG20") are unchanged, so `CoinSubClass.parse` now
    resolves "Polygon" by exact enum name and "POL" by exact ticker rather than
    by substring fallback — the latter previously resolved to the unsupported
-   `CoinSubClass.slp`. `iconTicker` stays `MATIC`: it names an icon file that
-   exists on both sides of the rename, where `pol.png` only exists once the
-   coins mainline carries it.
+   `CoinSubClass.slp`.
  - **FEAT**(private-keys): add the structured per-asset export result types used
    by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
    `zDerivationPath` on private-key metadata. Coverage describes supported

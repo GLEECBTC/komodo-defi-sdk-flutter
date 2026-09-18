@@ -142,11 +142,7 @@ enum CoinSubClass {
       case CoinSubClass.bep20:
         return 'BNB';
       case CoinSubClass.polygon:
-        // Icon file, not the platform ticker: `matic.png` resolves against a
-        // coins config from either side of the MATIC -> POL rename, because
-        // upstream keeps it for the wallet-only MATIC-ERC20/BEP20 coins.
-        // `pol.png` only exists once the rename is on the coins mainline.
-        return 'MATIC';
+        return 'POL';
       case CoinSubClass.smartBch:
         return 'BCH';
       case CoinSubClass.erc20:

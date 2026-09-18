@@ -22,16 +22,9 @@ void main() {
       expect(CoinSubClass.parse('PLG20'), CoinSubClass.polygon);
     });
 
-    test('uses the POL platform ticker', () {
+    test('resolves the POL platform and icon tickers', () {
       expect(CoinSubClass.polygon.ticker, 'POL');
-    });
-
-    test('keeps the matic icon file until the coins mainline carries POL', () {
-      // `iconTicker` names an icon file, not a coin. `matic.png` exists both
-      // before and after the rename (upstream keeps it for MATIC-ERC20 and
-      // MATIC-BEP20); `pol.png` only exists after. Flip this once the rename
-      // is on the coins mainline and `pol.png` is on the CDN.
-      expect(CoinSubClass.polygon.iconTicker, 'MATIC');
+      expect(CoinSubClass.polygon.iconTicker, 'POL');
     });
   });
 }
