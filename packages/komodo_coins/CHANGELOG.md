@@ -1,4 +1,7 @@
-## 0.4.0
+## 0.4.0 (unreleased)
+
+ - **CHORE**(deps): require `komodo_defi_types` `^0.6.0`, `komodo_coin_updates` `^2.1.1` for SDK 0.8.0;
+   retain this package version from the earlier preparation milestone.
 
  - **BREAKING** **FIX**(assets): return `filteredAssets` as an ordered snapshot
    keyed by `AssetId` equality rather than the live `SplayTreeMap` behind the

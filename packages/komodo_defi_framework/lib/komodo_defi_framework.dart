@@ -91,14 +91,15 @@ class KomodoDefiFramework implements ApiClient {
     }
 
     _loggerSub = _logStream.stream.listen(
-      logCallback,
-      onError: (Object error, StackTrace stackTrace) {
-        // Log the error internally but don't propagate it to avoid crashing
-        if (kDebugMode) {
-          print('[KomodoDefiFramework] Error in external logger callback:');
-          print('  Error: $error');
-          print('  Stack trace:\n$stackTrace');
+      (message) {
+        try {
+          logCallback(message);
+        } catch (_) {
+          if (kDebugMode) print('KDF diagnostic callback failed');
         }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (kDebugMode) print('KDF diagnostic stream failed');
       },
       cancelOnError: false, // Continue listening even if the callback throws
     );
@@ -114,8 +115,9 @@ class KomodoDefiFramework implements ApiClient {
   Stream<String> get logStream => _logStream.stream;
 
   void _log(String message) {
-    if (!_logStream.isClosed) {
-      _logStream.add(message);
+    final safeMessage = DiagnosticSanitizer.sanitizeMessage(message);
+    if (safeMessage != null && !_logStream.isClosed) {
+      _logStream.add(safeMessage);
     }
   }
 
@@ -219,23 +221,17 @@ class KomodoDefiFramework implements ApiClient {
 
   Future<String?> version() async {
     final stopwatch = Stopwatch()..start();
-    _log(
-      'version(): Starting version RPC call via ${_kdfOperations.operationsName}',
-    );
+    _log('KDF version probe started');
     try {
       final version = await _kdfOperations.version().timeout(
         _versionProbeTimeout,
       );
       stopwatch.stop();
-      _log(
-        'version(): Completed in ${stopwatch.elapsedMilliseconds}ms, result=$version',
-      );
+      _log('KDF version probe completed in ${stopwatch.elapsedMilliseconds}ms');
       return version;
     } catch (e) {
       stopwatch.stop();
-      _log(
-        'version(): Failed after ${stopwatch.elapsedMilliseconds}ms with error: $e',
-      );
+      _log('KDF version probe failed in ${stopwatch.elapsedMilliseconds}ms');
       rethrow;
     }
   }
@@ -257,10 +253,10 @@ class KomodoDefiFramework implements ApiClient {
         return false;
       }
 
-      _log('KDF health check passed: version=$versionCheck');
+      _log('KDF health check passed');
       return true;
     } catch (e) {
-      _log('KDF health check failed with exception: $e');
+      _log('KDF health check failed');
       return false;
     }
   }
@@ -275,62 +271,33 @@ class KomodoDefiFramework implements ApiClient {
 
   @override
   Future<JsonMap> executeRpc(JsonMap request) async {
-    final method = request['method'] as String?;
-    final isGasless = _isGaslessRequest(method, request);
-    if (!enableDebugLogging) {
-      final response = (await _kdfOperations.mm2Rpc(
-        request..setIfAbsentOrEmpty('userpass', _hostConfig.rpcPassword),
-      )).ensureJson();
-      if (KdfLoggingConfig.verboseLogging && !isGasless) {
-        _log('RPC response: ${response.toJsonString()}');
-      }
-      return response;
-    }
-
-    // Extract method name for logging
+    final method = request['method'];
     final stopwatch = Stopwatch()..start();
-
-    // Log activation parameters before the call
-    if (method != null && _isActivationMethod(method) && !isGasless) {
-      _logActivationParameters(method, request);
-    } else if (isGasless) {
-      _logger.info('[RPC] GasFree request started');
-    }
-
     try {
       final response = (await _kdfOperations.mm2Rpc(
         request..setIfAbsentOrEmpty('userpass', _hostConfig.rpcPassword),
       )).ensureJson();
-      stopwatch.stop();
-
-      _logger.info(
-        '[RPC] ${method ?? 'unknown'} completed in ${stopwatch.elapsedMilliseconds}ms',
+      final summary = DiagnosticSanitizer.rpcSummary(
+        method: method,
+        success: !response.containsKey('error'),
+        elapsedMilliseconds: stopwatch.elapsedMilliseconds,
       );
-
-      // Log electrum-related methods with more detail
-      if (method != null && _isElectrumRelatedMethod(method) && !isGasless) {
-        _logger.info(
-          '[ELECTRUM] Method: $method, Duration: ${stopwatch.elapsedMilliseconds}ms',
-        );
-        _logElectrumConnectionInfo(method, response);
-      }
-
-      if (KdfLoggingConfig.verboseLogging && !isGasless) {
-        _log('RPC response: ${response.toJsonString()}');
-      }
+      if (enableDebugLogging) _logger.info(summary);
+      if (KdfLoggingConfig.verboseLogging) _log(summary);
       return response;
-    } catch (e) {
-      stopwatch.stop();
+    } catch (error) {
+      final summary = DiagnosticSanitizer.rpcSummary(
+        method: method,
+        success: false,
+        elapsedMilliseconds: stopwatch.elapsedMilliseconds,
+      );
+      if (enableDebugLogging) _logger.warning(summary);
+      if (KdfLoggingConfig.verboseLogging) _log(summary);
 
-      // Detect transport-fatal SocketExceptions that indicate KDF is down/dying
-      // errno 32 (EPIPE): Broken pipe - writing to socket whose peer closed
-      // errno 54 (ECONNRESET): Connection reset by peer
-      // errno 60 (ETIMEDOUT): Operation timed out
-      // errno 61 (ECONNREFUSED): Connection refused - no listener on port
-      final errorString = e.toString().toLowerCase();
-      final isSocketException = errorString.contains('socketexception');
-      final isFatalTransportError =
-          isSocketException &&
+      // Preserve transport recovery without sending exception text to any sink.
+      // This platform-independent check predates the diagnostic boundary.
+      final errorString = error.toString().toLowerCase();
+      if (errorString.contains('socketexception') &&
           (errorString.contains('broken pipe') ||
               errorString.contains('errno = 32') ||
               errorString.contains('connection reset') ||
@@ -338,165 +305,10 @@ class KomodoDefiFramework implements ApiClient {
               errorString.contains('operation timed out') ||
               errorString.contains('errno = 60') ||
               errorString.contains('connection refused') ||
-              errorString.contains('errno = 61'));
-
-      if (isFatalTransportError) {
-        final errorType =
-            errorString.contains('errno = 32') ||
-                errorString.contains('broken pipe')
-            ? 'EPIPE (32)'
-            : errorString.contains('errno = 54') ||
-                  errorString.contains('connection reset')
-            ? 'ECONNRESET (54)'
-            : errorString.contains('errno = 60') ||
-                  errorString.contains('operation timed out')
-            ? 'ETIMEDOUT (60)'
-            : 'ECONNREFUSED (61)';
-        _logger.severe(
-          '[RPC] ${method ?? 'unknown'} failed: KDF transport error $errorType. '
-          'Resetting HTTP client to drop stale connections.',
-        );
-        // Reset HTTP client immediately to drop stale keep-alive connections
+              errorString.contains('errno = 61'))) {
         resetHttpClient();
-      } else {
-        _logger.warning(
-          '[RPC] ${isGasless ? 'GasFree' : method ?? 'unknown'} '
-          'failed after ${stopwatch.elapsedMilliseconds}ms',
-        );
       }
       rethrow;
-    }
-  }
-
-  bool _isElectrumRelatedMethod(String method) {
-    return method.contains('electrum') ||
-        method.contains('enable') ||
-        method.contains('utxo') ||
-        method == 'get_enabled_coins' ||
-        method == 'my_balance';
-  }
-
-  bool _isActivationMethod(String method) {
-    return method.contains('enable') ||
-        method.contains('task::enable') ||
-        method.contains('task_enable');
-  }
-
-  bool _isGaslessRequest(String? method, JsonMap request) =>
-      (method?.startsWith('gasless::') ?? false) ||
-      _containsGaslessConfiguration(request);
-
-  bool _containsGaslessConfiguration(Object? value) {
-    if (value is Map) {
-      if (value.containsKey('tron_gasless_provider') ||
-          value['fee_method'] == 'gasless' ||
-          value['relay_type'] == 'tron_gasfree') {
-        return true;
-      }
-      return value.values.any(_containsGaslessConfiguration);
-    }
-    if (value is Iterable) return value.any(_containsGaslessConfiguration);
-    return false;
-  }
-
-  void _logActivationParameters(String method, JsonMap request) {
-    try {
-      final params = request['params'] as Map<String, dynamic>?;
-      if (params == null) return;
-
-      final ticker = params['ticker'] as String?;
-      final activationParams =
-          params['activation_params'] as Map<String, dynamic>?;
-
-      if (ticker != null) {
-        _logger.info('[ACTIVATION] Enabling coin: $ticker');
-      }
-
-      if (activationParams != null) {
-        // Log key activation parameters
-        final mode = activationParams['mode'];
-        final nodes = activationParams['nodes'];
-        final servers = activationParams['servers'];
-        final rpcUrls = activationParams['rpc_urls'];
-        final tokensRequests = activationParams['erc20_tokens_requests'];
-        final bchUrls = activationParams['bchd_urls'];
-
-        final paramsSummary = <String, dynamic>{};
-
-        if (mode != null) paramsSummary['mode'] = mode;
-        if (nodes != null) {
-          paramsSummary['nodes_count'] = (nodes as List).length;
-        }
-        if (servers != null) {
-          paramsSummary['electrum_servers_count'] = (servers as List).length;
-        }
-        if (rpcUrls != null) {
-          paramsSummary['rpc_urls_count'] = (rpcUrls as List).length;
-        }
-        if (tokensRequests != null) {
-          paramsSummary['tokens_count'] = (tokensRequests as List).length;
-        }
-        if (bchUrls != null) {
-          paramsSummary['bchd_urls_count'] = (bchUrls as List).length;
-        }
-
-        // Add other relevant fields
-        if (activationParams['swap_contract_address'] != null) {
-          paramsSummary['swap_contract'] =
-              activationParams['swap_contract_address'];
-        }
-        if (activationParams['platform'] != null) {
-          paramsSummary['platform'] = activationParams['platform'];
-        }
-        if (activationParams['contract_address'] != null) {
-          paramsSummary['contract_address'] =
-              activationParams['contract_address'];
-        }
-
-        _logger.info('[ACTIVATION] Parameters: $paramsSummary');
-
-        // Never log full activation parameters: provider credentials, wallet
-        // material, or other secrets may be nested in this object.
-      }
-    } catch (e) {
-      // Silently ignore logging errors
-      _logger.info('[ACTIVATION] Parameter logging failed');
-    }
-  }
-
-  void _logElectrumConnectionInfo(String method, JsonMap response) {
-    try {
-      // Log connection information from enable responses
-      if (method.contains('enable') && response['result'] != null) {
-        final result = response['result'] as Map<String, dynamic>?;
-        if (result != null) {
-          final address = result['address'] as String?;
-          final balance = result['balance'] as String?;
-          _logger.info(
-            '[ELECTRUM] Coin enabled - Address: ${address ?? 'N/A'}, Balance: ${balance ?? 'N/A'}',
-          );
-
-          // Log server information if available
-          if (result['servers'] != null) {
-            final servers = result['servers'];
-            _logger.info('[ELECTRUM] Connected servers: $servers');
-          }
-        }
-      }
-
-      // Log balance information
-      if (method == 'my_balance' && response['result'] != null) {
-        final result = response['result'] as Map<String, dynamic>?;
-        if (result != null) {
-          final coin = result['coin'] as String?;
-          final balance = result['balance'] as String?;
-          _logger.info(
-            '[ELECTRUM] Balance query - Coin: ${coin ?? 'N/A'}, Balance: ${balance ?? 'N/A'}',
-          );
-        }
-      }
-    } catch (e) {
-      // Silently ignore logging errors
     }
   }
 

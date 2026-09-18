@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:js_interop' as js_interop;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:http/http.dart';
@@ -73,6 +74,17 @@ class KdfOperationsWasm implements IKdfOperations {
     return KdfOperationsWasm._(config).._logger = logCallback;
   }
 
+  /// Injects a JS module so browser tests exercise the real transport boundary.
+  @visibleForTesting
+  factory KdfOperationsWasm.withModule({
+    required LocalConfig config,
+    required js_interop.JSObject module,
+    void Function(String)? logCallback,
+  }) => KdfOperationsWasm._(config)
+    .._logger = logCallback
+    .._libraryLoaded = true
+    .._kdfModule = _KdfWasmBindings._(module);
+
   KdfOperationsWasm._(this._config);
   final _startupLock = Mutex();
 
@@ -81,25 +93,19 @@ class KdfOperationsWasm implements IKdfOperations {
   _KdfWasmBindings? _kdfModule;
   void Function(String)? _logger;
 
-  void _log(String message) => (_logger ?? print).call(message);
+  void _log(String message) {
+    final safeMessage = DiagnosticSanitizer.sanitizeMessage(message);
+    if (safeMessage == null) return;
+    try {
+      (_logger ?? print).call(safeMessage);
+    } catch (_) {
+      print('KDF WASM diagnostic callback failed');
+    }
+  }
 
   void _debugLog(String message) {
     if (KdfLoggingConfig.debugLogging) {
       _log(message);
-    }
-  }
-
-  /// Lazy variant, for messages whose *construction* is expensive.
-  ///
-  /// Dart evaluates interpolation eagerly, so `_debugLog('… ${x.censored()}')`
-  /// runs `censored()` - a full recursive rebuild of the request tree, with a
-  /// key-normalising pass per node - before `_debugLog` gets to check its flag.
-  /// `KdfLoggingConfig.debugLogging` is `verboseLogging && kDebugMode`, i.e.
-  /// **always false in release**, so on the RPC path that work was paid on
-  /// every call and thrown away every time.
-  void _debugLogLazy(String Function() message) {
-    if (KdfLoggingConfig.debugLogging) {
-      _log(message());
     }
   }
 
@@ -138,7 +144,7 @@ class KdfOperationsWasm implements IKdfOperations {
       } on js_interop.JSAny catch (jsError) {
         return _handleStartupJsError(jsError);
       } catch (e) {
-        _log('Unknown error starting KDF: [${e.runtimeType}]');
+        _log('KDF WASM startup failed');
 
         if (e.toString().contains('error')) {
           throw ClientException('Failed to call KDF main');
@@ -152,7 +158,9 @@ class KdfOperationsWasm implements IKdfOperations {
     final jsMethod = _kdfModule!.mm2Main(
       jsConfig,
       (int level, String message) {
-        _log('[$level] KDF: $message');
+        if (KdfLoggingConfig.verboseLogging) {
+          _log('KDF WASM diagnostic event received');
+        }
       }.toJS,
     );
 
@@ -164,10 +172,10 @@ class KdfOperationsWasm implements IKdfOperations {
 
   KdfStartupResult _handleStartupJsError(js_interop.JSAny jsError) {
     try {
-      _debugLog('Handling JSAny error: [${jsError.runtimeType}]');
+      _debugLog('KDF WASM startup error received');
 
       final dynamic error = jsError.dartify();
-      _debugLog('Dartified error type: ${error.runtimeType}');
+      _debugLog('KDF WASM startup error converted');
 
       final code = extractNumericCodeFromDartError(error);
       if (code != null) return KdfStartupResult.fromDefaultInt(code);
@@ -229,7 +237,7 @@ class KdfOperationsWasm implements IKdfOperations {
     } on int catch (e) {
       return StopStatus.fromDefaultInt(e);
     } catch (e) {
-      _log('Error stopping KDF: $e');
+      _log('KDF WASM stop failed');
       return StopStatus.errorStopping;
     }
   }
@@ -243,10 +251,7 @@ class KdfOperationsWasm implements IKdfOperations {
     try {
       dartResponse = parseJsInteropJson(jsResponse);
     } catch (_) {
-      throw FormatException(
-        'KDF RPC response could not be decoded for method '
-        '${_rpcMethodName(request)}',
-      );
+      throw const FormatException('KDF RPC response could not be decoded');
     }
     _validateResponse(dartResponse, request);
 
@@ -255,57 +260,56 @@ class KdfOperationsWasm implements IKdfOperations {
 
   /// Makes the JavaScript RPC call and returns the raw JS response
   Future<js_interop.JSAny?> _makeJsCall(JsonMap request) async {
-    final method = _rpcMethodName(request);
-    _debugLogLazy(() => 'mm2Rpc request: ${request.censored()}');
+    _debugLog('KDF WASM RPC request dispatched');
     request['userpass'] = _config.rpcPassword;
 
-    final jsRequest = request.jsify();
-    final jsPromise = _kdfModule!.mm2Rpc(jsRequest);
+    final js_interop.JSAny? jsRequest;
+    try {
+      jsRequest = request.jsify();
+    } catch (_) {
+      throw const FormatException('KDF RPC request could not be encoded');
+    }
+    final js_interop.JSPromise<js_interop.JSAny?>? jsPromise;
+    try {
+      jsPromise = _kdfModule!.mm2Rpc(jsRequest);
+    } catch (_) {
+      throw Exception('KDF JavaScript RPC call failed');
+    }
 
     if (jsPromise == null || jsPromise.isUndefinedOrNull) {
-      throw Exception('mm2_rpc call returned null for method: $method');
+      throw Exception('KDF JavaScript RPC call returned null');
     }
 
     final jsResponse = await jsPromise.toDart.then((value) => value).catchError(
       (Object error) {
-        if (error.toString().contains('RethrownDartError')) {
-          throw Exception('JavaScript error for KDF RPC method $method');
-        }
-        throw Exception('Unknown JavaScript error for KDF RPC method $method');
+        throw Exception('KDF JavaScript RPC call failed');
       },
     );
 
     if (jsResponse == null || jsResponse.isUndefinedOrNull) {
-      throw Exception('mm2_rpc response was null for method: $method');
+      throw Exception('KDF JavaScript RPC response was null');
     }
 
-    _debugLog('mm2Rpc response received for method: $method');
+    _debugLog('KDF WASM RPC response received');
     return jsResponse;
   }
 
   /// Validates the response structure
   void _validateResponse(JsonMap dartResponse, JsonMap request) {
     // Legacy RPCs have no standard response format to validate
-    if (request.valueOrNull<String>('mmrpc') != '2.0') return;
+    if (request['mmrpc'] != '2.0') return;
 
     if (!dartResponse.containsKey('result') &&
         !dartResponse.containsKey('error')) {
-      throw Exception(
-        'Invalid response format for method ${_rpcMethodName(request)} '
-        '(keys: ${dartResponse.keys.join(', ')})',
-      );
+      throw const FormatException('Invalid KDF RPC response format');
     }
 
     _debugLog(
-      'JS response validated for ${_rpcMethodName(request)} '
-      '(keys: ${dartResponse.keys.join(', ')})',
+      DiagnosticSanitizer.rpcSummary(
+        method: request['method'],
+        success: !dartResponse.containsKey('error'),
+      ),
     );
-  }
-
-  String _rpcMethodName(JsonMap request) {
-    final method = request['method']?.toString().trim();
-    if (method == null || method.isEmpty) return '<unknown>';
-    return method;
   }
 
   @override
@@ -372,8 +376,7 @@ class KdfOperationsWasm implements IKdfOperations {
 
       _log('KDF library loaded successfully');
     } catch (e) {
-      final message =
-          'Failed to load and import script $_kdfJsBootstrapperPath\n$e';
+      const message = 'Failed to load KDF WASM library';
       _log(message);
 
       throw Exception(message);

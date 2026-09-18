@@ -40,8 +40,9 @@ export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
 export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show MarketDataManager;
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
+export 'package:komodo_defi_sdk/src/security/private_key_export_request.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
-    show SecurityManager;
+    show PrivateKeyExportSession, SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
 export 'package:komodo_defi_types/komodo_defi_types.dart'
@@ -54,6 +55,11 @@ export 'package:komodo_defi_types/komodo_defi_types.dart'
         GaslessTransferStage,
         GaslessTransferState,
         PendingGaslessTransfer,
+        PrivateKeyExportCoverage,
+        PrivateKeyExportCoverageKind,
+        PrivateKeyExportFailure,
+        PrivateKeyExportOutcome,
+        PrivateKeyExportResult,
         WithdrawalSubmission,
         WithdrawalSubmissionType;
 
@@ -81,6 +87,12 @@ export 'src/assets/asset_extensions.dart'
         AssetUnavailableErrorReasonExtension,
         AssetValidation;
 export 'src/assets/asset_pubkey_extensions.dart';
+export 'src/auth/wallet_operation_context.dart'
+    show
+        isDegradedWalletIdentity,
+        isSameStableWallet,
+        preferEnrichedWalletIdentity,
+        walletIdentityContinuesSession;
 export 'src/assets/legacy_asset_extensions.dart';
 export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
 export 'src/transaction_history/transaction_merge_utils.dart'

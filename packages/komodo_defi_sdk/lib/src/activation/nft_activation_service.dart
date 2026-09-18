@@ -87,8 +87,8 @@ class NftActivationService {
     for (final asset in assetsById.values) {
       try {
         await enableNft(asset, activationParams: activationParams);
-      } on Object catch (e, s) {
-        _logger.severe('Failed to enable NFT asset ${asset.id.id}', e, s);
+      } on Object catch (e) {
+        _logger.severe('NFT activation failed');
         errors[asset.id] = e;
       }
     }

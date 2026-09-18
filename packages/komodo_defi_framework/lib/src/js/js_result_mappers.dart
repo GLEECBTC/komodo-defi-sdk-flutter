@@ -43,14 +43,10 @@ StopStatus mapJsStopResult(dynamic result) {
     if (code is num) return StopStatus.fromDefaultInt(code.toInt());
 
     // Log unexpected map structure for debugging
-    _logger.fine(
-      'Unexpected map structure in stop result, defaulting to ok: $map',
-    );
+    _logger.fine('Unexpected stop result structure, defaulting to ok');
     return StopStatus.ok;
   }
 
-  _logger.fine(
-    'Unrecognized stop result type ${result.runtimeType}, defaulting to ok',
-  );
+  _logger.fine('Unrecognized stop result type, defaulting to ok');
   return StopStatus.ok;
 }

@@ -1,4 +1,7 @@
-## 0.3.3
+## 0.3.3 (unreleased)
+
+ - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
+   retain this package version from the earlier preparation milestone.
 
  - **FEAT**(withdraw): render GasFree fees - provider, transfer fee and optional
    account-activation fee - in `FeeInfoDisplay`.

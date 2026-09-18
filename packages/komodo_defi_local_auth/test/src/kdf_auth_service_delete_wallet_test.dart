@@ -5,9 +5,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
+import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:logging/logging.dart';
 
 class _FakeKdfOperations implements IKdfOperations {
   _FakeKdfOperations({
@@ -97,6 +100,386 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues(<String, String>{});
+  });
+
+  test(
+    'authentication diagnostics omit wallet input and raw stream errors',
+    () async {
+      final previousLevel = Logger.root.level;
+      Logger.root.level = Level.ALL;
+      final records = <LogRecord>[];
+      final failureSeen = Completer<void>();
+      final subscription = Logger.root.onRecord.listen((record) {
+        records.add(record);
+        if (record.loggerName == 'KdfAuthService' &&
+            record.message.contains(
+              'Could not enable shutdown signal stream',
+            ) &&
+            !failureSeen.isCompleted) {
+          failureSeen.complete();
+        }
+      });
+      addTearDown(() async {
+        await subscription.cancel();
+        Logger.root.level = previousLevel;
+      });
+      final service = _createService(
+        onOperationsCreated: (operations) {
+          operations
+                  .responseHandlersByMethod['stream::shutdown_signal::enable'] =
+              () async => Error.throwWithStackTrace(
+                StateError('RPC_PAYLOAD_SENTINEL'),
+                StackTrace.fromString('STACK_PAYLOAD_SENTINEL'),
+              );
+        },
+      );
+      addTearDown(service.dispose);
+      await failureSeen.future.timeout(const Duration(seconds: 3));
+      await expectLater(
+        service.signIn(
+          walletName: 'WALLET_INPUT_SENTINEL',
+          password: 'PASSWORD_INPUT_SENTINEL',
+          options: _testUser().walletId.authOptions,
+        ),
+        throwsA(isA<AuthException>()),
+      );
+      final diagnostics = records
+          .map(
+            (record) =>
+                '${record.message} ${record.error} ${record.stackTrace}',
+          )
+          .join('\n');
+      for (final sentinel in [
+        'RPC_PAYLOAD_SENTINEL',
+        'STACK_PAYLOAD_SENTINEL',
+        'WALLET_INPUT_SENTINEL',
+        'PASSWORD_INPUT_SENTINEL',
+      ]) {
+        expect(diagnostics, isNot(contains(sentinel)));
+      }
+    },
+  );
+
+  group('KdfAuthService.authGeneration', () {
+    test(
+      'nested transitions notify synchronously with the busy state visible',
+      () async {
+        final service = _createService();
+        addTearDown(service.dispose);
+        final observed = <({int generation, bool busy})>[];
+        final subscription = service.authGenerationChanges.listen((generation) {
+          observed.add((
+            generation: generation,
+            busy: service.isAuthTransitionInProgress,
+          ));
+        });
+        addTearDown(subscription.cancel);
+        final generation = service.authGeneration;
+
+        service.beginAuthTransition();
+        expect(observed, [(generation: generation + 1, busy: true)]);
+        service.beginAuthTransition();
+        service.endAuthTransition();
+        expect(service.isAuthTransitionInProgress, isTrue);
+        service.endAuthTransition();
+        expect(service.isAuthTransitionInProgress, isFalse);
+        expect(observed, hasLength(2));
+      },
+    );
+
+    test('ordinary identity reads keep the session revision stable', () async {
+      final service = _createService();
+      addTearDown(service.dispose);
+      await service.restoreSession(_testUser());
+      final generation = service.authGeneration;
+
+      await service.getActiveUser();
+      await service.getActiveUser();
+
+      expect(service.authGeneration, generation);
+    });
+
+    test(
+      'restoring the same wallet invalidates prior work synchronously',
+      () async {
+        final service = _createService();
+        addTearDown(service.dispose);
+        await service.restoreSession(_testUser());
+        final generation = service.authGeneration;
+
+        final restoration = service.restoreSession(_testUser());
+
+        expect(service.authGeneration, greaterThan(generation));
+        await restoration;
+        expect((await service.getActiveUser())?.walletId.name, 'test-wallet');
+      },
+    );
+
+    test(
+      'sign-out invalidates work before the authentication lock is free',
+      () async {
+        final readStarted = Completer<void>();
+        final releaseRead = Completer<void>();
+        var blockReads = false;
+        final service = _createService(
+          publicKeyHashResponseHandler: () async {
+            if (blockReads) {
+              readStarted.complete();
+              await releaseRead.future;
+            }
+            return {
+              'mmrpc': '2.0',
+              'result': {'public_key_hash': _publicKeyHash},
+            };
+          },
+        );
+        addTearDown(service.dispose);
+        await service.restoreSession(_testUser());
+        final generation = service.authGeneration;
+        blockReads = true;
+        final pendingRead = service.getActiveUser();
+        await readStarted.future;
+
+        final signOut = service.signOut();
+
+        expect(service.authGeneration, greaterThan(generation));
+        releaseRead.complete();
+        await pendingRead;
+        await signOut;
+        expect(await service.getActiveUser(), isNull);
+      },
+    );
+
+    test(
+      'a sign-out and same-wallet restoration never reuse a revision',
+      () async {
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          onOperationsCreated: (value) => operations = value,
+        );
+        addTearDown(service.dispose);
+        await service.restoreSession(_testUser());
+        final generation = service.authGeneration;
+
+        await service.signOut();
+        final signedOutGeneration = service.authGeneration;
+        operations._isRunning = true;
+        await service.restoreSession(_testUser());
+
+        expect(signedOutGeneration, greaterThan(generation));
+        expect(service.authGeneration, greaterThan(signedOutGeneration));
+        expect((await service.getActiveUser())?.walletId.name, 'test-wallet');
+      },
+    );
+  });
+
+  group('KomodoDefiLocalAuth public transition races', () {
+    for (final transition in ['signOut', 'same-wallet signIn', 'register']) {
+      test(
+        '$transition revokes before its blocked authentication read',
+        () async {
+          final readStarted = Completer<void>();
+          final releaseRead = Completer<void>();
+          var blockReads = false;
+          final auth = _createPublicAuth(
+            publicKeyHashResponseHandler: () async {
+              if (blockReads) {
+                if (!readStarted.isCompleted) readStarted.complete();
+                await releaseRead.future;
+              }
+              return {
+                'mmrpc': '2.0',
+                'result': {'public_key_hash': _publicKeyHash},
+              };
+            },
+          );
+          addTearDown(auth.dispose);
+          final originalUser = await auth.currentUser;
+          expect(originalUser, isNotNull);
+          final generation = auth.authGeneration;
+          var notifiedSynchronously = false;
+          final subscription = auth.authGenerationChanges.listen((_) {
+            notifiedSynchronously = true;
+          });
+          addTearDown(subscription.cancel);
+          blockReads = true;
+
+          final transitionFuture = switch (transition) {
+            'signOut' => auth.signOut(),
+            'same-wallet signIn' =>
+              auth
+                  .signIn(
+                    walletName: originalUser!.walletId.name,
+                    password: 'synthetic-password',
+                  )
+                  .then((_) {}),
+            _ =>
+              auth
+                  .register(
+                    walletName: 'new-wallet',
+                    password: 'synthetic-password',
+                  )
+                  .then((_) {}),
+          };
+          final completion = transition == 'signOut'
+              ? expectLater(transitionFuture, completes)
+              : expectLater(transitionFuture, throwsA(isA<AuthException>()));
+
+          expect(notifiedSynchronously, isTrue);
+          expect(auth.authGeneration, greaterThan(generation));
+          expect(auth.isAuthTransitionInProgress, isTrue);
+          await readStarted.future;
+          expect(auth.isAuthTransitionInProgress, isTrue);
+
+          releaseRead.complete();
+          await completion;
+          expect(auth.isAuthTransitionInProgress, isFalse);
+          if (transition != 'signOut') {
+            // A rejected transition must still revoke prior results, without
+            // leaving the same authenticated wallet permanently busy.
+            expect((await auth.currentUser)?.walletId, originalUser!.walletId);
+          }
+        },
+      );
+    }
+
+    test(
+      'dispose revokes before a paused wallet-deletion stream can close',
+      () async {
+        final auth = _createPublicAuth();
+        await auth.currentUser;
+        final generation = auth.authGeneration;
+        var notifiedSynchronously = false;
+        final generations = auth.authGenerationChanges.listen((_) {
+          notifiedSynchronously = true;
+        });
+        final deletions = auth.walletDeletions.listen((_) {})..pause();
+        var disposalCompleted = false;
+
+        final disposal = auth.dispose().then((_) => disposalCompleted = true);
+
+        expect(notifiedSynchronously, isTrue);
+        expect(auth.authGeneration, greaterThan(generation));
+        expect(auth.isAuthTransitionInProgress, isTrue);
+        await Future<void>.delayed(Duration.zero);
+        expect(disposalCompleted, isFalse);
+        expect(auth.isAuthTransitionInProgress, isTrue);
+        deletions.resume();
+        await disposal;
+        expect(auth.isAuthTransitionInProgress, isTrue);
+        await generations.cancel();
+        await deletions.cancel();
+      },
+    );
+  });
+
+  group('KomodoDefiLocalAuth.getMnemonicPlainText', () {
+    const secretCanary = 'synthetic-secret-error-detail';
+    for (final kind in ['typed', 'json-rpc', 'general']) {
+      test(
+        'normalizes delayed $kind wrong-password errors and allows retry',
+        () async {
+          final requestStarted = Completer<void>();
+          final response = Completer<Map<String, dynamic>>();
+          var attempts = 0;
+          final auth = _createPublicAuth(
+            mnemonicResponseHandler: () {
+              if (attempts++ == 0) {
+                requestStarted.complete();
+                return response.future;
+              }
+              return Future.value({
+                'mmrpc': '2.0',
+                'result': {
+                  'format': 'plaintext',
+                  'mnemonic':
+                      'abandon abandon abandon abandon abandon abandon '
+                      'abandon abandon abandon abandon abandon about',
+                },
+              });
+            },
+          );
+          addTearDown(auth.dispose);
+          await auth.currentUser;
+          final generation = auth.authGeneration;
+
+          final rejection = expectLater(
+            auth.getMnemonicPlainText('wrong-password'),
+            throwsA(
+              isA<AuthException>()
+                  .having(
+                    (error) => error.type,
+                    'type',
+                    AuthExceptionType.incorrectPassword,
+                  )
+                  .having((error) => error.details, 'details', isEmpty)
+                  .having(
+                    (error) => error.toString(),
+                    'redacted error',
+                    isNot(contains(secretCanary)),
+                  ),
+            ),
+          );
+          await requestStarted.future;
+          switch (kind) {
+            case 'typed':
+              response.completeError(
+                const MnemonicRpcErrorInvalidPasswordException(secretCanary),
+              );
+            case 'json-rpc':
+              response.complete(
+                JsonRpcErrorResponse(
+                  code: null,
+                  error: 'InvalidPassword',
+                  message: secretCanary,
+                ),
+              );
+            default:
+              response.complete({
+                'mmrpc': '2.0',
+                'result': {
+                  'details': {
+                    'error_type': 'InvalidPassword',
+                    'error': secretCanary,
+                  },
+                },
+              });
+          }
+          await rejection;
+
+          expect(auth.authGeneration, generation);
+          expect(auth.isAuthTransitionInProgress, isFalse);
+          expect(await auth.currentUser, isNotNull);
+          final mnemonic = await auth.getMnemonicPlainText('correct-password');
+          expect(mnemonic.plaintextMnemonic, endsWith('about'));
+        },
+      );
+    }
+
+    test('keeps other delayed failures generic and secret-free', () async {
+      final auth = _createPublicAuth(
+        mnemonicResponseHandler: () => Future.error(StateError(secretCanary)),
+      );
+      addTearDown(auth.dispose);
+
+      await expectLater(
+        auth.getMnemonicPlainText('synthetic-password'),
+        throwsA(
+          isA<AuthException>()
+              .having(
+                (error) => error.type,
+                'type',
+                AuthExceptionType.generalAuthError,
+              )
+              .having((error) => error.details, 'details', isEmpty)
+              .having(
+                (error) => error.toString(),
+                'redacted error',
+                isNot(contains(secretCanary)),
+              ),
+        ),
+      );
+    });
   });
 
   group('KdfAuthService.deleteWallet', () {
@@ -1042,6 +1425,49 @@ void main() {
 
 const _publicKeyHash = '05aab5342166f8594baf17a7d9bef5d567443327';
 const _secondPublicKeyHash = '1111111111111111111111111111111111111111';
+
+KomodoDefiLocalAuth _createPublicAuth({
+  Future<Map<String, dynamic>> Function()? publicKeyHashResponseHandler,
+  Future<Map<String, dynamic>> Function()? mnemonicResponseHandler,
+}) {
+  final user = _testUser();
+  FlutterSecureStorage.setMockInitialValues({
+    'user_${user.walletId.name}': jsonEncode(user.toJson()),
+  });
+  final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
+  final operations = _FakeKdfOperations(
+    responsesByMethod: {
+      'get_wallet_names': {
+        'mmrpc': '2.0',
+        'result': {
+          'wallet_names': ['test-wallet'],
+          'activated_wallet': 'test-wallet',
+        },
+      },
+      'get_public_key_hash': {
+        'mmrpc': '2.0',
+        'result': {'public_key_hash': _publicKeyHash},
+      },
+      'stream::shutdown_signal::enable': {
+        'mmrpc': '2.0',
+        'result': {'streamer_id': 'test-stream'},
+      },
+    },
+    responseHandlersByMethod: {
+      if (publicKeyHashResponseHandler != null)
+        'get_public_key_hash': publicKeyHashResponseHandler,
+      if (mnemonicResponseHandler != null)
+        'get_mnemonic': mnemonicResponseHandler,
+    },
+  );
+  return KomodoDefiLocalAuth(
+    kdf: KomodoDefiFramework.createWithOperations(
+      hostConfig: hostConfig,
+      kdfOperations: operations,
+    ),
+    hostConfig: hostConfig,
+  );
+}
 
 KdfAuthService _createService({
   Map<String, dynamic>? deleteWalletResponse,

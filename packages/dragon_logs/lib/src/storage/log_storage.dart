@@ -3,7 +3,8 @@ import 'package:dragon_logs/src/storage/platform_instance/log_storage_web_platfo
     if (dart.tool.dart2wasm) 'package:dragon_logs/src/storage/platform_instance/log_storage_wasm_platform.dart';
 
 abstract class LogStorage {
-  Future<void> init();
+  Future<void> init({String? storageNamespace, bool purgeLegacy = false});
+  Future<void> dispose();
   // Future<Map<DateTime, File>> getLogFiles();
   Future<void> appendLog(DateTime date, String text);
   Future<void> closeLogFile();

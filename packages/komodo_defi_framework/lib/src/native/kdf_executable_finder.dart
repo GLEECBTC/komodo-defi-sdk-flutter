@@ -68,15 +68,12 @@ class KdfExecutableFinder {
 
     for (final file in files) {
       if (file.existsSync()) {
-        logCallback('Found executable: ${file.path}');
+        logCallback('KDF executable found');
         return file.absolute;
       }
     }
 
-    logCallback(
-      'Executable not found in paths: ${files.map((e) => e.absolute.path).join('\n')}. '
-      'If you are using the KDF Flutter SDK, open an issue on GitHub.',
-    );
+    logCallback('KDF executable not found');
 
     return null;
   }

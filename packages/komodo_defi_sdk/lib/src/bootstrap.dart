@@ -71,12 +71,11 @@ Future<void> _wireWalletDeletionPurge(GetIt container) async {
     ]) {
       try {
         await purge.$2();
-      } on Object catch (error, stackTrace) {
+      } on Object catch (error) {
         log(
-          'Failed to purge ${purge.$1} for a deleted wallet: $error',
+          'Failed to purge ${purge.$1} for a deleted wallet: '
+          '${DiagnosticSanitizer.safeError(error)}',
           name: 'Bootstrap',
-          error: error,
-          stackTrace: stackTrace,
         );
       }
     }

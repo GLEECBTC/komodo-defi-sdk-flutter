@@ -86,3 +86,69 @@ Future<T> withGaslessTransferLock<T>(Future<T> Function() operation) async {
   }
   return operationResult;
 }
+
+/// Exclusive ownership of a live submission or an explicit discard attempt.
+final class GaslessSubmissionLease {
+  GaslessSubmissionLease._(this._release);
+
+  final Future<void> Function() _release;
+  Future<void>? _released;
+
+  /// Releases ownership once. Repeated releases await the same completion.
+  Future<void> release() => _released ??= _release();
+}
+
+/// Stable, opaque lock name shared by same-origin browser contexts.
+String gaslessSubmissionLockName(String walletNamespace, String journalId) =>
+    'gleec-gasfree-submission:$walletNamespace:$journalId';
+
+/// Tries to protect one submission without waiting behind another tab.
+///
+/// This lock is distinct from the journal transaction lock: a live relay can
+/// hold its lease across network IO while all journal readers/writers continue
+/// working. Discard requests use the same non-blocking acquisition and refuse
+/// when another context still owns the submission. Browser context destruction
+/// releases the lease, allowing explicit recovery after a crashed tab.
+Future<GaslessSubmissionLease?> tryAcquireGaslessSubmissionLease(
+  String walletNamespace,
+  String journalId,
+) async {
+  final acquired = Completer<GaslessSubmissionLease?>();
+  final release = Completer<JSAny?>();
+  late final Future<JSAny?> requestCompleted;
+  final request = web.window.navigator.locks.request(
+    gaslessSubmissionLockName(walletNamespace, journalId),
+    web.LockOptions(ifAvailable: true),
+    Zone.current.bindUnaryCallback((web.Lock? lock) {
+      if (lock == null) {
+        acquired.complete(null);
+        return Future<JSAny?>.value().toJS;
+      }
+      acquired.complete(
+        GaslessSubmissionLease._(() async {
+          release.complete();
+          await requestCompleted;
+        }),
+      );
+      return release.future.toJS;
+    }).toJS,
+  );
+  requestCompleted = request.toDart;
+  unawaited(
+    requestCompleted.then<void>(
+      (_) {
+        if (!acquired.isCompleted) {
+          acquired.completeError(
+            StateError('GasFree submission lock completed without a result'),
+          );
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!acquired.isCompleted) {
+          acquired.completeError(error, stackTrace);
+        }
+      },
+    ),
+  );
+  return acquired.future;
+}

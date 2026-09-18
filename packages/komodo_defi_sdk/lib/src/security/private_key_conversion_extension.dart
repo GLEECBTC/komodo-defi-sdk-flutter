@@ -49,6 +49,7 @@ extension PrivateKeyConversionExtension on GetPrivateKeysResponse {
           publicKeySecp256k1: coinKeyInfo.publicKeySecp256k1,
           publicKeyAddress: coinKeyInfo.publicKeyAddress,
           privateKey: coinKeyInfo.privKey,
+          viewingKey: coinKeyInfo.viewingKey,
           // No HD info for standard keys
         );
 
@@ -72,8 +73,10 @@ extension PrivateKeyConversionExtension on GetPrivateKeysResponse {
             publicKeySecp256k1: addressInfo.publicKeySecp256k1,
             publicKeyAddress: addressInfo.publicKeyAddress,
             privateKey: addressInfo.privKey,
+            viewingKey: addressInfo.viewingKey,
             hdInfo: PrivateKeyHdInfo(
               derivationPath: addressInfo.derivationPath,
+              zDerivationPath: addressInfo.zDerivationPath,
             ),
           );
           privateKeys.add(privateKey);

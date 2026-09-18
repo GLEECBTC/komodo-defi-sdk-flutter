@@ -51,6 +51,16 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
+      when(() => auth.currentUser).thenAnswer(
+        (_) async => const KdfUser(
+          walletId: WalletId(
+            name: 'test-wallet',
+            pubkeyHash: 'test-wallet-hash',
+            authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+          ),
+          isBip39Seed: true,
+        ),
+      );
       final assetHistory = _MockAssetHistory();
       final assetLookup = _MockAssetLookup();
       final balanceManager = _MockBalanceManager();

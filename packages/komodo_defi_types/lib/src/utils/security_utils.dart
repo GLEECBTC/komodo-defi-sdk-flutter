@@ -20,6 +20,9 @@ enum PasswordValidationError {
 
 // ignore: one_member_abstracts
 abstract class SecurityUtils {
+  /// Shared sensitive-field taxonomy for structured and text diagnostics.
+  static bool isSensitiveDiagnosticKey(String key) => _isSensitiveLogKey(key);
+
   static String generatePasswordSecure(
     int length, {
     bool extendedSpecialCharacters = false,
@@ -162,11 +165,14 @@ const _sensitiveLogKeys = <String>{
   'password',
   'pin',
   'plaintext_mnemonic',
+  'priv_key',
+  'priv_keys',
   'private_key',
   'private_keys',
   'privkey',
   'refresh_token',
   'rpc_password',
+  'rpc_pass',
   'seed',
   'secret',
   'secret_key',
@@ -180,6 +186,7 @@ const _sensitiveLogKeys = <String>{
   'tx_hex',
   'userpass',
   'view_key',
+  'viewing_key',
   'wallet_password',
   'wif',
 };
@@ -188,12 +195,20 @@ const _sensitiveLogKeys = <String>{
 /// node** in a censored tree. Building the same `RegExp` on each call is pure
 /// allocation, and this walk is on the RPC path.
 final RegExp _camelCaseBoundary = RegExp('([a-z0-9])([A-Z])');
+final RegExp _acronymBoundary = RegExp('([A-Z]+)([A-Z][a-z])');
 
 bool _isSensitiveLogKey(Object? key) {
-  final snakeCaseKey = key.toString().trim().replaceAllMapped(
-    _camelCaseBoundary,
-    (match) => '${match.group(1)}_${match.group(2)}',
-  );
+  if (key is! String) return true;
+  final snakeCaseKey = key
+      .trim()
+      .replaceAllMapped(
+        _acronymBoundary,
+        (match) => '${match.group(1)}_${match.group(2)}',
+      )
+      .replaceAllMapped(
+        _camelCaseBoundary,
+        (match) => '${match.group(1)}_${match.group(2)}',
+      );
   final normalized = snakeCaseKey.toLowerCase().replaceAll('-', '_');
   return _sensitiveLogKeys.contains(normalized) ||
       normalized == 'address' ||
@@ -204,6 +219,7 @@ bool _isSensitiveLogKey(Object? key) {
       normalized.endsWith('_password') ||
       normalized.endsWith('_passphrase') ||
       normalized.endsWith('_private_key') ||
+      normalized.endsWith('_priv_key') ||
       normalized.endsWith('_secret') ||
       normalized.endsWith('_signature');
 }
@@ -213,17 +229,24 @@ Object? _censorForLogging(Object? value, {Object? key}) {
   if (value is Map) {
     return <String, dynamic>{
       for (final entry in value.entries)
-        entry.key.toString(): _censorForLogging(entry.value, key: entry.key),
+        (entry.key is String ? entry.key as String : '<omitted-key>'):
+            _censorForLogging(entry.value, key: entry.key),
     };
   }
   if (value is Iterable) {
     return <Object?>[for (final element in value) _censorForLogging(element)];
   }
-  return value;
+  if (value == null || value is String || value is num || value is bool) {
+    return value;
+  }
+  return _redactedLogValue;
 }
 
 extension CensoredJsonMap on JsonMap {
-  /// Returns a recursively redacted copy safe for diagnostic logging.
+  /// Returns a recursively redacted diagnostic copy as defense in depth.
+  ///
+  /// This denylist cannot identify every secret. RPC/config bodies must not be
+  /// logged; use allowlisted metadata summaries instead.
   ///
   /// Secret-bearing containers such as `signed_authorization` are removed as a
   /// whole, and nested maps/lists are traversed without mutating the RPC object
@@ -254,18 +277,4 @@ class SensitiveStringConverter
 
   @override
   String? toJson(SensitiveString? object) => object?.value;
-}
-
-// Example Test
-void main() {
-  final password = SecurityUtils.generatePasswordSecure(24);
-  final extendedPassword = SecurityUtils.generatePasswordSecure(
-    24,
-    extendedSpecialCharacters: true,
-  );
-
-  // ignore: avoid_print
-  print('Password: $password');
-  // ignore: avoid_print
-  print('Extended Password: $extendedPassword');
 }

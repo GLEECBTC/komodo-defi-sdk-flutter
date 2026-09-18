@@ -56,6 +56,16 @@ void main() {
   setUp(() {
     asset = Asset.fromJson(_utxoConfig(), knownIds: const {});
     auth = _MockAuth();
+    when(() => auth.currentUser).thenAnswer(
+      (_) async => const KdfUser(
+        walletId: WalletId(
+          name: 'test-wallet',
+          pubkeyHash: 'test-wallet-hash',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        ),
+        isBip39Seed: true,
+      ),
+    );
     manager = _MockActivationManager();
 
     when(

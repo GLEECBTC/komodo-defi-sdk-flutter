@@ -1,8 +1,13 @@
-## 0.8.0-rc.1
+## 0.8.0 (unreleased)
 
-Release candidate for the wallet-identity hotfix. Metadata writes have a breaking
-API change; this is not a source-compatible patch of 0.7.0.
+Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export
+remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-overview).
+Metadata writes have a breaking API change; this is not a source-compatible
+patch of 0.7.0.
 
+ - **FIX**(history): decode the legacy `matic` `sub_class` name as
+   `CoinSubClass.polygon`, so transaction history stored before the rename is
+   not downgraded to `CoinSubClass.unknown`.
  - **FIX**(history): preserve verified wallet identity and active history streams
    during degraded same-wallet authentication events.
  - **FIX**(history): retain one wallet context across historical and live results
@@ -14,10 +19,39 @@ API change; this is not a source-compatible patch of 0.7.0.
    require the original `expectedWalletId`. Writes fail closed when identity
    cannot be verified or the active wallet changes. See the
    [local-auth migration guidance](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
- - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0-rc.1`.
+ - **FEAT**(security): add `SecurityManager.exportPrivateKeys`, exporting each
+   offline-supported asset independently with concurrency limited to two.
+ - **FIX**(security): report TRON/TRC20 private-key export as
+   `unsupportedProtocol` until KDF supports `get_private_keys` for TRON.
+   Both structured and strict export reject these protocols before issuing an
+   RPC. Remove the active-key fallback, scalar/address derivation, HD metadata
+   searches and direct PointyCastle dependency.
+ - **SECURITY**(security): bind export capabilities to a verified wallet
+   identity, the manager that issued them, and a source-owned authentication
+   generation that revokes synchronously before an authentication transition.
+ - **SECURITY**(diagnostics): keep RPC and startup diagnostics metadata-only,
+   and redact secret-bearing diagnostic strings.
+ - **FEAT**(diagnostics): version persisted diagnostic storage, clean up legacy
+   records, and serialize writes and disposal behind stable native and browser
+   snapshots.
+ - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0`,
+   `komodo_defi_rpc_methods` `^0.7.0`, `komodo_defi_types` `^0.6.0`,
+   `komodo_defi_framework` `^0.6.0` and `komodo_coin_updates`
+   `^2.1.1`.
  - **TEST**(history): run wallet-race regressions in Chrome/WebAssembly in CI.
+ - **TEST**(security): cover structured export, session invalidation and
+   TRON/TRC20 rejection without RPC calls while retaining successful exports
+   for supported assets in a mixed selection.
 
-## 0.7.0
+ - **FIX**(activation): bind completion and coordinator work to the originating
+   wallet session, rejecting delayed results after a wallet switch (#376).
+ - **FIX**(gasfree): apply acceptance and reconciliation atomically and keep
+   browser recovery from discarding a live submission's journal record (#376).
+ - **FIX**(gasfree): cancel local waits during disposal, drain journal writes
+   before releasing submission ownership, and suppress detached relay/trace
+   continuations while preserving unresolved outcomes for recovery (#377).
+
+## 0.7.0 — preparation history
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.
 
@@ -94,7 +128,7 @@ API change; this is not a source-compatible patch of 0.7.0.
    `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
    10.x, and pub warns when a stable release depends on a pre-release.
 
-## 0.6.0
+## 0.6.0 — preparation history
 
 > Note: This release has breaking changes.
 
@@ -106,7 +140,7 @@ API change; this is not a source-compatible patch of 0.7.0.
  - **FEAT**(transaction-history): add a Tronscan strategy with address, cursor, and fixed-scale amount codecs (#339).
  - **BREAKING** **FEAT**(sia): route SIA activation and withdrawals through the hardened SIA strategy and RPC namespace (#343).
 
-## 0.5.0
+## 0.5.0 — preparation history
 
 > Note: This release has breaking changes.
 

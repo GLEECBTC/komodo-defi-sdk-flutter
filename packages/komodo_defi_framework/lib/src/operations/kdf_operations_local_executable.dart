@@ -104,7 +104,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
           ) !=
           null;
     } catch (e) {
-      _logCallback('Error checking availability: $e');
+      _logCallback('KDF availability check failed');
       return false;
     }
   }
@@ -158,7 +158,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
         sensitiveArgs.toJsonString(),
       ], environment: environment);
 
-      _logCallback('Launched executable: $executablePath');
+      _logCallback('KDF executable launched');
       _attachProcessListeners(newProcess, coinsTempDir);
 
       return newProcess;
@@ -167,14 +167,14 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       // be thrown before process listeners are attached, so ensure that the
       // dangling resources are cleaned up.
       await coinsTempDir?.delete(recursive: true).catchError((Object error) {
-        _logCallback('Failed to delete temporary directory: $error');
+        _logCallback('KDF temporary directory cleanup failed');
         return Directory('');
       });
       if (e is KdfException) {
         rethrow;
       }
       throw KdfException(
-        'Failed to start KDF: $e',
+        'Failed to start KDF',
         type: KdfExceptionType.startupFailed,
         stackTrace: stackTrace,
       );
@@ -188,7 +188,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       final result = await Process.run('chmod', ['+x', executablePath]);
       if (result.exitCode != 0) {
         throw KdfException(
-          'Failed to make executable executable: ${result.stderr}',
+          'Failed to grant KDF executable permission',
           type: KdfExceptionType.permissionError,
           stackTrace: StackTrace.current,
         );
@@ -198,11 +198,11 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
 
   void _attachProcessListeners(Process newProcess, Directory tempDir) {
     stdoutSub = newProcess.stdout.listen((event) {
-      _logCallback('[INFO]: ${String.fromCharCodes(event)}');
+      _logCallback('KDF process stdout event received');
     });
 
     stderrSub = newProcess.stderr.listen((event) {
-      _logCallback('[ERROR]: ${String.fromCharCodes(event)}');
+      _logCallback('KDF process stderr event received');
     });
 
     newProcess.exitCode
@@ -219,7 +219,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       await tempDir.delete(recursive: true);
       _logCallback('Temporary directory deleted successfully.');
     } catch (error) {
-      _logCallback('Failed to delete temporary directory: $error');
+      _logCallback('KDF temporary directory cleanup failed');
     } finally {
       _process = null;
     }
@@ -232,9 +232,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
     }
 
     final coinsCount = params.valueOrNull<List<dynamic>>('coins')?.length;
-    _logCallback(
-      'Starting KDF with parameters: ${{...params, 'coins': '{{OMITTED $coinsCount ITEMS}}', 'log_level': logLevel ?? 3}.censored().toJsonString()}',
-    );
+    _logCallback('KDF startup coin_count=${coinsCount ?? 0}');
 
     try {
       _process = await _startKdf(params);
@@ -262,7 +260,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
 
       return KdfStartupResult.spawnError;
     } catch (e) {
-      _logCallback('Error starting KDF: $e');
+      _logCallback('KDF process startup failed');
       if (e is ArgumentError) {
         return KdfStartupResult.invalidParams;
       }
@@ -309,8 +307,8 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
 
       _process = null;
       _logCallback('KDF process cleanup complete');
-    } catch (e, stack) {
-      _logCallback('Critical error during KDF cleanup: $e\n$stack');
+    } catch (_) {
+      _logCallback('KDF process cleanup failed');
     }
 
     return stopStatus;

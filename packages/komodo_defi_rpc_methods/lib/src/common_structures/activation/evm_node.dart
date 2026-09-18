@@ -100,7 +100,7 @@ const Map<String, String> _deadWsEndpoints = {
   'wss://polygon.gateway.tenderly.co':
       '2026-08-07: HTTP 404 with and without an Origin header. The Tenderly '
       'gateway wants an access key in the path (`/ws` answers 401); the coins '
-      'config carries the bare host. MATIC keeps three other ws endpoints.',
+      'config carries the bare host. POL keeps three other ws endpoints.',
 };
 
 /// Endpoints that serve a native handshake but refuse a browser one.
@@ -180,10 +180,10 @@ class EvmNode {
   /// Each config node becomes its existing `https://` entry, **plus** a second
   /// entry for its `ws_url` when that endpoint is usable on this platform.
   ///
-  /// **Always additive, never a replacement.** GLEEC, EWT, GLMR, MATIC and MOVR
+  /// **Always additive, never a replacement.** GLEEC, EWT, GLMR, POL and MOVR
   /// have no http-only node at all, so substituting rather than adding would
   /// strip those chains of HTTP entirely and leave them with no fallback.
-  /// Expanding gives MATIC 4 entries -> 8 and GLEEC 1 -> 2, which is itself the
+  /// Expanding gives POL 4 entries -> 8 and GLEEC 1 -> 2, which is itself the
   /// fix for the single-node-no-fallback condition `web3_pool.rs:52-64` blames
   /// for the original incident.
   ///

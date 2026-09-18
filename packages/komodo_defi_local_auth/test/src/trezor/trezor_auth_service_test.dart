@@ -97,6 +97,24 @@ class _FakeConnectionMonitor extends TrezorConnectionMonitor {
 }
 
 class _FakeAuthService implements IAuthService {
+  @override
+  int get authGeneration => 0;
+
+  @override
+  Stream<int> get authGenerationChanges => const Stream<int>.empty();
+
+  @override
+  bool get isAuthTransitionInProgress => false;
+
+  @override
+  void invalidateAuthSession() {}
+
+  @override
+  void beginAuthTransition() {}
+
+  @override
+  void endAuthTransition() {}
+
   final StreamController<KdfUser?> _authStateController =
       StreamController<KdfUser?>.broadcast();
 

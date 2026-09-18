@@ -1,7 +1,7 @@
 abstract class LoggerInterface {
   void log(String key, String message, {Map<String, dynamic>? metadata});
 
-  Future<void> init();
+  Future<void> init({String? storageNamespace, bool purgeLegacy = false});
 
   Stream<String> exportLogsStream();
 
@@ -17,8 +17,9 @@ abstract class LoggerInterface {
     final formattedMetadata = metadata == null || metadata.isEmpty
         ? ''
         : '__metadata: ${metadata.toString()}';
-    final appRunDurationString =
-        appRunDuration == null ? null : 'T+:$appRunDuration';
+    final appRunDurationString = appRunDuration == null
+        ? null
+        : 'T+:$appRunDuration';
     final dateString = _formatDate(date);
 
     return '$dateString$appRunDurationString [$key] $message$formattedMetadata';

@@ -2,16 +2,13 @@ part of 'auth_service.dart';
 
 extension KdfAuthServiceAuthExtension on KdfAuthService {
   Future<KdfUser> _authenticateUser(KdfStartupConfig config) async {
-    _logger.info(
-      '[$_sessionId] _authenticateUser: Restarting KDF for '
-      '${config.walletName}',
-    );
+    _logger.info('_authenticateUser: Restarting KDF for omitted');
     final restartStopwatch = Stopwatch()..start();
     await _restartKdf(config);
     restartStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _authenticateUser: auth start + readiness verify '
-      'completed in ${restartStopwatch.elapsedMilliseconds}ms',
+      '_authenticateUser: auth start + readiness verify completed in '
+      '${restartStopwatch.elapsedMilliseconds}ms',
     );
     final status = await _kdfFramework.kdfMainStatus();
     if (status != MainStatus.rpcIsUp) {
@@ -27,7 +24,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     var currentUser = await _getActiveUser();
     activeUserStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _authenticateUser: first authenticated RPC completed in '
+      '_authenticateUser: first authenticated RPC completed in '
       '${activeUserStopwatch.elapsedMilliseconds}ms',
     );
     if (currentUser == null) {
@@ -51,7 +48,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   void _emitAuthStateChange(KdfUser? user) {
     if (!_authStateController.isClosed && user != _lastEmittedUser) {
       _lastEmittedUser = user;
-      _authStateGeneration++;
+      invalidateAuthSession();
       _authStateController.add(user);
     }
   }
@@ -63,16 +60,13 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     AuthOptions authOptions,
     bool isImported,
   ) async {
-    _logger.info(
-      '[$_sessionId] _registerNewUser: Restarting KDF for '
-      '${config.walletName}',
-    );
+    _logger.info('_registerNewUser: Restarting KDF for omitted');
     final restartStopwatch = Stopwatch()..start();
     await _restartKdf(config);
     restartStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _registerNewUser: auth start + readiness verify '
-      'completed in ${restartStopwatch.elapsedMilliseconds}ms',
+      '_registerNewUser: auth start + readiness verify completed in '
+      '${restartStopwatch.elapsedMilliseconds}ms',
     );
     final status = await _kdfFramework.kdfMainStatus();
     if (status != MainStatus.rpcIsUp) {
@@ -87,8 +81,8 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     final isBip39Seed = await _isSeedBip39Compatible(config);
     seedValidationStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _registerNewUser: seed validation pipeline completed '
-      'in ${seedValidationStopwatch.elapsedMilliseconds}ms',
+      '_registerNewUser: seed validation pipeline completed in '
+      '${seedValidationStopwatch.elapsedMilliseconds}ms',
     );
     final currentUser = await _ensureAuthenticatedWalletIdentity(
       KdfUser(
@@ -102,7 +96,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     await _secureStorage.saveUser(currentUser);
     secureStorageStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _registerNewUser: secure-storage save completed in '
+      '_registerNewUser: secure-storage save completed in '
       '${secureStorageStopwatch.elapsedMilliseconds}ms',
     );
 
@@ -128,8 +122,8 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     );
     mnemonicStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _registerNewUser: first authenticated RPC '
-      '(get_mnemonic) completed in ${mnemonicStopwatch.elapsedMilliseconds}ms',
+      '_registerNewUser: first authenticated RPC (get_mnemonic) '
+      'completed in ${mnemonicStopwatch.elapsedMilliseconds}ms',
     );
 
     if (plaintext.plaintextMnemonic == null) {
@@ -145,7 +139,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     final isBip39 = validator.validateBip39(plaintext.plaintextMnemonic!);
     validationStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _registerNewUser: seed validation completed in '
+      '_registerNewUser: seed validation completed in '
       '${validationStopwatch.elapsedMilliseconds}ms',
     );
     return isBip39;

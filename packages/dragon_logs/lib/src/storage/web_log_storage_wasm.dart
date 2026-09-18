@@ -1,232 +1,383 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
-import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:dragon_logs/src/storage/input_output_mixin.dart';
 import 'package:dragon_logs/src/storage/log_storage.dart';
 import 'package:dragon_logs/src/storage/opfs_interop.dart';
 import 'package:dragon_logs/src/storage/queue_mixin.dart';
+import 'package:dragon_logs/src/storage/storage_lifecycle.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:web/web.dart';
 
-/// WASM-compatible web log storage implementation using OPFS
+/// Browser and Wasm storage share the same OPFS implementation. The lock covers
+/// the entire read/append/commit transaction, including migration and snapshots.
 class WebLogStorageWasm
-    with QueueMixin, CommonLogStorageOperations
+    with QueueMixin, LogStorageLifecycle, CommonLogStorageOperations
     implements LogStorage {
+  WebLogStorageWasm() : _directoryProvider = null, _lockOverride = null;
+
+  @visibleForTesting
+  WebLogStorageWasm.forTesting({
+    required Future<FileSystemDirectoryHandle> Function() directoryProvider,
+    Future<void> Function(Future<void> Function())? lock,
+  }) : _directoryProvider = directoryProvider,
+       _lockOverride = lock;
+
+  static const _lockName = 'dragon-logs-storage';
+  final Future<FileSystemDirectoryHandle> Function()? _directoryProvider;
+  final Future<void> Function(Future<void> Function())? _lockOverride;
   FileSystemDirectoryHandle? _logDirectory;
-  FileSystemFileHandle? _currentLogFile;
-  FileSystemWritableFileStream? _currentLogStream;
-  String _currentLogFileName = "";
+
+  /// Entries under `log_export` that a running export still reads. Export
+  /// bodies deliberately run outside the storage queue, so a concurrent clear
+  /// has to skip these rather than invalidate a snapshot that is being read.
+  final Set<String> _retainedExports = {};
 
   @override
-  Future<void> init() async {
-    final now = DateTime.now();
-    _currentLogFileName = logFileNameOfDate(now);
+  Future<void> init({String? storageNamespace, bool purgeLegacy = false}) {
+    final configuration = LogStorageConfiguration(
+      storageNamespace: storageNamespace,
+      purgeLegacy: purgeLegacy,
+    );
+    return initializeStorage(configuration, () async {
+      final root =
+          await (_directoryProvider?.call() ??
+              window.navigator.storage.getDirectory().toDart);
+      await _withStorageLock(() async {
+        FileSystemDirectoryHandle? active;
+        try {
+          active = await root
+              .getDirectoryHandle(configuration.namespace)
+              .toDart;
+        } on DOMException catch (error) {
+          if (error.name != 'NotFoundError') rethrow;
+        }
+        if (active == null) {
+          if (configuration.purgeLegacy) {
+            try {
+              await root
+                  .removeEntry(
+                    LogStorageConfiguration.legacyNamespace,
+                    FileSystemRemoveOptions(recursive: true),
+                  )
+                  .toDart;
+            } on DOMException catch (error) {
+              if (error.name != 'NotFoundError') rethrow;
+            }
+          }
+          // Existence marks a successfully completed migration. Do not create
+          // this directory after failed legacy deletion, and never import old
+          // files. Old clients cannot write into the new namespace.
+          active = await root
+              .getDirectoryHandle(
+                configuration.namespace,
+                FileSystemGetDirectoryOptions(create: true),
+              )
+              .toDart;
+        }
+        _logDirectory = active;
+      });
+    });
+  }
 
-    // Get the OPFS root directory
-    final storageManager = window.navigator.storage;
-    final root = await storageManager.getDirectory().toDart;
-
-    // Create or get the dragon_logs directory
-    _logDirectory =
-        await root
-            .getDirectoryHandle(
-              "dragon_logs",
-              FileSystemGetDirectoryOptions(create: true),
-            )
-            .toDart;
-
-    initQueueFlusher();
+  Future<T> _withStorageLock<T>(Future<T> Function() operation) async {
+    late T result;
+    final override = _lockOverride;
+    if (override != null) {
+      await override(() async {
+        result = await operation();
+      });
+      return result;
+    }
+    Object? failure;
+    StackTrace? failureStack;
+    var completed = false;
+    // No unlocked fallback: unsupported/failed Web Locks disable persistence
+    // and export instead of allowing an unsafe cross-tab race.
+    await window.navigator.locks
+        .request(
+          _lockName,
+          ((Lock? _) {
+            return Future<T>.sync(operation)
+                .then<JSAny?>(
+                  (value) {
+                    result = value;
+                    completed = true;
+                    return null;
+                  },
+                  onError: (Object error, StackTrace stack) {
+                    failure = error;
+                    failureStack = stack;
+                    return null;
+                  },
+                )
+                .toJS;
+          }).toJS,
+        )
+        .toDart;
+    if (failure != null) Error.throwWithStackTrace(failure!, failureStack!);
+    if (!completed) throw StateError('Log storage lock did not complete');
+    return result;
   }
 
   @override
-  Future<void> writeToTextFile(String logs) async {
-    if (_currentLogStream == null) {
-      await initWriteDate(DateTime.now());
-    }
+  Future<void> appendLog(DateTime date, String text) async {
+    await requireStorageReady();
+    enqueue(text);
+  }
 
+  @override
+  Future<void> writeToTextFile(String logs) => _withStorageLock(() async {
+    final directory = _logDirectory;
+    if (directory == null) throw StateError('Log storage is not ready');
+    final handle = await directory
+        .getFileHandle(
+          logFileNameOfDate(DateTime.now()),
+          FileSystemGetFileOptions(create: true),
+        )
+        .toDart;
+    final size = (await handle.getFile().toDart).size;
+    final stream = await handle
+        .createWritable(FileSystemCreateWritableOptions(keepExistingData: true))
+        .toDart;
     try {
-      await _currentLogStream!.write('$logs\n'.toJS).toDart;
-      await closeLogFile();
-      await initWriteDate(DateTime.now());
-    } catch (e) {
+      await stream.seek(size).toDart;
+      await stream.write('$logs\n'.toJS).toDart;
+      await stream.close().toDart;
+    } catch (_) {
+      try {
+        await stream.abort().toDart;
+      } catch (_) {}
       rethrow;
     }
-  }
-
-  Future<void> initWriteDate(DateTime date) async {
-    await closeLogFile();
-
-    _currentLogFileName = logFileNameOfDate(date);
-
-    _currentLogFile =
-        await _logDirectory!
-            .getFileHandle(
-              _currentLogFileName,
-              FileSystemGetFileOptions(create: true),
-            )
-            .toDart;
-
-    final file = await _currentLogFile!.getFile().toDart;
-    final sizeBytes = file.size.toInt();
-
-    _currentLogStream =
-        await _currentLogFile!
-            .createWritable(
-              FileSystemCreateWritableOptions(keepExistingData: true),
-            )
-            .toDart;
-
-    await _currentLogStream!.seek(sizeBytes).toDart;
-  }
+  });
 
   @override
   Future<void> deleteOldLogs(int size) async {
-    await startFlush();
-
-    try {
-      while (await getLogFolderSize() > size) {
+    if (size < 0) throw ArgumentError.value(size, 'size');
+    await requireStorageReady();
+    await withFlushedQueue(
+      () => _withStorageLock(() async {
         final files = await _getLogFiles();
-
-        final sortedFiles =
-            files
-                .where(
-                  (handle) => CommonLogStorageOperations.isLogFileNameValid(
-                    handle.name,
-                  ),
-                )
-                .toList()
-              ..sort((a, b) {
-                final aDate = CommonLogStorageOperations.tryParseLogFileDate(
-                  a.name,
-                );
-                final bDate = CommonLogStorageOperations.tryParseLogFileDate(
-                  b.name,
-                );
-
-                if (aDate == null || bDate == null) {
-                  return 0;
-                }
-
-                return aDate.compareTo(bDate);
-              });
-
-        if (sortedFiles.isEmpty) {
-          break;
+        var total = 0;
+        for (final file in files) {
+          total += (await file.getFile().toDart).size;
         }
-
-        await _logDirectory!
-            .removeEntry(
-              sortedFiles.first.name,
-              FileSystemRemoveOptions(recursive: false),
-            )
-            .toDart;
-      }
-    } catch (e) {
-      rethrow;
-    } finally {
-      endFlush();
-    }
+        for (final file in files) {
+          if (total <= size) break;
+          final length = (await file.getFile().toDart).size;
+          await _logDirectory!.removeEntry(file.name).toDart;
+          total -= length;
+        }
+      }),
+    );
   }
 
   @override
   Future<int> getLogFolderSize() async {
-    final files = await _getLogFiles();
-
-    int totalSize = 0;
-    for (final handle in files) {
-      final file = await handle.getFile().toDart;
-      totalSize += file.size.toInt();
-    }
-
-    return totalSize;
+    await requireStorageReady();
+    return withFlushedQueue(
+      () => _withStorageLock(() async {
+        var total = 0;
+        for (final file in await _getLogFiles()) {
+          total += (await file.getFile().toDart).size;
+        }
+        return total;
+      }),
+    );
   }
 
   @override
-  Future<void> closeLogFile() async {
-    if (_currentLogStream != null) {
-      await _currentLogStream!.close().toDart;
-      _currentLogStream = null;
-    }
-  }
+  Future<void> closeLogFile() => flushQueue();
 
   @override
   Stream<String> exportLogsStream() async* {
-    final files = await _getLogFiles();
-
-    for (final fileHandle in files) {
-      final file = await fileHandle.getFile().toDart;
-      final content = await _readFileContent(file);
-      yield content;
+    final snapshot = await _createSnapshot();
+    try {
+      yield* _readFileChunks(snapshot.file).transform(utf8.decoder);
+    } finally {
+      await _deleteSnapshot(snapshot);
     }
   }
 
-  /// Returns a list of OPFS file handles for all log files EXCLUDING any
-  /// temporary write file (if it exists) identified by the `.crswap` extension.
-  Future<List<FileSystemFileHandle>> _getLogFiles() async {
-    final files = <FileSystemFileHandle>[];
+  Future<_WebLogSnapshot> _createSnapshot() async {
+    await requireStorageReady();
+    return withFlushedQueue(
+      () => _withStorageLock(() async {
+        final cache = await _logDirectory!
+            .getDirectoryHandle(
+              'log_export',
+              FileSystemGetDirectoryOptions(create: true),
+            )
+            .toDart;
+        final random = Random.secure();
+        final name =
+            'snapshot_${DateTime.now().microsecondsSinceEpoch}_${random.nextInt(0x100000000)}_${random.nextInt(0x100000000)}';
+        final directory = await cache
+            .getDirectoryHandle(
+              name,
+              FileSystemGetDirectoryOptions(create: true),
+            )
+            .toDart;
+        _retainedExports.add(name);
+        try {
+          final handle = await directory
+              .getFileHandle(
+                'records.txt',
+                FileSystemGetFileOptions(create: true),
+              )
+              .toDart;
+          final writer = await handle.createWritable().toDart;
+          try {
+            for (final source in await _getLogFiles()) {
+              final file = await source.getFile().toDart;
+              await for (final bytes in _readFileChunks(file)) {
+                await writer.write(Uint8List.fromList(bytes).toJS).toDart;
+              }
+            }
+            await writer.close().toDart;
+          } catch (_) {
+            try {
+              await writer.abort().toDart;
+            } catch (_) {}
+            rethrow;
+          }
+          // OPFS getFile() objects are invalidated by later commits to their
+          // source. Copy first: this private snapshot file is never appended.
+          return _WebLogSnapshot(cache, name, await handle.getFile().toDart);
+        } catch (_) {
+          _retainedExports.remove(name);
+          await cache
+              .removeEntry(name, FileSystemRemoveOptions(recursive: true))
+              .toDart;
+          rethrow;
+        }
+      }),
+    );
+  }
 
-    // Use the async iterator provided by FileSystemDirectoryHandle.values()
-    // via our custom interop extension
-    await for (final handle in _logDirectory!.valuesStream()) {
-      if (handle.kind == 'file' && !handle.name.endsWith('.crswap')) {
+  Future<void> _deleteSnapshot(_WebLogSnapshot snapshot) =>
+      _withStorageLock(() async {
+        _retainedExports.remove(snapshot.name);
+        try {
+          await snapshot.parent
+              .removeEntry(
+                snapshot.name,
+                FileSystemRemoveOptions(recursive: true),
+              )
+              .toDart;
+        } on DOMException catch (error) {
+          if (error.name != 'NotFoundError') rethrow;
+        }
+      });
+
+  Stream<List<int>> _readFileChunks(File file) async* {
+    for (var offset = 0; offset < file.size; offset += 64 * 1024) {
+      final bytes = await file
+          .slice(offset, offset + 64 * 1024)
+          .arrayBuffer()
+          .toDart;
+      yield bytes.toDart.asUint8List();
+    }
+  }
+
+  Future<List<FileSystemFileHandle>> _getLogFiles() async {
+    final directory = _logDirectory;
+    if (directory == null) throw StateError('Log storage is not ready');
+    final files = <FileSystemFileHandle>[];
+    await for (final handle in directory.valuesStream()) {
+      if (handle.kind == 'file' &&
+          CommonLogStorageOperations.isLogFileNameValid(handle.name)) {
         files.add(handle as FileSystemFileHandle);
       }
     }
-
     files.sort((a, b) => a.name.compareTo(b.name));
     return files;
   }
 
-  Future<String> _readFileContent(File file) async {
-    final completer = Completer<String>();
-    final reader = FileReader();
-
-    reader.onLoadEnd.listen((event) {
-      final result = reader.result;
-      if (result != null) {
-        completer.complete(result.toString());
-      } else {
-        completer.complete('');
-      }
-    });
-
-    reader.readAsText(file);
-    return completer.future;
-  }
-
   @override
   Future<void> deleteExportedFiles() async {
-    // Since it's a web implementation, we just need to ensure necessary permissions.
-    // Note: Real-world applications should handle permissions gracefully, prompting users as needed.
+    await requireStorageReady();
+    await serializeStorage(
+      () => _withStorageLock(() async {
+        try {
+          final cache = await _logDirectory!
+              .getDirectoryHandle('log_export')
+              .toDart;
+          var retained = false;
+          for (final name in await cache.keysStream().toList()) {
+            if (_retainedExports.contains(name)) {
+              retained = true;
+              continue;
+            }
+            await cache
+                .removeEntry(name, FileSystemRemoveOptions(recursive: true))
+                .toDart;
+          }
+          // A retained snapshot is removed by the export that owns it, or by
+          // the next clear once that export has finished.
+          if (!retained) {
+            await _logDirectory!
+                .removeEntry(
+                  'log_export',
+                  FileSystemRemoveOptions(recursive: true),
+                )
+                .toDart;
+          }
+        } on DOMException catch (error) {
+          if (error.name != 'NotFoundError') rethrow;
+        }
+      }),
+    );
   }
 
   @override
   Future<void> exportLogsToDownload() async {
-    final bytesStream = exportLogsStream().asyncExpand((event) {
-      return Stream.fromIterable(event.codeUnits);
-    });
-
-    final formatter = DateFormat('yyyyMMdd_HHmmss');
-    final filename = 'log_${formatter.format(DateTime.now())}.txt';
-
-    final bytes = await bytesStream.toList();
-    final blob = Blob([Uint8List.fromList(bytes).toJS].toJS);
-    final url = URL.createObjectURL(blob);
-
-    final anchor =
-        HTMLAnchorElement()
-          ..href = url
-          ..download = filename
-          ..style.display = 'none';
-
-    document.body!.appendChild(anchor);
-    anchor.click();
-    document.body!.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    final snapshot = await _createSnapshot();
+    late Blob download;
+    try {
+      // Download blobs must own their bytes before the OPFS snapshot is
+      // deleted. Keep conversion chunked; no concatenated full-store string.
+      final parts = <JSAny>[];
+      await for (final bytes in _readFileChunks(snapshot.file)) {
+        parts.add(Uint8List.fromList(bytes).toJS);
+      }
+      download = Blob(parts.toJS);
+    } finally {
+      await _deleteSnapshot(snapshot);
+    }
+    final filename =
+        'log_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.txt';
+    final url = URL.createObjectURL(download);
+    final anchor = HTMLAnchorElement()
+      ..href = url
+      ..download = filename
+      ..style.display = 'none';
+    try {
+      document.body!.appendChild(anchor);
+      anchor.click();
+    } finally {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
   }
 
-  void dispose() async {
-    await closeLogFile();
+  @override
+  Future<void> dispose() async {
+    try {
+      await disposeStorage();
+    } finally {
+      _logDirectory = null;
+    }
   }
+}
+
+class _WebLogSnapshot {
+  _WebLogSnapshot(this.parent, this.name, this.file);
+  final FileSystemDirectoryHandle parent;
+  final String name;
+  final File file;
 }

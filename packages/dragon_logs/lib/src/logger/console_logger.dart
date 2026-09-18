@@ -12,7 +12,10 @@ class ConsoleLogger extends LoggerInterface {
   static final ConsoleLogger _instance = ConsoleLogger._internal();
 
   @override
-  Future<void> init() async {}
+  Future<void> init({
+    String? storageNamespace,
+    bool purgeLegacy = false,
+  }) async {}
 
   @override
   void log(String key, String message, {Map<String, dynamic>? metadata}) async {

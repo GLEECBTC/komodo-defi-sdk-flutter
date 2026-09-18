@@ -113,7 +113,7 @@ jobs:
         working-directory: packages/komodo_defi_sdk/example
         run: flutter build web --release || echo "Dry build completed (failure expected)"
 
-      - name: Test wallet history races in WebAssembly
+      - name: Test wallet isolation and GasFree races in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_sdk')
         timeout-minutes: 10
         working-directory: packages/komodo_defi_sdk
@@ -122,7 +122,12 @@ jobs:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           flutter test --no-pub --platform chrome --wasm --reporter expanded
+          test/activation/activation_wallet_race_test.dart
           test/transaction_history/transaction_history_manager_wallet_race_test.dart
+          test/withdrawals/pending_gasless_transfer_repository_test.dart
+          test/withdrawals/withdrawal_manager_gasless_test.dart
+          test/withdrawals/gasless_submission_lock_web_test.dart
+          test/withdrawals/pending_gasless_transfer_repository_web_test.dart
 
       - name: Run tests for all packages
         if: steps.discover.outputs.packages != ''

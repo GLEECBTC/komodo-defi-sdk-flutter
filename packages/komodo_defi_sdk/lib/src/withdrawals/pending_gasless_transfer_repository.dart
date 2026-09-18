@@ -168,6 +168,22 @@ abstract interface class PendingGaslessTransferRepository {
   /// Inserts or replaces a correlated non-terminal [transfer].
   Future<void> upsert(WalletId walletId, PendingGaslessTransfer transfer);
 
+  /// Attaches an accepted trace to its existing reservation and verifies the
+  /// encrypted write under the same lock. Retries cannot recreate a request
+  /// removed by terminal reconciliation or overwrite more advanced progress.
+  Future<bool> accept(WalletId walletId, PendingGaslessTransfer transfer);
+
+  /// Applies a trace snapshot only while its exact request still exists.
+  ///
+  /// Reads and writes under one journal lock, retains a more advanced stored
+  /// lifecycle, and removes terminal requests atomically. Returns the effective
+  /// transfer, or `null` if it was removed or replaced. Unlike [upsert], this
+  /// must never recreate a reservation from a delayed reconciliation result.
+  Future<PendingGaslessTransfer?> reconcile(
+    WalletId walletId,
+    PendingGaslessTransfer transfer,
+  );
+
   /// Atomically reserves one unresolved send per wallet/asset/custody source.
   Future<bool> reserve(WalletId walletId, PendingGaslessTransfer transfer);
 
@@ -432,6 +448,81 @@ class SecurePendingGaslessTransferRepository
       notifyGaslessTransferChanged();
     });
   }
+
+  @override
+  Future<bool> accept(WalletId walletId, PendingGaslessTransfer transfer) {
+    return _protect(() async {
+      final transfers = await _readUnlocked(walletId);
+      final index = transfers.indexWhere(
+        (stored) =>
+            _sameRequest(stored, transfer) &&
+            (stored.traceId == null || stored.traceId == transfer.traceId),
+      );
+      if (index < 0 || transfer.traceId == null || transfer.state.isTerminal) {
+        return false;
+      }
+      final stored = transfers[index];
+      transfers[index] = _stateRank(stored.state) > _stateRank(transfer.state)
+          ? stored
+          : transfer;
+      await _writeUnlocked(walletId, transfers);
+      // A separate manager-level read-back lets another poller remove the
+      // accepted request between write and verification, leading to blind
+      // upsert retries. Verify while the same journal lock is still held.
+      final verified = (await _readUnlocked(walletId)).any(
+        (stored) =>
+            _sameRequest(stored, transfer) &&
+            stored.traceId == transfer.traceId &&
+            _stateRank(stored.state) >= _stateRank(transfer.state),
+      );
+      notifyGaslessTransferChanged();
+      return verified;
+    });
+  }
+
+  @override
+  Future<PendingGaslessTransfer?> reconcile(
+    WalletId walletId,
+    PendingGaslessTransfer transfer,
+  ) {
+    return _protect(() async {
+      final transfers = await _readUnlocked(walletId);
+      final index = transfers.indexWhere(
+        (stored) =>
+            _sameRequest(stored, transfer) &&
+            stored.traceId == transfer.traceId,
+      );
+      if (index < 0) return null;
+      final stored = transfers[index];
+      if (_stateRank(stored.state) > _stateRank(transfer.state) ||
+          stored == transfer) {
+        return stored;
+      }
+      if (transfer.state.isTerminal) {
+        transfers.removeAt(index);
+      } else {
+        transfers[index] = transfer;
+      }
+      await _writeUnlocked(walletId, transfers);
+      notifyGaslessTransferChanged();
+      return transfer;
+    });
+  }
+
+  bool _sameRequest(
+    PendingGaslessTransfer stored,
+    PendingGaslessTransfer transfer,
+  ) =>
+      stored.journalId == transfer.journalId &&
+      stored.assetId == transfer.assetId &&
+      stored.network == transfer.network &&
+      stored.sourceAddress == transfer.sourceAddress &&
+      stored.custodyAddress == transfer.custodyAddress &&
+      stored.destinationAddress == transfer.destinationAddress &&
+      stored.requestedAmount == transfer.requestedAmount &&
+      stored.signedMaxFee == transfer.signedMaxFee &&
+      stored.authorizationDeadline == transfer.authorizationDeadline &&
+      stored.acceptedAt == transfer.acceptedAt;
 
   @override
   Future<bool> reserve(WalletId walletId, PendingGaslessTransfer transfer) {

@@ -112,11 +112,11 @@ class KdfOperationsRemote implements IKdfOperations {
     try {
       final stopResultResponse = await mm2Rpc({'method': 'stop'});
 
-      _log('stopResultResponse: $stopResultResponse');
+      _log('KDF stop response received');
 
       return _parseStopResult(stopResultResponse);
-    } on Exception catch (e) {
-      _log('Error stopping KDF: $e');
+    } on Exception {
+      _log('KDF stop failed');
       return StopStatus.errorStopping;
     }
   }
@@ -150,7 +150,7 @@ class KdfOperationsRemote implements IKdfOperations {
     }
 
     if (KdfLoggingConfig.verboseLogging) {
-      _logCallback('mm2Rpc request: ${json.encode(request.censored())}');
+      _logCallback('KDF remote RPC request dispatched');
     }
 
     late final http.Response response;

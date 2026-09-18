@@ -3,57 +3,214 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## 2026-09-05 — wallet-identity release candidate
+## 2026-09-11 — SDK 0.8.0 (unreleased)
+
+### SDK 0.8.0 overview
+
+This is the stable release preparation for the GitHub checkout/submodule
+workflow. No tag, GitHub release or pub.dev publication is created by this PR.
+The comparison baseline is the latest SDK tag,
+[`komodo_defi_sdk-v0.4.0+3`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/tree/komodo_defi_sdk-v0.4.0%2B3).
+The 0.5.0, 0.6.0 and 0.7.0 sections below record earlier preparation milestones;
+the September 5 and 9 candidates have been consolidated into this section.
+Merge/cherry-pick copies and reverted NFT-filter changes are not separate items.
+
+The release includes the wallet-identity and diagnostics/export changes listed
+below, plus the earlier changes since that tag:
+
+ - **FEAT**(wallet): TRON/TRC20, SIA and GRC20 support, legacy wallet migration,
+   typed errors and manager APIs, message-signing address paths, custom-token
+   validation and cleanup, and ETH-BASE asset support. See the
+   [0.5.0 preparation](#2026-03-23--sdk-050-preparation) and
+   [0.6.0 preparation](#2026-05-02--sdk-060-preparation) for package details.
+ - **FEAT**(gasfree): KDF's activation-time provider configuration, four-state
+   account status, maximum-send contract, wallet journal and trace recovery.
+   Recovery preserves uncertain outcomes without automatic resubmission.
+ - **PERF**(wallet): cached first-paint balances, durable transaction history,
+   Tronscan/Blockscout providers, smaller software-HD gap scans, shared
+   activation coordination, stream-first trading and reduced duplicate RPCs.
+ - **FIX**(platforms): Wasm-safe parsing/interoperability, SSE readiness,
+   Android 16 KB alignment, macOS artefact placement, market-data fallbacks,
+   stable asset snapshots and icon handling. KDF provenance verification and
+   the replay/measurement harness accompany these changes. Detailed GasFree,
+   performance and build entries remain in the
+   [0.7.0 preparation](#2026-09-01--sdk-070-preparation).
+
+Adopters coming from the tagged SDK must also migrate the earlier GasFree,
+activation-progress, SIA and asset-snapshot interfaces described in those
+package entries. Read the [migration guide](docs/RELEASE_0.8.0.md) and
+[release checklist](docs/RELEASE_0.8.0_CHECKLIST.md) before repinning a consumer.
+The KDF binary/coin pins and supported Dart/Flutter constraints are unchanged
+by this preparation PR.
+
+### Package versions
+
+Packages with breaking API changes in this promotion: `komodo_defi_sdk`,
+`komodo_defi_local_auth`, `dragon_logs`. Earlier breaking changes are described
+in the linked preparation history.
+
+| Package | Stable version |
+| --- | --- |
+| `komodo_defi_sdk` | `0.8.0` |
+| `komodo_defi_local_auth` | `0.6.0` |
+| `komodo_defi_framework` | `0.6.0` |
+| `komodo_defi_types` | `0.6.0` |
+| `komodo_defi_rpc_methods` | `0.7.0` |
+| `komodo_coin_updates` | `2.1.1` |
+| `dragon_logs` | `3.0.0` |
+
+Other versions remain unchanged. `komodo_coins` 0.4.0, `komodo_ui` 0.3.3,
+`komodo_cex_market_data` 0.1.0+2 and `komodo_legacy_wallet_migration` 0.1.1
+receive only stable workspace dependency constraints in this promotion; their
+existing unreleased entries are extended in place.
 
 ### Changes
 
----
+#### `komodo_defi_sdk` - `v0.8.0`
 
-Packages with breaking changes:
-
- - [`komodo_defi_sdk` - `v0.8.0-rc.1`](#komodo_defi_sdk---v080-rc1)
- - [`komodo_defi_local_auth` - `v0.6.0-rc.1`](#komodo_defi_local_auth---v060-rc1)
-
-Packages with other changes:
-
- - There are no other package version changes in this release candidate.
-
----
-
-#### `komodo_defi_sdk` - `v0.8.0-rc.1`
-
- - **BREAKING** **FIX**(auth): metadata writes through `KomodoDefiSdk.auth`
-   require the verified wallet identity captured when the operation starts.
-   Reject stale operations before they can update a replacement wallet.
- - **FIX**(history): retain verified identity and active history streams during
-   degraded same-wallet authentication events.
+ - **FIX**(history): preserve verified wallet identity and active history streams
+   during degraded same-wallet authentication events.
  - **FIX**(history): retain one wallet context across historical and live results
-   so old-wallet rows cannot enter a replacement wallet's stream.
- - **FIX**(history): validate the wallet before recording activation and recheck
-   the session synchronously immediately before the marker is added. This also
-   closes the asynchronous return gap on WebAssembly.
- - **TEST**(history): cover wallet switching during activation in native and
-   Chrome/WebAssembly tests, including the Wasm suite in CI.
- - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0-rc.1`.
+   so a wallet switch cannot carry the previous wallet's rows into the new stream.
+ - **FIX**(history): recheck the wallet session synchronously before recording
+   activation. On WebAssembly, an auth event can run after asynchronous
+   validation completes and otherwise mark the replacement wallet activated.
+ - **BREAKING** **FIX**(auth): `sdk.auth` metadata setters and atomic updates
+   require the original `expectedWalletId`. Writes fail closed when identity
+   cannot be verified or the active wallet changes. See the
+   [local-auth migration guidance](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes).
+ - **FEAT**(security): add `SecurityManager.exportPrivateKeys`, exporting each
+   offline-supported asset independently with concurrency limited to two.
+ - **FIX**(security): report TRON/TRC20 private-key export as
+   `unsupportedProtocol` until KDF supports `get_private_keys` for TRON.
+   Both structured and strict export reject these protocols before issuing an
+   RPC. Remove the active-key fallback, scalar/address derivation, HD metadata
+   searches and direct PointyCastle dependency.
+ - **SECURITY**(security): bind export capabilities to a verified wallet
+   identity, the manager that issued them, and a source-owned authentication
+   generation that revokes synchronously before an authentication transition.
+ - **SECURITY**(diagnostics): keep RPC and startup diagnostics metadata-only,
+   and redact secret-bearing diagnostic strings.
+ - **FEAT**(diagnostics): version persisted diagnostic storage, clean up legacy
+   records, and serialize writes and disposal behind stable native and browser
+   snapshots.
+ - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0`,
+   `komodo_defi_rpc_methods` `^0.7.0`, `komodo_defi_types` `^0.6.0`,
+   `komodo_defi_framework` `^0.6.0` and `komodo_coin_updates`
+   `^2.1.1`.
+ - **TEST**(history): run wallet-race regressions in Chrome/WebAssembly in CI.
+ - **TEST**(security): cover structured export, session invalidation and
+   TRON/TRC20 rejection without RPC calls while retaining successful exports
+   for supported assets in a mixed selection.
 
-#### `komodo_defi_local_auth` - `v0.6.0-rc.1`
+ - **FIX**(activation): bind completion and coordinator work to the originating
+   wallet session, rejecting delayed results after a wallet switch (#376).
+ - **FIX**(gasfree): apply acceptance and reconciliation atomically and keep
+   browser recovery from discarding a live submission's journal record (#376).
+ - **FIX**(gasfree): cancel local waits during disposal, drain journal writes
+   before releasing submission ownership, and suppress detached relay/trace
+   continuations while preserving unresolved outcomes for recovery (#377).
 
- - **BREAKING** **FIX**(auth): require `expectedWalletId` for metadata setters
-   and atomic updates, including custom auth implementations and Trezor
-   forwarding. Callers must capture the original identity before asynchronous
-   work and retain it through every write and rollback.
- - **FIX**(auth): reject missing public-key hashes and changed wallets under the
-   authentication write lock, before transformation or persistence. This prevents
-   a stale confirmation from updating a different seed recreated under the same
-   name during an identity lookup outage.
- - **DOCS**(auth): document [caller migration](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes)
-   and explicit prerelease adoption.
+#### `komodo_defi_local_auth` - `v0.6.0`
 
-These versions prepare the release candidate in [PR #374](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/374).
-They do not indicate that packages have been published. The KDF binary, coin
-configuration pins, and stored-data format are unchanged.
+ - **BREAKING** **FIX**(auth): require `expectedWalletId` on metadata setters
+   and atomic updates, including custom auth implementations. Capture the
+   original wallet identity before asynchronous work and forward it through
+   every write. See [migration guidance](packages/komodo_defi_local_auth/README.md#migrating-metadata-writes).
+ - **FIX**(auth): reject metadata writes when either identity lacks a verified
+   public-key hash, preventing stale confirmations from reaching a different
+   wallet recreated under the same name during an identity lookup outage.
+ - **BREAKING** **FEAT**(auth): add `authGeneration` and `authGenerationChanges`
+   to `KomodoDefiAuth` and the auth service interface. A capability holder can
+   revoke synchronously as the generation advances, before an authentication
+   transition completes; custom implementations must provide both members,
+   transition state and
+   the session invalidation/transition methods. See the
+   [authentication lifecycle migration](packages/komodo_defi_local_auth/README.md#migrating-authentication-lifecycle).
+ - **FIX**(auth): run sign-in, registration, sign-out, session restore and
+   disposal through one serialized authentication transition, so a transition
+   cannot interleave with another or with KDF lifecycle changes.
 
-## 2026-09-01
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,
+   `komodo_defi_rpc_methods` `^0.7.0`.
+
+#### `komodo_defi_framework` - `v0.6.0`
+
+ - **SECURITY**(diagnostics): omit request, configuration, response and
+   exception bodies from native, remote, WASM, RPC-client and startup logging.
+   Every message reaching `logStream` or an external log callback is sanitized
+   to metadata first.
+ - **FIX**(logging): contain a failing external log callback instead of letting
+   it escape into the framework's own lifecycle.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`, `komodo_defi_rpc_methods` `^0.7.0`,
+   `komodo_coin_updates` `^2.1.1`.
+
+#### `komodo_defi_types` - `v0.6.0`
+
+ - **FEAT**(private-keys): add the structured per-asset export result types used
+   by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
+   `zDerivationPath` on private-key metadata. Coverage describes supported
+   offline exports; TRON/TRC20 return `unsupportedProtocol`. Remove the
+   active-address coverage, limited-coverage flag, separate signing-asset
+   attribution, TRON opt-in and TRON-only failure categories from the
+   unreleased export API.
+ - **FEAT**(diagnostics): add `DiagnosticSanitizer` for metadata-only
+   diagnostics, and expose the shared sensitive-field taxonomy through
+   `SecurityUtils.isSensitiveDiagnosticKey`.
+ - **SECURITY**(diagnostics): reduce every non-primitive value to `<redacted>`
+   when censoring recursively, treat a non-string key as sensitive, and give
+   key-bearing types a redacting `toString()`.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_rpc_methods` `^0.7.0`.
+
+#### `komodo_defi_rpc_methods` - `v0.7.0`
+
+ - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
+   `account_balance_read` wrappers used by the removed TRON export workaround.
+ - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
+   and key metadata, and preserve strict account/range semantics in
+   `get_private_keys`.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`.
+
+#### `komodo_coin_updates` - `v2.1.1`
+
+ - **SECURITY**(seed-nodes): keep the configured URL out of seed-node fetch
+   failures by building the URI inside the same diagnostic boundary as transport
+   and response parsing, and raising a dedicated failure type.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`.
+
+#### `dragon_logs` - `v3.0.0`
+
+ - **BREAKING** **FEAT**(storage): `LogStorage.init` and `LoggerInterface.init`
+   take `storageNamespace` and `purgeLegacy`, both interfaces gained `dispose`,
+   and `FileLogStorage` is no longer a process-wide singleton. `DragonLogs.init`
+   mirrors the new parameters and every API now fails closed before it runs.
+ - **FEAT**(storage): version persisted storage by namespace and purge records
+   written by an older, unversioned client before the new epoch is created.
+ - **FEAT**(diagnostics): add `DragonLogs.writeRecord` for one caller-sanitized
+   JSON object per line, without legacy message or metadata decoration.
+ - **FIX**(storage): serialize appends, snapshots, migrations and disposal
+   behind one queue and a cross-process lock, using Web Locks in the browser.
+ - **FEAT**(export): `DragonLogs.clearLogs` also removes cached exports.
+ - **FIX**(export): keep the artefacts of a running export out of that clear.
+   Writing and sharing deliberately run outside the storage queue, so a clear
+   could otherwise delete the snapshot being read or the file being shared.
+ - **FIX**(export): share native export ownership across storage instances in
+   one isolate using canonical paths, and serialize snapshot cleanup with clear.
+   Retention survives disposal; concurrent shares use separate cache directories.
+
+## 2026-09-01 — SDK 0.7.0 preparation
+
+Historical preparation milestone included in 0.8.0; this heading is not a
+publication record. Detailed changes are retained here once.
 
 ### Changes
 
@@ -76,12 +233,6 @@ Packages with other changes:
  - [`komodo_ui` - `v0.3.3`](#komodo_ui---v033)
  - [`komodo_legacy_wallet_migration` - `v0.1.1`](#komodo_legacy_wallet_migration---v011)
  - [`komodo_cex_market_data` - `v0.1.0+2`](#komodo_cex_market_data---v0102)
-
-Packages with dependency updates only:
-
-> Packages listed below depend on other packages in this workspace that have had changes. Their versions have been incremented to bump the minimum dependency versions of the packages they depend upon in this project.
-
- - `komodo_cex_market_data` - `v0.1.0+2`
 
 ---
 
@@ -360,7 +511,10 @@ Packages with dependency updates only:
    rejected the package.
  - Update a dependency to the latest release.
 
-## 2026-05-02
+## 2026-05-02 — SDK 0.6.0 preparation
+
+Historical preparation milestone included in 0.8.0; this heading is not a
+publication record. Detailed changes are retained here once.
 
 ### Changes
 
@@ -459,7 +613,10 @@ Packages with dependency updates only:
  - **FEAT**(build): update API config tooling for the balance recovery and fee-info release inputs (#341).
 
 
-## 2026-03-23
+## 2026-03-23 — SDK 0.5.0 preparation
+
+Historical preparation milestone included in 0.8.0; this heading is not a
+publication record. Detailed changes are retained here once.
 
 ### Changes
 

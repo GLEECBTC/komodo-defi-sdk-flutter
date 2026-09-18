@@ -70,7 +70,7 @@ void main() {
       ]) {
         expect(diagnostics, isNot(contains(secret)));
       }
-      expect(logs.join('\n'), contains('<redacted>'));
+      expect(logs, ['KDF remote RPC request dispatched']);
 
       // Redaction is log-only: KDF still receives the exact credentials/payload.
       expect(sent['userpass'], 'rpc-password-value');
