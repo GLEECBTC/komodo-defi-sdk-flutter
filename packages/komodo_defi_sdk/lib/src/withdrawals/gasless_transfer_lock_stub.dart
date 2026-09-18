@@ -15,6 +15,40 @@ Future<T> withGaslessTransferLock<T>(Future<T> Function() operation) {
 }
 
 final Set<(String, String)> _submissionLeases = {};
+final Map<String, int> _walletReaders = {};
+final Set<String> _walletWriters = {};
+
+/// Stable wallet lifecycle lock name, shared by submissions and deletion.
+String gaslessWalletLockName(String walletNamespace) =>
+    'gleec-gasfree-wallet-lifecycle:$walletNamespace';
+
+/// Submissions share a wallet lease; deletion requires exclusive ownership.
+Future<GaslessSubmissionLease?> tryAcquireGaslessWalletLease(
+  String walletNamespace, {
+  bool exclusive = false,
+}) async {
+  if (_walletWriters.contains(walletNamespace) ||
+      (exclusive && (_walletReaders[walletNamespace] ?? 0) > 0)) {
+    return null;
+  }
+  if (exclusive) {
+    _walletWriters.add(walletNamespace);
+  } else {
+    _walletReaders.update(walletNamespace, (n) => n + 1, ifAbsent: () => 1);
+  }
+  return GaslessSubmissionLease._(() async {
+    if (exclusive) {
+      _walletWriters.remove(walletNamespace);
+    } else {
+      final remaining = (_walletReaders[walletNamespace] ?? 1) - 1;
+      if (remaining == 0) {
+        _walletReaders.remove(walletNamespace);
+      } else {
+        _walletReaders[walletNamespace] = remaining;
+      }
+    }
+  });
+}
 
 /// Exclusive ownership of a live submission or an explicit discard attempt.
 final class GaslessSubmissionLease {

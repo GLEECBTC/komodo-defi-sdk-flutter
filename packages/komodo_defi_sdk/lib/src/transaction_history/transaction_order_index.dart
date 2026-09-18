@@ -19,13 +19,11 @@ class TransactionPrefixStats {
   final int newestMicros;
 }
 
-/// In-memory ordering index over the persisted transaction keyspace.
+/// Ordering index rebuilt from decrypted cache envelope metadata.
 ///
-/// Every answer this class gives is derived from the keys alone, so opening a
-/// box and serving a page costs no value reads beyond the rows actually
-/// returned. That is what makes a lazy box viable: the ordering field lives in
-/// the key ([TransactionStorageKey]), so the index can be rebuilt from
-/// `box.keys` without deserializing a single record.
+/// The structured keys in this index exist only in memory and encrypted record
+/// envelopes. Persistent Hive keys are opaque HMAC identifiers, so opening a
+/// cache must decrypt its bounded metadata before serving local rows.
 ///
 /// Ordering matches `InMemoryTransactionStorage`: **timestamp descending, then
 /// internal ID descending** as a stable tiebreaker. The index deliberately does

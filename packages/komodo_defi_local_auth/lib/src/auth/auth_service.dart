@@ -4,18 +4,30 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
+import 'package:komodo_defi_local_auth/src/auth/auth_session.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
+import 'package:komodo_defi_local_auth/src/auth/wallet_catalog_lock.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
-import 'package:mutex/mutex.dart';
+import 'package:mutex/mutex.dart' show ReadWriteMutex;
+import 'package:uuid/uuid.dart';
 
 part 'auth_service_auth_extension.dart';
 part 'auth_service_kdf_extension.dart';
 part 'auth_service_operations_extension.dart';
 
 abstract interface class IAuthService {
+  Future<AuthSessionContext> captureSessionContext();
+  bool isSessionContextCurrent(AuthSessionContext context);
+  void ensureSessionContextCurrent(AuthSessionContext context);
+  Stream<AuthSessionContext?> watchSessionContext();
+  Future<KdfUser> updateMetadataForSession(
+    AuthSessionContext context,
+    Map<String, dynamic> updates,
+  );
+
   /// Synchronous revision of the authentication session.
   ///
   /// Capture before asynchronous sensitive work and compare before using its
@@ -49,12 +61,15 @@ abstract interface class IAuthService {
   });
 
   /// Throws [AuthException] if user creation fails, the wallet already exists,
-  /// or the seed phrase is not a valid BIP39 seed phrase.
+  /// or the seed phrase is not a valid BIP39 seed phrase. [initialMetadata]
+  /// is saved with the first user record before the authenticated user is
+  /// published. A collision never signs into the existing wallet.
   Future<KdfUser> register({
     required String walletName,
     required String password,
     required AuthOptions options,
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   });
 
   /// Waits for active operations to complete before signin the user out.
@@ -95,10 +110,15 @@ abstract interface class IAuthService {
     required String newPassword,
   });
 
-  /// Deletes the specified wallet.
+  /// Deletes the wallet while holding the shared catalog lock.
+  /// [beforeDelete] checks the fresh record inside the auth write lock.
+  /// [afterDelete] runs after that lock is released, but before catalog
+  /// ownership is released. Neither callback may enter catalog operations.
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    Future<void> Function(KdfUser target)? beforeDelete,
+    Future<void> Function()? afterDelete,
   });
 
   /// Method to store custom metadata for the user.
@@ -166,8 +186,9 @@ class KdfAuthService implements IAuthService {
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage;
   final ReadWriteMutex _authMutex = ReadWriteMutex();
-  final Mutex _metadataMutex = Mutex();
   final Logger _logger = Logger('KdfAuthService');
+
+  final _sessions = AuthSessionTracker();
 
   KdfUser? _lastEmittedUser;
   int _authStateGeneration = 0;
@@ -196,6 +217,7 @@ class KdfAuthService implements IAuthService {
   @override
   void beginAuthTransition() {
     // Subscribers must see the busy state when the synchronous epoch arrives.
+    if (_authTransitionDepth == 0) _sessions.invalidate();
     _authTransitionDepth++;
     invalidateAuthSession();
   }
@@ -206,6 +228,9 @@ class KdfAuthService implements IAuthService {
       throw StateError('No authentication transition is in progress');
     }
     _authTransitionDepth--;
+    if (_authTransitionDepth == 0 && !_isDisposed) {
+      _sessions.observe(_lastEmittedUser);
+    }
   }
 
   Future<T> _runAuthTransition<T>(Future<T> Function() operation) async {
@@ -214,6 +239,90 @@ class KdfAuthService implements IAuthService {
       return await operation();
     } finally {
       endAuthTransition();
+    }
+  }
+
+  @override
+  Future<AuthSessionContext> captureSessionContext() async {
+    if (isAuthTransitionInProgress) throw const AuthSessionChangedException();
+    final existing = _sessions.current;
+    if (existing != null) return existing;
+    final epoch = _sessions.epoch;
+    await getActiveUser();
+    final context = _sessions.current;
+    if (context == null || epoch != _sessions.epoch) {
+      throw const AuthSessionChangedException();
+    }
+    ensureSessionContextCurrent(context);
+    return context;
+  }
+
+  @override
+  bool isSessionContextCurrent(AuthSessionContext context) =>
+      !isAuthTransitionInProgress && _sessions.isCurrent(context);
+
+  @override
+  void ensureSessionContextCurrent(AuthSessionContext context) {
+    if (!isSessionContextCurrent(context)) {
+      throw const AuthSessionChangedException();
+    }
+  }
+
+  @override
+  Stream<AuthSessionContext?> watchSessionContext() => Stream.multi((sink) {
+    final subscription = _sessions.changes.listen(
+      sink.addSync,
+      onError: sink.addErrorSync,
+      onDone: sink.closeSync,
+    );
+    sink
+      ..addSync(_sessions.current)
+      ..onCancel = subscription.cancel;
+  });
+
+  @override
+  Future<KdfUser> updateMetadataForSession(
+    AuthSessionContext context,
+    Map<String, dynamic> updates,
+  ) async {
+    if (updates.containsKey(walletEntryIdMetadataKey)) {
+      throw ArgumentError('Wallet entry identity is SDK-owned');
+    }
+    ensureSessionContextCurrent(context);
+    try {
+      return await _runAuthenticatedWriteOperation((activeUser) async {
+        ensureSessionContextCurrent(context);
+        if (!(activeUser.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
+          throw const AuthIdentityUnavailableException();
+        }
+        final persisted = await _secureStorage.updateUser(
+          activeUser.walletId.name,
+          (stored) {
+            if (stored == null) throw AuthException.notFound();
+            _ensureMetadataWalletIdentity(activeUser.walletId, stored.walletId);
+            _sessions.observe(stored);
+            ensureSessionContextCurrent(context);
+            final metadata = JsonMap.from(stored.metadata);
+            for (final entry in updates.entries) {
+              if (entry.value == null) {
+                metadata.remove(entry.key);
+              } else {
+                metadata[entry.key] = entry.value;
+              }
+            }
+            return stored.copyWith(metadata: metadata);
+          },
+        );
+        final updated = activeUser.copyWith(metadata: persisted!.metadata);
+        ensureSessionContextCurrent(context);
+        _emitAuthStateChange(updated);
+        return updated;
+      });
+    } catch (_) {
+      // Fresh resolution may discover logout/replacement before entering the
+      // metadata callback. Preserve a typed session change in that case.
+      ensureSessionContextCurrent(context);
+      rethrow;
     }
   }
 
@@ -363,12 +472,16 @@ class KdfAuthService implements IAuthService {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) => _runAuthTransition(
-    () => _register(
-      walletName: walletName,
-      password: password,
-      options: options,
-      mnemonic: mnemonic,
+    () => withWalletCatalogLock(
+      () => _register(
+        walletName: walletName,
+        password: password,
+        options: options,
+        mnemonic: mnemonic,
+        initialMetadata: initialMetadata,
+      ),
     ),
   );
 
@@ -379,6 +492,7 @@ class KdfAuthService implements IAuthService {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) async {
     invalidateAuthSession();
     _logger.info('register: Starting registration for wallet: omitted');
@@ -393,57 +507,36 @@ class KdfAuthService implements IAuthService {
         '${ensureStartStopwatch.elapsedMilliseconds}ms',
       );
 
-      final walletExistsStopwatch = Stopwatch()..start();
-      await _lockWriteOperation(() async {
-        final walletExists = await _walletExists(walletName);
-        if (walletExists) {
+      return _lockWriteOperation(() async {
+        // A fresh existence check and creation share the auth write lock.
+        // UI validation and cached wallet lists cannot enforce uniqueness.
+        _invalidateUsersCache();
+        if (await _walletExists(walletName)) {
           throw AuthException(
             'Wallet already exists',
-            type: AuthExceptionType.generalAuthError,
+            type: AuthExceptionType.walletAlreadyExists,
+            details: {'walletName': walletName},
           );
         }
-      });
-      walletExistsStopwatch.stop();
-      _logger.info(
-        'register: wallet existence read completed in '
-        '${walletExistsStopwatch.elapsedMilliseconds}ms',
-      );
-
-      // replaces the __assertWalletOrStop method - wait for read/write locks to
-      // be released here.
-      // can be used outside of a lock, since both functions are public-facing
-      // and manage their own read/write locks
-      final stopStopwatch = Stopwatch()..start();
-      if (await isSignedIn()) {
-        await signOut();
-        stopStopwatch.stop();
-        _logger.info(
-          'register: stop phase completed in '
-          '${stopStopwatch.elapsedMilliseconds}ms',
+        final config = await _generateStartupConfig(
+          walletName: walletName,
+          walletPassword: password,
+          allowRegistrations: true,
+          plaintextMnemonic: mnemonic?.plaintextMnemonic,
+          hdEnabled: options.derivationMethod == DerivationMethod.hdWallet,
+          allowWeakPassword: options.allowWeakPassword,
         );
-      } else {
-        stopStopwatch.stop();
-        _logger.info(
-          'register: no active session to stop '
-          '(${stopStopwatch.elapsedMilliseconds}ms)',
-        );
-      }
 
-      final config = await _generateStartupConfig(
-        walletName: walletName,
-        walletPassword: password,
-        allowRegistrations: true,
-        plaintextMnemonic: mnemonic?.plaintextMnemonic,
-        hdEnabled: options.derivationMethod == DerivationMethod.hdWallet,
-        allowWeakPassword: options.allowWeakPassword,
-      );
-
-      return _lockWriteOperation(() async {
         final writePathStopwatch = Stopwatch()..start();
         final isImported = mnemonic != null;
         late final KdfUser currentUser;
         try {
-          currentUser = await _registerNewUser(config, options, isImported);
+          currentUser = await _registerNewUser(
+            config,
+            options,
+            isImported,
+            initialMetadata,
+          );
           if (!isImported) {
             // A wallet created here has no on-chain history by construction:
             // the seed did not exist a moment ago. Recorded per session so the
@@ -474,11 +567,13 @@ class KdfAuthService implements IAuthService {
   }
 
   @override
-  Future<List<KdfUser>> getUsers() async {
+  Future<List<KdfUser>> getUsers() => withWalletCatalogLock(() async {
     await _ensureKdfRunning();
-
-    return _lockWriteOperation(_getUsersWithinAuthLock);
-  }
+    return _lockWriteOperation(() async {
+      _invalidateUsersCache();
+      return _getUsersWithinAuthLock();
+    });
+  });
 
   Future<List<KdfUser>> _getUsersWithinAuthLock() async {
     // Serve from cache if fresh.
@@ -495,17 +590,23 @@ class KdfAuthService implements IAuthService {
 
     final users = await Future.wait(
       walletNames.walletNames.map((name) async {
-        final user = await _secureStorage.getUser(name);
-        if (user != null) return user;
-
-        // Create a user record for a KDF wallet discovered before local auth
-        // metadata was persisted.
-        final newUser = KdfUser(
-          walletId: WalletId.fromName(name, _fallbackAuthOptions),
-          isBip39Seed: true,
-        );
-        await _secureStorage.saveUser(newUser);
-        return newUser;
+        final updated = await _secureStorage.updateUser(name, (current) {
+          final user =
+              current ??
+              KdfUser(
+                walletId: WalletId.fromName(name, _fallbackAuthOptions),
+                isBip39Seed: true,
+              );
+          final entryId = user.metadata[walletEntryIdMetadataKey];
+          if (entryId is String && entryId.isNotEmpty) return user;
+          return user.copyWith(
+            metadata: {
+              ...user.metadata,
+              walletEntryIdMetadataKey: const Uuid().v4(),
+            },
+          );
+        });
+        return updated!;
       }),
     );
 
@@ -516,19 +617,16 @@ class KdfAuthService implements IAuthService {
 
   Future<void> updateUserBip39Status(String walletName, bool isBip39) async {
     await _lockWriteOperation(() async {
-      final existingUser = await _secureStorage.getUser(walletName);
-      if (existingUser == null) return;
-
-      // Don't allow switching to HD if not BIP39
-      if (!isBip39 && existingUser.isHd) {
-        throw AuthException(
-          'Cannot use non-BIP39 seed with HD wallet',
-          type: AuthExceptionType.generalAuthError,
-        );
-      }
-
-      final updatedUser = existingUser.copyWith(isBip39Seed: isBip39);
-      await _secureStorage.saveUser(updatedUser);
+      await _secureStorage.updateUser(walletName, (existingUser) {
+        if (existingUser == null) return null;
+        if (!isBip39 && existingUser.isHd) {
+          throw AuthException(
+            'Cannot use non-BIP39 seed with HD wallet',
+            type: AuthExceptionType.generalAuthError,
+          );
+        }
+        return existingUser.copyWith(isBip39Seed: isBip39);
+      });
       _invalidateUsersCache();
     });
   }
@@ -756,9 +854,20 @@ class KdfAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
-  }) async {
+    Future<void> Function(KdfUser target)? beforeDelete,
+    Future<void> Function()? afterDelete,
+  }) => withWalletCatalogLock(() async {
     await _ensureKdfRunning();
-    return _lockWriteOperation(() async {
+    await _lockWriteOperation(() async {
+      if (beforeDelete != null) {
+        _invalidateUsersCache();
+        final users = await _getUsersWithinAuthLock();
+        final target = users
+            .where((user) => user.walletId.name == walletName)
+            .firstOrNull;
+        if (target == null) throw AuthException.notFound();
+        await beforeDelete(target);
+      }
       try {
         await _client.rpc.wallet.deleteWallet(
           walletName: walletName,
@@ -787,7 +896,10 @@ class KdfAuthService implements IAuthService {
         );
       }
     });
-  }
+    // Keep catalog ownership through cache cleanup, while releasing the auth
+    // lock so hooks may perform ordinary identity reads without deadlocking.
+    await afterDelete?.call();
+  });
 
   AuthException _mapDeleteWalletRpcError(Object error) {
     final message = _extractRpcErrorMessage(error);
@@ -960,6 +1072,7 @@ class KdfAuthService implements IAuthService {
       await _dispose();
     } finally {
       await _authGenerationController.close();
+      await _sessions.dispose();
     }
   });
 
@@ -1013,31 +1126,40 @@ class KdfAuthService implements IAuthService {
     Map<String, dynamic> metadata, {
     required WalletId expectedWalletId,
   }) async {
-    await _runAuthenticatedWriteOperation(
-      (activeUser) => _metadataMutex.protect(() async {
-        _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
-        final user = await _secureStorage.getUser(activeUser.walletId.name);
-        if (user == null) throw AuthException.notFound();
+    await _runAuthenticatedWriteOperation((activeUser) async {
+      _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
+      final persistedUser = await _secureStorage.updateUser(
+        activeUser.walletId.name,
+        (user) {
+          if (user == null) throw AuthException.notFound();
+          _ensureMetadataWalletIdentity(activeUser.walletId, user.walletId);
+          return user.copyWith(
+            metadata: {
+              ...metadata,
+              if (user.metadata[walletEntryIdMetadataKey] != null)
+                walletEntryIdMetadataKey:
+                    user.metadata[walletEntryIdMetadataKey],
+            },
+          );
+        },
+      );
+      final persistedMetadata = persistedUser!.metadata;
 
-        final persistedUser = user.copyWith(metadata: metadata);
-        await _secureStorage.saveUser(persistedUser);
-
-        // Update cache silently without triggering auth state change. Updating
-        // the storage and cache at the same time emulates the same behaviour as
-        // before. Update user metadata for any subsequent access without
-        // emitting auth state changes, as the metadata field is currently used
-        // for events like coin activation, wallet type (derivation), and seed
-        // backup status.
-        //
-        // Keep the wallet identity from the current runtime session. In
-        // particular, an identity RPC outage intentionally produces a
-        // name-only runtime user so the encrypted GasFree journal remains
-        // locked. Reloading the stored identity into this cache would bypass
-        // that verification boundary after an otherwise unrelated metadata
-        // write.
-        _lastEmittedUser = activeUser.copyWith(metadata: metadata);
-      }),
-    );
+      // Update cache silently without triggering auth state change. Updating
+      // the storage and cache at the same time emulates the same behaviour as
+      // before. Update user metadata for any subsequent access without
+      // emitting auth state changes, as the metadata field is currently used
+      // for events like coin activation, wallet type (derivation), and seed
+      // backup status.
+      //
+      // Keep the wallet identity from the current runtime session. In
+      // particular, an identity RPC outage intentionally produces a
+      // name-only runtime user so the encrypted GasFree journal remains
+      // locked. Reloading the stored identity into this cache would bypass
+      // that verification boundary after an otherwise unrelated metadata
+      // write.
+      _lastEmittedUser = activeUser.copyWith(metadata: persistedMetadata);
+    });
   }
 
   @override
@@ -1046,25 +1168,28 @@ class KdfAuthService implements IAuthService {
     dynamic Function(dynamic currentValue) transform, {
     required WalletId expectedWalletId,
   }) async {
-    await _runAuthenticatedWriteOperation(
-      (activeUser) => _metadataMutex.protect(() async {
-        _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
-        final user = await _secureStorage.getUser(activeUser.walletId.name);
-        if (user == null) throw AuthException.notFound();
-
-        final metadata = JsonMap.from(user.metadata);
-        final transformed = transform(metadata[key]);
-        if (transformed == null) {
-          metadata.remove(key);
-        } else {
-          metadata[key] = transformed;
-        }
-
-        final persistedUser = user.copyWith(metadata: metadata);
-        await _secureStorage.saveUser(persistedUser);
-        _lastEmittedUser = activeUser.copyWith(metadata: metadata);
-      }),
-    );
+    if (key == walletEntryIdMetadataKey) {
+      throw ArgumentError('Wallet entry identity is SDK-owned');
+    }
+    await _runAuthenticatedWriteOperation((activeUser) async {
+      _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
+      final persisted = await _secureStorage.updateUser(
+        activeUser.walletId.name,
+        (user) {
+          if (user == null) throw AuthException.notFound();
+          _ensureMetadataWalletIdentity(activeUser.walletId, user.walletId);
+          final metadata = JsonMap.from(user.metadata);
+          final transformed = transform(metadata[key]);
+          if (transformed == null) {
+            metadata.remove(key);
+          } else {
+            metadata[key] = transformed;
+          }
+          return user.copyWith(metadata: metadata);
+        },
+      );
+      _lastEmittedUser = activeUser.copyWith(metadata: persisted!.metadata);
+    });
   }
 
   void _ensureMetadataWalletIdentity(

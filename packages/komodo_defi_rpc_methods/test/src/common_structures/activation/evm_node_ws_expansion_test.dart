@@ -20,7 +20,7 @@ import 'package:test/test.dart';
 /// `_kSendWsNodesOnWeb` because the pinned KDF (`main`, `f3efd2c`) still panics
 /// at `websocket_transport.rs:207` on a response that lands after the caller's
 /// 10s timeout but inside the 30s notifier window - and a wasm panic takes the
-/// whole instance down. See `docs/KDF_PERF_STACK_DESCOPE.md`.
+/// whole instance down. See `docs/WALLET_LOAD_MEASUREMENT.md`.
 ///
 /// So the expansion is inert on every platform until one of those gates flips.
 /// These tests state that rather than asserting `hasLength(1)` outright, so

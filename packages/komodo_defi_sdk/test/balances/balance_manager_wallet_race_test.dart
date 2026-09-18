@@ -12,7 +12,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+import '../helpers/runtime_auth_fixture.dart';
+
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -352,6 +356,8 @@ void main() {
 
       currentUser = _hashAWallet;
       authChanges.add(_hashAWallet);
+      // Runtime session updates are delivered asynchronously.
+      await Future<void>.delayed(Duration.zero);
       expect(
         manager.lastKnownForWallet(asset.id, _hashAWallet.walletId)?.total,
         Decimal.fromInt(5),
@@ -419,4 +425,65 @@ void main() {
       expect(first.total, Decimal.fromInt(5));
     },
   );
+  for (final boundary in ['reauthentication', 'same-identity replacement']) {
+    test(
+      '$boundary rejects old balances and accepts a fresh context',
+      () async {
+        final auth = _MockAuth();
+        final pubkeys = _MockPubkeyManager();
+        final assetLookup = _MockAssetLookup();
+        final authChanges = StreamController<KdfUser?>.broadcast();
+        final response = Completer<AssetPubkeys>();
+        final started = Completer<void>();
+        final asset = _asset();
+        var currentUser = _walletA.copyWith(
+          metadata: {'_wallet_entry_id': 'original-entry'},
+        );
+        var requests = 0;
+        when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+        when(() => auth.currentUser).thenAnswer((_) async => currentUser);
+        when(() => assetLookup.fromId(asset.id)).thenReturn(asset);
+        when(() => pubkeys.getPubkeys(asset)).thenAnswer((_) {
+          if (requests++ == 0) {
+            started.complete();
+            return response.future;
+          }
+          return Future.value(_pubkeys(asset, '9'));
+        });
+        final manager = BalanceManager(
+          assetLookup: assetLookup,
+          auth: auth,
+          pubkeyManager: pubkeys,
+          activationCoordinator: _MockActivationCoordinator(),
+          eventStreamingManager: _MockEventStreamingManager(),
+          assetHistoryStorage: _MockAssetHistoryStorage(),
+        );
+        addTearDown(() async {
+          await manager.dispose();
+          await authChanges.close();
+        });
+        final pending = manager.getBalance(asset.id);
+        final rejected = expectLater(
+          pending,
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        await started.future;
+
+        if (boundary == 'reauthentication') {
+          auth.runtimeSessions.invalidate();
+        } else {
+          currentUser = currentUser.copyWith(
+            metadata: {'_wallet_entry_id': 'replacement-entry'},
+          );
+        }
+        // A session boundary need not emit a null or changed auth user.
+        auth.runtimeSessions.observe(currentUser);
+
+        response.complete(_pubkeys(asset, '5'));
+        await rejected;
+        expect(manager.lastKnown(asset.id), isNull);
+        expect((await manager.getBalance(asset.id)).total, Decimal.fromInt(9));
+      },
+    );
+  }
 }
