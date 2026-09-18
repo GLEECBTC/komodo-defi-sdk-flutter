@@ -202,6 +202,20 @@ void main() {
       }
     });
 
+    test('decodes the legacy "matic" sub_class name as polygon', () {
+      // CoinSubClass.matic was renamed to polygon for the MATIC -> POL coins
+      // config change. History written before the rename stores the old name.
+      final encoded = TransactionRecordCodec.encodeToMap(
+        testTransaction(assetId: testAssetId(subClass: CoinSubClass.polygon)),
+      );
+      (encoded['asset']! as Map<String, Object?>)['sub_class'] = 'matic';
+
+      expect(
+        TransactionRecordCodec.decodeFromMap(encoded).assetId.subClass,
+        CoinSubClass.polygon,
+      );
+    });
+
     test('preserves non-integer chain ids', () {
       final tendermint = testAssetId(
         id: 'ATOM',
