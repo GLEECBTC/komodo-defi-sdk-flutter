@@ -14,10 +14,7 @@
       "linux",
       "windows"
     ],
-    "source_urls": [
-      "https://devbuilds.gleec.com",
-      "https://nebula.decker.im"
-    ],
+    "source_urls": ["https://devbuilds.gleec.com", "https://nebula.decker.im"],
     "platforms": {
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
@@ -73,11 +70,11 @@
   },
   "coins": {
     "fetch_at_build_enabled": true,
-    "update_commit_on_build": false,
-    "bundled_coins_repo_commit": "658585866a4eb420b5ed5190e96446d3dc55c129",
+    "update_commit_on_build": true,
+    "bundled_coins_repo_commit": "1c58da4a708359a6efaf0ebf8485b36182d22322",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
-    "coins_repo_branch": "config-generate/test-pol",
+    "coins_repo_branch": "master",
     "runtime_updates_enabled": true,
     "mapped_files": {
       "assets/config/coins_config.json": "utils/coins_config_unfiltered.json",
