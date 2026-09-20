@@ -42,12 +42,14 @@ class HiveTransactionStorage
     TransactionHistoryCachePolicy policy =
         const TransactionHistoryCachePolicy(),
     HistoryCacheKeyProvider? keyProvider,
+    Future<Set<String>> Function()? knownWalletNamespaces,
     CompactionStrategy? compactionStrategy,
     void Function(String message, Object error, StackTrace stackTrace)? onError,
   }) => HiveTransactionStorage.acquire(
     boxName: boxName,
     policy: policy,
     keyProvider: keyProvider,
+    knownWalletNamespaces: knownWalletNamespaces,
     compactionStrategy: compactionStrategy,
     onError: onError,
   );
@@ -56,9 +58,11 @@ class HiveTransactionStorage
     required this.boxName,
     required this.policy,
     required HistoryCacheKeyProvider keyProvider,
+    Future<Set<String>> Function()? knownWalletNamespaces,
     CompactionStrategy? compactionStrategy,
     void Function(String message, Object error, StackTrace stackTrace)? onError,
   }) : _keyProvider = keyProvider,
+       _knownWalletNamespaces = knownWalletNamespaces,
        _compactionStrategy = compactionStrategy ?? _defaultCompaction,
        _onError = onError ?? _logError,
        _retention = TransactionCacheRetention(policy);
@@ -69,6 +73,7 @@ class HiveTransactionStorage
     TransactionHistoryCachePolicy policy =
         const TransactionHistoryCachePolicy(),
     HistoryCacheKeyProvider? keyProvider,
+    Future<Set<String>> Function()? knownWalletNamespaces,
     CompactionStrategy? compactionStrategy,
     void Function(String message, Object error, StackTrace stackTrace)? onError,
   }) {
@@ -89,6 +94,7 @@ class HiveTransactionStorage
       boxName: name,
       policy: policy,
       keyProvider: provider,
+      knownWalletNamespaces: knownWalletNamespaces,
       compactionStrategy: compactionStrategy,
       onError: onError,
     );
@@ -112,6 +118,10 @@ class HiveTransactionStorage
   /// Limits shared by persistence and its memory fallback.
   final TransactionHistoryCachePolicy policy;
   final HistoryCacheKeyProvider _keyProvider;
+
+  /// Lists the wallets that still exist, consulted once per successful open.
+  /// See [_collectOrphanedWallets].
+  final Future<Set<String>> Function()? _knownWalletNamespaces;
   final CompactionStrategy _compactionStrategy;
   final void Function(String, Object, StackTrace) _onError;
   final _mutex = Mutex();
@@ -382,6 +392,48 @@ class HiveTransactionStorage
     });
   }
 
+  /// Drops history belonging to wallets that no longer exist.
+  ///
+  /// The deletion-time purge in `bootstrap.dart` is the primary path, but it
+  /// can fail without the caller ever learning: in degraded mode [purgeWallet]
+  /// clears only the memory fallback and throws, the hook logs that and moves
+  /// on, and `deleteWallet` still reports success. Degradation is reachable -
+  /// on web the cache lease is taken with `ifAvailable: true`, so a second tab
+  /// never holds it, and [_ensureOpen] latches on `_fallback` rather than
+  /// retrying. Without this sweep the deleted wallet's rows would then survive
+  /// until ordinary retention happened to evict them, which for a low-activity
+  /// wallet may be never.
+  ///
+  /// Fails open in every uncertain case - a throwing or empty provider means
+  /// "do not know", never "delete everything".
+  Future<void> _collectOrphanedWallets(LazyBox<String> box) async {
+    final provider = _knownWalletNamespaces;
+    if (provider == null) return;
+
+    final Set<String> known;
+    try {
+      known = await provider();
+    } on Object catch (error, stackTrace) {
+      _onError('skipping wallet GC: could not list wallets', error, stackTrace);
+      return;
+    }
+    if (known.isEmpty) return;
+
+    final knownTokens = known
+        .map(TransactionStorageKey.tokenForNamespace)
+        .toSet();
+    final orphaned = <String>{
+      for (final scope in _index.prefixes)
+        if (!knownTokens.contains(
+          scope.split(TransactionStorageKey.separator).first,
+        ))
+          scope,
+    };
+    if (orphaned.isEmpty) return;
+
+    await _removeScopes(box, orphaned.toList());
+  }
+
   Future<void> _removeScopes(LazyBox<String> box, List<String> scopes) async {
     final keys = [for (final scope in scopes) ..._index.keysFor(scope)];
     try {
@@ -570,6 +622,7 @@ class HiveTransactionStorage
       }
       _box = opened;
       await _rebuildFromEnvelopes(opened);
+      await _collectOrphanedWallets(opened);
       return opened;
     } on Object catch (error, stack) {
       await _degrade(

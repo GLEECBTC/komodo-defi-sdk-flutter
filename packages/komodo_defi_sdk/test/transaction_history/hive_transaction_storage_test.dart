@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:decimal/decimal.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/hive_transaction_storage.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_record_codec.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage.dart';
@@ -54,6 +55,97 @@ void main() {
     create: openStorage,
     reopen: reopenStorage,
   );
+
+  group('orphaned wallet sweep', () {
+    final kept = testWallet(name: 'kept', pubkeyHash: 'kept-pubkey');
+    final deleted = testWallet(name: 'deleted', pubkeyHash: 'deleted-pubkey');
+    final asset = testAssetId();
+
+    Future<HiveTransactionStorage> openWithCatalogue(
+      Future<Set<String>> Function()? catalogue,
+    ) async {
+      final storage = HiveTransactionStorage(
+        keyProvider: testHistoryCacheKeys,
+        knownWalletNamespaces: catalogue,
+      );
+      open.add(storage);
+      return storage;
+    }
+
+    Future<void> seedBothWallets() async {
+      final storage = await openStorage();
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'kept-1'),
+      ], kept);
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'deleted-1'),
+      ], deleted);
+      for (final s in open) {
+        await s.close();
+      }
+      open.clear();
+    }
+
+    Future<int> countFor(
+      HiveTransactionStorage storage,
+      WalletId wallet,
+    ) async =>
+        (await storage.getTransactions(asset, wallet)).transactions.length;
+
+    test(
+      'drops history for a wallet that is no longer in the catalogue',
+      () async {
+        // The deletion-time purge is best effort: while the store is degraded it
+        // clears only memory and throws, the bootstrap hook logs that, and
+        // deleteWallet still reports success. This sweep is what stops the rows
+        // surviving that.
+        await seedBothWallets();
+
+        final storage = await openWithCatalogue(
+          () async => {walletStorageNamespace(kept)},
+        );
+
+        expect(await countFor(storage, deleted), 0);
+        expect(
+          await countFor(storage, kept),
+          1,
+          reason: 'a live wallet must be untouched by the sweep',
+        );
+      },
+    );
+
+    test(
+      'an empty catalogue means do-not-know, never delete-everything',
+      () async {
+        await seedBothWallets();
+
+        final storage = await openWithCatalogue(() async => <String>{});
+
+        expect(await countFor(storage, kept), 1);
+        expect(await countFor(storage, deleted), 1);
+      },
+    );
+
+    test('a throwing catalogue leaves every wallet in place', () async {
+      await seedBothWallets();
+
+      final storage = await openWithCatalogue(
+        () async => throw StateError('cannot list wallets'),
+      );
+
+      expect(await countFor(storage, kept), 1);
+      expect(await countFor(storage, deleted), 1);
+    });
+
+    test('no catalogue provider sweeps nothing', () async {
+      await seedBothWallets();
+
+      final storage = await openWithCatalogue(null);
+
+      expect(await countFor(storage, kept), 1);
+      expect(await countFor(storage, deleted), 1);
+    });
+  });
 
   group('HiveTransactionStorage persistence', () {
     final wallet = testWallet();

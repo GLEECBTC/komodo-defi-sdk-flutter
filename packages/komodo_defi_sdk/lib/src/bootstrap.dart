@@ -11,6 +11,7 @@ import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/activation_config/hive_adapters.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
@@ -417,8 +418,16 @@ Future<void> bootstrap({
     // store (one order index, refcounted close) instead of each adopting the
     // open box with an index of its own.
     container.registerSingletonAsync<HiveTransactionStorage>(() async {
+      final auth = await container.getAsync<KomodoDefiLocalAuth>();
       return HiveTransactionStorage.acquire(
         policy: config.transactionHistoryCachePolicy,
+        // Backstop for the deletion-time purge below, which can fail while
+        // storage is degraded and is only logged when it does. Fails open: an
+        // error or an empty result means "do not know", never
+        // "delete everything".
+        knownWalletNamespaces: () async => (await auth.getUsers())
+            .map((user) => walletStorageNamespace(user.walletId))
+            .toSet(),
       );
     }, dependsOn: [KomodoDefiLocalAuth]);
   }
