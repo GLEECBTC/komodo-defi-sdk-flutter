@@ -14,9 +14,20 @@ import 'package:pointycastle/export.dart';
 /// writes no CRC at all. A modified record therefore decrypted into plausible
 /// bytes rather than being rejected.
 ///
-/// GCM authenticates. A record that has been altered - by a byte flip, a
-/// truncation, or a whole ciphertext lifted from elsewhere - fails its tag
-/// check and the read throws instead of returning attacker-shaped data.
+/// GCM authenticates. A record altered by a byte flip or a truncation, or
+/// sealed under a different key, fails its tag check and the read throws
+/// instead of returning attacker-shaped data.
+///
+/// The tag covers the ciphertext and nothing else, so it does not by itself
+/// distinguish one record in this box from another: a ciphertext moved to a
+/// different disk key still authenticates. What rejects that is the plaintext
+/// envelope, whose `orderKey` both read paths in `HiveTransactionStorage`
+/// compare against the key it was read under. Relocation is caught there, not
+/// here. Restoring an *older* ciphertext under its own key is not caught by
+/// either, and would need the disk key and a version bound in as associated
+/// data - which Hive's cipher interface does not pass through. The exposure is
+/// a stale history view for someone who already has write access to the app's
+/// private storage, where deleting the cache is equally available.
 ///
 /// Layout is `nonce || ciphertext || tag`: a 12-byte random nonce, then the
 /// ciphertext, then the 16-byte tag GCM appends when the record is finalised.
@@ -37,14 +48,17 @@ class HistoryCacheGcmCipher implements HiveCipher {
     }
     _key = KeyParameter(Uint8List.fromList(key));
 
-    // Domain-separated from Hive's own CRC over the same bytes. Hive compares
-    // this against the value in the box header, so a cache written by the
-    // previous CBC cipher is rejected at open time and rebuilt, rather than
-    // being handed to GCM as if it were authenticated.
+    // Domain-separated from Hive's own CRC over the same bytes, so a cache
+    // written by the previous CBC cipher cannot be mistaken for one of ours.
+    //
+    // On the VM backend Hive seeds each frame's CRC with this value, so a
+    // legacy cache is rejected as the box opens and the storage rebuilds it.
+    // The web backend writes no CRC and never asks for this, so there the
+    // legacy records instead fail their GCM tag one at a time and are evicted
+    // as unreadable. Different route, same outcome: nothing from the old cache
+    // is ever decoded.
     _keyCrc = _crc32(
-      Uint8List.fromList(
-        sha256.convert([...utf8Label, ...key]).bytes,
-      ),
+      Uint8List.fromList(sha256.convert([...utf8Label, ...key]).bytes),
     );
   }
 
@@ -76,8 +90,7 @@ class HistoryCacheGcmCipher implements HiveCipher {
   int calculateKeyCrc() => _keyCrc;
 
   @override
-  int maxEncryptedSize(Uint8List inp) =>
-      inp.length + nonceLength + tagLength;
+  int maxEncryptedSize(Uint8List inp) => inp.length + nonceLength + tagLength;
 
   @override
   int encrypt(
