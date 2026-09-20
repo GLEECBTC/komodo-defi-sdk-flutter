@@ -5,6 +5,41 @@ remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-over
 Metadata writes have a breaking API change; this is not a source-compatible
 patch of 0.7.0.
 
+ - **SECURITY**(history): authenticate the transaction cache. Records were
+   AES-CBC with no authentication tag, and the surrounding CRC-32 gave no
+   integrity - CRC-32 is affine, so an edit could be corrected without knowing
+   the seed, and the web backend writes no CRC at all. Records are now
+   AES-256-GCM: an altered, truncated or relocated record fails its tag check
+   and is dropped instead of decoding into plausible bytes. The key is
+   re-derived under a new label, so a cache from a previous release is rejected
+   at open and rebuilt from providers.
+ - **BREAKING** **FEAT**(auth): issue session contexts. Runtime work survives
+   metadata and hash refreshes, while work from a replaced, signed-out or
+   reauthenticated session is rejected. Sensitive writes still verify identity
+   inside the persistence lock.
+ - **BREAKING** **FEAT**(auth): make wallet creation and initial metadata
+   persistence atomic. A name collision fails with a typed error, and an
+   existing wallet requires an explicit login rather than being adopted.
+ - **BREAKING** **FEAT**(assets): separate saved selection from runtime
+   activation. Activation returns typed outcomes, and the host's policy applies
+   before a restored session can activate anything.
+ - **BREAKING** **FEAT**(wallet): prepare deletion against a reviewed wallet and
+   recovery snapshot, recheck it under the submission lease, report busy while
+   an outcome is being recorded, and retain unresolved GasFree recovery records
+   after deletion.
+ - **FIX**(wallet): restore the open-time orphaned-wallet sweep as a deletion
+   backstop. The deletion-time purge stays the primary path, but in the store's
+   degraded memory-only mode it throws and its failure is swallowed, so without
+   the sweep a deleted wallet's encrypted history survived until ordinary
+   eviction. The sweep fails open: an empty or throwing catalogue means "do not
+   know", never "delete everything".
+ - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
+   as a value. One future is handed to every caller joining the same in-flight
+   work, and those callers do not share an error zone, because `retry()` runs
+   each attempt inside its own `runZonedGuarded`. Dart will not deliver a
+   future's error across that boundary: it reports the error as uncaught in the
+   creating zone and leaves the cross-zone joiner waiting forever. Each caller
+   now rethrows the outcome in its own zone.
  - **FIX**(history): decode the legacy `matic` `sub_class` name as
    `CoinSubClass.polygon`, so transaction history stored before the rename is
    not downgraded to `CoinSubClass.unknown`.

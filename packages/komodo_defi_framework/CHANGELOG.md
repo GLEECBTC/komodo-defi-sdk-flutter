@@ -1,8 +1,9 @@
 ## 0.6.0 (unreleased)
 
- - **CHORE**(coins): point the bundled coins configuration at the POL rename
-   test branch (`config-generate/test-pol`) with commit pinning, ahead of the
-   change landing on the coins repository's `master`.
+ - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
+   the coins repository's `master` (`f766b261`). It was pinned to the
+   `config-generate/test-pol` branch while the rename was in review; the
+   release ships the `master` commit.
  - **SECURITY**(diagnostics): omit request, configuration, response and
    exception bodies from native, remote, WASM, RPC-client and startup logging.
    Every message reaching `logStream` or an external log callback is sanitized

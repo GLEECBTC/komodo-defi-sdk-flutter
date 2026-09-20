@@ -150,10 +150,28 @@ including indexes. Key or storage failure uses bounded memory. The SDK attempts
 to delete the old plaintext cache, logs cleanup failures and retries on later
 opens. It never reads or migrates that cache; history is rebuilt from providers.
 
-Hive's AES-CBC encryption does not authenticate ciphertext. The current web
-secure-storage backend keeps its own encryption key in browser storage, so a
-copy of all storage for the origin remains recoverable. Physical native
-Keychain/Keystore storage has not yet been verified; native tests mock it.
+Records are authenticated. The cache no longer uses Hive's AES-CBC cipher,
+which had no authentication tag and whose surrounding CRC-32 provided no
+integrity at all - CRC-32 is affine, so an edit could be corrected without
+knowing anything secret, and the web backend writes no CRC. Records are now
+AES-256-GCM, and an altered one fails its tag check and is dropped rather than
+decrypted. The key is re-derived under a new label, so a cache written by the
+previous release is rejected at open and rebuilt from providers; nothing is
+migrated and no history is lost that the providers cannot return.
+
+Two limitations remain, and both need a storage redesign rather than a
+different cipher:
+
+- The web secure-storage backend keeps its own encryption key in browser
+  storage, so a complete copy of all storage for the origin recovers it. The
+  key is derived per box name rather than per wallet, and the single box holds
+  **every wallet on the device** - so such a copy yields all wallets' history,
+  not only the signed-in one. No wallet password is involved at any point. A
+  per-wallet key is not possible while one shared box rebuilds its retention
+  index from every record at open time, regardless of which wallet is signed
+  in.
+- Physical native Keychain/Keystore storage has not yet been verified; native
+  tests mock it.
 
 Storage returns `CachedTransactionPage`: `cachedCount` describes retained rows,
 not a provider total. Keep provider pagination and completeness separate from

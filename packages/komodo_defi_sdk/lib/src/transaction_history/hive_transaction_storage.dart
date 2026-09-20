@@ -5,6 +5,7 @@ import 'dart:developer' as developer;
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/history_cache_cipher.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/history_cache_key_provider.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/history_cache_lease.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_cache_retention.dart';
@@ -600,8 +601,12 @@ class HiveTransactionStorage
         throw StateError('Transaction history cache key is invalid');
       }
       final master = Hmac(sha256, key);
-      _cipher = HiveAesCipher(
-        master.convert(utf8.encode('history-encryption-v2')).bytes,
+      // v3 re-derives under a new label so the key, and with it the CRC Hive
+      // keeps in the box header, differs from anything the previous CBC cipher
+      // wrote. An existing cache is rejected at open and rebuilt from the
+      // network below rather than being read back unauthenticated.
+      _cipher = HistoryCacheGcmCipher(
+        master.convert(utf8.encode('history-encryption-v3-gcm')).bytes,
       );
       _keyHmac = Hmac(
         sha256,
