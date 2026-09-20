@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/history_cache_lease.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/hive_transaction_storage.dart';
@@ -158,4 +159,45 @@ void main() {
       ['row-4', 'row-3'],
     );
   });
+
+  // The native upgrade path is covered in history_cache_cipher_upgrade_test,
+  // but it is covered there by a mechanism this backend does not have: Hive
+  // seeds each frame's CRC with the cipher's key CRC on the VM only, so a
+  // legacy box is refused as it opens. IndexedDB stores no CRC and never asks
+  // for one, so here the legacy records have to fail their GCM tags one at a
+  // time and be evicted. Same outcome, different route - and the route that
+  // was not asserted anywhere.
+  test(
+    'a cache written by the previous cipher is rebuilt in the browser',
+    () async {
+      final master = Hmac(
+        sha256,
+        await testHistoryCacheKeys.loadOrCreate(name),
+      );
+      final legacy = HiveAesCipher(
+        master.convert(utf8.encode('history-encryption-v2')).bytes,
+      );
+      final legacyBox = await Hive.openLazyBox<String>(
+        name,
+        encryptionCipher: legacy,
+      );
+      await legacyBox.put('b' * 64, 'an envelope only the old cipher can read');
+      await legacyBox.close();
+
+      final store = open();
+      // Not degraded: the rejection has to be handled inside the open, not
+      // escape it and drop the store into its memory-only fallback, where reads
+      // still answer and nothing survives a restart.
+      await store.storeTransaction(
+        testTransaction(internalId: 'after'),
+        wallet,
+      );
+      expect(store.isDegraded, isFalse);
+      expect((await store.getTransactions(asset, wallet)).cachedCount, 1);
+      await store.close();
+
+      final reopened = open();
+      expect((await reopened.getTransactions(asset, wallet)).cachedCount, 1);
+    },
+  );
 }
