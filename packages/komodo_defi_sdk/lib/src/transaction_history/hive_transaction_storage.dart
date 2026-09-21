@@ -1,8 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:collection/collection.dart';
+import 'package:crypto/crypto.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/history_cache_cipher.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/history_cache_key_provider.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/history_cache_lease.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_cache_retention.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_merge_utils.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_order_index.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_record_codec.dart';
@@ -11,160 +18,157 @@ import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage_key.
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
-/// A [TransactionStorage] that can release its backing resources.
-///
-/// Deliberately separate from [TransactionStorage] so that adding it does not
-/// break the hand-written fakes that `implements TransactionStorage`.
+/// A cache that can release its backing resources.
 // ignore: one_member_abstracts
 abstract interface class ClosableTransactionStorage {
-  /// Flushes and releases the backing store.
+  /// Flushes and releases this acquisition of the cache.
   Future<void> close();
 }
 
-/// Transaction history persisted in a lazy Hive box.
+/// Encrypted, bounded transaction cache owned by the SDK.
 ///
-/// ## Shape
+/// Hive encrypts values but not keys. Disk keys are therefore HMAC identifiers;
+/// timestamps, wallet/asset scope and transaction IDs live inside encrypted
+/// envelopes. Opening the cache rebuilds a bounded in-memory ordering index
+/// from those envelopes. Transaction domain objects are decoded only on read.
 ///
-/// One box entry per transaction, keyed by [TransactionStorageKey]. Ordering,
-/// pagination, lookups and stats are served by [TransactionOrderIndex], which
-/// is rebuilt from the box's keys at open. Values therefore stay on disk until
-/// a row is actually returned: a cold open costs one pass over the key list and
-/// zero record decodes, and `getLatestTransactionId` - polled per watched asset
-/// every 30 seconds - costs neither.
-///
-/// A per-transaction entry rather than one blob per asset is what keeps writes
-/// proportional to what changed. Production stores a page at a time and
-/// re-stores page one on every confirmations refresh; against a per-asset blob
-/// that would rewrite the entire history each time, and Hive's VM backend is an
-/// append-only log, so every rewrite stays on disk until compaction.
-///
-/// ## Failure posture
-///
-/// Throw for caller bugs, degrade for I/O. Transaction history is fully
-/// reconstructible from the network, so no storage fault should be able to
-/// break the wallet:
-///
-/// * Validation errors - an empty internal ID, an unknown pagination cursor -
-///   throw [TransactionStorageException], exactly as the in-memory store does.
-/// * A box that will not open is deleted and reopened once; if that also fails
-///   the instance falls back to an in-memory store for the rest of the process
-///   and reports [isDegraded]. Construction and first use never throw.
-/// * A record that will not decode is skipped and evicted, leaving the rest of
-///   the asset's history readable. This per-record containment is why the box
-///   is lazy: a non-lazy box decodes everything at open, so one bad frame would
-///   take the whole dataset with it.
-/// * A failed write is logged and swallowed. The caller already has the rows it
-///   fetched; failing a *cache* write must not turn a successful network fetch
-///   into a user-visible error.
+/// Every acquisition of a box shares one index and a reference-counted owner.
+/// On web an exclusive lease prevents another tab from maintaining a competing
+/// Hive index. A tab without the lease uses bounded memory instead.
 class HiveTransactionStorage
     implements TransactionStorage, ClosableTransactionStorage {
-  /// Creates a Hive-backed transaction store.
-  ///
-  /// The box is opened lazily on first use, so construction is cheap and does
-  /// not require Hive to be initialised yet.
-  ///
-  /// [knownWalletNamespaces], when supplied, is consulted once per open to
-  /// drop history belonging to wallets that no longer exist. It fails open: if
-  /// it throws or returns nothing, no rows are removed.
-  HiveTransactionStorage({
-    this.boxName = defaultBoxName,
+  /// Acquires the shared encrypted cache, opening it lazily on first use.
+  factory HiveTransactionStorage({
+    String boxName = defaultBoxName,
+    TransactionHistoryCachePolicy policy =
+        const TransactionHistoryCachePolicy(),
+    HistoryCacheKeyProvider? keyProvider,
     Future<Set<String>> Function()? knownWalletNamespaces,
     CompactionStrategy? compactionStrategy,
-    HiveCipher? cipher,
     void Function(String message, Object error, StackTrace stackTrace)? onError,
-  }) : _knownWalletNamespaces = knownWalletNamespaces,
-       _compactionStrategy = compactionStrategy ?? _defaultCompaction,
-       _cipher = cipher,
-       _onError = onError ?? _logError;
+  }) => HiveTransactionStorage.acquire(
+    boxName: boxName,
+    policy: policy,
+    keyProvider: keyProvider,
+    knownWalletNamespaces: knownWalletNamespaces,
+    compactionStrategy: compactionStrategy,
+    onError: onError,
+  );
 
-  /// Returns the live store for [boxName], creating it on first acquisition.
-  ///
-  /// Hive boxes are process-global, so two SDK containers each constructing
-  /// their own store over the same (default) box name would adopt one
-  /// underlying box while maintaining independent order indexes - writes
-  /// through one invisible to the other - and either container's dispose
-  /// would close the box underneath the survivor. Acquiring shares a single
-  /// instance, so every acquirer sees one index and one owner, and [close]
-  /// releases the box only when the last acquirer lets go.
-  ///
-  /// [knownWalletNamespaces] and the other tuning parameters take effect only
-  /// on the call that creates the instance; later acquirers share the first
-  /// caller's configuration. The plain constructor stays for standalone,
-  /// single-owner use (tests, custom wiring) and does not consult this
-  /// registry.
+  HiveTransactionStorage._({
+    required this.boxName,
+    required this.policy,
+    required HistoryCacheKeyProvider keyProvider,
+    Future<Set<String>> Function()? knownWalletNamespaces,
+    CompactionStrategy? compactionStrategy,
+    void Function(String message, Object error, StackTrace stackTrace)? onError,
+  }) : _keyProvider = keyProvider,
+       _knownWalletNamespaces = knownWalletNamespaces,
+       _compactionStrategy = compactionStrategy ?? _defaultCompaction,
+       _onError = onError ?? _logError,
+       _retention = TransactionCacheRetention(policy);
+
+  /// Acquires the single owner for [boxName]. Each caller must [close] once.
   factory HiveTransactionStorage.acquire({
     String boxName = defaultBoxName,
+    TransactionHistoryCachePolicy policy =
+        const TransactionHistoryCachePolicy(),
+    HistoryCacheKeyProvider? keyProvider,
     Future<Set<String>> Function()? knownWalletNamespaces,
     CompactionStrategy? compactionStrategy,
-    HiveCipher? cipher,
     void Function(String message, Object error, StackTrace stackTrace)? onError,
   }) {
-    final existing = _acquired[boxName];
+    final name = boxName.toLowerCase();
+    final provider = keyProvider ?? _defaultKeyProvider;
+    final existing = _acquired[name];
     if (existing != null) {
+      if (existing.policy != policy ||
+          !identical(existing._keyProvider, provider)) {
+        throw ArgumentError(
+          'Conflicting transaction history cache configuration',
+        );
+      }
       existing._acquireCount++;
       return existing;
     }
-    final created = HiveTransactionStorage(
-      boxName: boxName,
+    final created = HiveTransactionStorage._(
+      boxName: name,
+      policy: policy,
+      keyProvider: provider,
       knownWalletNamespaces: knownWalletNamespaces,
       compactionStrategy: compactionStrategy,
-      cipher: cipher,
       onError: onError,
-    ).._acquireCount = 1;
-    _acquired[boxName] = created;
+    );
+    _acquired[name] = created;
     return created;
   }
 
-  /// Live [acquire]d instances by box name.
-  static final Map<String, HiveTransactionStorage> _acquired = {};
+  static final _defaultKeyProvider = SecureHistoryCacheKeyProvider();
+  static final _acquired = <String, HiveTransactionStorage>{};
+  static final _pendingClose = <String, Future<void>>{};
 
-  /// How many [acquire] calls this instance must outlive; 0 for instances
-  /// built directly, whose [close] always really closes.
-  int _acquireCount = 0;
+  /// Versioned encrypted cache, separate from the retired plaintext box.
+  static const defaultBoxName = 'komodo_tx_history_v2';
+  static const _plaintextBoxName = 'komodo_tx_history_v1';
+  static const _deleteTimeout = Duration(seconds: 5);
+  static const _openBatchSize = 64;
 
-  /// Box name for the current key layout.
-  ///
-  /// The version suffix tracks the *key* scheme; the record schema is versioned
-  /// separately inside each value. Earlier layouts are deleted on first open so
-  /// a bump does not orphan a full copy of the history on disk forever.
-  static const String defaultBoxName = 'komodo_tx_history_v1';
-
-  /// Box names from superseded key layouts, deleted on first successful open.
-  static const List<String> _supersededBoxNames = <String>[];
-
-  /// How long to wait for a recovery delete before giving up.
-  ///
-  /// On web `deleteBoxFromDisk` calls `IDBFactory.deleteDatabase`, which blocks
-  /// while another tab holds the database open and never completes. Without a
-  /// deadline, corruption recovery would hang the caller forever.
-  static const Duration _deleteTimeout = Duration(seconds: 5);
-
-  /// Name of the Hive box this instance reads and writes.
+  /// Name of the encrypted Hive box.
   final String boxName;
 
+  /// Limits shared by persistence and its memory fallback.
+  final TransactionHistoryCachePolicy policy;
+  final HistoryCacheKeyProvider _keyProvider;
+
+  /// Lists the wallets that still exist, consulted once per successful open.
+  /// See [_collectOrphanedWallets].
   final Future<Set<String>> Function()? _knownWalletNamespaces;
   final CompactionStrategy _compactionStrategy;
-  final HiveCipher? _cipher;
   final void Function(String, Object, StackTrace) _onError;
-
   final _mutex = Mutex();
   final _index = TransactionOrderIndex();
-
-  /// Live asset identities seen this session, keyed by asset token.
-  ///
-  /// Lets [getStats] name the (wallet, asset) pairs it reports without storing
-  /// wallet names on disk - the wallet storage namespace is a one-way hash, so
-  /// the alternative would be persisting wallet identity in the clear for a
-  /// method with no production callers.
+  final TransactionCacheRetention _retention;
   final _sessionScopes = <String, AssetTransactionHistoryId>{};
+  final _dirtyScopes = <String>{};
 
   LazyBox<String>? _box;
   Future<LazyBox<String>?>? _opening;
   InMemoryTransactionStorage? _fallback;
+  HistoryCacheLease? _lease;
+  HiveCipher? _cipher;
+  Hmac? _keyHmac;
+  int _acquireCount = 1;
+  int _lastAccess = 0;
 
-  /// Whether the box is unusable and reads and writes are being served from
-  /// memory only.
+  /// Whether this owner serves bounded memory because persistence is
+  /// unavailable.
   bool get isDegraded => _fallback != null;
+
+  /// Logical retained bytes, including serialized metadata and index
+  /// allowances.
+  int get logicalBytes => _fallback?.logicalBytes ?? _retention.logicalBytes;
+
+  int _accessNow() {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return _lastAccess = now > _lastAccess ? now : _lastAccess + 1;
+  }
+
+  String _registerScope(WalletId walletId, AssetId assetId) {
+    final scope = TransactionStorageKey.prefix(walletId, assetId);
+    if (_index.count(scope) > 0) {
+      _sessionScopes[scope] = AssetTransactionHistoryId(walletId, assetId);
+      _retention.touch(scope, _accessNow());
+      _dirtyScopes.add(scope);
+    }
+    return scope;
+  }
+
+  String _diskKey(String orderKey) {
+    final parts = TransactionStorageKey.parse(orderKey)!;
+    return _keyHmac!
+        .convert(utf8.encode('${parts.prefix}${parts.idToken}'))
+        .toString();
+  }
 
   @override
   Future<void> storeTransaction(Transaction transaction, WalletId walletId) =>
@@ -176,36 +180,40 @@ class HiveTransactionStorage
     WalletId walletId,
   ) async {
     if (transactions.isEmpty) return;
-    for (final transaction in transactions) {
-      if (transaction.internalId.isEmpty) {
-        throw TransactionStorageException(
-          'Transaction internal ID cannot be empty',
-        );
-      }
+    if (transactions.any((transaction) => transaction.internalId.isEmpty)) {
+      throw TransactionStorageException(
+        'Transaction internal ID cannot be empty',
+      );
     }
-
-    final box = await _ensureOpen();
-    if (box == null) {
-      return _fallback!.storeTransactions(transactions, walletId);
-    }
-
     await _mutex.protect(() async {
-      final grouped = groupBy(transactions, (Transaction tx) => tx.assetId);
-      for (final entry in grouped.entries) {
-        // Collapse duplicates within the batch first, so two perspectives of
-        // one transfer arriving on the same page merge rather than overwrite.
-        final batch = <String, Transaction>{};
-        for (final transaction in entry.value) {
-          batch.update(
-            transaction.internalId,
-            (existing) => TransactionMergeUtils.mergeTransactionFields(
-              existing,
-              transaction,
-            ),
-            ifAbsent: () => transaction,
-          );
+      final box = await _ensureOpen();
+      if (box == null) {
+        return _fallback!.storeTransactions(transactions, walletId);
+      }
+      try {
+        for (final group in groupBy(
+          transactions,
+          (Transaction tx) => tx.assetId,
+        ).entries) {
+          final batch = <String, Transaction>{};
+          for (final row in group.value) {
+            batch.update(
+              row.internalId,
+              (previous) =>
+                  TransactionMergeUtils.mergeTransactionFields(previous, row),
+              ifAbsent: () => row,
+            );
+          }
+          await _writeBatch(box, walletId, group.key, batch.values);
         }
-        await _writeBatch(box, walletId, entry.key, batch.values);
+      } on Object catch (error, stack) {
+        await _degrade(
+          box,
+          'Could not persist transaction history',
+          error,
+          stack,
+        );
+        await _fallback!.storeTransactions(transactions, walletId);
       }
     });
   }
@@ -216,134 +224,103 @@ class HiveTransactionStorage
     AssetId assetId,
     Iterable<Transaction> transactions,
   ) async {
-    final prefix = _registerScope(walletId, assetId);
-    final writes = <String, String>{};
-
-    // Resolve and read every row this batch will merge into up front, rather
-    // than one await at a time inside the loop. The confirmations refresh
-    // re-stores a full page every 30 seconds per watched asset, and on web
-    // each read is its own IndexedDB round trip.
-    final existingKeys = <String, String>{};
-    for (final incoming in transactions) {
-      final key = _index.keyForPrefixedId(prefix, incoming.internalId);
-      if (key != null) existingKeys[incoming.internalId] = key;
-    }
-    final existingRecords = await _readRecords(box, existingKeys);
-
-    for (final incoming in transactions) {
-      final existingKey = existingKeys[incoming.internalId];
-      final existingRecord = existingRecords[incoming.internalId];
-      var merged = incoming;
-
-      if (existingKey != null && existingRecord != null) {
-        final existing = _decode(
-          existingRecord,
-          existingKey,
-          scopedAssetId: assetId,
-        );
-        if (existing != null) {
-          merged = TransactionMergeUtils.mergeTransactionFields(
-            existing,
-            incoming,
-          );
-        }
-      }
-
-      final encoded = TransactionRecordCodec.encode(merged);
-      final key = TransactionStorageKey.build(
-        prefix: prefix,
+    final scope = _registerScope(walletId, assetId);
+    _sessionScopes[scope] = AssetTransactionHistoryId(walletId, assetId);
+    final accessedAt = _accessNow();
+    _retention.touch(scope, accessedAt);
+    _dirtyScopes.add(scope);
+    final writes = <String, _HistoryEnvelope>{};
+    final incomingRows = transactions.toList(growable: false);
+    final previousKeys = [
+      for (final row in incomingRows)
+        _index.keyForPrefixedId(scope, row.internalId),
+    ];
+    // Pipeline a page's IndexedDB reads rather than paying a round trip per
+    // row.
+    final previousRows = await Future.wait([
+      for (final key in previousKeys)
+        key == null
+            ? Future<_HistoryEnvelope?>.value()
+            : _readEnvelope(box, key),
+    ]);
+    for (var i = 0; i < incomingRows.length; i++) {
+      final incoming = incomingRows[i];
+      final previousKey = previousKeys[i];
+      final previous = previousRows[i];
+      final previousTransaction = previous == null
+          ? null
+          : await _decode(
+              previous.record,
+              previousKey!,
+              scopedAssetId: assetId,
+            );
+      final merged = previousTransaction == null
+          ? incoming
+          : TransactionMergeUtils.mergeTransactionFields(
+              previousTransaction,
+              incoming,
+            );
+      final orderKey = TransactionStorageKey.build(
+        prefix: scope,
         timestamp: merged.timestamp,
         internalId: merged.internalId,
       );
-
-      // Skip byte-identical rewrites. The confirmations refresh re-stores page
-      // one every 30 seconds per watched asset, and most of those rows have not
-      // changed at all.
-      if (key == existingKey && encoded == existingRecord) continue;
-
-      writes[key] = encoded;
+      final record = TransactionRecordCodec.encode(merged);
+      final diskKey = _diskKey(orderKey);
+      if (previous?.record == record && previous?.orderKey == orderKey) {
+        continue;
+      }
+      final envelope = _HistoryEnvelope(orderKey, record, accessedAt);
+      writes[diskKey] = envelope;
+      _retention.put(diskKey, envelope.entry, accessedAt);
     }
 
-    if (writes.isEmpty) return;
-
-    try {
-      await box.putAll(writes);
-    } on Object catch (error, stackTrace) {
-      // The rows are already with the caller; a cache write failing must not
-      // surface as a fetch failure. The index is deliberately untouched at
-      // this point: rows Hive refused must not become authoritative, or the
-      // store starts counting phantom records and reporting a latest
-      // transaction ID that was never written.
-      _onError(
-        'failed to persist ${writes.length} transactions',
-        error,
-        stackTrace,
+    // Plan eviction before writing so even an oversized network page cannot
+    // create an unbounded durable cache. A failed delete disables persistence.
+    final evicted = _retention.prune();
+    if (evicted.isNotEmpty) {
+      await box.deleteAll(evicted);
+      for (final key in evicted) {
+        writes.remove(key);
+      }
+      _rebuildIndex();
+    }
+    if (writes.isNotEmpty) {
+      await box.putAll(
+        writes.map((key, envelope) => MapEntry(key, envelope.encode())),
       );
-      return;
+      for (final envelope in writes.values) {
+        _index.insert(envelope.orderKey);
+      }
     }
-
-    // Index the rows only now that Hive actually holds them.
-    final staleKeys = <String>[];
-    for (final key in writes.keys) {
-      // Re-keying (a pending row gaining a real timestamp) indexes the new
-      // key first and deletes the old record after. A crash in between leaves
-      // a duplicate that `rebuildFromKeys` collapses on the next open; the
-      // reverse order would lose the row.
-      final displaced = _index.insert(key);
-      if (displaced != null && displaced != key) staleKeys.add(displaced);
-    }
-
-    if (staleKeys.isEmpty) return;
-
-    try {
-      await box.deleteAll(staleKeys);
-    } on Object catch (error, stackTrace) {
-      // The replacement rows are stored and indexed; a displaced record that
-      // will not delete is unreachable through the index and merely wastes
-      // its bytes until the box is next compacted or collected.
-      _onError(
-        'failed to delete ${staleKeys.length} displaced records',
-        error,
-        stackTrace,
-      );
-    }
+    _forgetEmptyScopes();
+    if (evicted.isNotEmpty) await box.compact();
   }
 
   @override
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
     int? pageNumber,
     int limit = 10,
   }) async {
-    final box = await _ensureOpen();
-    if (box == null) {
-      return _fallback!.getTransactions(
-        assetId,
-        walletId,
-        fromId: fromId,
-        pageNumber: pageNumber,
-        limit: limit,
-      );
-    }
-
     return _mutex.protect(() async {
-      final prefix = _registerScope(walletId, assetId);
-      final total = _index.count(prefix);
-      if (total == 0) {
-        return TransactionPage(
-          transactions: const [],
-          total: 0,
-          currentPage: pageNumber ?? 1,
-          totalPages: 0,
+      final box = await _ensureOpen();
+      if (box == null) {
+        return _fallback!.getTransactions(
+          assetId,
+          walletId,
+          fromId: fromId,
+          pageNumber: pageNumber,
+          limit: limit,
         );
       }
-
+      final scope = _registerScope(walletId, assetId);
       final List<String> keys;
       try {
         keys = _index.page(
-          prefix,
+          scope,
           limit: limit,
           fromId: fromId,
           pageNumber: pageNumber,
@@ -351,412 +328,86 @@ class HiveTransactionStorage
       } on TransactionOrderIndexCursorException {
         throw TransactionStorageException('Starting transaction not found');
       }
-
-      final transactions = await _readAll(box, keys, scopedAssetId: assetId);
-      return TransactionPage(
+      final envelopes = await Future.wait(
+        keys.map((key) => _readEnvelope(box, key)),
+      );
+      final transactions = <Transaction>[];
+      for (var i = 0; i < keys.length; i++) {
+        final envelope = envelopes[i];
+        if (envelope == null) continue;
+        final row = await _decode(
+          envelope.record,
+          keys[i],
+          scopedAssetId: assetId,
+        );
+        if (row != null) transactions.add(row);
+      }
+      return CachedTransactionPage(
         transactions: transactions,
-        total: total,
-        nextPageId: transactions.lastOrNull?.internalId,
-        currentPage: pageNumber ?? 1,
-        totalPages: (total / limit).ceil(),
+        cachedCount: _index.count(scope),
       );
     });
   }
 
   @override
   Future<Transaction?> getTransactionById(String internalId) async {
-    final box = await _ensureOpen();
-    if (box == null) return _fallback!.getTransactionById(internalId);
-
     return _mutex.protect(() async {
+      final box = await _ensureOpen();
+      if (box == null) return _fallback!.getTransactionById(internalId);
       final key = _index.keyForId(internalId);
       if (key == null) return null;
-      final record = await _readRecord(box, key);
-      if (record == null) return null;
-      return _decode(record, key);
+      final scope = TransactionStorageKey.parse(key)!.prefix;
+      _retention.touch(scope, _accessNow());
+      _dirtyScopes.add(scope);
+      final envelope = await _readEnvelope(box, key);
+      return envelope == null ? null : await _decode(envelope.record, key);
     });
   }
 
   @override
   Future<void> clearTransactions(AssetId assetId, WalletId walletId) async {
-    final box = await _ensureOpen();
-    if (box == null) return _fallback!.clearTransactions(assetId, walletId);
-
     await _mutex.protect(() async {
-      final prefix = TransactionStorageKey.prefix(walletId, assetId);
-      final keys = _index.keysFor(prefix);
-      if (keys.isNotEmpty) {
-        try {
-          await box.deleteAll(keys);
-        } on Object catch (error, stackTrace) {
-          // Keep the index: `_onError` swallows this, so dropping the entries
-          // first would report a successful clear while the rows survive on
-          // disk. They are re-indexed on the next open, and the history the
-          // caller believes it deleted comes back.
-          _onError('failed to clear ${assetId.id}', error, stackTrace);
-          return;
-        }
-      }
-      _index.removePrefix(prefix);
+      final box = await _ensureOpen();
+      if (box == null) return _fallback!.clearTransactions(assetId, walletId);
+      await _removeScopes(box, [
+        TransactionStorageKey.prefix(walletId, assetId),
+      ]);
     });
   }
 
-  @override
-  Future<String?> getLatestTransactionId(
-    AssetId assetId,
-    WalletId walletId,
-  ) async {
-    final box = await _ensureOpen();
-    if (box == null) {
-      return _fallback!.getLatestTransactionId(assetId, walletId);
-    }
-
-    return _mutex.protect(() async {
-      final prefix = _registerScope(walletId, assetId);
-      final key = _index.latestKey(prefix);
-      if (key == null) return null;
-      final parts = TransactionStorageKey.parse(key);
-      // The key holds a digest rather than the ID when the ID was over budget,
-      // so fall back to the record in that case.
-      if (parts != null && !parts.idTokenIsHashed) return parts.idToken;
-      final record = await _readRecord(box, key);
-      if (record == null) return null;
-      return _decode(record, key, scopedAssetId: assetId)?.internalId;
-    });
-  }
-
-  @override
-  Future<StorageStats> getStats() async {
-    final box = await _ensureOpen();
-    if (box == null) return _fallback!.getStats();
-
-    return _mutex.protect(() async {
-      final perAsset = <AssetTransactionHistoryId, int>{};
-      var total = 0;
-      int? oldest;
-      int? newest;
-
-      for (final prefix in _index.prefixes.toList()) {
-        final scope = _sessionScopes[prefix];
-        // Only pairs this process has touched can be named: the wallet half of
-        // a key is a one-way hash.
-        if (scope == null) continue;
-        final stats = _index.statsFor(prefix);
-        if (stats == null) continue;
-        perAsset[scope] = stats.count;
-        total += stats.count;
-        oldest = oldest == null
-            ? stats.oldestMicros
-            : (stats.oldestMicros < oldest ? stats.oldestMicros : oldest);
-        newest = newest == null
-            ? stats.newestMicros
-            : (stats.newestMicros > newest ? stats.newestMicros : newest);
-      }
-
-      if (total == 0 || oldest == null || newest == null) {
-        throw TransactionStorageException('No transactions available');
-      }
-
-      return StorageStats(
-        totalTransactions: total,
-        transactionsPerAsset: perAsset,
-        oldestTransaction: DateTime.fromMicrosecondsSinceEpoch(
-          oldest,
-          isUtc: true,
-        ),
-        newestTransaction: DateTime.fromMicrosecondsSinceEpoch(
-          newest,
-          isUtc: true,
-        ),
-      );
-    });
-  }
-
-  /// Deletes every stored transaction belonging to [walletId].
-  ///
-  /// Not wired into wallet deletion yet - no SDK-wide purge hook exists - but
-  /// available to callers that delete a wallet, and used by [_collectGarbage].
+  /// Wallet deletion purges the cache, including its bounded memory fallback.
   Future<void> purgeWallet(WalletId walletId) async {
-    final box = await _ensureOpen();
-    if (box == null) return;
-    await _mutex.protect(
-      () =>
-          _purgeWalletPrefix(box, TransactionStorageKey.walletPrefix(walletId)),
-    );
-  }
-
-  @override
-  Future<void> close() async {
-    // A shared instance closes only with its last acquirer; earlier releases
-    // must not shut the box underneath the containers still using it.
-    if (_acquireCount > 1) {
-      _acquireCount--;
-      return;
-    }
-    if (_acquireCount == 1) {
-      _acquireCount = 0;
-      _acquired.remove(boxName);
-    }
-    final closing = () async {
-      // `_open` installs `_box` only after its own await, so a null `_box`
-      // here can mean "not opened yet" rather than "nothing to release".
-      // Treating that as released strands the handle the in-flight open is
-      // about to assign: the registry entry is already gone, so the next
-      // acquire builds a fresh instance, adopts the same process-global box
-      // through `Hive.isBoxOpen`, and drives it from an index that never saw
-      // the other instance's writes. `_open` reports its own failures and
-      // never rejects, so this cannot throw past the pending-close record.
-      final opening = _opening;
-      if (opening != null) await opening;
-      await _mutex.protect(() async {
-        final box = _box;
-        _box = null;
-        _opening = null;
-        if (box == null) return;
-        try {
-          // A no-op on web, where the backend reports no compaction support.
-          await box.compact();
-          await box.close();
-        } on Object catch (error, stackTrace) {
-          _onError('failed to close $boxName', error, stackTrace);
-        }
-      });
-    }();
-    // Recorded before the first await: the registry entry is already gone, so
-    // a concurrent acquire builds a fresh instance - whose open must wait for
-    // this handle to actually release the box rather than adopt a still-open
-    // box that is about to be closed underneath it. Never rejects; the close
-    // body contains its own failures.
-    _pendingCloseByBoxName[boxName] = closing;
-    await closing;
-  }
-
-  /// The most recent in-flight (or completed) real close per box name; the
-  /// next open of that box awaits it. See [close] and [_openBoxWithRecovery].
-  static final Map<String, Future<void>> _pendingCloseByBoxName = {};
-
-  Future<void> _purgeWalletPrefix(
-    LazyBox<String> box,
-    String walletPrefix,
-  ) async {
-    final keys = [
-      for (final prefix in _index.prefixes.toList())
-        if (prefix.startsWith(walletPrefix)) ..._index.keysFor(prefix),
-    ];
-    if (keys.isNotEmpty) {
-      try {
-        await box.deleteAll(keys);
-      } on Object catch (error, stackTrace) {
-        // Index intact on failure, for the reason given in [clearTransactions].
-        _onError('failed to purge a wallet', error, stackTrace);
-        return;
-      }
-    }
-    _index.removeWallet(walletPrefix);
-    _sessionScopes.removeWhere((prefix, _) => prefix.startsWith(walletPrefix));
-  }
-
-  String _registerScope(WalletId walletId, AssetId assetId) {
-    final prefix = TransactionStorageKey.prefix(walletId, assetId);
-    _sessionScopes[prefix] = AssetTransactionHistoryId(walletId, assetId);
-    return prefix;
-  }
-
-  /// Reads [keys] concurrently, preserving their order.
-  ///
-  /// One `await` per row put a page's worth of round trips on the path that
-  /// paints the asset details list. That is invisible on the VM, where a read
-  /// is a file offset, and very visible on web, where every `LazyBox.get` is
-  /// its own IndexedDB transaction. Issuing them together lets the backend
-  /// pipeline them, so a page costs one round trip's latency rather than N.
-  ///
-  /// [_readRecord] contains its own failures, so a single unreadable row still
-  /// yields `null` here instead of failing the whole page.
-  Future<List<Transaction>> _readAll(
-    LazyBox<String> box,
-    List<String> keys, {
-    AssetId? scopedAssetId,
-  }) async {
-    if (keys.isEmpty) return const [];
-    final records = await Future.wait(keys.map((key) => _readRecord(box, key)));
-
-    final transactions = <Transaction>[];
-    for (var i = 0; i < keys.length; i++) {
-      final record = records[i];
-      if (record == null) continue;
-      final transaction = _decode(
-        record,
-        keys[i],
-        scopedAssetId: scopedAssetId,
-      );
-      if (transaction != null) transactions.add(transaction);
-    }
-    return transactions;
-  }
-
-  /// Reads the records behind [keysById] concurrently, keyed by the same ids.
-  Future<Map<String, String>> _readRecords(
-    LazyBox<String> box,
-    Map<String, String> keysById,
-  ) async {
-    if (keysById.isEmpty) return const {};
-    final ids = keysById.keys.toList();
-    final records = await Future.wait(
-      ids.map((id) => _readRecord(box, keysById[id]!)),
-    );
-    return {
-      for (var i = 0; i < ids.length; i++)
-        if (records[i] != null) ids[i]: records[i]!,
-    };
-  }
-
-  Future<String?> _readRecord(LazyBox<String> box, String key) async {
-    try {
-      return await box.get(key);
-    } on Object catch (error, stackTrace) {
-      _onError('failed to read a stored transaction', error, stackTrace);
-      // Out of the index first, like the decode-failure path: a key left
-      // behind is a phantom the process keeps counting - short pages, wrong
-      // totals, a latestKey that reads as null - while the eviction below is
-      // only best-effort.
-      _index.remove(key);
-      unawaited(_evict(box, key));
-      return null;
-    }
-  }
-
-  /// Decodes one record, evicting it if it is unreadable.
-  ///
-  /// A record from a newer schema, or one that has been corrupted, costs a
-  /// refetch rather than an error: dropping it keeps the rest of the asset's
-  /// history usable.
-  Transaction? _decode(String record, String key, {AssetId? scopedAssetId}) {
-    try {
-      return TransactionRecordCodec.decode(
-        record,
-        scopedAssetId: scopedAssetId,
-      );
-    } on TransactionRecordVersionException catch (error, stackTrace) {
-      _onError('dropping a record from a newer schema', error, stackTrace);
-    } on TransactionRecordFormatException catch (error, stackTrace) {
-      _onError('dropping an unreadable record', error, stackTrace);
-    }
-    _index.remove(key);
-    final box = _box;
-    if (box != null) unawaited(_evict(box, key));
-    return null;
-  }
-
-  Future<void> _evict(LazyBox<String> box, String key) async {
-    try {
-      await box.delete(key);
-    } on Object catch (_) {
-      // Best effort: the record is already out of the index.
-    }
-  }
-
-  Future<LazyBox<String>?> _ensureOpen() {
-    final box = _box;
-    if (box != null) return Future.value(box);
-    if (_fallback != null) return Future.value();
-    return _opening ??= _open();
-  }
-
-  Future<LazyBox<String>?> _open() async {
-    LazyBox<String>? opened;
-    try {
-      final box = await _openBoxWithRecovery();
-      opened = box;
-      _box = box;
-      // Unparseable keys, plus the stale halves of any re-key that crashed
-      // between writing the replacement and deleting the displaced record.
-      final dropped = _index.rebuildFromKeys(box.keys.whereType<String>());
-      if (dropped.isNotEmpty) {
-        _onError(
-          'dropping ${dropped.length} unparseable or superseded keys',
-          StateError('unindexable keys in $boxName'),
-          StackTrace.current,
+    await _mutex.protect(() async {
+      final box = await _ensureOpen();
+      if (box == null) {
+        await _fallback!.purgeWallet(walletId);
+        throw TransactionStorageException(
+          'Persistent history could not be purged; memory was cleared',
         );
-        await box.deleteAll(dropped);
       }
-      await _deleteSupersededBoxes();
-      await _collectGarbage(box);
-      return box;
-    } on Object catch (error, stackTrace) {
-      // Last resort: serve from memory so a broken cache cannot break history.
-      _onError(
-        'falling back to in-memory transaction storage',
-        error,
-        stackTrace,
+      final prefix = TransactionStorageKey.walletPrefix(walletId);
+      return _removeScopes(
+        box,
+        _index.prefixes.where((scope) => scope.startsWith(prefix)).toList(),
       );
-      // The throw can come from a step *after* the open succeeded - dropping
-      // superseded keys, garbage collection - and a Hive box is process-global.
-      // Clearing `_box` without closing it puts the handle beyond the reach of
-      // `close()` for good, and the next `_openBoxWithRecovery` then adopts it
-      // through `Hive.isBoxOpen` in whatever state this attempt abandoned.
-      if (opened != null) {
-        try {
-          await opened.close();
-        } on Object catch (closeError, closeStackTrace) {
-          _onError(
-            'failed to release $boxName after falling back',
-            closeError,
-            closeStackTrace,
-          );
-        }
-      }
-      _fallback = InMemoryTransactionStorage();
-      _box = null;
-      return null;
-    } finally {
-      _opening = null;
-    }
+    });
   }
 
-  Future<LazyBox<String>> _openBoxWithRecovery() async {
-    // Wait out any final close of this box still in flight. Without this, an
-    // instance acquired while the previous one was closing could adopt the
-    // still-open box through `isBoxOpen` and then have it closed underneath
-    // it, leaving a live store holding a dead box.
-    final pendingClose = _pendingCloseByBoxName[boxName];
-    if (pendingClose != null) await pendingClose;
-    if (Hive.isBoxOpen(boxName)) return Hive.lazyBox<String>(boxName);
-    try {
-      return await _openBox();
-    } on Object catch (error, stackTrace) {
-      _onError('recovering an unreadable $boxName', error, stackTrace);
-      await _deleteBox(boxName);
-      return _openBox();
-    }
-  }
-
-  Future<LazyBox<String>> _openBox() => Hive.openLazyBox<String>(
-    boxName,
-    encryptionCipher: _cipher,
-    compactionStrategy: _compactionStrategy,
-  );
-
-  Future<void> _deleteBox(String name) async {
-    // See [_deleteTimeout]: on web this can block indefinitely behind another
-    // tab's open connection.
-    await Hive.deleteBoxFromDisk(name).timeout(_deleteTimeout);
-  }
-
-  Future<void> _deleteSupersededBoxes() async {
-    for (final name in _supersededBoxNames) {
-      try {
-        if (await Hive.boxExists(name)) await _deleteBox(name);
-      } on Object catch (error, stackTrace) {
-        _onError('failed to delete superseded box $name', error, stackTrace);
-      }
-    }
-  }
-
-  /// Drops history for wallets that no longer exist.
+  /// Drops history belonging to wallets that no longer exist.
+  ///
+  /// The deletion-time purge in `bootstrap.dart` is the primary path, but it
+  /// can fail without the caller ever learning: in degraded mode [purgeWallet]
+  /// clears only the memory fallback and throws, the hook logs that and moves
+  /// on, and `deleteWallet` still reports success. Degradation is reachable -
+  /// on web the cache lease is taken with `ifAvailable: true`, so a second tab
+  /// never holds it, and [_ensureOpen] latches on `_fallback` rather than
+  /// retrying. Without this sweep the deleted wallet's rows would then survive
+  /// until ordinary retention happened to evict them, which for a low-activity
+  /// wallet may be never.
   ///
   /// Fails open in every uncertain case - a throwing or empty provider means
   /// "do not know", never "delete everything".
-  Future<void> _collectGarbage(LazyBox<String> box) async {
+  Future<void> _collectOrphanedWallets(LazyBox<String> box) async {
     final provider = _knownWalletNamespaces;
     if (provider == null) return;
 
@@ -773,29 +424,440 @@ class HiveTransactionStorage
         .map(TransactionStorageKey.tokenForNamespace)
         .toSet();
     final orphaned = <String>{
-      for (final prefix in _index.prefixes)
+      for (final scope in _index.prefixes)
         if (!knownTokens.contains(
-          prefix.split(TransactionStorageKey.separator).first,
+          scope.split(TransactionStorageKey.separator).first,
         ))
-          prefix,
+          scope,
     };
+    if (orphaned.isEmpty) return;
 
-    for (final prefix in orphaned) {
-      await _purgeWalletPrefix(
-        box,
-        prefix.substring(0, TransactionStorageKey.tokenLength + 1),
+    await _removeScopes(box, orphaned.toList());
+  }
+
+  Future<void> _removeScopes(LazyBox<String> box, List<String> scopes) async {
+    final keys = [for (final scope in scopes) ..._index.keysFor(scope)];
+    try {
+      await box.deleteAll(keys.map(_diskKey));
+      for (final key in keys) {
+        _forget(key);
+      }
+      _forgetEmptyScopes();
+      if (keys.isNotEmpty) await box.compact();
+    } on Object catch (error, stack) {
+      _report('Could not purge transaction history', error, stack);
+      throw TransactionStorageException(
+        'Persistent history could not be purged',
       );
     }
   }
 
-  static bool _defaultCompaction(int entries, int deletedEntries) =>
-      deletedEntries > 60 &&
-      (deletedEntries / entries > 0.15 || deletedEntries > 20000);
-
-  static void _logError(String message, Object error, StackTrace stackTrace) {
-    developer.log(
-      'Transaction storage operation failed',
-      name: 'HiveTransactionStorage',
-    );
+  @override
+  Future<String?> getLatestTransactionId(
+    AssetId assetId,
+    WalletId walletId,
+  ) async {
+    return _mutex.protect(() async {
+      final box = await _ensureOpen();
+      if (box == null) {
+        return _fallback!.getLatestTransactionId(assetId, walletId);
+      }
+      final scope = _registerScope(walletId, assetId);
+      final key = _index.latestKey(scope);
+      if (key == null) return null;
+      final parts = TransactionStorageKey.parse(key)!;
+      if (!parts.idTokenIsHashed) return parts.idToken;
+      final envelope = await _readEnvelope(box, key);
+      return envelope == null
+          ? null
+          : (await _decode(
+              envelope.record,
+              key,
+              scopedAssetId: assetId,
+            ))?.internalId;
+    });
   }
+
+  @override
+  Future<StorageStats> getStats() async {
+    return _mutex.protect(() async {
+      final box = await _ensureOpen();
+      if (box == null) return _fallback!.getStats();
+      final perAsset = <AssetTransactionHistoryId, int>{};
+      int? oldest;
+      int? newest;
+      for (final scope in _index.prefixes) {
+        final stats = _index.statsFor(scope)!;
+        final identity = _sessionScopes[scope];
+        if (identity != null) perAsset[identity] = stats.count;
+        if (oldest == null || stats.oldestMicros < oldest) {
+          oldest = stats.oldestMicros;
+        }
+        if (newest == null || stats.newestMicros > newest) {
+          newest = stats.newestMicros;
+        }
+      }
+      if (oldest == null || newest == null) {
+        throw TransactionStorageException('No transactions available');
+      }
+      return StorageStats(
+        totalTransactions: _index.length,
+        transactionsPerAsset: perAsset,
+        oldestTransaction: DateTime.fromMicrosecondsSinceEpoch(
+          oldest,
+          isUtc: true,
+        ),
+        newestTransaction: DateTime.fromMicrosecondsSinceEpoch(
+          newest,
+          isUtc: true,
+        ),
+      );
+    });
+  }
+
+  Future<_HistoryEnvelope?> _readEnvelope(
+    LazyBox<String> box,
+    String orderKey,
+  ) async {
+    try {
+      final encoded = await box.get(_diskKey(orderKey));
+      if (encoded != null) {
+        final envelope = _HistoryEnvelope.decode(encoded);
+        if (envelope.orderKey == orderKey) return envelope;
+      }
+    } on Object catch (error, stack) {
+      _report('Could not read cached transaction', error, stack);
+    }
+    _forget(orderKey);
+    await _evict(box, orderKey);
+    return null;
+  }
+
+  Future<Transaction?> _decode(
+    String record,
+    String orderKey, {
+    AssetId? scopedAssetId,
+  }) async {
+    try {
+      return TransactionRecordCodec.decode(
+        record,
+        scopedAssetId: scopedAssetId,
+      );
+    } on Object catch (error, stack) {
+      _report('Could not decode cached transaction', error, stack);
+      _forget(orderKey);
+      final box = _box;
+      if (box != null) await _evict(box, orderKey);
+      return null;
+    }
+  }
+
+  Future<void> _evict(LazyBox<String> box, String orderKey) async {
+    try {
+      await box.delete(_diskKey(orderKey));
+    } on Object {
+      // The unreadable row is already excluded from the live index. Reopening
+      // retries eviction before admitting any cached rows.
+    }
+  }
+
+  void _forget(String orderKey) {
+    _index.remove(orderKey);
+    _retention.remove(_diskKey(orderKey));
+  }
+
+  void _forgetEmptyScopes() {
+    final live = _index.prefixes.toSet();
+    _sessionScopes.removeWhere((scope, _) => !live.contains(scope));
+    _retention.scopeAccess.removeWhere((scope, _) => !live.contains(scope));
+    _dirtyScopes.removeWhere((scope) => !live.contains(scope));
+  }
+
+  void _rebuildIndex() => _index.rebuildFromKeys(
+    _retention.entries.values.map((entry) => entry.orderKey),
+  );
+
+  Future<LazyBox<String>?> _ensureOpen() {
+    if (_acquireCount == 0) {
+      return Future.error(StateError('Transaction history cache is closed'));
+    }
+    if (_box != null) return Future.value(_box);
+    if (_fallback != null) return Future.value();
+    return _opening ??= _open();
+  }
+
+  Future<LazyBox<String>?> _open() async {
+    LazyBox<String>? opened;
+    try {
+      await _pendingClose[boxName];
+      _lease = await HistoryCacheLease.acquire(boxName);
+      // Retire plaintext even if key acquisition fails. No legacy record is
+      // imported or copied to the encrypted cache.
+      if (boxName == defaultBoxName) await retireLegacyCache();
+      final key = await _keyProvider
+          .loadOrCreate(boxName)
+          .timeout(_deleteTimeout);
+      if (key.length != 32 || key.any((byte) => byte < 0 || byte > 255)) {
+        throw StateError('Transaction history cache key is invalid');
+      }
+      final master = Hmac(sha256, key);
+      // v3 re-derives under a new label so the key, and with it the CRC Hive
+      // keeps in the box header, differs from anything the previous CBC cipher
+      // wrote. An existing cache is rejected at open and rebuilt from the
+      // network below rather than being read back unauthenticated.
+      _cipher = HistoryCacheGcmCipher(
+        master.convert(utf8.encode('history-encryption-v3-gcm')).bytes,
+      );
+      _keyHmac = Hmac(
+        sha256,
+        master.convert(utf8.encode('history-identifiers-v2')).bytes,
+      );
+      if (Hive.isBoxOpen(boxName)) {
+        // Hive silently returns an already-open box without checking its
+        // cipher.
+        // Only the SDK registry may share a handle; an external handle is
+        // unsafe.
+        throw StateError('Transaction history cache has an external owner');
+      }
+      try {
+        opened = await _openBox();
+      } on Object {
+        await _deleteBox(boxName);
+        opened = await _openBox();
+      }
+      _box = opened;
+      await _rebuildFromEnvelopes(opened);
+      await _collectOrphanedWallets(opened);
+      return opened;
+    } on Object catch (error, stack) {
+      await _degrade(
+        opened,
+        'Encrypted transaction history is unavailable',
+        error,
+        stack,
+      );
+      return null;
+    } finally {
+      _opening = null;
+    }
+  }
+
+  Future<LazyBox<String>> _openBox() => Hive.openLazyBox<String>(
+    boxName,
+    encryptionCipher: _cipher,
+    compactionStrategy: _compactionStrategy,
+    // A wrong key must not make Hive silently truncate an otherwise valid file.
+    // Explicit cache recovery below deletes and rebuilds the whole cache.
+    crashRecovery: false,
+  );
+
+  Future<void> _rebuildFromEnvelopes(LazyBox<String> box) async {
+    _retention.clear();
+    final keys = box.keys.toList(growable: false);
+    var deleted = false;
+    for (var start = 0; start < keys.length; start += _openBatchSize) {
+      final batch = keys.skip(start).take(_openBatchSize).toList();
+      final envelopes = await Future.wait(
+        batch.map((key) async {
+          try {
+            if (key is! String || !RegExp(r'^[0-9a-f]{64}$').hasMatch(key)) {
+              return null;
+            }
+            final value = await box.get(key);
+            if (value == null) return null;
+            final envelope = _HistoryEnvelope.decode(value);
+            if (_diskKey(envelope.orderKey) != key) return null;
+            return envelope;
+          } on Object {
+            return null;
+          }
+        }),
+      );
+      final invalid = <dynamic>[];
+      for (var i = 0; i < batch.length; i++) {
+        final envelope = envelopes[i];
+        if (envelope == null) {
+          invalid.add(batch[i]);
+          continue;
+        }
+        _retention.put(batch[i] as String, envelope.entry, envelope.accessedAt);
+        if (envelope.accessedAt > _lastAccess) {
+          _lastAccess = envelope.accessedAt;
+        }
+      }
+      invalid.addAll(_retention.prune());
+      if (invalid.isNotEmpty) {
+        await box.deleteAll(invalid);
+        deleted = true;
+      }
+    }
+    _rebuildIndex();
+    if (deleted) await box.compact();
+  }
+
+  /// Deletes the obsolete plaintext cache without reading or migrating rows.
+  ///
+  /// Bootstrap calls this even when persistence is disabled. A blocked browser
+  /// delete has a deadline; failures are retried on subsequent cache opens and
+  /// SDK starts, without touching any other Hive box or secure-storage key.
+  static Future<void> retireLegacyCache() async {
+    try {
+      // Deleting a nonexistent box is safe. Hive's web boxExists opens an
+      // IndexedDB connection without closing it, which would block our delete.
+      await _deleteBox(_plaintextBoxName);
+    } on Object {
+      developer.log(
+        'Could not retire legacy transaction cache; cleanup will retry',
+        name: 'HiveTransactionStorage',
+      );
+    }
+  }
+
+  static Future<void> _deleteBox(String name) =>
+      Hive.deleteBoxFromDisk(name).timeout(_deleteTimeout);
+
+  Future<void> _degrade(
+    LazyBox<String>? box,
+    String message,
+    Object error,
+    StackTrace stack,
+  ) async {
+    _report(message, error, stack);
+    _fallback ??= InMemoryTransactionStorage(policy: policy);
+    _box = null;
+    _retention.clear();
+    _index.rebuildFromKeys(const []);
+    _sessionScopes.clear();
+    _dirtyScopes.clear();
+    try {
+      await box?.close();
+    } on Object {
+      // Cache faults cannot stop network history.
+    }
+    try {
+      await _lease?.release();
+    } on Object {
+      // Releasing a failed cache must not break network history.
+    }
+    _lease = null;
+    _cipher = null;
+    _keyHmac = null;
+  }
+
+  /// Persists scope recency once per session instead of rewriting every read.
+  Future<void> _flushAccesses(LazyBox<String> box) async {
+    for (final scope in _dirtyScopes.toList()) {
+      final orderKey = _index.latestKey(scope);
+      final access = _retention.scopeAccess[scope];
+      if (orderKey == null || access == null) continue;
+      final envelope = await _readEnvelope(box, orderKey);
+      if (envelope == null || envelope.accessedAt == access) continue;
+      await box.put(
+        _diskKey(orderKey),
+        _HistoryEnvelope(orderKey, envelope.record, access).encode(),
+      );
+    }
+    _dirtyScopes.clear();
+  }
+
+  @override
+  Future<void> close() async {
+    if (_acquireCount == 0) return;
+    if (--_acquireCount > 0) return;
+    _acquired.remove(boxName);
+    final closing = () async {
+      await _opening;
+      await _mutex.protect(() async {
+        final box = _box;
+        _box = null;
+        try {
+          if (box != null) {
+            await _flushAccesses(box);
+            await box.compact();
+          }
+        } on Object catch (error, stack) {
+          _report('Could not compact transaction history', error, stack);
+        } finally {
+          try {
+            await box?.close();
+          } on Object catch (error, stack) {
+            _report('Could not close transaction history', error, stack);
+          }
+          try {
+            await _lease?.release();
+          } on Object catch (error, stack) {
+            _report(
+              'Could not release transaction cache ownership',
+              error,
+              stack,
+            );
+          }
+          _lease = null;
+          _cipher = null;
+          _keyHmac = null;
+          _retention.clear();
+          _index.rebuildFromKeys(const []);
+          _sessionScopes.clear();
+          _dirtyScopes.clear();
+        }
+      });
+    }();
+    _pendingClose[boxName] = closing;
+    await closing;
+  }
+
+  void _report(String message, Object error, StackTrace stack) => _onError(
+    message,
+    StateError('Transaction history cache operation failed'),
+    stack,
+  );
+
+  static bool _defaultCompaction(int entries, int deleted) =>
+      deleted > 60 && (deleted / entries > 0.15 || deleted > 20000);
+
+  static void _logError(String message, Object error, StackTrace stack) {
+    developer.log(message, name: 'HiveTransactionStorage');
+  }
+}
+
+class _HistoryEnvelope {
+  const _HistoryEnvelope(this.orderKey, this.record, this.accessedAt);
+
+  factory _HistoryEnvelope.decode(String encoded) {
+    try {
+      final value = jsonDecode(encoded);
+      if (value is Map<String, dynamic> &&
+          value['v'] == 2 &&
+          value['key'] is String &&
+          value['record'] is String &&
+          value['access'] is int &&
+          (value['access'] as int) >= 0 &&
+          TransactionStorageKey.parse(value['key'] as String) != null) {
+        return _HistoryEnvelope(
+          value['key'] as String,
+          value['record'] as String,
+          value['access'] as int,
+        );
+      }
+    } on Object {
+      // Never surface a JSON exception containing decrypted transaction data.
+    }
+    throw StateError('Invalid transaction history cache envelope');
+  }
+  final String orderKey;
+  final String record;
+  final int accessedAt;
+
+  TransactionCacheEntry get entry => TransactionCacheEntry(
+    scope: TransactionStorageKey.parse(orderKey)!.prefix,
+    orderKey: orderKey,
+    logicalBytes: TransactionCacheEntry.sizeOf(record, orderKey),
+  );
+
+  String encode() => jsonEncode({
+    'v': 2,
+    'key': orderKey,
+    'record': record,
+    'access': accessedAt,
+  });
 }

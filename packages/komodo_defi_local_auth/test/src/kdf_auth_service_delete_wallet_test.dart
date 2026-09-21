@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -95,8 +98,66 @@ class _WriteFailingFlutterSecureStorage extends FlutterSecureStorage {
   }) => Future<void>.error(StateError('secure storage write failed'));
 }
 
+class _ObservedFlutterSecureStorage extends FlutterSecureStorage {
+  _ObservedFlutterSecureStorage({required this.beforeWrite});
+  final Future<void> Function(String key, String? value) beforeWrite;
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    await beforeWrite(key, value);
+    await super.write(key: key, value: value);
+  }
+}
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory testHome;
+  setUpAll(() async {
+    testHome = await Directory.systemTemp.createTemp('local-auth-test-');
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (_) async => testHome.path,
+    );
+    // Read the existing source assets without running build transformers.
+    binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (
+      message,
+    ) async {
+      final key = utf8.decode(message!.buffer.asUint8List());
+      if (key.endsWith('app_build/build_config.json')) {
+        // Force the local seed-node fallback without a network request.
+        return ByteData.sublistView(
+          Uint8List.fromList(
+            utf8.encode(
+              '{"coins":{"coins_repo_content_url":"http://[","cdn_branch_mirrors":{}}}',
+            ),
+          ),
+        );
+      }
+      if (!key.startsWith('packages/')) return null;
+      final source = File('../${key.substring('packages/'.length)}');
+      if (!source.existsSync()) return null;
+      return ByteData.sublistView(await source.readAsBytes());
+    });
+  });
+  tearDownAll(() async {
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      null,
+    );
+    binding.defaultBinaryMessenger.setMockMessageHandler(
+      'flutter/assets',
+      null,
+    );
+    await testHome.delete(recursive: true);
+  });
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues(<String, String>{});
@@ -1371,7 +1432,7 @@ void main() {
           ),
           throwsA(anything),
         );
-        expect(operations.stopCount, 1);
+        expect(await operations.isRunning(), isFalse);
         expect(await service.getActiveUser(), isNull);
       },
     );
@@ -1420,6 +1481,463 @@ void main() {
         );
       },
     );
+  });
+  group('runtime session ownership', () {
+    late KdfAuthService service;
+    late _FakeKdfOperations operations;
+    setUp(() {
+      final user = _verifiedTestUser();
+      FlutterSecureStorage.setMockInitialValues({
+        'user_${user.walletId.name}': jsonEncode(user.toJson()),
+      });
+      service = _createService(
+        onOperationsCreated: (value) => operations = value,
+      );
+      addTearDown(service.dispose);
+    });
+
+    test(
+      'metadata refresh and identity outage preserve runtime ownership',
+      () async {
+        final context = await service.captureSessionContext();
+        final strictGeneration = service.authGeneration;
+        await service.updateMetadataForSession(context, {'has_backup': true});
+        expect(service.isSessionContextCurrent(context), isTrue);
+        expect(service.authGeneration, greaterThan(strictGeneration));
+        operations.responsesByMethod['get_public_key_hash'] = {
+          'mmrpc': '2.0',
+          'error': 'identity unavailable',
+          'error_type': 'Internal',
+        };
+        final degraded = await service.getActiveUser();
+        expect(degraded!.walletId.pubkeyHash, isNull);
+        expect(service.isSessionContextCurrent(context), isTrue);
+        await expectLater(
+          service.updateMetadataForSession(context, {'has_backup': false}),
+          throwsA(isA<AuthIdentityUnavailableException>()),
+        );
+        expect(service.isSessionContextCurrent(context), isTrue);
+        expect(
+          (await SecureLocalStorage().getUser(
+            'test-wallet',
+          ))!.metadata['has_backup'],
+          isTrue,
+        );
+        operations.responsesByMethod['get_public_key_hash'] = {
+          'mmrpc': '2.0',
+          'result': {'public_key_hash': _publicKeyHash},
+        };
+        final saved = await service.updateMetadataForSession(context, {
+          'has_backup': false,
+        });
+        expect(saved.metadata['has_backup'], isFalse);
+        expect(service.isSessionContextCurrent(context), isTrue);
+      },
+    );
+
+    test('a name-only context survives fresh identity enrichment', () async {
+      operations.responsesByMethod['get_public_key_hash'] = {
+        'mmrpc': '2.0',
+        'error': 'identity unavailable',
+        'error_type': 'Internal',
+      };
+      final context = await service.captureSessionContext();
+      expect(context.walletId.pubkeyHash, isNull);
+      operations.responsesByMethod['get_public_key_hash'] = {
+        'mmrpc': '2.0',
+        'result': {'public_key_hash': _publicKeyHash},
+      };
+      await service.updateMetadataForSession(context, {'has_backup': true});
+      final enriched = await service.captureSessionContext();
+      expect(enriched, context);
+      expect(enriched.walletId.pubkeyHash, _publicKeyHash);
+    });
+
+    test(
+      'same-wallet reauthentication invalidates the previous context',
+      () async {
+        final context = await service.captureSessionContext();
+        await service.signIn(
+          walletName: 'test-wallet',
+          password: 'pw',
+          options: context.walletId.authOptions,
+        );
+        expect(service.isSessionContextCurrent(context), isFalse);
+        await expectLater(
+          service.updateMetadataForSession(context, {'has_backup': true}),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(await service.captureSessionContext(), isNot(context));
+      },
+    );
+
+    test(
+      'wallet replacement inside the write lock rejects the prior context',
+      () async {
+        final context = await service.captureSessionContext();
+        final replacement = _verifiedTestUser().copyWith(
+          walletId: WalletId.withPubkeyHash(
+            'replacement',
+            context.walletId.authOptions,
+            _secondPublicKeyHash,
+          ),
+        );
+        await SecureLocalStorage().saveUser(replacement);
+        operations.responsesByMethod['get_wallet_names'] = {
+          'mmrpc': '2.0',
+          'result': {
+            'wallet_names': ['test-wallet', 'replacement'],
+            'activated_wallet': 'replacement',
+          },
+        };
+        operations.responsesByMethod['get_public_key_hash'] = {
+          'mmrpc': '2.0',
+          'result': {'public_key_hash': _secondPublicKeyHash},
+        };
+        await expectLater(
+          service.updateMetadataForSession(context, {'has_backup': true}),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(
+          (await SecureLocalStorage().getUser(
+            'replacement',
+          ))!.metadata['has_backup'],
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'metadata patch preserves unrelated values and protects entry identity',
+      () async {
+        final catalogUser = (await service.getUsers()).single;
+        final entryId = catalogUser.metadata[walletEntryIdMetadataKey];
+        expect(entryId, isA<String>());
+        final context = await service.captureSessionContext();
+        await service.updateMetadataForSession(context, {
+          'activated_coins': ['BTC'],
+        });
+        final saved = await service.updateMetadataForSession(context, {
+          'has_backup': true,
+        });
+        expect(saved.metadata['activated_coins'], ['BTC']);
+        expect(saved.metadata[walletEntryIdMetadataKey], entryId);
+        await expectLater(
+          service.updateMetadataForSession(context, {
+            walletEntryIdMetadataKey: 'spoof',
+          }),
+          throwsArgumentError,
+        );
+        expect(
+          (await service.getUsers()).single.metadata[walletEntryIdMetadataKey],
+          entryId,
+        );
+      },
+    );
+  });
+
+  group('shared wallet record transactions', () {
+    test(
+      'catalog identity and concurrent instance metadata patches are preserved',
+      () async {
+        final user = _verifiedTestUser();
+        FlutterSecureStorage.setMockInitialValues({
+          'user_test-wallet': jsonEncode(user.toJson()),
+        });
+        final saving = Completer<void>();
+        final allowSave = Completer<void>();
+        final storage = SecureLocalStorage.withStorage(
+          _ObservedFlutterSecureStorage(
+            beforeWrite: (key, value) async {
+              if (key == 'user_test-wallet' && !saving.isCompleted) {
+                saving.complete();
+                await allowSave.future;
+              }
+            },
+          ),
+        );
+        final first = _createService(secureStorage: storage);
+        final second = _createService();
+        addTearDown(first.dispose);
+        addTearDown(second.dispose);
+        final firstContext = await first.captureSessionContext();
+        final secondContext = await second.captureSessionContext();
+        final backup = first.updateMetadataForSession(firstContext, {
+          'has_backup': true,
+        });
+        await saving.future;
+        final catalog = second.getUsers();
+        final otherPatch = second.updateMetadataForSession(secondContext, {
+          'label': 'saved concurrently',
+        });
+        allowSave.complete();
+        await backup;
+        await catalog;
+        await otherPatch;
+        final saved = (await SecureLocalStorage().getUser('test-wallet'))!;
+        expect(saved.metadata['has_backup'], isTrue);
+        expect(saved.metadata['label'], 'saved concurrently');
+        expect(saved.metadata[walletEntryIdMetadataKey], isA<String>());
+      },
+    );
+
+    test(
+      'delayed identity enrichment keeps newer metadata and catalog identity',
+      () async {
+        final user = _testUser();
+        FlutterSecureStorage.setMockInitialValues({
+          'user_test-wallet': jsonEncode(user.toJson()),
+        });
+        final verifying = Completer<void>();
+        final allowProof = Completer<void>();
+        final first = _createService(
+          publicKeyHashResponseHandler: () async {
+            verifying.complete();
+            await allowProof.future;
+            return {
+              'mmrpc': '2.0',
+              'result': {'public_key_hash': _publicKeyHash},
+            };
+          },
+        );
+        final second = _createService();
+        addTearDown(first.dispose);
+        addTearDown(second.dispose);
+        final resolving = first.getActiveUser();
+        await verifying.future;
+        final catalog = await second.getUsers();
+        final context = await second.captureSessionContext();
+        await second.updateMetadataForSession(context, {'has_backup': true});
+        allowProof.complete();
+        final resolved = (await resolving)!;
+        expect(resolved.metadata['has_backup'], isTrue);
+        expect(
+          resolved.metadata[walletEntryIdMetadataKey],
+          catalog.single.metadata[walletEntryIdMetadataKey],
+        );
+        expect(resolved.walletId.pubkeyHash, _publicKeyHash);
+      },
+    );
+
+    test(
+      'same-name same-seed replacement invalidates the runtime context',
+      () async {
+        final user = _verifiedTestUser().copyWith(
+          metadata: {walletEntryIdMetadataKey: 'old-entry'},
+        );
+        FlutterSecureStorage.setMockInitialValues({
+          'user_test-wallet': jsonEncode(user.toJson()),
+        });
+        final service = _createService();
+        addTearDown(service.dispose);
+        final context = await service.captureSessionContext();
+        await SecureLocalStorage().saveUser(
+          user.copyWith(metadata: {walletEntryIdMetadataKey: 'new-entry'}),
+        );
+        await expectLater(
+          service.updateMetadataForSession(context, {'has_backup': true}),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(
+          (await SecureLocalStorage().getUser(
+            'test-wallet',
+          ))!.metadata['has_backup'],
+          isNull,
+        );
+      },
+    );
+  });
+
+  test('deletion keeps catalog ownership through cache cleanup', () async {
+    final cleanupStarted = Completer<void>();
+    final cleanupFinished = Completer<void>();
+    final catalogRead = Completer<void>();
+    final deleting = _createService();
+    final creating = _createService(
+      walletNamesResponseHandler: () async {
+        catalogRead.complete();
+        return {
+          'mmrpc': '2.0',
+          'result': {
+            'wallet_names': ['test-wallet'],
+            'activated_wallet': null,
+          },
+        };
+      },
+    );
+    addTearDown(deleting.dispose);
+    addTearDown(creating.dispose);
+    final deletion = deleting.deleteWallet(
+      walletName: 'test-wallet',
+      password: 'pw',
+      afterDelete: () async {
+        cleanupStarted.complete();
+        await cleanupFinished.future;
+      },
+    );
+    await cleanupStarted.future;
+    final registration = creating.register(
+      walletName: 'test-wallet',
+      password: 'pw',
+    );
+    final rejected = expectLater(
+      registration,
+      throwsA(
+        isA<AuthException>().having(
+          (error) => error.type,
+          'type',
+          AuthExceptionType.walletAlreadyExists,
+        ),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(catalogRead.isCompleted, isFalse);
+    cleanupFinished.complete();
+    await deletion;
+    await rejected;
+    expect(catalogRead.isCompleted, isTrue);
+  });
+
+  test(
+    'deletion permits validate the fresh target and cannot be reused',
+    () async {
+      final auth = _createPublicAuth();
+      addTearDown(auth.dispose);
+      final owner = Object();
+      auth.requireWalletDeletionReview(owner);
+      await expectLater(
+        auth.deleteWallet(walletName: 'test-wallet', password: 'pw'),
+        throwsA(isA<WalletDeletionReviewRequiredException>()),
+      );
+      final rejection = StateError('review changed');
+      final permit = auth.authorizeWalletDeletion(owner, (target) async {
+        expect(target.metadata['fresh'], isTrue);
+        expect(target.metadata[walletEntryIdMetadataKey], isA<String>());
+        throw rejection;
+      });
+      await SecureLocalStorage().saveUser(
+        _testUser().copyWith(metadata: {'fresh': true}),
+      );
+      await expectLater(
+        auth.deleteWallet(
+          walletName: 'test-wallet',
+          password: 'pw',
+          permit: permit,
+        ),
+        throwsA(same(rejection)),
+      );
+      await expectLater(
+        auth.deleteWallet(
+          walletName: 'test-wallet',
+          password: 'pw',
+          permit: permit,
+        ),
+        throwsA(isA<WalletDeletionReviewRequiredException>()),
+      );
+      expect(await SecureLocalStorage().getUser('test-wallet'), isNotNull);
+    },
+  );
+
+  group('atomic wallet registration', () {
+    test(
+      'initial metadata is persisted before publishing the authenticated user',
+      () async {
+        final saving = Completer<void>();
+        final allowSave = Completer<void>();
+        final storage = SecureLocalStorage.withStorage(
+          _ObservedFlutterSecureStorage(
+            beforeWrite: (key, value) async {
+              if (key == 'user_new-wallet' && !saving.isCompleted) {
+                saving.complete();
+                await allowSave.future;
+              }
+            },
+          ),
+        );
+        final service = _createService(secureStorage: storage);
+        addTearDown(service.dispose);
+        final emitted = <KdfUser>[];
+        final subscription = service.authStateChanges.listen((user) {
+          if (user != null) emitted.add(user);
+        });
+        addTearDown(subscription.cancel);
+        final created = service.register(
+          walletName: 'new-wallet',
+          password: 'correct horse battery staple',
+          initialMetadata: {
+            'has_backup': true,
+            'type': 'hdwallet',
+            'activated_coins': ['BTC'],
+          },
+        );
+        await saving.future;
+        expect(emitted, isEmpty);
+        expect(await storage.getUser('new-wallet'), isNull);
+        allowSave.complete();
+        final user = await created;
+        expect(user.metadata['has_backup'], isTrue);
+        expect(user.metadata['activated_coins'], ['BTC']);
+        expect(user.metadata[walletEntryIdMetadataKey], isA<String>());
+        expect((await storage.getUser('new-wallet'))!.metadata, user.metadata);
+        await Future<void>.delayed(Duration.zero);
+        expect(emitted.single.metadata, user.metadata);
+      },
+    );
+
+    test('concurrent service instances reject a colliding creation '
+        'after the first save', () async {
+      final saving = Completer<void>();
+      final allowSave = Completer<void>();
+      final names = <String>[];
+      final storage = SecureLocalStorage.withStorage(
+        _ObservedFlutterSecureStorage(
+          beforeWrite: (key, value) async {
+            if (key == 'user_new-wallet' && !saving.isCompleted) {
+              saving.complete();
+              await allowSave.future;
+              names.add('new-wallet');
+            }
+          },
+        ),
+      );
+      Future<Map<String, dynamic>> catalog() async => {
+        'mmrpc': '2.0',
+        'result': {'wallet_names': names.toList(), 'activated_wallet': null},
+      };
+      final first = _createService(
+        secureStorage: storage,
+        walletNamesResponseHandler: catalog,
+      );
+      final second = _createService(
+        secureStorage: storage,
+        walletNamesResponseHandler: catalog,
+      );
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      final created = first.register(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+      );
+      await saving.future;
+      final collision = second.register(
+        walletName: 'new-wallet',
+        password: 'different correct password',
+      );
+      final rejected = expectLater(
+        collision,
+        throwsA(
+          isA<AuthException>().having(
+            (error) => error.type,
+            'type',
+            AuthExceptionType.walletAlreadyExists,
+          ),
+        ),
+      );
+      allowSave.complete();
+      await created;
+      await rejected;
+      expect(names, ['new-wallet']);
+    });
   });
 }
 

@@ -18,12 +18,8 @@ void main() {
   late Directory directory;
   final open = <HiveTransactionStorage>[];
 
-  Future<HiveTransactionStorage> openStorage({
-    Future<Set<String>> Function()? knownWalletNamespaces,
-  }) async {
-    final storage = HiveTransactionStorage(
-      knownWalletNamespaces: knownWalletNamespaces,
-    );
+  Future<HiveTransactionStorage> openStorage() async {
+    final storage = HiveTransactionStorage(keyProvider: testHistoryCacheKeys);
     open.add(storage);
     return storage;
   }
@@ -44,6 +40,9 @@ void main() {
   });
 
   tearDown(() async {
+    for (final storage in open) {
+      await storage.close();
+    }
     open.clear();
     await Hive.close();
     if (directory.existsSync()) {
@@ -56,6 +55,97 @@ void main() {
     create: openStorage,
     reopen: reopenStorage,
   );
+
+  group('orphaned wallet sweep', () {
+    final kept = testWallet(name: 'kept', pubkeyHash: 'kept-pubkey');
+    final deleted = testWallet(name: 'deleted', pubkeyHash: 'deleted-pubkey');
+    final asset = testAssetId();
+
+    Future<HiveTransactionStorage> openWithCatalogue(
+      Future<Set<String>> Function()? catalogue,
+    ) async {
+      final storage = HiveTransactionStorage(
+        keyProvider: testHistoryCacheKeys,
+        knownWalletNamespaces: catalogue,
+      );
+      open.add(storage);
+      return storage;
+    }
+
+    Future<void> seedBothWallets() async {
+      final storage = await openStorage();
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'kept-1'),
+      ], kept);
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'deleted-1'),
+      ], deleted);
+      for (final s in open) {
+        await s.close();
+      }
+      open.clear();
+    }
+
+    Future<int> countFor(
+      HiveTransactionStorage storage,
+      WalletId wallet,
+    ) async =>
+        (await storage.getTransactions(asset, wallet)).transactions.length;
+
+    test(
+      'drops history for a wallet that is no longer in the catalogue',
+      () async {
+        // The deletion-time purge is best effort: while the store is degraded it
+        // clears only memory and throws, the bootstrap hook logs that, and
+        // deleteWallet still reports success. This sweep is what stops the rows
+        // surviving that.
+        await seedBothWallets();
+
+        final storage = await openWithCatalogue(
+          () async => {walletStorageNamespace(kept)},
+        );
+
+        expect(await countFor(storage, deleted), 0);
+        expect(
+          await countFor(storage, kept),
+          1,
+          reason: 'a live wallet must be untouched by the sweep',
+        );
+      },
+    );
+
+    test(
+      'an empty catalogue means do-not-know, never delete-everything',
+      () async {
+        await seedBothWallets();
+
+        final storage = await openWithCatalogue(() async => <String>{});
+
+        expect(await countFor(storage, kept), 1);
+        expect(await countFor(storage, deleted), 1);
+      },
+    );
+
+    test('a throwing catalogue leaves every wallet in place', () async {
+      await seedBothWallets();
+
+      final storage = await openWithCatalogue(
+        () async => throw StateError('cannot list wallets'),
+      );
+
+      expect(await countFor(storage, kept), 1);
+      expect(await countFor(storage, deleted), 1);
+    });
+
+    test('no catalogue provider sweeps nothing', () async {
+      await seedBothWallets();
+
+      final storage = await openWithCatalogue(null);
+
+      expect(await countFor(storage, kept), 1);
+      expect(await countFor(storage, deleted), 1);
+    });
+  });
 
   group('HiveTransactionStorage persistence', () {
     final wallet = testWallet();
@@ -170,7 +260,7 @@ void main() {
       ], before);
 
       final restored = await reopenStorage();
-      expect((await restored.getTransactions(asset, after)).total, 1);
+      expect((await restored.getTransactions(asset, after)).cachedCount, 1);
     });
 
     test('pubkey hash casing does not fork the history', () async {
@@ -182,7 +272,7 @@ void main() {
         testTransaction(internalId: 'tx-0'),
       ], lower);
 
-      expect((await storage.getTransactions(asset, upper)).total, 1);
+      expect((await storage.getTransactions(asset, upper)).cachedCount, 1);
     });
 
     test('a name-only identity stays separate from an enriched one', () async {
@@ -221,7 +311,7 @@ void main() {
     Future<LazyBox<String>> boxOf() async =>
         Hive.lazyBox<String>(HiveTransactionStorage.defaultBoxName);
 
-    test('an interrupted re-key collapses to one row on reopen', () async {
+    test('an injected legacy key is discarded on reopen', () async {
       final storage = await openStorage();
       final confirmed = testTransaction(
         internalId: 'tx-0',
@@ -245,7 +335,7 @@ void main() {
 
       final restored = await reopenStorage();
       final page = await restored.getTransactions(asset, wallet);
-      expect(page.total, 1, reason: 'the duplicate must collapse');
+      expect(page.cachedCount, 1, reason: 'the duplicate must collapse');
       expect(
         page.transactions.single.timestamp,
         DateTime.utc(2026, 7, 10),
@@ -271,10 +361,10 @@ void main() {
       await storage.storeTransactions([transaction], wallet);
 
       expect(box.keys.toList(), keysBefore);
-      expect((await storage.getTransactions(asset, wallet)).total, 1);
+      expect((await storage.getTransactions(asset, wallet)).cachedCount, 1);
     });
 
-    test('a pending row that confirms is re-keyed, not duplicated', () async {
+    test('a pending row confirms under the same opaque key', () async {
       final storage = await openStorage();
       await storage.storeTransactions([
         testTransaction(
@@ -299,10 +389,14 @@ void main() {
       ], wallet);
 
       expect(box.keys, hasLength(1), reason: 'the stale key must be deleted');
-      expect(box.keys.single, isNot(pendingKey));
+      expect(
+        box.keys.single,
+        pendingKey,
+        reason: 'opaque identity is independent of timestamp',
+      );
 
       final page = await storage.getTransactions(asset, wallet);
-      expect(page.total, 1);
+      expect(page.cachedCount, 1);
       expect(page.transactions.single.confirmations, 6);
       expect(page.transactions.single.timestamp, DateTime.utc(2026, 7, 10));
     });
@@ -344,8 +438,8 @@ void main() {
 
       await storage.purgeWallet(first);
 
-      expect((await storage.getTransactions(asset, first)).total, 0);
-      expect((await storage.getTransactions(asset, second)).total, 1);
+      expect((await storage.getTransactions(asset, first)).cachedCount, 0);
+      expect((await storage.getTransactions(asset, second)).cachedCount, 1);
       expect((await boxOf()).keys, hasLength(1));
     });
 
@@ -383,9 +477,16 @@ void main() {
       ], wallet);
 
       final box = Hive.lazyBox<String>(HiveTransactionStorage.defaultBoxName);
-      final badKey = box.keys.cast<String>().firstWhere(
-        (key) => TransactionStorageKey.parse(key)!.idToken == 'bad',
-      );
+      String? badKey;
+      for (final key in box.keys.cast<String>()) {
+        final envelope =
+            jsonDecode((await box.get(key))!) as Map<String, dynamic>;
+        if (TransactionStorageKey.parse(envelope['key'] as String)!.idToken ==
+            'bad') {
+          badKey = key;
+        }
+      }
+      expect(badKey, isNotNull);
       await box.put(badKey, '{not json');
 
       final page = await storage.getTransactions(asset, wallet, limit: 10);
@@ -407,7 +508,10 @@ void main() {
         testTransaction(internalId: 'tx-0'),
       );
       encoded['v'] = TransactionRecordCodec.currentVersion + 1;
-      await box.put(key, jsonEncode(encoded));
+      final envelope =
+          jsonDecode((await box.get(key))!) as Map<String, dynamic>;
+      envelope['record'] = jsonEncode(encoded);
+      await box.put(key, jsonEncode(envelope));
 
       // Never throws: a downgrade should cost a refetch, not a broken wallet.
       final page = await storage.getTransactions(asset, wallet);
@@ -425,7 +529,7 @@ void main() {
       expect(box.keys, hasLength(2));
 
       final restored = await reopenStorage();
-      expect((await restored.getTransactions(asset, wallet)).total, 1);
+      expect((await restored.getTransactions(asset, wallet)).cachedCount, 1);
       expect(
         Hive.lazyBox<String>(HiveTransactionStorage.defaultBoxName).keys,
         hasLength(1),
@@ -450,7 +554,7 @@ void main() {
       await storage.storeTransactions([
         testTransaction(internalId: 'tx-0'),
       ], wallet);
-      expect((await storage.getTransactions(asset, wallet)).total, 1);
+      expect((await storage.getTransactions(asset, wallet)).cachedCount, 1);
 
       // Close the box behind the storage's back so every `LazyBox.get`
       // throws the way a corrupt or unreadable backend would.
@@ -462,7 +566,11 @@ void main() {
       expect(broken.transactions, isEmpty);
 
       final after = await storage.getTransactions(asset, wallet);
-      expect(after.total, 0, reason: 'the unreadable key must not be counted');
+      expect(
+        after.cachedCount,
+        0,
+        reason: 'the unreadable key must not be counted',
+      );
       expect(await storage.getLatestTransactionId(asset, wallet), isNull);
     });
   });
@@ -472,8 +580,12 @@ void main() {
     final asset = testAssetId();
 
     test('acquire shares one instance and close is refcounted', () async {
-      final first = HiveTransactionStorage.acquire();
-      final second = HiveTransactionStorage.acquire();
+      final first = HiveTransactionStorage.acquire(
+        keyProvider: testHistoryCacheKeys,
+      );
+      final second = HiveTransactionStorage.acquire(
+        keyProvider: testHistoryCacheKeys,
+      );
       // Failure-safe drains: extra closes on a released instance are no-ops.
       addTearDown(first.close);
       addTearDown(second.close);
@@ -493,19 +605,23 @@ void main() {
       await second.storeTransactions([
         testTransaction(internalId: 'tx-1'),
       ], wallet);
-      expect((await second.getTransactions(asset, wallet)).total, 2);
+      expect((await second.getTransactions(asset, wallet)).cachedCount, 2);
 
       // The last release really closes; a later acquire starts fresh over
       // the same persisted data.
       await second.close();
-      final third = HiveTransactionStorage.acquire();
+      final third = HiveTransactionStorage.acquire(
+        keyProvider: testHistoryCacheKeys,
+      );
       addTearDown(third.close);
       expect(identical(third, first), isFalse);
-      expect((await third.getTransactions(asset, wallet)).total, 2);
+      expect((await third.getTransactions(asset, wallet)).cachedCount, 2);
     });
 
     test('an acquire during the final close waits for the release', () async {
-      final first = HiveTransactionStorage.acquire();
+      final first = HiveTransactionStorage.acquire(
+        keyProvider: testHistoryCacheKeys,
+      );
       addTearDown(first.close);
       await first.storeTransactions([
         testTransaction(internalId: 'tx-0'),
@@ -514,18 +630,20 @@ void main() {
       // Deliberately not awaited: the registry entry is gone but the box is
       // still releasing when the next acquire arrives.
       final closing = first.close();
-      final second = HiveTransactionStorage.acquire();
+      final second = HiveTransactionStorage.acquire(
+        keyProvider: testHistoryCacheKeys,
+      );
       addTearDown(second.close);
       expect(identical(second, first), isFalse);
 
       // The replacement must not adopt the closing box - its open waits for
       // the release and reopens - so reads and writes keep working instead
       // of landing on a box closed underneath it.
-      expect((await second.getTransactions(asset, wallet)).total, 1);
+      expect((await second.getTransactions(asset, wallet)).cachedCount, 1);
       await second.storeTransactions([
         testTransaction(internalId: 'tx-1'),
       ], wallet);
-      expect((await second.getTransactions(asset, wallet)).total, 2);
+      expect((await second.getTransactions(asset, wallet)).cachedCount, 2);
       await closing;
     });
   });
@@ -564,7 +682,7 @@ void main() {
       expect((await storage.getTransactionById('tx-0'))?.internalId, 'tx-0');
       expect((await storage.getStats()).totalTransactions, 1);
       await storage.clearTransactions(asset, wallet);
-      expect((await storage.getTransactions(asset, wallet)).total, 0);
+      expect((await storage.getTransactions(asset, wallet)).cachedCount, 0);
     });
 
     test('validation still throws in degraded mode', () async {
@@ -593,60 +711,36 @@ void main() {
 
       final restored = await openStorage();
       expect(restored.isDegraded, isFalse);
-      expect((await restored.getTransactions(asset, wallet)).total, 0);
+      expect((await restored.getTransactions(asset, wallet)).cachedCount, 0);
     });
   });
 
-  group('HiveTransactionStorage wallet garbage collection', () {
-    final wallet = testWallet();
-    final otherWallet = testWallet(pubkeyHash: 'other-pubkey');
-    final asset = testAssetId();
-
-    Future<void> seedBothWallets() async {
-      final storage = await openStorage();
-      await storage.storeTransactions([
-        testTransaction(internalId: 'kept'),
-      ], wallet);
-      await storage.storeTransactions([
-        testTransaction(internalId: 'orphaned'),
-      ], otherWallet);
-      for (final entry in open) {
-        await entry.close();
-      }
+  test(
+    'cold purge removes only the requested wallet without a catalogue',
+    () async {
+      final wallet = testWallet();
+      final otherWallet = testWallet(pubkeyHash: 'other-pubkey');
+      final asset = testAssetId();
+      final seeded = await openStorage();
+      await seeded.storeTransaction(
+        testTransaction(internalId: 'keep'),
+        wallet,
+      );
+      await seeded.storeTransaction(
+        testTransaction(internalId: 'remove'),
+        otherWallet,
+      );
+      await seeded.close();
       open.clear();
-    }
 
-    test('purges wallets missing from the known set', () async {
-      await seedBothWallets();
-
-      final storage = await openStorage(
-        knownWalletNamespaces: () async => {walletStorageNamespace(wallet)},
+      final storage = HiveTransactionStorage(keyProvider: testHistoryCacheKeys);
+      open.add(storage);
+      await storage.purgeWallet(otherWallet);
+      expect((await storage.getTransactions(asset, wallet)).cachedCount, 1);
+      expect(
+        (await storage.getTransactions(asset, otherWallet)).cachedCount,
+        0,
       );
-
-      expect((await storage.getTransactions(asset, wallet)).total, 1);
-      expect((await storage.getTransactions(asset, otherWallet)).total, 0);
-    });
-
-    test('keeps everything when the provider throws', () async {
-      await seedBothWallets();
-
-      final storage = await openStorage(
-        knownWalletNamespaces: () async => throw StateError('unavailable'),
-      );
-
-      expect((await storage.getTransactions(asset, wallet)).total, 1);
-      expect((await storage.getTransactions(asset, otherWallet)).total, 1);
-    });
-
-    test('keeps everything when the provider returns nothing', () async {
-      await seedBothWallets();
-
-      final storage = await openStorage(
-        knownWalletNamespaces: () async => <String>{},
-      );
-
-      expect((await storage.getTransactions(asset, wallet)).total, 1);
-      expect((await storage.getTransactions(asset, otherWallet)).total, 1);
-    });
-  });
+    },
+  );
 }

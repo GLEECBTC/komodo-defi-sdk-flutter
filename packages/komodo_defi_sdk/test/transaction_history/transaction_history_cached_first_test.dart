@@ -8,15 +8,20 @@ import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_manager.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import '../helpers/runtime_auth_fixture.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockAssetProvider extends Mock implements IAssetProvider {}
 
@@ -67,18 +72,14 @@ class _SeededStorage implements TransactionStorage {
   Future<StorageStats> getStats() => throw UnimplementedError();
 
   @override
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
     int? pageNumber,
     int limit = 10,
-  }) async => TransactionPage(
-    transactions: seeded,
-    total: seeded.length,
-    currentPage: pageNumber ?? 1,
-    totalPages: 1,
-  );
+  }) async =>
+      CachedTransactionPage(transactions: seeded, cachedCount: seeded.length);
 
   @override
   Future<void> storeTransaction(
@@ -99,7 +100,7 @@ class _CursorRejectingStorage extends _SeededStorage {
   _CursorRejectingStorage() : super(const []);
 
   @override
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
@@ -136,8 +137,8 @@ class _OpaqueCursorStrategy extends TransactionHistoryStrategy {
     limit: 10,
     skipped: 0,
     syncStatus: SyncStatusResponse(state: TransactionSyncStatusEnum.finished),
-    total: 2,
-    totalPages: 2,
+    total: 100,
+    totalPages: 10,
     pageNumber: null,
     pagingOptions: null,
     transactions: [
@@ -315,4 +316,75 @@ void main() {
     expect(page.transactions.single.txHash, 'hash-page-2');
     expect(page.nextPageId, 'next-opaque-cursor');
   });
+  for (final pagination in <TransactionPagination>[
+    const PagePagination(pageNumber: 2, itemsPerPage: 1),
+    const TransactionBasedPagination(fromId: 'internal-newest', itemCount: 1),
+  ]) {
+    test('bounded cached rows preserve provider metadata '
+        'for ${pagination.runtimeType}', () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final asset = _asset();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => wallet);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+      final storage = InMemoryTransactionStorage(
+        policy: const TransactionHistoryCachePolicy(maxTransactionsPerAsset: 2),
+      );
+      await storage.storeTransactions([
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-newest',
+          timestamp: DateTime.utc(2026, 1, 3),
+        ),
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-cached',
+          timestamp: DateTime.utc(2026, 1, 2),
+        ),
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-evicted',
+          timestamp: DateTime.utc(2026),
+        ),
+      ], wallet.walletId);
+      expect(
+        (await storage.getTransactions(asset.id, wallet.walletId)).cachedCount,
+        2,
+      );
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [_OpaqueCursorStrategy()],
+      );
+      addTearDown(() async {
+        await authChanges.close();
+        await manager.dispose();
+      });
+
+      final page = await manager.getTransactionHistory(
+        asset,
+        pagination: pagination,
+      );
+
+      expect(page.transactions.single.txHash, 'hash-page-2');
+      expect(page.nextPageId, 'next-opaque-cursor');
+      expect(page.total, 100);
+      expect(page.totalPages, 10);
+    });
+  }
 }

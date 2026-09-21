@@ -11,6 +11,7 @@ import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/activation_config/hive_adapters.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
@@ -19,7 +20,6 @@ import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/storage/secure_rpc_password_mixin.dart';
-import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
@@ -34,9 +34,8 @@ var _activationConfigHiveInitialized = false;
 /// `deleteWallet` removes the wallet from KDF and from secure storage, and
 /// nothing else - so derived addresses, activation preferences, the enabled
 /// asset list and transaction history all used to outlive the wallet they
-/// described. Transaction history also self-heals at open through
-/// [HiveTransactionStorage]'s garbage collector, but only on the next launch,
-/// and the other three stores have no equivalent.
+/// described. Explicit deletion purges these caches while retaining encrypted
+/// transfer recovery records outside the cache lifecycle.
 ///
 /// Every purge is best-effort and independent: a cache that will not clear
 /// must not make a deleted wallet look undeleted, and must not stop the other
@@ -97,6 +96,7 @@ final class _SdkAssetConfigTransform implements CoinConfigTransform {
 Future<void> _ensureActivationConfigHiveInitialized() async {
   if (_activationConfigHiveInitialized) return;
   await Hive.initFlutter();
+  await HiveTransactionStorage.retireLegacyCache();
   registerActivationConfigAdapters();
   _activationConfigHiveInitialized = true;
 }
@@ -113,6 +113,12 @@ Future<void> bootstrap({
   final stopwatch = Stopwatch()..start();
 
   config.tronGaslessProvider?.validate();
+
+  // Restored-session callbacks can request activation during initialization.
+  // Install host policy before registering any asynchronous SDK dependency.
+  container.registerSingleton<ActivationPolicy>(
+    ActivationPolicy(initial: config.initialActivationPolicy),
+  );
 
   container.registerSingleton(
     GaslessCapabilityRegistry(
@@ -163,6 +169,12 @@ Future<void> bootstrap({
     await auth.ensureInitialized();
     return auth;
   }, dependsOn: [KomodoDefiFramework]);
+
+  container.registerSingletonAsync<WalletAssetSelection>(
+    () async =>
+        WalletAssetSelection(await container.getAsync<KomodoDefiLocalAuth>()),
+    dependsOn: [KomodoDefiLocalAuth],
+  );
 
   // Asset history storage singletons
   container.registerLazySingleton(AssetHistoryStorage.new);
@@ -268,6 +280,7 @@ Future<void> bootstrap({
         activatedAssetsCache,
         tronGaslessProvider: config.tronGaslessProvider,
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
+        activationPolicy: container<ActivationPolicy>(),
       );
 
       return activationManager;
@@ -283,13 +296,29 @@ Future<void> bootstrap({
     ],
   );
 
-  container.registerSingletonAsync<NftActivationService>(() async {
-    final client = await container.getAsync<ApiClient>();
-    final assetManager = await container.getAsync<AssetManager>();
-    final activatedAssetsCache = await container
-        .getAsync<ActivatedAssetsCache>();
-    return NftActivationService(client, assetManager, activatedAssetsCache);
-  }, dependsOn: [ApiClient, AssetManager, ActivatedAssetsCache]);
+  container.registerSingletonAsync<NftActivationService>(
+    () async {
+      final client = await container.getAsync<ApiClient>();
+      final assetManager = await container.getAsync<AssetManager>();
+      final activatedAssetsCache = await container
+          .getAsync<ActivatedAssetsCache>();
+      return NftActivationService(
+        client,
+        assetManager,
+        activatedAssetsCache,
+        activationPolicy: container<ActivationPolicy>(),
+        auth: await container.getAsync<KomodoDefiLocalAuth>(),
+        activationManager: await container.getAsync<ActivationManager>(),
+      );
+    },
+    dependsOn: [
+      ApiClient,
+      AssetManager,
+      ActivatedAssetsCache,
+      KomodoDefiLocalAuth,
+      ActivationManager,
+    ],
+  );
 
   // Register shared activation coordinator
   container.registerSingletonAsync<SharedActivationCoordinator>(() async {
@@ -391,9 +420,11 @@ Future<void> bootstrap({
     container.registerSingletonAsync<HiveTransactionStorage>(() async {
       final auth = await container.getAsync<KomodoDefiLocalAuth>();
       return HiveTransactionStorage.acquire(
-        // Lets the store drop history belonging to wallets that no
-        // longer exist. Fails open: an error or an empty result means
-        // "do not know", never "delete everything".
+        policy: config.transactionHistoryCachePolicy,
+        // Backstop for the deletion-time purge below, which can fail while
+        // storage is degraded and is only logged when it does. Fails open: an
+        // error or an empty result means "do not know", never
+        // "delete everything".
         knownWalletNamespaces: () async => (await auth.getUsers())
             .map((user) => walletStorageNamespace(user.walletId))
             .toSet(),
@@ -420,7 +451,9 @@ Future<void> bootstrap({
         eventStreamingManager: eventStreamingManager,
         storage: config.persistTransactionHistory
             ? await container.getAsync<HiveTransactionStorage>()
-            : InMemoryTransactionStorage(),
+            : InMemoryTransactionStorage(
+                policy: config.transactionHistoryCachePolicy,
+              ),
         assetHistoryStorage: container<AssetHistoryStorage>(),
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
       );
@@ -454,6 +487,7 @@ Future<void> bootstrap({
         feeManager,
         activationCoordinator,
         legacyManager,
+        auth: auth,
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
         pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
         eventStreamingManager: eventStreamingManager,
@@ -461,8 +495,6 @@ Future<void> bootstrap({
           final pubkeys = await pubkeyManager.getFreshPubkeys(asset);
           return {for (final key in pubkeys.keys) key.address};
         },
-        walletIdResolver: () async => (await auth.currentUser)?.walletId,
-        authStateChanges: auth.watchCurrentUser(),
       );
     },
     dependsOn: [
@@ -503,6 +535,26 @@ Future<void> bootstrap({
   await container.allReady();
 
   await _wireWalletDeletionPurge(container);
+
+  final deletionAuth = await container.getAsync<KomodoDefiLocalAuth>();
+  final deletionAuthority = Object();
+  deletionAuth.requireWalletDeletionReview(deletionAuthority);
+  container.registerSingleton(
+    WalletDeletionManager(
+      readWallets: deletionAuth.getUsers,
+      pendingTransfers: container<PendingGaslessTransferRepository>(),
+      deleteWallet:
+          ({required walletName, required password, required validateTarget}) =>
+              deletionAuth.deleteWallet(
+                walletName: walletName,
+                password: password,
+                permit: deletionAuth.authorizeWalletDeletion(
+                  deletionAuthority,
+                  validateTarget,
+                ),
+              ),
+    ),
+  );
 
   stopwatch.stop();
   log(

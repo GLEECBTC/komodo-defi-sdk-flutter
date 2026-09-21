@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
     hide Bip44Chain;
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
@@ -18,6 +19,8 @@ import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
+
+import '../helpers/withdrawal_auth_fixture.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
@@ -566,6 +569,7 @@ void main() {
     });
 
     WithdrawalManager makeManager({
+      KomodoDefiLocalAuth? auth,
       EventStreamingManager? streams,
       bool includeStreams = true,
       PendingGaslessTransferRepository? repository,
@@ -573,21 +577,29 @@ void main() {
       Future<Set<String>> Function(Asset asset)? freshSourceAddressResolver,
       Future<WalletId?> Function()? walletResolver,
       Stream<KdfUser?>? authStateChanges,
-    }) => WithdrawalManager(
-      client,
-      assetProvider,
-      feeManager,
-      activationCoordinator,
-      legacyManager,
-      gaslessCapabilities: capabilities ?? gaslessCapabilities,
-      pendingGaslessTransfers: repository ?? pendingRepository,
-      eventStreamingManager: includeStreams
-          ? streams ?? eventStreamingManager
-          : null,
-      freshSourceAddressResolver: freshSourceAddressResolver,
-      walletIdResolver: walletResolver ?? () async => _wallet,
-      authStateChanges: authStateChanges,
-    );
+    }) {
+      final manager = WithdrawalManager(
+        client,
+        assetProvider,
+        feeManager,
+        activationCoordinator,
+        legacyManager,
+        gaslessCapabilities: capabilities ?? gaslessCapabilities,
+        pendingGaslessTransfers: repository ?? pendingRepository,
+        eventStreamingManager: includeStreams
+            ? streams ?? eventStreamingManager
+            : null,
+        freshSourceAddressResolver: freshSourceAddressResolver,
+        auth:
+            auth ??
+            WithdrawalAuthFixture(
+              walletResolver: walletResolver ?? () async => _wallet,
+              userChanges: authStateChanges,
+            ),
+      );
+      addTearDown(manager.dispose);
+      return manager;
+    }
 
     test(
       'forwards the KDF relay domain without a generic network allowlist',
@@ -2160,7 +2172,18 @@ void main() {
         expect(ownershipProof, {
           _coin: {_sourceAddress},
         });
-        verify(() => repository.list(_wallet)).called(1);
+        // Binding the session also starts a recovery cycle that reads the same
+        // journal, so assert the ordering rather than an exact call count.
+        verifyInOrder([
+          () => repository.listAmbiguousLegacyTransfers(_wallet),
+          () => repository.resolveAmbiguousLegacyTransfers(
+            _wallet,
+            ownedSourceAddressesByAsset: any(
+              named: 'ownedSourceAddressesByAsset',
+            ),
+          ),
+          () => repository.list(_wallet),
+        ]);
       },
     );
 
@@ -2220,6 +2243,49 @@ void main() {
           result,
           throwsA(isA<WalletChangedDisconnectException>()),
         );
+        verifyNever(
+          () => repository.resolveAmbiguousLegacyTransfers(
+            _wallet,
+            ownedSourceAddressesByAsset: any(
+              named: 'ownedSourceAddressesByAsset',
+            ),
+          ),
+        );
+        verifyNever(() => repository.list(_wallet));
+      },
+    );
+
+    test(
+      'same-wallet reauthentication rejects a late legacy ownership proof',
+      () async {
+        final repository = _MockPendingGaslessTransferRepository();
+        final resolverStarted = Completer<void>();
+        final resolverResult = Completer<Set<String>>();
+        final auth = WithdrawalAuthFixture(walletResolver: () async => _wallet);
+        when(
+          () => repository.listAmbiguousLegacyTransfers(_wallet),
+        ).thenAnswer((_) async => [_pending()]);
+        final manager = makeManager(
+          auth: auth,
+          repository: repository,
+          freshSourceAddressResolver: (_) {
+            resolverStarted.complete();
+            return resolverResult.future;
+          },
+        );
+        final result = manager.listPendingGaslessTransfers();
+        final rejected = expectLater(
+          result,
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        await resolverStarted.future;
+        auth.runtimeSessions.invalidate();
+        auth.runtimeSessions.observe(
+          const KdfUser(walletId: _wallet, isBip39Seed: false),
+        );
+        resolverResult.complete(const {_sourceAddress});
+        await rejected;
+
         verifyNever(
           () => repository.resolveAmbiguousLegacyTransfers(
             _wallet,

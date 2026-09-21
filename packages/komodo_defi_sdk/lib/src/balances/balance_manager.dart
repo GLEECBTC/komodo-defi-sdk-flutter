@@ -108,7 +108,9 @@ class BalanceManager implements IBalanceManager {
        _watcherStartMaxRetryDelay = watcherStartMaxRetryDelay,
        _maxWatcherStartRetries = maxWatcherStartRetries {
     // Listen for auth state changes
-    _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
+    _authSubscription = _auth.watchSessionContext().listen(
+      _handleSessionContextChanged,
+    );
     _logger.fine('Initialized');
   }
   static final Logger _logger = Logger('BalanceManager');
@@ -120,7 +122,9 @@ class BalanceManager implements IBalanceManager {
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
 
-  StreamSubscription<KdfUser?>? _authSubscription;
+  // dispose cancels the detached subscription with the other pending cleanup.
+  // ignore: cancel_subscriptions
+  StreamSubscription<AuthSessionContext?>? _authSubscription;
   final Duration _defaultPollingInterval = const Duration(seconds: 30);
 
   /// Enable debug logging for balance polling fallback
@@ -274,6 +278,7 @@ class BalanceManager implements IBalanceManager {
   }
 
   /// Current wallet ID being tracked
+  AuthSessionContext? _currentSession;
   WalletId? _currentWalletId;
 
   /// Invalidates every in-flight fetch as soon as authentication changes.
@@ -352,53 +357,39 @@ class BalanceManager implements IBalanceManager {
   }
 
   /// Handle authentication state changes
-  Future<void> _handleAuthStateChanged(KdfUser? user) async {
+  Future<void> _handleSessionContextChanged(AuthSessionContext? session) async {
     if (_isDisposed) return;
-    final newWalletId = user?.walletId;
-    // If the wallet ID has changed, reset all state
-    _logger.fine('Auth state changed. session updated');
-    final currentWalletId = _currentWalletId;
-    if (_sameOptionalWallet(currentWalletId, newWalletId)) {
-      if (currentWalletId != null && newWalletId != null) {
-        _currentWalletId = preferEnrichedWalletIdentity(
-          currentWalletId,
-          newWalletId,
-        );
+    final previous = _currentSession;
+    // A queued old event must not reset a newer context captured by a caller.
+    if (session != null && !_auth.isSessionContextCurrent(session)) return;
+    if (session == null &&
+        previous != null &&
+        _auth.isSessionContextCurrent(previous)) {
+      return;
+    }
+    if (previous == session) {
+      final currentWallet = _currentWalletId;
+      if (session != null &&
+          (currentWallet == null ||
+              isSameStableWallet(currentWallet, session.walletId))) {
+        _currentWalletId = session.walletId;
       }
       return;
     }
-
-    // A transient `get_public_key_hash` failure makes the auth service emit the
-    // *same* wallet without its pubkeyHash. Resetting on that would clear the
-    // balance cache and error-and-close every per-asset controller in the app
-    // for a wallet that never changed - and since the identity RPC is most
-    // likely to blip exactly when KDF is saturated with login activations,
-    // that is a post-login stall, not a rare edge case. Keep the enriched
-    // identity and the live state; the next successful read re-confirms it.
-    if (currentWalletId != null &&
-        newWalletId != null &&
-        isDegradedWalletIdentity(currentWalletId, newWalletId)) {
-      _logger.warning(
-        'Ignoring a degraded wallet identity '
-        '(identity RPC unavailable); keeping balance state',
-      );
-      return;
-    }
-
-    // Change identity before awaiting cleanup so an already-completing RPC
-    // cannot commit into the next wallet's cache in the reset window.
+    // Revoke local work before any asynchronous cancellation. SDK session
+    // checks also reject old results before this stream event is delivered.
     _walletGeneration++;
-    _currentWalletId = newWalletId;
+    _currentSession = session;
+    _currentWalletId = session?.walletId;
     await _resetState();
   }
 
-  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
-    if (previous == null || current == null) return previous == current;
-    return isSameStableWallet(previous, current);
-  }
-
   Future<WalletOperationContext> _captureWalletContext() async {
+    final session = await _auth.captureSessionContext();
+    _auth.ensureSessionContextCurrent(session);
+    await _handleSessionContextChanged(session);
     final user = await _auth.currentUser;
+    _auth.ensureSessionContextCurrent(session);
     if (user == null) throw AuthException.notSignedIn();
 
     final currentWalletId = _currentWalletId;
@@ -414,7 +405,7 @@ class BalanceManager implements IBalanceManager {
       _currentWalletId = operationWalletId;
     } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
       // Same wallet, identity RPC temporarily unavailable. See the matching
-      // branch in [_handleAuthStateChanged] - operate under the enriched
+      // branch in [_handleSessionContextChanged] - operate under the enriched
       // identity we already hold rather than resetting every balance watcher.
       operationWalletId = currentWalletId;
     } else {
@@ -429,12 +420,14 @@ class BalanceManager implements IBalanceManager {
     return WalletOperationContext(
       walletId: operationWalletId,
       generation: _walletGeneration,
+      session: session,
     );
   }
 
   bool _isWalletContextCurrentSync(WalletOperationContext context) {
     final current = _currentWalletId;
     return !_isDisposed &&
+        _auth.isSessionContextCurrent(context.session) &&
         context.generation == _walletGeneration &&
         current != null &&
         isSameStableWallet(context.walletId, current);
@@ -872,6 +865,8 @@ class BalanceManager implements IBalanceManager {
       // own auth read resolving.
       _logger.fine('Delaying balance watcher start for asset: unauthenticated');
       _scheduleWatcherStartRetry(assetId, activateIfNeeded, 'unauthenticated');
+      return;
+    } on WalletChangedDisconnectException {
       return;
     }
     if (controller.isClosed ||
@@ -1471,6 +1466,8 @@ class BalanceManager implements IBalanceManager {
     if (_isDisposed) {
       throw StateError('BalanceManager has been disposed');
     }
+    final session = _currentSession;
+    if (session == null || !_auth.isSessionContextCurrent(session)) return null;
     return _balanceCache[assetId];
   }
 
@@ -1493,6 +1490,8 @@ class BalanceManager implements IBalanceManager {
     if (current == null || !isSameStableWallet(walletId, current)) {
       return null;
     }
+    final session = _currentSession;
+    if (session == null || !_auth.isSessionContextCurrent(session)) return null;
     return _balanceCache[assetId];
   }
 
@@ -1520,7 +1519,7 @@ class BalanceManager implements IBalanceManager {
     }
 
     // Take snapshots to avoid concurrent modification while cancelling/closing
-    final StreamSubscription<KdfUser?>? authSub = _authSubscription;
+    final StreamSubscription<AuthSessionContext?>? authSub = _authSubscription;
     _authSubscription = null;
 
     final List<StreamSubscription<dynamic>> watcherSubs =
@@ -1608,6 +1607,8 @@ class BalanceManager implements IBalanceManager {
       walletContext = await _captureWalletContext();
     } on AuthException {
       return;
+    } on WalletChangedDisconnectException {
+      return;
     }
 
     // Retry logic to handle timing issues after activation
@@ -1615,6 +1616,7 @@ class BalanceManager implements IBalanceManager {
     const baseDelay = Duration(milliseconds: 200);
 
     for (int attempt = 0; attempt < maxRetries; attempt++) {
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       try {
         final balance = await _pubkeyManager!
             .getPubkeys(asset)

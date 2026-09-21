@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
+import 'package:komodo_defi_local_auth/src/auth/auth_session.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -97,6 +98,36 @@ class _FakeConnectionMonitor extends TrezorConnectionMonitor {
 }
 
 class _FakeAuthService implements IAuthService {
+  final sessions = AuthSessionTracker();
+  @override
+  Future<AuthSessionContext> captureSessionContext() async {
+    sessions.observe(activeUser);
+    return sessions.current ?? (throw const AuthSessionChangedException());
+  }
+
+  @override
+  bool isSessionContextCurrent(AuthSessionContext context) =>
+      sessions.isCurrent(context);
+  @override
+  void ensureSessionContextCurrent(AuthSessionContext context) {
+    if (!isSessionContextCurrent(context)) {
+      throw const AuthSessionChangedException();
+    }
+  }
+
+  @override
+  Stream<AuthSessionContext?> watchSessionContext() => sessions.changes;
+  @override
+  Future<KdfUser> updateMetadataForSession(
+    AuthSessionContext context,
+    Map<String, dynamic> updates,
+  ) async {
+    ensureSessionContextCurrent(context);
+    return activeUser = activeUser!.copyWith(
+      metadata: {...activeUser!.metadata, ...updates},
+    );
+  }
+
   @override
   int get authGeneration => 0;
 
@@ -133,6 +164,8 @@ class _FakeAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    Future<void> Function(KdfUser target)? beforeDelete,
+    Future<void> Function()? afterDelete,
   }) async => throw UnimplementedError();
 
   @override
@@ -194,6 +227,7 @@ class _FakeAuthService implements IAuthService {
     required String password,
     required AuthOptions options,
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) async {
     lastRegisterArgs = (
       walletName: walletName,
