@@ -41,7 +41,10 @@ activation-progress, SIA and asset-snapshot interfaces described in those
 package entries. Read the [migration guide](docs/RELEASE_0.8.0.md) and
 [release checklist](docs/RELEASE_0.8.0_CHECKLIST.md) before repinning a consumer.
 The KDF binary/coin pins and supported Dart/Flutter constraints are unchanged
-by this preparation PR.
+by this preparation PR. The `add/routed-swap` branch has since repinned the KDF
+artefact to `feat/lifi-integration`
+`4872ef2e0bb07348673e1578aca4aca53f3d73b6`; see the
+[komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
 
 ### Package versions
 

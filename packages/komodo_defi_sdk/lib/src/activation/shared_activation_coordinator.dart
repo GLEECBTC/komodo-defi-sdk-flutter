@@ -88,7 +88,8 @@ class SharedActivationCoordinator {
   /// The 8.2s BTC-segwit / 6.1s KMD figures this used to cite were measured
   /// against the concurrent HD gap scan, which is **not** in the pinned KDF -
   /// it is `407cf6c0a` / `ba4b3996e`, kdf-internal PR #18, still unmerged. The
-  /// pin (`main`, `f3efd2c`) walks the gap one address at a time, where the
+  /// pin (`feat/lifi-integration`, `4872ef2`) walks the gap one address at a
+  /// time, where the
   /// same runs measured BTC-segwit 121.2s and KMD 46.9s
   /// The wallet repository documents repeatable measurement in
   /// `docs/WALLET_LOAD_MEASUREMENT.md`; remeasure before lowering these bounds.
