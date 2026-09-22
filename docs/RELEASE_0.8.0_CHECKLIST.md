@@ -50,7 +50,7 @@ checksums, are unchanged by this PR.
 
 | Input | Pin |
 | --- | --- |
-| KDF | `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`, `main`) |
+| KDF | `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`, `main`) at 0.8.0 preparation; repinned on `add/routed-swap` to `4872ef2e0bb07348673e1578aca4aca53f3d73b6` (`feat/lifi-integration`) |
 | Bundled coins | `a4fa5547a2c508223dc4e5c449549699c9049856` |
 | Coin repository | `GLEECBTC/coins`, `master` |
 | KDF mirrors | `https://devbuilds.gleec.com`, then `https://nebula.decker.im` |
