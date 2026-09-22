@@ -11,9 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pinned, not floating. `channel: stable` alone takes whatever Flutter
+      # stable is that day, so a Flutter release breaks the build on a branch
+      # nobody touched -- which is what happened on 2026-08-24 (3.44.8 -> 3.47.1).
+      # Keep this equal to the wallet app's pin (.fvmrc / .github/actions/flutter-deps).
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # Disabled melos generation due to circular dependency issues caused by komodo_defi_rpc_methods
       # and komodo_defi_types packages. This will be revisited in the future.
       # The app should already have the necessary generated files committed to the repository. If
@@ -42,6 +47,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos
@@ -73,11 +79,21 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos
       # - name: Bootstrap workspace
       #   run: melos bootstrap
+      # The build transformer fetches the coin assets on a clean runner and then
+      # fails on purpose, because Flutter's build system cannot pick them up in
+      # the run that produced them. The playground job above and both preview
+      # jobs already absorb that first build; this one did not, so its single
+      # build was always the one that bailed out and the deploy never ran.
+      - name: Run dry web build to generate assets (expected to fail)
+        env:
+          GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cd packages/komodo_defi_sdk/example && flutter build web --release || echo "Dry build completed (failure expected)"
       - name: Build SDK example web
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

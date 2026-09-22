@@ -56,109 +56,17 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     );
   }
 
-  /// Logs a native log message, or the raw bytes if parsing fails.
-  /// Default method uses the package:ffi [Utf8] class to decode the message.
-  /// If decoding fails, it tries to parse the message manually, or the raw
-  /// bytes if parsing fails.
+  /// Native free-form diagnostics have no stable privacy schema. Do not decode
+  /// or forward their contents, including malformed UTF-8 and fallback bytes.
   static void _logNativeLogMessage(
     ffi.Pointer<Utf8> messagePtr,
     void Function(String) log,
   ) {
+    if (!KdfLoggingConfig.verboseLogging) return;
     try {
-      final message = messagePtr.toDartString();
-      _safeLog(message, log);
-    } catch (e) {
-      // Message decoding failed, try manual parsing
-      final unsignedLength = _safeGetLength(messagePtr);
-      _safeLog('Failed to decode log message ($unsignedLength bytes): $e', log);
-
-      final manuallyParsedMessage = _tryParseNativeLogMessage(messagePtr, log);
-      if (manuallyParsedMessage.isNotEmpty) {
-        _safeLog(manuallyParsedMessage, log);
-      }
-    }
-  }
-
-  /// Safely gets the length of a pointer, returning -1 if it fails
-  static int _safeGetLength(ffi.Pointer<Utf8> messagePtr) {
-    try {
-      return messagePtr.length;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Failed to get message length: $e');
-      }
-      return -1;
-    }
-  }
-
-  /// Safely invokes the log callback with fallback to debug print
-  static void _safeLog(String message, void Function(String) log) {
-    try {
-      log(message);
-    } catch (e, stackTrace) {
-      // Log callback failed - use debug print as fallback
-      if (kDebugMode) {
-        print('Log callback failed for message: $message');
-        print('Error: $e');
-        print('Stack trace: $stackTrace');
-      }
-    }
-  }
-
-  /// Tries to parse the native log message manually, or the raw bytes if
-  /// parsing fails, by finding the null terminator (0x00) or invalid UTF-8
-  /// byte (0xFF). This is a workaround for the fact that KDF terminating on
-  /// exceptions can leave the log message in an invalid state.
-  static String _tryParseNativeLogMessage(
-    ffi.Pointer<Utf8> messagePtr,
-    void Function(String) log,
-  ) {
-    try {
-      // Calculate string length by finding the null terminator
-      // (0x00) or invalid UTF-8 byte (0xFF). 0xFF encountered on iOS.
-      var length = 0;
-      final messagePtrAsInt = messagePtr.cast<ffi.Uint8>();
-      while (messagePtrAsInt[length] != 0 && messagePtrAsInt[length] != 255) {
-        length++;
-
-        // prevent overflows & infinite loops with a reasonable limit
-        if (length >= 32767) {
-          _safeLog('Received log message longer than 32767 bytes.', log);
-          return '';
-        }
-      }
-
-      if (length == 0) {
-        _safeLog('Received empty log message.', log);
-        return '';
-      }
-
-      // print the raw bytes if the message is not valid UTF-8 to prevent
-      // flutter devtools from crashing.
-      final bytes = messagePtrAsInt.asTypedList(length);
-      if (!_isValidUtf8(bytes)) {
-        _safeLog('Received invalid UTF-8 log message.', log);
-        final hexString = bytes
-            .map((b) => b.toRadixString(16).padLeft(2, '0'))
-            .join(' ');
-        _safeLog('Raw bytes: $hexString', log);
-        return '';
-      }
-
-      return utf8.decode(bytes);
-    } catch (e) {
-      _safeLog('Failed to decode log message: $e', log);
-    }
-
-    return '';
-  }
-
-  static bool _isValidUtf8(List<int> bytes) {
-    try {
-      utf8.decode(bytes, allowMalformed: false);
-      return true;
+      log('KDF native diagnostic event received');
     } catch (_) {
-      return false;
+      if (kDebugMode) print('KDF diagnostic callback failed');
     }
   }
 
@@ -265,8 +173,7 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
   @override
   Future<Map<String, dynamic>> mm2Rpc(Map<String, dynamic> request) async {
     if (KdfLoggingConfig.debugLogging) {
-      _log('mm2 config: ${_config.toJson().censored()}');
-      _log('mm2Rpc request (pre-process): ${request.censored()}');
+      _log('KDF native RPC request dispatched');
     }
 
     request['userpass'] = _config.rpcPassword;
@@ -303,8 +210,8 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     try {
       final response = await mm2Rpc({'method': 'version'});
       return response['result'] as String?;
-    } on Exception catch (e) {
-      _log('Error getting KDF version: $e');
+    } on Exception {
+      _log('KDF version probe failed');
       return null;
     }
   }
@@ -366,7 +273,7 @@ ffi.DynamicLibrary _loadLibrary() {
           ? ffi.DynamicLibrary.executable()
           : ffi.DynamicLibrary.open(path);
       if (lib.providesSymbol('mm2_main')) {
-        if (kDebugMode) print('Loaded library at path: $path');
+        if (kDebugMode) print('KDF native library loaded');
         return lib;
       }
     } catch (_) {

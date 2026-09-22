@@ -13,9 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pinned, not floating. `channel: stable` alone takes whatever Flutter
+      # stable is that day, so a Flutter release breaks the build on a branch
+      # nobody touched -- which is what happened on 2026-08-24 (3.44.8 -> 3.47.1).
+      # Keep this equal to the wallet app's pin (.fvmrc / .github/actions/flutter-deps).
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # Disabled melos generation due to circular dependency issues caused by komodo_defi_rpc_methods
       # and komodo_defi_types packages. This will be revisited in the future.
       # The app should already have the necessary generated files committed to the repository. If
@@ -45,6 +50,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos
@@ -76,6 +82,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.4"
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos

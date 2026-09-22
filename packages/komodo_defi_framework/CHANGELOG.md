@@ -1,4 +1,55 @@
-## 0.4.1
+## 0.6.0 (unreleased)
+
+ - **BUILD**(kdf): repin the bundled artefact from `main` `f3efd2ca` to
+   `feat/lifi-integration` `4872ef2e0bb07348673e1578aca4aca53f3d73b6` for all
+   seven targets, so the routed-swap RPC namespace is exercisable against a
+   real binary rather than only the scripted harness fixture. That branch forks
+   from `main` at `750be938` and does not carry the five later `main` merges;
+   it still lacks the websocket `.expect` fix, so `ws_url` expansion stays off
+   on web.
+ - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
+   the coins repository's `master` (`f766b261`). It was pinned to the
+   `config-generate/test-pol` branch while the rename was in review; the
+   release ships the `master` commit.
+ - **SECURITY**(diagnostics): omit request, configuration, response and
+   exception bodies from native, remote, WASM, RPC-client and startup logging.
+   Every message reaching `logStream` or an external log callback is sanitized
+   to metadata first.
+ - **FIX**(logging): contain a failing external log callback instead of letting
+   it escape into the framework's own lifecycle.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`, `komodo_defi_rpc_methods` `^0.7.0`,
+   `komodo_coin_updates` `^2.1.1`.
+
+## 0.5.0 — preparation history
+
+> Note: This release rolls the bundled KDF to the `3.1.0-beta` line.
+
+ - **BREAKING** **BUILD**(kdf): pin the bundled artefact to KDF `main`
+   `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`) for all
+   seven native/WASM targets. This reprices EVM swap gas under the
+   Amsterdam/Bogota fork rules and is visible in fee estimates.
+ - **BREAKING** **BUILD**(kdf): require a full 40-character commit hash and
+   declare `required_platforms`, so a partial or missing platform fails the
+   build instead of shipping a stale artefact.
+ - **SECURITY**(build): restrict bundled KDF sources to the official Devbuilds
+   and Nebula mirrors. Keep `devbuilds.gleec.com` first for `main/` builds.
+ - **FEAT**(streaming): add typed `GASLESS_TRACE` events and rework the web and
+   IO event-stream transports around a single service lifecycle.
+ - **FEAT**(config): allow an `IKdfOperations` implementation to be injected,
+   and export `KdfExecutableFinder` and `KdfOperationsLocalExecutable` so a test
+   harness can drive the real binary through the framework's own lifecycle.
+ - **FIX**(android): align native LOAD segments to 16 KB pages (#355).
+ - **SECURITY**(logging): stop logging full activation parameters, and suppress
+   verbose RPC logging for GasFree requests, whose bodies carry provider
+   credentials and signed authorization material.
+ - **CHORE**(build): drop the committed `CMakeCache.txt`, `Makefile` and
+   `cmake_install.cmake`. The cache recorded absolute paths from the machine
+   that generated it, and CMake refuses to configure a directory whose cache
+   came from elsewhere (#362).
+
+## 0.4.1 — preparation history
 
  - **CHORE**(build): update bundled KDF to staging commit `52ba4f9` and use the TRON coins source for release builds.
  - **FIX**(config): carry TRON explorer URL support through bundled build configuration (#338).
@@ -6,7 +57,7 @@
  - **FEAT**(migration): expose the framework hooks needed for legacy wallet migration.
  - **FEAT**(build): align build configuration with the balance recovery and fee-info release inputs (#341).
 
-## 0.4.0
+## 0.4.0 — preparation history
 
 > Note: This release has breaking changes.
 

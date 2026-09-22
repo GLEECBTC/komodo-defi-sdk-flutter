@@ -381,7 +381,10 @@ class StrategicCoinConfigManager
         return;
       }
 
-      // Add custom tokens to _assets, handling conflicts by creating duplicate entries
+      // Keyed by _assetIdComparator, which orders on `AssetId.toString()` and
+      // so ignores the chain id: a custom token that shares a ticker, parent
+      // and subclass with a bundled asset takes over its slot rather than
+      // sitting beside it.
       for (final customToken in customTokens) {
         _assets![customToken.id] = customToken;
       }

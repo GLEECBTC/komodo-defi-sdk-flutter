@@ -1,5 +1,5 @@
 import 'dart:async' show StreamSubscription;
-import 'dart:collection' show UnmodifiableMapView;
+import 'dart:collection' show UnmodifiableMapView, UnmodifiableSetView;
 
 import 'package:flutter/foundation.dart' show ValueGetter;
 import 'package:komodo_coins/komodo_coins.dart';
@@ -181,9 +181,15 @@ class AssetManager implements IAssetProvider {
   ///   print('${asset.id.name} on ${asset.protocol.subClass.formatted}');
   /// }
   /// ```
+  ///
+  /// The result is an unmodifiable view: it is backed by the cached lookup
+  /// index, and letting a caller mutate it in place would corrupt every
+  /// subsequent lookup until the catalogue next changes.
   @override
-  Set<Asset> findAssetsByConfigId(String ticker) =>
-      _indexes.byConfigId[ticker] ?? const <Asset>{};
+  Set<Asset> findAssetsByConfigId(String ticker) {
+    final matches = _indexes.byConfigId[ticker];
+    return matches == null ? const <Asset>{} : UnmodifiableSetView(matches);
+  }
 
   /// Lookup indexes over the catalogue, rebuilt only when it changes.
   ///
@@ -229,9 +235,14 @@ class AssetManager implements IAssetProvider {
   /// final ethId = assetManager.findAssetsByTicker('ETH').first.id;
   /// final erc20Tokens = assetManager.childAssetsOf(ethId);
   /// ```
+  ///
+  /// The result is an unmodifiable view over the cached lookup index, for the
+  /// same reason as [findAssetsByConfigId].
   @override
-  Set<Asset> childAssetsOf(AssetId parentId) =>
-      _indexes.byParent[parentId] ?? const <Asset>{};
+  Set<Asset> childAssetsOf(AssetId parentId) {
+    final children = _indexes.byParent[parentId];
+    return children == null ? const <Asset>{} : UnmodifiableSetView(children);
+  }
 
   /// Activates a single asset.
   ///

@@ -2,6 +2,12 @@ name: komodo_symbol_converter
 description: A lightweight package to convert fiat/crypto prices and charts
 version: 0.3.0+1
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
+homepage: https://www.gleec.com
+issue_tracker: https://github.com/GLEECBTC/komodo-defi-sdk-flutter/issues
+topics:
+  - komodo
+  - currency
+  - cryptocurrency
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

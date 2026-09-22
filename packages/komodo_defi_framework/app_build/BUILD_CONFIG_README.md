@@ -74,13 +74,13 @@ so changing or relabelling an extracted library also fails before linking.
 - Use `--concurrent` for faster downloads in development
 - Override behavior per build via env `OVERRIDE_DEFI_API_DOWNLOAD=true|false`
 
-### Using an additional build mirror
+### Official build mirrors
 
-- You can add Nebula as an additional source in `api.source_urls`:
+The committed `api.source_urls` must contain only the official KDF mirrors,
+Devbuilds and Nebula, in this fallback order:
 
 ```
 "source_urls": [
-    "https://kdf-dev-builds.nitride.app",
     "https://devbuilds.gleec.com",
     "https://nebula.decker.im"
 ]

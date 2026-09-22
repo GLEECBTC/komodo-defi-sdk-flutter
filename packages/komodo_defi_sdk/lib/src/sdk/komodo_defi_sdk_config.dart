@@ -1,5 +1,7 @@
 // sdk_config.dart
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
@@ -16,6 +18,7 @@ class KomodoDefiSdkConfig {
     this.preActivateHistoricalAssets = true,
     this.preActivateCustomTokenAssets = true,
     this.persistTransactionHistory = true,
+    this.transactionHistoryCachePolicy = const TransactionHistoryCachePolicy(),
     this.maxPreActivationAttempts = 3,
     this.activationRetryDelay = const Duration(seconds: 2),
     this.activatedAssetsCacheTtl = const Duration(seconds: 10),
@@ -24,6 +27,7 @@ class KomodoDefiSdkConfig {
     this.tronProApiKey,
     this.tronGaslessProvider,
     this.assetConfigTransform,
+    this.initialActivationPolicy,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -45,13 +49,14 @@ class KomodoDefiSdkConfig {
   /// cache is derived state and is always refreshed from the network, so
   /// disabling this costs latency rather than correctness.
   ///
-  /// Two caveats worth knowing. Cached history survives sign-out, and no
-  /// SDK-wide purge runs on wallet deletion yet, so a deleted wallet's history
-  /// stays on disk until something calls
-  /// `HiveTransactionStorage.purgeWallet`; the same is already true of the
-  /// pubkey cache, the activation config store and the wallet asset list. And
-  /// the store is unbounded, mirroring the in-memory behaviour it replaces.
+  /// The SDK encrypts persisted history using a random platform-protected key.
+  /// Cached history survives sign-out; wallet deletion attempts to purge rows.
+  /// Physical storage failures may retain encrypted rows after deletion.
+  /// If secure storage is unavailable, the SDK uses bounded memory instead.
   final bool persistTransactionHistory;
+
+  /// Limits applied to history persistence and the in-memory fallback alike.
+  final TransactionHistoryCachePolicy transactionHistoryCachePolicy;
 
   /// Maximum number of retry attempts for pre-activation
   final int maxPreActivationAttempts;
@@ -89,12 +94,20 @@ class KomodoDefiSdkConfig {
   /// registry views without persisting its result.
   final AssetConfigTransform? assetConfigTransform;
 
+  /// Policy installed before SDK services can react to a restored session.
+  ///
+  /// Hosts that require a remote policy should supply a loading snapshot, then
+  /// publish the lookup result through the SDK's activation policy service.
+  /// Null keeps standalone SDK clients unrestricted by default.
+  final ActivationPolicySnapshot? initialActivationPolicy;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
     bool? preActivateHistoricalAssets,
     bool? preActivateCustomTokenAssets,
     bool? persistTransactionHistory,
+    TransactionHistoryCachePolicy? transactionHistoryCachePolicy,
     int? maxPreActivationAttempts,
     Duration? activationRetryDelay,
     Duration? activatedAssetsCacheTtl,
@@ -103,6 +116,7 @@ class KomodoDefiSdkConfig {
     String? tronProApiKey,
     TronGaslessProviderConfig? tronGaslessProvider,
     AssetConfigTransform? assetConfigTransform,
+    ActivationPolicySnapshot? initialActivationPolicy,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -114,6 +128,8 @@ class KomodoDefiSdkConfig {
           preActivateCustomTokenAssets ?? this.preActivateCustomTokenAssets,
       persistTransactionHistory:
           persistTransactionHistory ?? this.persistTransactionHistory,
+      transactionHistoryCachePolicy:
+          transactionHistoryCachePolicy ?? this.transactionHistoryCachePolicy,
       maxPreActivationAttempts:
           maxPreActivationAttempts ?? this.maxPreActivationAttempts,
       activationRetryDelay: activationRetryDelay ?? this.activationRetryDelay,
@@ -126,6 +142,8 @@ class KomodoDefiSdkConfig {
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
       tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
       assetConfigTransform: assetConfigTransform ?? this.assetConfigTransform,
+      initialActivationPolicy:
+          initialActivationPolicy ?? this.initialActivationPolicy,
     );
   }
 }

@@ -19,13 +19,11 @@ class TransactionPrefixStats {
   final int newestMicros;
 }
 
-/// In-memory ordering index over the persisted transaction keyspace.
+/// Ordering index rebuilt from decrypted cache envelope metadata.
 ///
-/// Every answer this class gives is derived from the keys alone, so opening a
-/// box and serving a page costs no value reads beyond the rows actually
-/// returned. That is what makes a lazy box viable: the ordering field lives in
-/// the key ([TransactionStorageKey]), so the index can be rebuilt from
-/// `box.keys` without deserializing a single record.
+/// The structured keys in this index exist only in memory and encrypted record
+/// envelopes. Persistent Hive keys are opaque HMAC identifiers, so opening a
+/// cache must decrypt its bounded metadata before serving local rows.
 ///
 /// Ordering matches `InMemoryTransactionStorage`: **timestamp descending, then
 /// internal ID descending** as a stable tiebreaker. The index deliberately does
@@ -59,21 +57,28 @@ class TransactionOrderIndex {
 
   /// Discards all state and rebuilds from [keys].
   ///
-  /// Keys that do not parse are skipped and returned, so the caller can evict
-  /// them from the box.
+  /// Returns every key that must not stay in the box: keys that do not parse,
+  /// and all but the newest key where several share one (prefix, internal ID)
+  /// pair. The latter are the halves of a re-key interrupted between writing
+  /// the replacement and deleting the displaced record - indexing both would
+  /// count and return the transaction twice and leave the ID lookup on the
+  /// stale row, so the rebuild keeps the newest (matching [insert]'s
+  /// replace-on-collision at runtime; a pending row's placeholder timestamp
+  /// is older than the real one it gains) and hands the rest back for
+  /// eviction.
   List<String> rebuildFromKeys(Iterable<String> keys) {
     _orderedByPrefix.clear();
     _positionByKey.clear();
     _keyByPrefixedId.clear();
     _keyByGlobalId.clear();
 
-    final unparseable = <String>[];
+    final dropped = <String>[];
     final parsedByPrefix = <String, List<(String, TransactionKeyParts)>>{};
 
     for (final key in keys) {
       final parts = TransactionStorageKey.parse(key);
       if (parts == null) {
-        unparseable.add(key);
+        dropped.add(key);
         continue;
       }
       parsedByPrefix.putIfAbsent(parts.prefix, () => []).add((key, parts));
@@ -84,6 +89,12 @@ class TransactionOrderIndex {
       final keyList = <String>[];
       final idMap = <String, String>{};
       for (final (key, parts) in ordered) {
+        // Newest-first traversal: the first key seen for an ID token is the
+        // authoritative row, every later one a superseded duplicate.
+        if (idMap.containsKey(parts.idToken)) {
+          dropped.add(key);
+          continue;
+        }
         _positionByKey[key] = keyList.length;
         keyList.add(key);
         idMap[parts.idToken] = key;
@@ -93,7 +104,7 @@ class TransactionOrderIndex {
       _keyByPrefixedId[entry.key] = idMap;
     }
 
-    return unparseable;
+    return dropped;
   }
 
   /// Inserts [key] into the index, replacing any previous key for the same
@@ -177,11 +188,16 @@ class TransactionOrderIndex {
   int count(String prefix) => _orderedByPrefix[prefix]?.length ?? 0;
 
   /// The key for [internalId] under [prefix], or `null`.
+  ///
+  /// [internalId] is normalised through [TransactionStorageKey.idTokenFor]:
+  /// the maps are keyed by the token parsed out of the Hive key, which for an
+  /// overlong ID is its digest, not the ID itself.
   String? keyForPrefixedId(String prefix, String internalId) =>
-      _keyByPrefixedId[prefix]?[internalId];
+      _keyByPrefixedId[prefix]?[TransactionStorageKey.idTokenFor(internalId)];
 
   /// The key for [internalId] anywhere in the index, or `null`.
-  String? keyForId(String internalId) => _keyByGlobalId[internalId];
+  String? keyForId(String internalId) =>
+      _keyByGlobalId[TransactionStorageKey.idTokenFor(internalId)];
 
   /// The newest transaction's key under [prefix], or `null`.
   String? latestKey(String prefix) => _orderedByPrefix[prefix]?.firstOrNull;
@@ -220,7 +236,8 @@ class TransactionOrderIndex {
 
     var start = 0;
     if (fromId != null) {
-      final cursorKey = _keyByPrefixedId[prefix]?[fromId];
+      final cursorKey =
+          _keyByPrefixedId[prefix]?[TransactionStorageKey.idTokenFor(fromId)];
       final cursorPosition = cursorKey == null
           ? null
           : _positionByKey[cursorKey];

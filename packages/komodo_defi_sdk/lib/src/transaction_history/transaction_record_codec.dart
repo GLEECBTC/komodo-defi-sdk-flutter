@@ -209,6 +209,12 @@ abstract final class TransactionRecordCodec {
     );
   }
 
+  /// Enum names written by older builds, kept readable after a rename so
+  /// stored history is not downgraded to [CoinSubClass.unknown].
+  static const _legacySubClassNames = <String, CoinSubClass>{
+    'matic': CoinSubClass.polygon,
+  };
+
   static AssetId _decodeAssetId(Map<String, Object?> json) {
     final symbol = _readMap(json, 'symbol');
     final subClassName = _readString(json, 'sub_class');
@@ -231,6 +237,7 @@ abstract final class TransactionRecordCodec {
           CoinSubClass.values.firstWhereOrNull(
             (value) => value.name == subClassName,
           ) ??
+          _legacySubClassNames[subClassName] ??
           CoinSubClass.unknown,
       // Parent linkage cannot be rebuilt without the live asset registry.
       // It is not part of AssetId.props, so equality is unaffected.

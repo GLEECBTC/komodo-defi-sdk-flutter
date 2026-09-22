@@ -39,7 +39,7 @@ extension KdfExtensions on KdfAuthService {
         phase: 'authenticated wallet identity read',
         operation: () => _client.rpc.wallet.getPublicKeyHash(),
       );
-    } catch (error, stackTrace) {
+    } catch (error) {
       final identityRpcIsUnavailable =
           error is GeneralErrorResponse ||
           (error is AuthException &&
@@ -50,16 +50,9 @@ extension KdfExtensions on KdfAuthService {
         // stringifies the offending object, which here is a wallet identity
         // response.
         //
-        // That left nothing at all to debug with, though - a bare
-        // "causeType: JsonUnsupportedObjectError" says the response could not
-        // be re-encoded and not one thing about why. So log the full cause and
-        // stack at severe, where it reaches the log file the user can export
-        // and the redaction in the framework's log sink still applies.
-        _logger.severe(
-          '[$_sessionId] Authenticated wallet identity read failed',
-          error,
-          stackTrace,
-        );
+        // Log only the failed phase. The cause and stack may contain the
+        // response object and must not enter any diagnostic sink.
+        _logger.severe('Authenticated wallet identity read failed');
         throw AuthException(
           'KDF returned a malformed authenticated wallet identity response',
           type: AuthExceptionType.internalError,
@@ -72,12 +65,7 @@ extension KdfExtensions on KdfAuthService {
       // journal after the active KDF identity has been verified in this
       // session. The stored user remains untouched so a later successful RPC
       // can recover the same journal.
-      _logger.warning(
-        'Authenticated wallet identity is unavailable '
-        '(${error.runtimeType})',
-        null,
-        stackTrace,
-      );
+      _logger.warning('Authenticated wallet identity is unavailable (omitted)');
       return user.copyWith(
         walletId: WalletId.fromName(
           user.walletId.name,
@@ -102,7 +90,8 @@ extension KdfExtensions on KdfAuthService {
         type: AuthExceptionType.internalError,
       );
     }
-    if (storedIdentity == resolvedIdentity &&
+    if (!persist &&
+        storedIdentity == resolvedIdentity &&
         (user.walletId.pubkeyHash?.trim().isNotEmpty ?? false)) {
       // Preserve an already-authenticated identity byte-for-byte. Earlier
       // preview builds could have stored uppercase hex and used those bytes
@@ -116,19 +105,39 @@ extension KdfExtensions on KdfAuthService {
     );
     if (persist) {
       try {
-        await _secureStorage.saveUser(identifiedUser);
+        final persisted = await _secureStorage.updateUser(user.walletId.name, (
+          current,
+        ) {
+          if (current == null) throw AuthException.notFound();
+          final currentHash = current.walletId.pubkeyHash?.trim().toLowerCase();
+          if (currentHash != null &&
+              currentHash.isNotEmpty &&
+              currentHash != resolvedIdentity) {
+            throw AuthException(
+              'Stored wallet identity changed during verification',
+              type: AuthExceptionType.internalError,
+            );
+          }
+          return currentHash == resolvedIdentity
+              ? current
+              : current.copyWith(
+                  walletId: current.walletId.copyWith(
+                    pubkeyHash: resolvedIdentity,
+                  ),
+                );
+        });
         _invalidateUsersCache();
-      } catch (error, stackTrace) {
+        return persisted!;
+      } on AuthException {
+        rethrow;
+      } catch (error) {
         // Identity persistence is required for GasFree journal access, but a
         // local secure-storage write failure must not stop an otherwise
         // authenticated KDF session or remove Standard wallet access. Return
         // a name-only runtime identity so GasFree remains locked until a later
         // verified call can persist the stable identity.
         _logger.warning(
-          'Unable to persist the authenticated wallet identity '
-          '(${error.runtimeType})',
-          null,
-          stackTrace,
+          'Unable to persist the authenticated wallet identity (omitted)',
         );
         return user.copyWith(
           walletId: WalletId.fromName(
@@ -158,33 +167,67 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    final response = await _runStartupSensitiveRpc<JsonMap>(
-      phase: 'get_mnemonic',
-      operation: () async {
-        return _kdfFramework.client.executeRpc({
-          'mmrpc': '2.0',
-          'method': 'get_mnemonic',
-          'params': {
-            'format': encrypted ? 'encrypted' : 'plaintext',
-            if (!encrypted) 'password': walletPassword,
-          },
-        });
-      },
-    );
+    try {
+      final response = await _runStartupSensitiveRpc<JsonMap>(
+        phase: 'get_mnemonic',
+        operation: () async {
+          return _kdfFramework.client.executeRpc({
+            'mmrpc': '2.0',
+            'method': 'get_mnemonic',
+            'params': {
+              'format': encrypted ? 'encrypted' : 'plaintext',
+              if (!encrypted) 'password': walletPassword,
+            },
+          });
+        },
+      );
 
-    if (response is JsonRpcErrorResponse) {
+      if (response is JsonRpcErrorResponse) throw response;
+      // The framework may normalize this MapBase wrapper into ordinary JSON.
+      // Its `error` field is the error type; `message` holds the raw detail.
+      final wrappedType = response['error'];
+      final wrappedMessage = response['message'];
+      if (response.containsKey('code') &&
+          wrappedType is String &&
+          wrappedMessage is String) {
+        throw JsonRpcErrorResponse(
+          code: response['code'] is int ? response['code'] as int : null,
+          error: wrappedType,
+          message: wrappedMessage,
+        );
+      }
+      if (GeneralErrorResponse.isErrorResponse(response)) {
+        throw GeneralErrorResponse.parse(response);
+      }
+
+      return Mnemonic.fromRpcJson(response.value<JsonMap>('result'));
+    } catch (error) {
+      if (_isIncorrectPasswordRpcError(error)) {
+        throw AuthException(
+          'Incorrect wallet password',
+          type: AuthExceptionType.incorrectPassword,
+        );
+      }
       throw AuthException(
-        response.error,
+        'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,
       );
     }
-
-    return Mnemonic.fromRpcJson(response.value<JsonMap>('result'));
   }
 
-  Future<void> _stopKdf() async {
+  Future<void> _stopKdf() => _runAuthTransition(_stopKdfWithinTransition);
+
+  Future<void> _stopKdfWithinTransition() async {
+    // Invalidate pending exports before cancellation or shutdown can suspend.
+    // This also covers restarts and shutdown failures with an unchanged user.
+    invalidateAuthSession();
     await _shutdownSubscription?.cancel();
     _shutdownSubscription = null;
+    // Every authenticated session ends through here, and "generated this
+    // session" means "first sign-in": once that sign-in is over the marker
+    // must not keep telling the HD gap scan there is nothing to find. A later
+    // sign-in to the same wallet gets the standard gap.
+    _walletsGeneratedThisSession.clear();
     await _kdfFramework.kdfStop();
     _kdfFramework.resetHttpClient();
     _emitAuthStateChange(null);
@@ -193,16 +236,13 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _clearFailedAuthenticatedKdfWithinWriteLock() async {
     try {
       await _stopKdf();
-    } catch (error, stackTrace) {
+    } catch (error) {
       // Authentication must remain cleared even if the native runtime cannot
       // be stopped cleanly. Managers observe this transition and revoke every
       // wallet-scoped cache and operation.
       _emitAuthStateChange(null);
       _logger.warning(
-        'Failed to stop KDF after authentication failure '
-        '(${error.runtimeType})',
-        null,
-        stackTrace,
+        'Failed to stop KDF after authentication failure (omitted)',
       );
     }
   }
@@ -214,23 +254,27 @@ extension KdfExtensions on KdfAuthService {
       await _lockWriteOperation(() async {
         if (await _kdfFramework.isRunning()) return;
 
-        final startStopwatch = Stopwatch()..start();
-        final kdfResult = await _kdfFramework.startKdf(await _noAuthConfig);
-        startStopwatch.stop();
-        _logger.info(
-          '[$_sessionId] _ensureKdfRunning: startKdf(no-auth) returned '
-          '${kdfResult.name} in ${startStopwatch.elapsedMilliseconds}ms',
-        );
-
-        if (!kdfResult.isStartingOrAlreadyRunning()) {
-          throw _mapStartupErrorToAuthException(kdfResult);
-        }
-
-        _kdfFramework.resetHttpClient();
-        await _waitUntilKdfRpcReady();
-        await _subscribeToShutdownSignals();
+        await _runAuthTransition(_startNoAuthKdfWithinTransition);
       });
     }
+  }
+
+  Future<void> _startNoAuthKdfWithinTransition() async {
+    final startStopwatch = Stopwatch()..start();
+    final kdfResult = await _kdfFramework.startKdf(await _noAuthConfig);
+    startStopwatch.stop();
+    _logger.info(
+      '_ensureKdfRunning: startKdf(no-auth) returned omitted in '
+      '${startStopwatch.elapsedMilliseconds}ms',
+    );
+
+    if (!kdfResult.isStartingOrAlreadyRunning()) {
+      throw _mapStartupErrorToAuthException(kdfResult);
+    }
+
+    _kdfFramework.resetHttpClient();
+    await _waitUntilKdfRpcReady();
+    await _subscribeToShutdownSignals();
   }
 
   // consider moving to kdf api
@@ -239,7 +283,7 @@ extension KdfExtensions on KdfAuthService {
     await _stopKdf();
     stopStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _restartKdf: stop phase completed in '
+      '_restartKdf: stop phase completed in '
       '${stopStopwatch.elapsedMilliseconds}ms',
     );
 
@@ -247,7 +291,7 @@ extension KdfExtensions on KdfAuthService {
     final kdfResult = await _kdfFramework.startKdf(config);
     startStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _restartKdf: auth start returned ${kdfResult.name} in '
+      '_restartKdf: auth start returned omitted in '
       '${startStopwatch.elapsedMilliseconds}ms',
     );
 
@@ -261,7 +305,7 @@ extension KdfExtensions on KdfAuthService {
     await _subscribeToShutdownSignals();
     readyStopwatch.stop();
     _logger.info(
-      '[$_sessionId] _restartKdf: readiness verify completed in '
+      '_restartKdf: readiness verify completed in '
       '${readyStopwatch.elapsedMilliseconds}ms',
     );
   }
@@ -338,25 +382,25 @@ extension KdfExtensions on KdfAuthService {
           );
           if (version != null) {
             _logger.info(
-              '[$_sessionId] _waitUntilKdfRpcReady: RPC ready in '
+              '_waitUntilKdfRpcReady: RPC ready in '
               '${stopwatch.elapsedMilliseconds}ms',
             );
             return;
           }
         } on SocketException catch (e) {
           _logger.fine(
-            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
-            'error (will retry): $e',
+            '_waitUntilKdfRpcReady: version probe transport error (will '
+            'retry): ${DiagnosticSanitizer.safeError(e)}',
           );
         } on HttpException catch (e) {
           _logger.fine(
-            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
-            'error (will retry): $e',
+            '_waitUntilKdfRpcReady: version probe transport error (will '
+            'retry): ${DiagnosticSanitizer.safeError(e)}',
           );
         } on HandshakeException catch (e) {
           _logger.fine(
-            '[$_sessionId] _waitUntilKdfRpcReady: version probe transport '
-            'error (will retry): $e',
+            '_waitUntilKdfRpcReady: version probe transport error (will '
+            'retry): ${DiagnosticSanitizer.safeError(e)}',
           );
         }
       }
@@ -379,32 +423,26 @@ extension KdfExtensions on KdfAuthService {
 
     try {
       return await runAttempt();
-    } catch (error, stackTrace) {
+    } catch (error) {
       if (!_shouldRecoverStartupSensitiveRpc(error)) {
         rethrow;
       }
 
       _logger.warning(
-        '[$_sessionId] _runStartupSensitiveRpc: $phase failed on first '
-        'attempt, resetting HTTP client and retrying',
-        error,
-        stackTrace,
+        '_runStartupSensitiveRpc: omitted failed on first attempt, '
+        'resetting HTTP client and retrying',
       );
       _kdfFramework.resetHttpClient();
       await _waitUntilKdfRpcReady();
 
       try {
         return await runAttempt();
-      } catch (retryError, retryStackTrace) {
+      } catch (retryError) {
         if (!_shouldRecoverStartupSensitiveRpc(retryError)) {
           rethrow;
         }
 
-        _logger.severe(
-          '[$_sessionId] _runStartupSensitiveRpc: $phase failed after retry',
-          retryError,
-          retryStackTrace,
-        );
+        _logger.severe('_runStartupSensitiveRpc: omitted failed after retry');
         throw AuthException(
           'KDF RPC unavailable during $phase',
           type: AuthExceptionType.apiConnectionError,
@@ -414,17 +452,49 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
+  /// Whether [error] means KDF could not be *reached*, in either the raw or the
+  /// already-wrapped form.
+  ///
+  /// Deliberately narrower than [_shouldRecoverStartupSensitiveRpc], and
+  /// deliberately not delegating to it: that one also retries a non-permanent
+  /// `GeneralErrorResponse`, which means KDF answered. This decides whether to
+  /// tear down the runtime and sign the user out, so it must mean transport
+  /// only.
+  ///
+  /// The wrapped form is the one that fires in practice.
+  /// [_runStartupSensitiveRpc] retries the raw types and then gives up by
+  /// throwing `AuthException(apiConnectionError)`, so a caller matching only
+  /// the raw types would silently never fire.
+  /// [_ensureAuthenticatedWalletIdentity] keys off the same pair.
+  bool _isKdfUnreachable(Object error) {
+    if (error is AuthException) {
+      return error.type == AuthExceptionType.apiConnectionError;
+    }
+    return error is TimeoutException ||
+        error is ClientException ||
+        error is SocketException ||
+        error is HttpException ||
+        error is HandshakeException;
+  }
+
   /// Whether a startup-sensitive RPC failure is worth one retry.
   ///
-  /// The first four are transport faults. The fifth covers KDF answering *with*
-  /// an error while it is still coming up or is saturated - on web a
-  /// single-threaded WASM instance sharing the Flutter isolate with a login's
-  /// activation fan-out. Without it, one such response on the very first
-  /// attempt makes [_ensureAuthenticatedWalletIdentity] fall straight through
-  /// to a name-only identity with no retry, and that downgrade is emitted on
-  /// the auth stream to every wallet-scoped consumer.
+  /// The transport faults below, plus KDF answering *with* an error while it is
+  /// still coming up or is saturated - on web a single-threaded WASM instance
+  /// sharing the Flutter isolate with a login's activation fan-out. Without
+  /// that last clause, one such response on the very first attempt makes
+  /// [_ensureAuthenticatedWalletIdentity] fall straight through to a name-only
+  /// identity with no retry, and that downgrade is emitted on the auth stream
+  /// to every wallet-scoped consumer.
+  ///
+  /// `ClientException` is the transport type that actually fires: the RPC path
+  /// runs through `package:http` (`kdf_operations_native.dart`) and
+  /// `http_extensions.dart` raises it directly, so a loopback failure arrives
+  /// as that rather than as the `dart:io` types. Those are kept for the paths
+  /// that bypass `package:http`.
   bool _shouldRecoverStartupSensitiveRpc(Object error) {
     return error is TimeoutException ||
+        error is ClientException ||
         error is SocketException ||
         error is HttpException ||
         error is HandshakeException ||

@@ -141,5 +141,62 @@ void main() {
         await first;
       },
     );
+
+    test(
+      'an invalidated fetch completing does not clear the newer fetch slot',
+      () async {
+        var now = DateTime(2026);
+        var rpcCalls = 0;
+        final firstGate = Completer<void>();
+        final secondGate = Completer<void>();
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final call = ++rpcCalls;
+          if (call == 1) await firstGate.future;
+          if (call == 2) await secondGate.future;
+          return {
+            'mmrpc': '2.0',
+            'result': {
+              'coins': [
+                {'ticker': 'TRX'},
+              ],
+            },
+          };
+        });
+
+        final cache = ActivatedAssetsCache(
+          client: client,
+          auth: auth,
+          assetLookup: assetLookup,
+          clock: () => now,
+        );
+        addTearDown(cache.dispose);
+
+        final first = cache.getActivatedAssetIds(forceRefresh: true);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Stale in-flight fetch: the second forced refresh invalidates it and
+        // installs its own pending completer.
+        now = now.add(const Duration(seconds: 5));
+        final second = cache.getActivatedAssetIds(forceRefresh: true);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // The abandoned first fetch finishes while the second is in flight.
+        // Its cleanup must not clear the second fetch's slot.
+        firstGate.complete();
+        await first;
+
+        // A plain read arriving now must join the in-flight second fetch
+        // rather than starting a third round trip.
+        final third = cache.getActivatedAssetIds();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        secondGate.complete();
+
+        final results = await Future.wait([second, third]);
+        expect(rpcCalls, 2);
+        for (final ids in results) {
+          expect(ids, contains(parent.id));
+        }
+      },
+    );
   });
 }

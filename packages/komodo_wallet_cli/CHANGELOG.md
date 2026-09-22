@@ -1,3 +1,20 @@
+## 0.6.0
+
+ - **BREAKING** **FEAT**(update-api-config): default to the `main` branch of the
+   private `GLEECBTC/kdf-internal` repository. `--source github` against it now
+   needs a `--token` with read access.
+ - **FEAT**(update-api-config): resolve short commit SHAs remotely and write
+   only a full 40-character lowercase SHA; add `--strict` to require
+   exact commit-matching artefacts, `--mirror-url` to pin the mirror, and a
+   platform update scope that only lets `--platform all` change the pinned
+   commit.
+ - **FIX**(update-api-config): match a mirror listing's links by the artefact
+   filename contract applied to the href's basename, so bare filenames,
+   relative paths and absolute URLs all resolve alike.
+ - **FIX**(update-api-config): keep an independently trusted checksum set
+   unchanged when the pinned commit has not moved, rather than replacing it
+   with whatever the current download calculated.
+
 ## 0.5.1
 
  - **FEAT**(build): update API config tooling for the balance recovery and fee-info release inputs (#341).

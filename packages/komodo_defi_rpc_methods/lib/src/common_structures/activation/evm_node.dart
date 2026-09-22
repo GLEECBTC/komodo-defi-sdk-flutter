@@ -8,9 +8,46 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 /// is folded away at compile time and the unused list never ships.
 const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
 
+/// Whether to send `ws_url` endpoints to KDF on web builds.
+///
+/// **Off while the wallet ships KDF `main`.** The ws transport on `main` panics
+/// on an ordinary late response, and on wasm a panic takes the whole MM2
+/// instance down with it:
+///
+///  * `eth_rpc.rs:23`/`:41` abandon a call at `TRY_RPC_NODE_TIMEOUT_S` = 10s,
+///    dropping the receiver.
+///  * `websocket_transport.rs:153` keeps the notifier registered for
+///    `WEB3_REQUEST_TIMEOUT_S` = 30s (`eth.rs:222`).
+///  * A response landing in that 10-30s window reaches
+///    `websocket_transport.rs:207`,
+///    `notifier.send(res_bytes).expect("receiver channel must be alive")`.
+///  * `mm2_wasm_lib.rs:129` says outright that it cannot wrap the async entry
+///    in `catch_unwind`, so nothing contains it.
+///
+/// Verified at source in the pinned artefact `4872ef2`
+/// (`feat/lifi-integration`): `websocket_transport.rs` still carries the
+/// `.expect("receiver channel must be alive")` at both :207 and :306.
+///
+/// The fix is not ours to make app-side - it is KDF `6b9ae7c8f` (`.expect` to
+/// `let _ =`) plus `7d4e1872c` (PR #20, generation-stamped `Close` and a spawn
+/// reservation). Neither is in the pinned build. **Flip this back to `true`
+/// once the pinned KDF contains them**, i.e. once `build_config.json`'s
+/// `api_commit_hash` is a commit carrying `6b9ae7c8f`.
+/// Nothing else about the expansion needs to change: [_webUnusableWsEndpoints]
+/// and [_deadWsEndpoints] still hold, and [EvmNode.toRpcNodeList] stays
+/// additive.
+///
+/// What web gives up in the meantime is what the rollout bought: every EVM POST
+/// there carries a CORS preflight, the endpoint's 429 response arrives without
+/// an `Access-Control-Allow-Origin` header and so is unrecoverable, and a
+/// WebSocket replaced the whole burst with one HTTP Upgrade - outside the
+/// per-request rate limiter and outside the CORS model entirely.
+const bool _kSendWsNodesOnWeb = false;
+
 /// Whether to send `ws_url` endpoints to KDF on native builds.
 ///
-/// **Currently web-only, deliberately.** The rollout is a measured win on web:
+/// **Was web-only, deliberately** - see [_kSendWsNodesOnWeb] for why web is
+/// currently off too. The rollout was a measured win on web:
 /// every EVM POST there carries a CORS preflight, the endpoint's 429 response
 /// arrives without an `Access-Control-Allow-Origin` header and so is
 /// unrecoverable, and a WebSocket replaces the whole burst with one HTTP
@@ -64,7 +101,7 @@ const Map<String, String> _deadWsEndpoints = {
   'wss://polygon.gateway.tenderly.co':
       '2026-08-07: HTTP 404 with and without an Origin header. The Tenderly '
       'gateway wants an access key in the path (`/ws` answers 401); the coins '
-      'config carries the bare host. MATIC keeps three other ws endpoints.',
+      'config carries the bare host. POL keeps three other ws endpoints.',
 };
 
 /// Endpoints that serve a native handshake but refuse a browser one.
@@ -127,6 +164,7 @@ class EvmNode {
     if (wsUrl == null || wsUrl.isEmpty) return null;
     if (_deadWsEndpoints.containsKey(wsUrl)) return null;
     if (isWeb) {
+      if (!_kSendWsNodesOnWeb) return null;
       return _webUnusableWsEndpoints.containsKey(wsUrl) ? null : wsUrl;
     }
     return _kSendWsNodesOnNative ? wsUrl : null;
@@ -143,10 +181,10 @@ class EvmNode {
   /// Each config node becomes its existing `https://` entry, **plus** a second
   /// entry for its `ws_url` when that endpoint is usable on this platform.
   ///
-  /// **Always additive, never a replacement.** GLEEC, EWT, GLMR, MATIC and MOVR
+  /// **Always additive, never a replacement.** GLEEC, EWT, GLMR, POL and MOVR
   /// have no http-only node at all, so substituting rather than adding would
   /// strip those chains of HTTP entirely and leave them with no fallback.
-  /// Expanding gives MATIC 4 entries -> 8 and GLEEC 1 -> 2, which is itself the
+  /// Expanding gives POL 4 entries -> 8 and GLEEC 1 -> 2, which is itself the
   /// fix for the single-node-no-fallback condition `web3_pool.rs:52-64` blames
   /// for the original incident.
   ///

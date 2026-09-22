@@ -12,7 +12,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+import '../helpers/runtime_auth_fixture.dart';
+
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -196,6 +200,24 @@ void main() {
     },
   );
 
+  test('operations complete while the identity stays degraded', () async {
+    // Tolerating the degraded observation at capture is not enough on its
+    // own: every operation re-reads `auth.currentUser` in its post-await
+    // guards, and rejecting the same degraded identity there would throw
+    // WalletChangedDisconnectException at the first checkpoint - during the
+    // exact blip the capture branch admits the operation for.
+    final manager = build();
+    expect((await manager.getBalance(asset.id)).total, Decimal.fromInt(5));
+
+    currentUser = _degraded;
+
+    expect(
+      (await manager.getBalance(asset.id)).total,
+      Decimal.fromInt(5),
+      reason: 'a degraded identity must not fail an in-flight operation',
+    );
+  });
+
   test('a genuinely different wallet still resets state', () async {
     final manager = build();
 
@@ -222,5 +244,36 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     expect(manager.lastKnownForWallet(asset.id, _enriched.walletId), isNull);
+  });
+
+  test('a balance watcher starts while the identity is degraded', () async {
+    // The watcher start captures the wallet context - which admits the
+    // degraded observation and keeps the enriched identity - and then
+    // immediately re-reads `auth.currentUser`. Comparing those two with
+    // same-stable rules fails for as long as the identity RPC is down, and
+    // the start returns before registering a producer. `onListen` fires only
+    // on a 0->1 listener transition, so nothing emits at all: no cached
+    // paint, no fetch, and the row stays "loading" until the retry budget
+    // runs out.
+    final manager = build();
+
+    // Establish the enriched identity *without* caching a balance: the stream
+    // attachment replays `lastKnownForWallet` on subscribe, so a primed cache
+    // would emit a value even when no watcher ever starts.
+    authChanges.add(_enriched);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    // The RPC blips before the UI subscribes to this asset.
+    currentUser = _degraded;
+
+    expect(
+      (await manager
+              .watchBalance(asset.id)
+              .first
+              .timeout(const Duration(seconds: 5)))
+          .total,
+      Decimal.fromInt(5),
+      reason: 'the watcher must start during the blip capture already admits',
+    );
   });
 }

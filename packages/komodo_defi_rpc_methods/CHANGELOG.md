@@ -1,4 +1,18 @@
-## 1.0.0
+## 0.7.0 (unreleased)
+
+ - **FEAT**(routed-swap): add the `routed_swap` method namespace - quote,
+   start, status, cancel and history requests with their typed models -
+   covering aggregator-executed swaps such as cross-chain bridges.
+ - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
+   `account_balance_read` wrappers used by the removed TRON export workaround.
+ - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
+   and key metadata, and preserve strict account/range semantics in
+   `get_private_keys`.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`.
+
+## 0.6.0 — preparation history
 
 > Note: This release has breaking GasFree relay response interfaces.
 
@@ -12,8 +26,16 @@
    streaming exceptions from the pinned KDF Rust error enums.
  - **FIX**(gasfree): serialize maximum withdrawals with `max: true` and no
    `amount`, and serialize only documented GasFree withdrawal options.
+ - **FEAT**(activation): send the HD address `gap_limit` on the wire for the
+   activation methods that accept it, so callers can scan fewer addresses than
+   KDF's default of 20.
+ - **FEAT**(activation): add WebSocket expansion of EVM node entries, gated off
+   on both web and native for this release: KDF `main` panics on a `wss://`
+   reply that lands after the caller's timeout, so only HTTP nodes are sent.
+ - **FIX**(requests): encode request bodies through a single encodable path so
+   nested parameter objects serialize consistently.
 
-## 0.5.0
+## 0.5.0 — preparation history
 
 > Note: This release has breaking changes.
 
@@ -22,7 +44,7 @@
  - **FEAT**(auth): add the RPC request and activation parameter support needed by legacy wallet migration.
  - **BREAKING** **FEAT**(sia): move SIA withdrawal handling onto hardened SIA-specific RPC models and namespace methods (#343).
 
-## 0.4.0
+## 0.4.0 — preparation history
 
 > Note: This release has breaking changes.
 

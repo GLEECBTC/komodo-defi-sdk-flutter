@@ -31,10 +31,8 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
       _handleShutdownSignal,
       onError: (Object error, StackTrace stackTrace) {
         _logger.warning(
-          'Error in shutdown signal stream, '
-          'will rely on periodic health checks',
-          error,
-          stackTrace,
+          'Error in shutdown signal stream, will rely on periodic health '
+          'checks',
         );
       },
       cancelOnError: false,
@@ -49,8 +47,9 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
         Object error,
       ) {
         _logger.warning(
-          'Failed to enable shutdown signal stream, '
-          'will rely on periodic health checks: $error',
+          'Failed to enable shutdown signal stream, will rely on '
+          'periodic health checks: '
+          '${DiagnosticSanitizer.safeError(error)}',
         );
       }),
     );
@@ -75,18 +74,22 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
       );
     } catch (e) {
       // Log but don't throw - streaming is a nice-to-have optimization
-      _logger.warning('Could not enable shutdown signal stream: $e');
+      _logger.warning(
+        'Could not enable shutdown signal stream: '
+        '${DiagnosticSanitizer.safeError(e)}',
+      );
     }
   }
 
   /// Handles shutdown signal events by immediately updating auth state.
   void _handleShutdownSignal(ShutdownSignalEvent event) {
     _logger.info(
-      'Received shutdown signal (${event.signalName}), '
-      'signing out user immediately',
+      'Received shutdown signal (omitted), signing out user '
+      'immediately',
     );
 
-    final generation = _authStateGeneration;
+    beginAuthTransition();
+    final generation = authGeneration;
     unawaited(
       _lockWriteOperation(() async {
         // A delayed shutdown event from the previous KDF instance must not
@@ -96,7 +99,7 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
           _shutdownSubscription = null;
           _emitAuthStateChange(null);
         }
-      }),
+      }).whenComplete(endAuthTransition),
     );
   }
 
@@ -108,7 +111,7 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
         final KdfUser? currentUser;
         try {
           currentUser = await _getActiveUser();
-        } on AuthException catch (error, stackTrace) {
+        } on AuthException catch (error) {
           if (error.type != AuthExceptionType.internalError) {
             rethrow;
           }
@@ -119,8 +122,6 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
           // sign-in or restore operation.
           _logger.severe(
             'Authenticated wallet identity failed health verification',
-            error,
-            stackTrace,
           );
           await _clearFailedAuthenticatedKdfWithinWriteLock();
           return;
@@ -136,13 +137,13 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
           _emitAuthStateChange(currentUser);
         }
       });
-    } on AuthException catch (e, s) {
-      _logger.warning('Health check failed, will retry on next interval', e, s);
-    } catch (e, s) {
+    } on AuthException {
+      _logger.warning('Health check failed, will retry on next interval');
+    } catch (e) {
       // Log the error but don't immediately sign out on transient RPC failures.
       // The next health check (in 5 minutes) will verify if this is persistent.
       // This prevents false sign-outs during temporary network issues.
-      _logger.warning('Health check failed, will retry on next interval', e, s);
+      _logger.warning('Health check failed, will retry on next interval');
       // Note: We intentionally do NOT emit null here to avoid false sign-outs
       // from transient errors. KDF may still be running and user authenticated.
     }

@@ -33,7 +33,10 @@ class TransactionKeyParts {
   final bool idTokenIsHashed;
 }
 
-/// Builds and decomposes the Hive keys used by the persisted transaction store.
+/// Builds the in-memory ordering keys stored inside encrypted cache envelopes.
+///
+/// These keys contain sensitive metadata and must never be used as Hive keys.
+/// The persistent store derives opaque HMAC keys from their identity fields.
 ///
 /// The layout is fixed-width up to the trailing ID so that a key can be
 /// decomposed with three `indexOf` calls, and so that no component can bleed
@@ -95,8 +98,7 @@ abstract final class TransactionStorageKey {
 
   /// Returns the wallet token for an already-computed storage [namespace].
   ///
-  /// Lets callers that hold namespaces rather than [WalletId]s - the
-  /// wallet garbage collector, for one - compare against key prefixes.
+  /// Lets callers with a namespace compare against in-memory key prefixes.
   static String tokenForNamespace(String namespace) => _digest(namespace);
 
   /// Returns the opaque token identifying [assetId].
@@ -143,7 +145,7 @@ abstract final class TransactionStorageKey {
   }) {
     final key =
         '$prefix${encodeTimestamp(timestamp)}$separator'
-        '${_idToken(internalId)}';
+        '${idTokenFor(internalId)}';
     final byteLength = utf8.encode(key).length;
     if (byteLength > maxKeyBytes) {
       throw TransactionStorageException(
@@ -183,7 +185,13 @@ abstract final class TransactionStorageKey {
   /// Whether [key] belongs to the (wallet, asset) pair identified by [prefix].
   static bool hasPrefix(String key, String prefix) => key.startsWith(prefix);
 
-  static String _idToken(String internalId) =>
+  /// The token [build] embeds in the key for [internalId].
+  ///
+  /// An ID within [maxIdTokenBytes] is embedded verbatim; anything longer is
+  /// replaced by a `#`-prefixed SHA-256 digest. Everything that stores or
+  /// looks up by internal ID must normalise through this same function, or an
+  /// overlong ID's row can never be found again once written.
+  static String idTokenFor(String internalId) =>
       utf8.encode(internalId).length <= maxIdTokenBytes
       ? internalId
       : '$_hashedIdPrefix${sha256.convert(utf8.encode(internalId))}';

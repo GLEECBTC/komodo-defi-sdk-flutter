@@ -35,27 +35,27 @@ class SeedNodeUpdater {
     final mappedSeedNodesPath =
         config.mappedFiles['assets/config/seed_nodes.json'] ?? seedNodesPath;
 
-    // Build the URL using the centralized logic
-    final seedNodesUri = AssetRuntimeUpdateConfig.buildContentUrl(
-      path: mappedSeedNodesPath,
-      coinsRepoContentUrl: config.coinsRepoContentUrl,
-      coinsRepoBranch: config.coinsRepoBranch,
-      cdnBranchMirrors: config.cdnBranchMirrors,
-    );
-
     try {
+      // URI parsing can include the configured URL in an exception. Keep it
+      // inside the same diagnostic boundary as transport and response parsing.
+      final seedNodesUri = AssetRuntimeUpdateConfig.buildContentUrl(
+        path: mappedSeedNodesPath,
+        coinsRepoContentUrl: config.coinsRepoContentUrl,
+        coinsRepoBranch: config.coinsRepoBranch,
+        cdnBranchMirrors: config.cdnBranchMirrors,
+      );
       final client = httpClient ?? http.Client();
       late final http.Response response;
       try {
         response = await client.get(seedNodesUri).timeout(timeout);
       } on TimeoutException {
-        throw Exception('Timeout fetching seed nodes from $seedNodesUri');
+        throw const _SeedNodeFetchFailure('Timeout fetching seed nodes');
       } finally {
         if (httpClient == null) client.close();
       }
 
       if (response.statusCode != 200) {
-        throw Exception(
+        throw _SeedNodeFetchFailure(
           'Failed to fetch seed nodes. Status code: ${response.statusCode}',
         );
       }
@@ -71,13 +71,20 @@ class SeedNodeUpdater {
       }
 
       if (seedNodes.isEmpty) {
-        throw Exception('No seed nodes found for netid $kDefaultNetId');
+        throw const _SeedNodeFetchFailure(
+          'No seed nodes found for netid $kDefaultNetId',
+        );
       }
 
       return (seedNodes: seedNodes, netId: kDefaultNetId);
-    } catch (e) {
-      debugPrint('Error fetching seed nodes: $e');
-      throw Exception('Failed to fetch or process seed nodes: $e');
+    } on Object catch (error) {
+      debugPrint('Peer configuration update failed');
+      // Only locally constructed, fixed failures may retain their explanation.
+      // Parser and HTTP errors can include response bodies or credentials.
+      if (error is _SeedNodeFetchFailure) rethrow;
+      throw const _SeedNodeFetchFailure(
+        'Failed to fetch or process seed nodes',
+      );
     }
   }
 
@@ -89,4 +96,13 @@ class SeedNodeUpdater {
   static List<String> seedNodesToStringList(List<SeedNode> seedNodes) {
     return seedNodes.map((node) => node.host).toList();
   }
+}
+
+class _SeedNodeFetchFailure implements Exception {
+  const _SeedNodeFetchFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

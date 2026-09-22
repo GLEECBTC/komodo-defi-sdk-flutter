@@ -17,9 +17,11 @@ High-level, opinionated SDK for building cross-platform Komodo DeFi wallets and 
 
 ## Install
 
-```sh
-dart pub add komodo_defi_sdk
-```
+This checkout prepares `komodo_defi_sdk` `0.8.0` for SDK 0.8.0. Use the
+[pinned checkout/submodule instructions](../../docs/RELEASE_0.8.0.md#pin-the-complete-checkout)
+and resolve all SDK dependencies from the same reviewed commit. Stable version
+metadata here does not imply pub.dev publication. Review the
+[release migrations](../../docs/RELEASE_0.8.0.md) before updating a consumer.
 
 ## Quick start
 

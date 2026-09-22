@@ -256,9 +256,25 @@ class BlockscoutTransactionStrategy extends TransactionHistoryStrategy {
     // not a failure - treating it as an error would reproduce the very bug
     // this strategy exists to fix, only louder.
     final result = json['result'];
-    if (result is! List) return const [];
+    if (result is List) return result.whereType<JsonMap>().toList();
 
-    return result.whereType<JsonMap>().toList();
+    // Some Etherscan-compatible deployments answer the no-history case with a
+    // null/string result instead of an empty list, still under this message.
+    final message = json.valueOrNull<String>('message') ?? '';
+    if (message.toLowerCase().contains('no transactions found')) {
+      return const [];
+    }
+
+    // Every other non-list envelope is an error report - a rate limit, an
+    // invalid query, a backend failure - with the detail carried in `result`
+    // as a string. Mapping those to an empty list would show the user "no
+    // transactions" for a transient explorer failure and suppress the
+    // manager's retry handling.
+    final detail = [
+      message,
+      if (result is String) result,
+    ].where((s) => s.isNotEmpty).join(' - ');
+    throw HttpException('Blockscout error response: $detail', uri: uri);
   }
 
   // ---------------------------------------------------------------------------

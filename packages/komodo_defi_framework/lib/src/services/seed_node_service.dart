@@ -51,7 +51,7 @@ class SeedNodeService {
       );
     } catch (e) {
       if (KdfLoggingConfig.verboseLogging) {
-        debugPrint('WARN Failed to fetch seed nodes from remote: $e');
+        debugPrint('Remote peer configuration fetch failed');
         debugPrint('WARN Falling back to bundled seed nodes');
       }
 
@@ -62,7 +62,7 @@ class SeedNodeService {
         return (seedNodes: fallbackNodes, netId: kDefaultNetId);
       } catch (fallbackError) {
         if (KdfLoggingConfig.verboseLogging) {
-          debugPrint('WARN Failed to load bundled seed nodes: $fallbackError');
+          debugPrint('Bundled peer configuration load failed');
           debugPrint('WARN Falling back to emergency seed nodes');
         }
 

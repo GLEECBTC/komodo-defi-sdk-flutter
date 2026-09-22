@@ -14,6 +14,14 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   @override
+  Future<bool> discardPendingGaslessTransfer(String journalId) =>
+      Future.error(
+        UnsupportedError(
+          'Legacy withdrawals keep no GasFree journal to discard from',
+        ),
+      );
+
+  @override
   Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) =>
       Future.error(
         UnsupportedError(

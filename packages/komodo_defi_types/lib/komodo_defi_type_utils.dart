@@ -4,6 +4,7 @@
 library komodo_defi_type_utils;
 
 export 'src/utils/backoff_strategy.dart';
+export 'src/utils/diagnostic_sanitizer.dart';
 export 'src/utils/iterable_type_utils.dart';
 export 'src/utils/json_type_utils.dart';
 export 'src/utils/live_data.dart';

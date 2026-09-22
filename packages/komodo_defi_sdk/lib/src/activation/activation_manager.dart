@@ -5,8 +5,10 @@ import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
-import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
+import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart'
+    show isSameStableWallet;
 import 'package:komodo_defi_sdk/src/balances/balance_manager.dart';
 import 'package:komodo_defi_sdk/src/errors/sdk_error_mapper.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
@@ -34,11 +36,25 @@ class ActivationManager {
     this._configService,
     this._assetsUpdateManager,
     this._activatedAssetsCache, {
+    ActivationPolicy? activationPolicy,
     TronGaslessProviderConfig? tronGaslessProvider,
     GaslessCapabilityRegistry? gaslessCapabilities,
-  }) : _tronGaslessProvider = tronGaslessProvider,
+  }) : _activationPolicy = activationPolicy ?? ActivationPolicy(),
+       _tronGaslessProvider = tronGaslessProvider,
        _gaslessCapabilities =
-           gaslessCapabilities ?? GaslessCapabilityRegistry();
+           gaslessCapabilities ?? GaslessCapabilityRegistry() {
+    _authSubscription = _auth.watchSessionContext().listen(_observeSession);
+    _policySubscription = _activationPolicy.changes.listen(_onPolicyChanged);
+    _onPolicyChanged(_activationPolicy.current);
+  }
+
+  final ActivationPolicy _activationPolicy;
+  late final StreamSubscription<ActivationPolicySnapshot> _policySubscription;
+  Future<void>? _policyReconciliation;
+  Future<void>? _policyRecovery;
+  final Set<AssetId> _policySuspendedAssets = {};
+  final Map<AssetId, Future<void> Function()> _runtimeRecovery = {};
+  Timer? _policyRetryTimer;
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
@@ -57,7 +73,9 @@ class ActivationManager {
   static const _operationTimeout = Duration(seconds: 30);
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
-  final Map<AssetId, Completer<void>> _activationCompleters = {};
+  /// Holds an *outcome*, never a failed future. See [_ActivationJoinOutcome].
+  final Map<AssetId, Completer<_ActivationJoinOutcome>> _activationCompleters =
+      {};
 
   /// Assets this session actually activated, as opposed to found already
   /// enabled.
@@ -78,6 +96,48 @@ class ActivationManager {
   final Map<AssetId, _ActivationCancellation> _cancelledActivations = {};
   int _activationSessionGeneration = 0;
   bool _isDisposed = false;
+
+  late final StreamSubscription<AuthSessionContext?> _authSubscription;
+  AuthSessionContext? _session;
+
+  void _observeSession(AuthSessionContext? session) {
+    if (_isDisposed) return;
+    if (session == null ||
+        (_session != null && !_auth.isSessionContextCurrent(_session!))) {
+      resetActivationSessionState();
+    }
+    _session = session;
+  }
+
+  Future<({_ActivationWalletContext context, bool isGeneratedThisSession})>
+  _captureWalletContext() async {
+    final context = await _auth.captureSessionContext();
+    final user = await _auth.currentUser;
+    _auth.ensureSessionContextCurrent(context);
+    _observeSession(context);
+    return (
+      context: _ActivationWalletContext(context, _activationSessionGeneration),
+      isGeneratedThisSession: user!.isGeneratedThisSession,
+    );
+  }
+
+  bool _isWalletContextCurrent(_ActivationWalletContext context) =>
+      !_isDisposed &&
+      context.generation == _activationSessionGeneration &&
+      _auth.isSessionContextCurrent(context.session);
+
+  void _requireWalletContextCurrentSync(_ActivationWalletContext context) {
+    if (!_isWalletContextCurrent(context)) {
+      throw const AuthSessionChangedException();
+    }
+  }
+
+  Future<void> _requireWalletContextCurrent(
+    _ActivationWalletContext context,
+  ) async {
+    await _auth.captureSessionContext();
+    _requireWalletContextCurrentSync(context);
+  }
 
   /// Authoritative per-asset activation state. Absent means "not activated".
   ///
@@ -212,11 +272,14 @@ class ActivationManager {
     await _protectedOperation(() async {
       final completer = _activationCompleters.remove(assetId);
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(
-          ActivationFailedException(
-            assetId: assetId,
-            message: reason,
-            errorCode: 'ACTIVATION_ABANDONED',
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            ActivationFailedException(
+              assetId: assetId,
+              message: reason,
+              errorCode: 'ACTIVATION_ABANDONED',
+            ),
+            StackTrace.current,
           ),
         );
       }
@@ -230,12 +293,10 @@ class ActivationManager {
   /// This is what makes activations performed by other SDK subsystems - and
   /// divergence on the KDF side - visible without any consumer polling.
   void _foldAuthoritativeActiveSet(Set<AssetId> enabled) {
-    // An empty set is ambiguous: ActivatedAssetsCache returns `const []` when
-    // no user is signed in, and a wedged read looks the same. Acting on it
-    // would deactivate everything mid-blip. Sign-out is handled by
-    // [resetActivationSessionState] instead.
-    if (enabled.isEmpty) return;
-
+    // An empty [enabled] is folded like any other: the caller guarantees it
+    // is KDF's authoritative "nothing enabled" - a successful read for a
+    // signed-in user - and not the signed-out cache short-circuit (see
+    // [_readActivatedAssetIds]). A failed or wedged read throws before here.
     var changed = false;
 
     for (final assetId in enabled) {
@@ -269,6 +330,7 @@ class ActivationManager {
   /// be forgotten at a call site.
   Future<Set<AssetId>> _readActivatedAssetIds({
     bool forceRefresh = false,
+    _ActivationWalletContext? walletContext,
   }) async {
     final generation = _activationSessionGeneration;
     final ids = await _activatedAssetsCache.getActivatedAssetIds(
@@ -276,7 +338,25 @@ class ActivationManager {
     );
     // Drop a result that started before a wallet change, so it cannot
     // re-seed the previous wallet's assets after the reset cleared them.
-    if (generation != _activationSessionGeneration) return ids;
+    if (walletContext != null) {
+      await _requireWalletContextCurrent(walletContext);
+      _requireWalletContextCurrentSync(walletContext);
+    } else if (generation != _activationSessionGeneration) {
+      return ids;
+    }
+    if (ids.isEmpty && walletContext == null) {
+      // An empty set from the cache is ambiguous: it is also what a
+      // signed-out session reads (`ActivatedAssetsCache` answers `const []`
+      // without an RPC). Only a signed-in user's empty set is KDF's
+      // authoritative "nothing enabled" - the last coin disabled elsewhere,
+      // or an authenticated KDF restart that re-enabled nothing - and that
+      // one must sweep whatever this map still believes is active. Sign-out
+      // itself is handled by [resetActivationSessionState].
+      final user = await _auth.currentUser;
+      if (user == null || generation != _activationSessionGeneration) {
+        return ids;
+      }
+    }
     _foldAuthoritativeActiveSet(ids);
     return ids;
   }
@@ -290,6 +370,145 @@ class ActivationManager {
           onTimeout: () =>
               throw TimeoutException('Operation timed out', _operationTimeout),
         );
+  }
+
+  /// Checks a new activation against the host policy.
+  void ensureActivationAllowed(AssetId assetId) =>
+      _activationPolicy.ensureAllowed(assetId);
+
+  /// Retains an SDK service's specialized activation parameters for recovery.
+  /// The registration expires at the next runtime session boundary.
+  @internal
+  void registerRuntimeRecovery(
+    AssetId assetId, {
+    required AuthSessionContext session,
+    required Future<void> Function() recover,
+  }) {
+    _auth.ensureSessionContextCurrent(session);
+    if (_isDisposed) throw StateError('ActivationManager has been disposed');
+    _runtimeRecovery[assetId] = recover;
+  }
+
+  void _onPolicyChanged(ActivationPolicySnapshot snapshot) {
+    for (final state in _activationStates.values.toList()) {
+      if (!state.isActivating || !snapshot.isBlocked(state.assetId)) continue;
+      cancelActivation(
+        state.assetId.parentId ?? state.assetId,
+        reason: 'Asset activation is restricted',
+      );
+    }
+    _maintainPolicy();
+  }
+
+  void _maintainPolicy() {
+    if (_isDisposed) return;
+    unawaited(_reconcileRestrictedAssets());
+    unawaited(_resumePolicySuspendedAssets());
+    if (_activationPolicy.current.blockedAssets.isNotEmpty ||
+        _policySuspendedAssets.isNotEmpty) {
+      _policyRetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) {
+        _maintainPolicy();
+      });
+    } else {
+      _policyRetryTimer?.cancel();
+      _policyRetryTimer = null;
+    }
+  }
+
+  Future<void> _reconcileRestrictedAssets() {
+    if (_policyReconciliation != null) return _policyReconciliation!;
+    late final Future<void> pending;
+    pending = _disableRestrictedAssets().whenComplete(() {
+      if (identical(_policyReconciliation, pending)) {
+        _policyReconciliation = null;
+      }
+    });
+    return _policyReconciliation = pending;
+  }
+
+  Future<void> _resumePolicySuspendedAssets() {
+    if (_policyRecovery != null) return _policyRecovery!;
+    late final Future<void> pending;
+    pending = _restoreRuntimeAssets().whenComplete(() {
+      if (identical(_policyRecovery, pending)) _policyRecovery = null;
+    });
+    return _policyRecovery = pending;
+  }
+
+  Future<void> _restoreRuntimeAssets() async {
+    if (_isDisposed ||
+        _policySuspendedAssets.isEmpty ||
+        _activationPolicy.current.status != ActivationPolicyStatus.ready) {
+      return;
+    }
+    try {
+      final session = await _auth.captureSessionContext();
+      for (final id in _policySuspendedAssets.toList()) {
+        _auth.ensureSessionContextCurrent(session);
+        if (_isDisposed || !_activationPolicy.current.canActivate(id)) continue;
+        final asset = _assetLookup.fromId(id);
+        if (asset == null) continue;
+        // This restores runtime availability only. Wallet selection is owned
+        // separately and is never rewritten by policy suspension or recovery.
+        final specializedRecovery = _runtimeRecovery[id];
+        if (specializedRecovery != null) {
+          await specializedRecovery();
+          _auth.ensureSessionContextCurrent(session);
+          _policySuspendedAssets.remove(id);
+        } else {
+          final result = await activateAsset(asset).last;
+          _auth.ensureSessionContextCurrent(session);
+          if (result.isSuccess) _policySuspendedAssets.remove(id);
+        }
+      }
+    } on WalletChangedDisconnectException {
+      // Recovery belongs to the session that held these enabled assets.
+    } on ActivationPolicyException {
+      // The next successful policy snapshot resumes the remaining assets.
+    } on Object {
+      _logger.warning('Unable to restore policy-suspended assets; will retry');
+    }
+  }
+
+  Future<void> _disableRestrictedAssets() async {
+    if (_isDisposed || _activationPolicy.current.blockedAssets.isEmpty) return;
+    try {
+      final session = await _auth.captureSessionContext();
+      final enabled = await _activatedAssetsCache.getActivatedAssetIds(
+        forceRefresh: true,
+      );
+      _auth.ensureSessionContextCurrent(session);
+      final restricted =
+          enabled.where(_activationPolicy.current.isBlocked).toList()..sort(
+            (a, b) => (a.parentId == null ? 1 : 0).compareTo(
+              b.parentId == null ? 1 : 0,
+            ),
+          );
+      for (final id in restricted) {
+        _auth.ensureSessionContextCurrent(session);
+        if (!_activationPolicy.current.isBlocked(id)) continue;
+        try {
+          await _client.post(DisableCoinRequest(coin: id.id));
+          _auth.ensureSessionContextCurrent(session);
+          _policySuspendedAssets.add(id);
+          _activationStates.remove(id);
+          _freshlyActivated.remove(id);
+          _activatedAssetsCache.invalidate();
+          _emitActivationStates();
+        } on WalletChangedDisconnectException {
+          rethrow;
+        } on Object {
+          _logger.warning('Unable to disable a restricted asset; will retry');
+        }
+      }
+      _activatedAssetsCache.invalidate();
+      // Policy may have recovered while disable_coin was in flight.
+      _maintainPolicy();
+    } on WalletChangedDisconnectException {
+      // Reconciliation belongs to the session that started it.
+    } on Object {
+      _logger.warning('Unable to reconcile restricted runtime assets');
+    }
   }
 
   /// Activate a single asset
@@ -321,6 +540,10 @@ class ActivationManager {
   /// Clear per-session activation hints when the active wallet changes.
   void resetActivationSessionState() {
     _activationSessionGeneration++;
+    _policySuspendedAssets.clear();
+    _runtimeRecovery.clear();
+    _policyRecovery = null;
+    _policyReconciliation = null;
     _freshlyActivated.clear();
     final staleCompleters = _activationCompleters.values.toList();
     _activationCompleters.clear();
@@ -338,9 +561,12 @@ class ActivationManager {
 
     for (final completer in staleCompleters) {
       if (!completer.isCompleted) {
-        completer.completeError(
-          const WalletChangedDisconnectException(
-            'Wallet changed during asset activation',
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            const WalletChangedDisconnectException(
+              'Wallet changed during asset activation',
+            ),
+            StackTrace.current,
           ),
         );
       }
@@ -426,9 +652,12 @@ class ActivationManager {
       throw StateError('ActivationManager has been disposed');
     }
 
+    final capturedWallet = await _captureWalletContext();
+    final walletContext = capturedWallet.context;
     final groups = _AssetGroup._groupByPrimary(assets, _assetLookup);
 
     for (final group in groups) {
+      _requireWalletContextCurrentSync(walletContext);
       final activationSessionGeneration = _activationSessionGeneration;
       final pendingCancellation = _currentCancellation(group.primary.id);
       if (pendingCancellation != null) {
@@ -450,7 +679,11 @@ class ActivationManager {
       final gaslessContext = candidateGaslessContext;
 
       // Check activation status atomically
-      final activationStatus = await _checkActivationStatus(group);
+      final activationStatus = await _checkActivationStatus(
+        group,
+        walletContext: walletContext,
+      );
+      _requireWalletContextCurrentSync(walletContext);
       if (activationStatus.isComplete) {
         if (!shouldRefreshTronGaslessActivation) {
           // Already active. Publish it: this branch is otherwise invisible to
@@ -464,22 +697,29 @@ class ActivationManager {
         // as `reactivation_required` while Standard TRON remains available.
       }
 
+      for (final asset in [group.primary, ...group.children]) {
+        _activationPolicy.ensureAllowed(asset.id);
+      }
+
       // Register activation attempt.
       final registration = await _registerActivation(
         group.primary.id,
         activationSessionGeneration,
       );
+      _requireWalletContextCurrentSync(walletContext);
       final primaryCompleter = registration.completer;
       if (registration.shouldStartActivation) {
         // Before any RPC, so an observer sees the row turn over immediately.
         _setActivationStates(_groupStates(group, _activatingState));
       }
       if (!registration.shouldStartActivation) {
-        debugPrint(
-          'Activation already in progress for ${group.primary.id.name}',
-        );
+        debugPrint('Activation already in progress');
         try {
-          await primaryCompleter.future;
+          (await primaryCompleter.future).unwrap();
+          await _requireWalletContextCurrent(walletContext);
+          _requireWalletContextCurrentSync(walletContext);
+        } on WalletChangedDisconnectException {
+          rethrow;
         } catch (e, st) {
           final mappedError = _mapError(e, group.primary.id);
           yield ActivationProgress.error(
@@ -500,7 +740,9 @@ class ActivationManager {
         final joinedStatus = await _checkActivationStatus(
           group,
           forceRefresh: true,
+          walletContext: walletContext,
         );
+        _requireWalletContextCurrentSync(walletContext);
         if (joinedStatus.isComplete) {
           final verified = shouldRefreshTronGaslessActivation
               ? await _verifyGaslessCapability(
@@ -509,6 +751,7 @@ class ActivationManager {
                   gaslessContext!,
                 )
               : joinedStatus;
+          _requireWalletContextCurrentSync(walletContext);
           yield verified;
           continue;
         }
@@ -538,31 +781,18 @@ class ActivationManager {
       // ever attempted. An asset with a start and no finish is the signature of
       // the stall that cost users minutes.
       final activationStopwatch = Stopwatch()..start();
-      _logger.info(
-        'Activating ${group.primary.id.id}'
-        '${group.children.isEmpty ? '' : ' with ${group.children.length} '
-                  'token(s)'}',
-      );
+      _logger.info('Activation started token_count=${group.children.length}');
 
       try {
-        // Get the current user's auth options to retrieve privKeyPolicy
-        final currentUser = await _auth.currentUser;
-        final privKeyPolicy =
-            currentUser?.walletId.authOptions.privKeyPolicy ??
-            const PrivateKeyPolicy.contextPrivKey();
-
+        // Signing mode and the first-sign-in hint belong to the captured
+        // wallet. Reusing them avoids another serialized identity RPC.
+        _requireWalletContextCurrentSync(walletContext);
+        final privKeyPolicy = walletContext.walletId.authOptions.privKeyPolicy;
         final gaslessProvider = _gaslessProviderFor(group);
-
-        // Hardware keeps the full BIP-44 gap; a wallet this session generated
-        // has no on-chain history to find, so its first sign-in walks the
-        // minimum. Resolved here because this is the one place that already
-        // holds the current user.
-        final hdGapLimit = currentUser == null
-            ? null
-            : HdGapLimit.resolve(
-                privKeyPolicy: privKeyPolicy,
-                isNewlyGeneratedFirstSignIn: currentUser.isGeneratedThisSession,
-              );
+        final hdGapLimit = HdGapLimit.resolve(
+          privKeyPolicy: privKeyPolicy,
+          isNewlyGeneratedFirstSignIn: capturedWallet.isGeneratedThisSession,
+        );
 
         // Create activator with the user's privKeyPolicy
         final activator = ActivationStrategyFactory.createStrategy(
@@ -574,6 +804,9 @@ class ActivationManager {
           hdGapLimit: hdGapLimit,
         );
 
+        for (final asset in [group.primary, ...group.children]) {
+          _activationPolicy.ensureAllowed(asset.id);
+        }
         var completionHandled = false;
         final activationStream =
             activationStatus.isComplete &&
@@ -585,6 +818,14 @@ class ActivationManager {
             ? Stream<ActivationProgress>.value(activationStatus)
             : activator.activate(group.primary, group.children.toList());
         await for (final rawProgress in activationStream) {
+          // Progress is often purely local. The auth subscription fences these
+          // events without an identity RPC for every strategy progress update.
+          _requireWalletContextCurrentSync(walletContext);
+          for (final asset in [group.primary, ...group.children]) {
+            if (_activationPolicy.current.isBlocked(asset.id)) {
+              _activationPolicy.ensureAllowed(asset.id);
+            }
+          }
           final cancellation = _cancellationFor(group.primary.id, registration);
           if (cancellation != null) {
             final cancellationError = ActivationCancelledException(
@@ -592,8 +833,29 @@ class ActivationManager {
               message: cancellation.reason,
             );
             if (!primaryCompleter.isCompleted) {
-              primaryCompleter.completeError(cancellationError);
+              primaryCompleter.complete(
+                _ActivationJoinOutcome.error(
+                  cancellationError,
+                  StackTrace.current,
+                ),
+              );
             }
+            // Cancellation is a terminal path of its own, so it has to write
+            // the state map like the error path below does. Leaving the group
+            // on `activating` hands it to `_failGroupIfStillActivating` in the
+            // `finally`, which overwrites the caller's reason with the generic
+            // 'Activation ended without a terminal result' - so the progress
+            // event and the published state would disagree about why this
+            // asset stopped.
+            _setActivationStates(
+              _groupStates(
+                group,
+                (id) => AssetActivationState.failed(
+                  id,
+                  errorMessage: cancellation.reason,
+                ),
+              ),
+            );
             yield ActivationProgress.error(
               message: cancellation.reason,
               errorCode: 'ACTIVATION_CANCELLED',
@@ -612,12 +874,10 @@ class ActivationManager {
             );
           }
 
+          _requireWalletContextCurrentSync(walletContext);
           if (progress.isComplete) {
             if (completionHandled) {
-              debugPrint(
-                'Ignoring duplicate completion event for '
-                '${group.primary.id.name}',
-              );
+              debugPrint('Ignoring duplicate activation completion event');
             } else {
               completionHandled = true;
               // Finalize before exposing the terminal event. The shared
@@ -630,10 +890,12 @@ class ActivationManager {
                 progress,
                 primaryCompleter,
                 gaslessContext: gaslessContext,
+                walletContext: walletContext,
               );
             }
           }
 
+          _requireWalletContextCurrentSync(walletContext);
           yield progress;
         }
 
@@ -648,7 +910,9 @@ class ActivationManager {
           final status = await _checkActivationStatus(
             group,
             forceRefresh: true,
+            walletContext: walletContext,
           );
+          _requireWalletContextCurrentSync(walletContext);
           completionHandled = true;
           if (status.isComplete) {
             final verified = shouldRefreshTronGaslessActivation
@@ -659,7 +923,9 @@ class ActivationManager {
               verified,
               primaryCompleter,
               gaslessContext: gaslessContext,
+              walletContext: walletContext,
             );
+            _requireWalletContextCurrentSync(walletContext);
             yield verified;
           } else {
             final mappedError = _mapError(
@@ -669,7 +935,9 @@ class ActivationManager {
               group.primary.id,
             );
             if (!primaryCompleter.isCompleted) {
-              primaryCompleter.completeError(mappedError);
+              primaryCompleter.complete(
+                _ActivationJoinOutcome.error(mappedError, StackTrace.current),
+              );
             }
             yield ActivationProgress.error(
               message: mappedError.fallbackMessage,
@@ -677,23 +945,32 @@ class ActivationManager {
             );
           }
         }
+      } on WalletChangedDisconnectException {
+        rethrow;
+      } on ActivationPolicyException {
+        rethrow;
       } catch (e, st) {
+        await _requireWalletContextCurrent(walletContext);
+        _requireWalletContextCurrentSync(walletContext);
         final recoveredProgress = shouldRefreshTronGaslessActivation
             ? null
-            : await _tryRecoverAlreadyActivated(group, e);
+            : await _tryRecoverAlreadyActivated(group, e, walletContext);
+        _requireWalletContextCurrentSync(walletContext);
         if (recoveredProgress != null) {
           if (!primaryCompleter.isCompleted) {
-            primaryCompleter.complete();
+            primaryCompleter.complete(const _ActivationJoinOutcome.success());
           }
           _setActivationStates(_groupStates(group, _activeState));
           yield recoveredProgress;
           continue;
         }
 
-        debugPrint('Activation failed: $e');
+        debugPrint('Activation failed');
         final mappedError = _mapError(e, group.primary.id);
         if (!primaryCompleter.isCompleted) {
-          primaryCompleter.completeError(mappedError);
+          primaryCompleter.complete(
+            _ActivationJoinOutcome.error(mappedError, StackTrace.current),
+          );
         }
         _setActivationStates(
           _groupStates(
@@ -711,13 +988,19 @@ class ActivationManager {
           stackTrace: st,
         );
       } finally {
+        if (_activationPolicy.current.isBlocked(group.primary.id) ||
+            group.children.any(
+              (asset) => _activationPolicy.current.isBlocked(asset.id),
+            )) {
+          unawaited(_reconcileRestrictedAssets());
+        }
         activationStopwatch.stop();
         // The outcome is read back from the state map rather than tracked in a
         // local, so this reports what consumers will actually observe -
         // including the `_failGroupIfStillActivating` correction below and any
         // GasFree downgrade applied on the way through.
         _logger.info(
-          'Activated ${group.primary.id.id} in '
+          'Activation completed in '
           '${activationStopwatch.elapsedMilliseconds}ms '
           '(${_activationStates[group.primary.id]?.status.name ?? 'unknown'})',
         );
@@ -726,14 +1009,16 @@ class ActivationManager {
         // generator mid-activation - the `AssetManager.activateAsset` path
         // can do that - which is the only other way an asset could sit on
         // `activating` for the rest of the session.
-        _failGroupIfStillActivating(
-          group,
-          'Activation ended without a terminal result',
-        );
+        if (_isWalletContextCurrent(walletContext)) {
+          _failGroupIfStillActivating(
+            group,
+            'Activation ended without a terminal result',
+          );
+        }
         try {
           await _cleanupActivation(group.primary.id, registration);
         } catch (e) {
-          debugPrint('Failed to cleanup activation: $e');
+          debugPrint('Activation cleanup failed');
         }
       }
     }
@@ -791,13 +1076,16 @@ class ActivationManager {
   /// Check if asset and its children are already activated.
   Future<ActivationProgress> _checkActivationStatus(
     _AssetGroup group, {
+    required _ActivationWalletContext walletContext,
     bool forceRefresh = false,
   }) async {
     try {
       // Use cache instead of direct RPC call to avoid excessive requests
       final enabledAssetIds = await _readActivatedAssetIds(
         forceRefresh: forceRefresh,
+        walletContext: walletContext,
       );
+      _requireWalletContextCurrentSync(walletContext);
 
       final isActive = enabledAssetIds.contains(group.primary.id);
       final childrenActive = group.children.every(
@@ -810,8 +1098,10 @@ class ActivationManager {
           childCount: group.children.length,
         );
       }
+    } on WalletChangedDisconnectException {
+      rethrow;
     } catch (e) {
-      debugPrint('Failed to check activation status: $e');
+      debugPrint('Activation status check failed');
     }
 
     return const ActivationProgress(
@@ -867,11 +1157,10 @@ class ActivationManager {
         );
       }
 
-      final completer = Completer<void>();
-      // A sole activation attempt has no joiner awaiting this future. Attach a
-      // side listener so completing it with an error does not become an
-      // unhandled zone error; concurrent joiners still receive the same error.
-      unawaited(completer.future.catchError((Object _) {}));
+      // Never completed with an error - see [_ActivationJoinOutcome] - so a
+      // sole activation attempt with no joiner awaiting this future cannot
+      // produce an unhandled zone error when it is failed.
+      final completer = Completer<_ActivationJoinOutcome>();
       _activationCompleters[assetId] = completer;
       return _ActivationRegistration(
         completer: completer,
@@ -884,6 +1173,7 @@ class ActivationManager {
   Future<ActivationProgress?> _tryRecoverAlreadyActivated(
     _AssetGroup group,
     Object error,
+    _ActivationWalletContext walletContext,
   ) async {
     if (!_isAlreadyActivatedError(error)) {
       return null;
@@ -893,6 +1183,7 @@ class ActivationManager {
     final refreshedStatus = await _checkActivationStatus(
       group,
       forceRefresh: true,
+      walletContext: walletContext,
     );
     return refreshedStatus.isComplete ? refreshedStatus : null;
   }
@@ -904,119 +1195,107 @@ class ActivationManager {
         message.contains('activated already');
   }
 
-  /// Handle completion of activation
+  Future<void> _requireCompletionContext(
+    _ActivationWalletContext walletContext,
+    _GaslessActivationContext? gaslessContext,
+  ) async {
+    if (gaslessContext != null) {
+      await _requireGaslessContextCurrent(gaslessContext);
+    } else {
+      await _requireWalletContextCurrent(walletContext);
+    }
+    _requireWalletContextCurrentSync(walletContext);
+  }
+
+  /// Handle completion using the identity captured before activation began.
   Future<void> _handleActivationComplete(
     _AssetGroup group,
     ActivationProgress progress,
-    Completer<void> completer, {
+    Completer<_ActivationJoinOutcome> completer, {
+    required _ActivationWalletContext walletContext,
     _GaslessActivationContext? gaslessContext,
   }) async {
+    await _requireCompletionContext(walletContext, gaslessContext);
+    _requireWalletContextCurrentSync(walletContext);
     if (progress.isSuccess) {
-      // Published first, before any await. The work below is guarded by
-      // `user != null` and can throw part-way through
-      // `_requireGaslessContextCurrent`; a state write buried in there would
-      // be skipped for an activation that genuinely succeeded. A throw there
-      // means the wallet changed, and the reset clears the map anyway.
       _setActivationStates(_groupStates(group, _activeState));
-
-      // Recorded here rather than inferred from an `ActivationResult`, because
-      // by the time the pubkey layer asks, the coordinator reports "already
-      // active" - see [_freshlyActivated].
       _freshlyActivated
         ..add(group.primary.id)
         ..addAll(group.children.map((child) => child.id));
 
-      if (gaslessContext != null) {
-        await _requireGaslessContextCurrent(gaslessContext);
+      if (group.primary.protocol.isCustomToken) {
+        await _assetsUpdateManager.assets.storeCustomToken(group.primary);
+      } else {
+        await _assetHistory.addAssetToWallet(
+          walletContext.walletId,
+          group.primary.id.id,
+        );
       }
-      final user = await _auth.currentUser;
-      if (gaslessContext != null) {
-        await _requireGaslessContextCurrent(gaslessContext);
-      }
-      if (user != null) {
-        // Store custom tokens using CoinConfigManager
-        if (group.primary.protocol.isCustomToken) {
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
-          await _assetsUpdateManager.assets.storeCustomToken(group.primary);
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
-        } else {
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
-          await _assetHistory.addAssetToWallet(
-            user.walletId,
-            group.primary.id.id,
-          );
-          if (gaslessContext != null) {
-            await _requireGaslessContextCurrent(gaslessContext);
-          }
+      await _requireCompletionContext(walletContext, gaslessContext);
+      _requireWalletContextCurrentSync(walletContext);
+
+      for (final asset in [group.primary, ...group.children]) {
+        if (asset.protocol.isCustomToken) {
+          await _assetsUpdateManager.assets.storeCustomToken(asset);
+          await _requireCompletionContext(walletContext, gaslessContext);
+          _requireWalletContextCurrentSync(walletContext);
         }
 
-        final allAssets = [group.primary, ...group.children];
-
-        for (final asset in allAssets) {
-          if (asset.protocol.isCustomToken) {
-            if (gaslessContext != null) {
-              await _requireGaslessContextCurrent(gaslessContext);
-            }
-            await _assetsUpdateManager.assets.storeCustomToken(asset);
-            if (gaslessContext != null) {
-              await _requireGaslessContextCurrent(gaslessContext);
-            }
-          }
-
-          // Pre-cache the balance, but do NOT await it here.
-          //
-          // Two reasons, and the first is a hard deadlock:
-          //
-          // 1. `precacheBalance` awaits `PubkeyManager.getPubkeys(asset)`. On
-          //    the fresh-fetch path - no in-memory cache, no in-flight request,
-          //    no persisted pubkeys, i.e. the first ever activation of this
-          //    asset for this wallet on this device - that re-enters
-          //    `SharedActivationCoordinator.activateAsset(asset)`. The
-          //    coordinator finds its own still-pending completer in
-          //    `_pendingActivations` and joins it. But that completer is only
-          //    completed after this method returns, so the activation waits on
-          //    itself. Nothing on the chain has a timeout, so the asset stays
-          //    `activating` forever and every caller blocked on it - the login
-          //    fan-out's `Future.wait`, the balance watcher's
-          //    `_ensureAssetActivated` - hangs with it.
-          //
-          // 2. Even without the cycle it is a `get_new_address`/pubkey round
-          //    trip per asset sitting between KDF reporting success and the
-          //    terminal `ActivationProgress` the UI is waiting on. It is a
-          //    cache warm-up; nothing about the activation's correctness
-          //    depends on it, and the balance watcher fetches the balance on
-          //    its own anyway.
-          //
-          // The genuinely load-bearing side effects above (asset history,
-          // custom-token storage, cache invalidation, completing the join
-          // future) stay inline and still gate the terminal event.
-          unawaited(
-            _balanceManager.precacheBalance(asset).catchError((Object e) {
-              debugPrint(
-                'Background balance pre-cache failed for ${asset.id.id}: $e',
-              );
-            }),
-          );
-        }
-
-        if (gaslessContext != null) {
-          await _requireGaslessContextCurrent(gaslessContext);
-        }
-        _activatedAssetsCache.invalidate();
+        // Pre-cache the balance, but do NOT await it here.
+        //
+        // Two reasons, and the first is a hard deadlock:
+        //
+        // 1. `precacheBalance` awaits `PubkeyManager.getPubkeys(asset)`. On
+        //    the fresh-fetch path - no in-memory cache, no in-flight request,
+        //    no persisted pubkeys, i.e. the first ever activation of this
+        //    asset for this wallet on this device - that re-enters
+        //    `SharedActivationCoordinator.activateAsset(asset)`. The
+        //    coordinator finds its own still-pending completer in
+        //    `_pendingActivations` and joins it. But that completer is only
+        //    completed after this method returns, so the activation waits on
+        //    itself. Nothing on the chain has a timeout, so the asset stays
+        //    `activating` forever and every caller blocked on it - the login
+        //    fan-out's `Future.wait`, the balance watcher's
+        //    `_ensureAssetActivated` - hangs with it.
+        //
+        // 2. Even without the cycle it is a `get_new_address`/pubkey round
+        //    trip per asset sitting between KDF reporting success and the
+        //    terminal `ActivationProgress` the UI is waiting on. It is a
+        //    cache warm-up; nothing about the activation's correctness
+        //    depends on it, and the balance watcher fetches the balance on
+        //    its own anyway.
+        //
+        // The genuinely load-bearing side effects above (asset history,
+        // custom-token storage, cache invalidation, completing the join
+        // future) stay inline and still gate the terminal event.
+        unawaited(
+          _balanceManager.precacheBalance(asset).catchError((Object e) {
+            debugPrint('Background balance pre-cache failed');
+          }),
+        );
       }
-
+      _activatedAssetsCache.invalidate();
       if (!completer.isCompleted) {
-        completer.complete();
+        completer.complete(const _ActivationJoinOutcome.success());
       }
     } else {
+      _setActivationStates(
+        _groupStates(
+          group,
+          (id) => AssetActivationState.failed(
+            id,
+            errorMessage: progress.errorMessage ?? 'Unknown error',
+            sdkError: progress.sdkError,
+          ),
+        ),
+      );
       if (!completer.isCompleted) {
-        completer.completeError(progress.errorMessage ?? 'Unknown error');
+        completer.complete(
+          _ActivationJoinOutcome.error(
+            progress.errorMessage ?? 'Unknown error',
+            StackTrace.current,
+          ),
+        );
       }
     }
   }
@@ -1244,7 +1523,7 @@ class ActivationManager {
     try {
       return await _readActivatedAssetIds();
     } catch (e) {
-      debugPrint('Failed to get active assets: $e');
+      debugPrint('Active assets lookup failed');
       return {};
     }
   }
@@ -1264,7 +1543,7 @@ class ActivationManager {
           : await getActiveAssets();
       return activeAssets.contains(assetId);
     } catch (e) {
-      debugPrint('Failed to check if asset is active: $e');
+      debugPrint('Asset activation check failed');
       return false;
     }
   }
@@ -1273,16 +1552,23 @@ class ActivationManager {
   Future<void> dispose() async {
     if (_isDisposed) return;
 
+    _isDisposed = true;
+    await _authSubscription.cancel();
+    await _policySubscription.cancel();
+    _policyRetryTimer?.cancel();
     await _protectedOperation(() async {
-      _isDisposed = true;
-
       // Complete any pending completers with errors
-      final completers = List<Completer<void>>.from(
+      final completers = List<Completer<_ActivationJoinOutcome>>.from(
         _activationCompleters.values,
       );
       for (final completer in completers) {
         if (!completer.isCompleted) {
-          completer.completeError('ActivationManager disposed');
+          completer.complete(
+            _ActivationJoinOutcome.error(
+              'ActivationManager disposed',
+              StackTrace.current,
+            ),
+          );
         }
       }
 
@@ -1355,7 +1641,7 @@ class _ActivationRegistration {
     required this.shouldStartActivation,
   });
 
-  final Completer<void> completer;
+  final Completer<_ActivationJoinOutcome> completer;
   final int sessionGeneration;
   final bool shouldStartActivation;
 }
@@ -1367,7 +1653,54 @@ class _ActivationCancellation {
     required this.reason,
   });
 
-  final Completer<void> completer;
+  final Completer<_ActivationJoinOutcome> completer;
   final int sessionGeneration;
   final String reason;
+}
+
+/// Manager resets revoke requests even when the authenticated wallet
+/// stays open.
+final class _ActivationWalletContext {
+  const _ActivationWalletContext(this.session, this.generation);
+  final AuthSessionContext session;
+  final int generation;
+  WalletId get walletId => session.walletId;
+}
+
+/// The settled state of one shared activation attempt, carried as a *value* so
+/// it can cross an error zone. See [ActivationManager._activationCompleters].
+///
+/// A single completer is shared by every caller that joins an attempt for the
+/// same primary asset, and those callers do not all sit in the same error zone:
+/// `retry()` runs each of its attempts inside its own `runZonedGuarded`, and
+/// work dispatched un-awaited from an attempt keeps running in that zone
+/// afterwards.
+///
+/// Dart refuses to deliver a future's *error* across an error-zone boundary:
+/// rather than completing the cross-zone listener, `_propagateToListeners`
+/// reports the error as uncaught in the zone that created the future and
+/// abandons that listener's future forever. A joiner from another zone then
+/// never resumes, so its `async*` generator yields nothing further and the
+/// coordinator waiting on it only recovers when its own deadline fires. The
+/// outcome travels as a value instead, and each caller rethrows it in its own
+/// zone - the same remedy applied to the coordinator's own
+/// `_pendingActivations` and to `PubkeyManager`'s shared pubkey fetch.
+class _ActivationJoinOutcome {
+  const _ActivationJoinOutcome._(this._error, this._stackTrace);
+
+  /// The attempt reached a successful terminal state.
+  const _ActivationJoinOutcome.success() : this._(null, null);
+
+  /// The attempt failed, or was abandoned or cancelled.
+  const _ActivationJoinOutcome.error(Object error, StackTrace stackTrace)
+    : this._(error, stackTrace);
+
+  final Object? _error;
+  final StackTrace? _stackTrace;
+
+  /// Rethrows the original failure, if any, in the caller's zone.
+  void unwrap() {
+    final error = _error;
+    if (error != null) Error.throwWithStackTrace(error, _stackTrace!);
+  }
 }

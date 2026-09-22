@@ -76,6 +76,23 @@ void main() {
       expect(index.length, 1);
     });
 
+    test('collapses re-keyed duplicates to the newest and reports the rest', () {
+      // A crash between a re-key's replacement write and its stale delete
+      // leaves the same internal ID under two timestamps. Indexing both
+      // would double-count the transaction and leave the ID lookup on the
+      // stale row.
+      final stale = keyFor('tx-a', timestamp: DateTime.utc(1970));
+      final fresh = keyFor('tx-a', timestamp: DateTime.utc(2026, 7, 10));
+      final index = TransactionOrderIndex();
+      final dropped = index.rebuildFromKeys([stale, fresh, keyFor('tx-b')]);
+
+      expect(dropped, [stale]);
+      expect(index.count(prefix), 2);
+      expect(index.keyForPrefixedId(prefix, 'tx-a'), fresh);
+      expect(index.keyForId('tx-a'), fresh);
+      expect(idsOf(index.page(prefix, limit: 5)), ['tx-b', 'tx-a']);
+    });
+
     test('discards previous state', () {
       final index = TransactionOrderIndex()
         ..rebuildFromKeys([keyFor('first')])
@@ -240,6 +257,28 @@ void main() {
       expect(index.keyForId('kmd-tx'), isNotNull);
       expect(index.keyForPrefixedId(prefix, 'kmd-tx'), isNull);
       expect(index.keyForId('nope'), isNull);
+    });
+
+    test('overlong ids are found by their original id', () {
+      // Over maxIdTokenBytes the key stores a digest of the id, not the id
+      // itself. Lookups and cursors must normalise the same way, or a row
+      // written under a hashed token can never be addressed again.
+      final longId = 'tx-${'a' * TransactionStorageKey.maxIdTokenBytes}';
+      final index = TransactionOrderIndex()
+        ..rebuildFromKeys([
+          keyFor(longId, timestamp: DateTime.utc(2026, 7, 10)),
+          keyFor('short', timestamp: DateTime.utc(2026, 7, 20)),
+        ]);
+
+      final hashedKey = index.keyForId(longId);
+      expect(hashedKey, isNotNull);
+      expect(TransactionStorageKey.parse(hashedKey!)!.idTokenIsHashed, isTrue);
+      expect(index.keyForPrefixedId(prefix, longId), hashedKey);
+
+      // A cursor naming the newer row pages onto the overlong row, and an
+      // overlong cursor resolves to its position instead of throwing.
+      expect(index.page(prefix, limit: 5, fromId: 'short'), [hashedKey]);
+      expect(index.page(prefix, limit: 5, fromId: longId), isEmpty);
     });
 
     test('removing one of two same-id rows falls back to the other', () {

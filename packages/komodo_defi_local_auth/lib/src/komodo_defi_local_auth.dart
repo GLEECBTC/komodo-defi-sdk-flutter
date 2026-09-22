@@ -1,12 +1,29 @@
 import 'dart:async';
+import 'dart:developer' show log;
 
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
+import 'package:komodo_defi_local_auth/src/auth/auth_session.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_state.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
 import 'package:komodo_defi_local_auth/src/trezor/_trezor_index.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+/// A single deletion authorized by the SDK's installed lifecycle coordinator.
+/// Its final target check runs inside the catalog transaction, before the RPC.
+final class WalletDeletionPermit {
+  WalletDeletionPermit._(this._issuer, this._validate);
+  final Object _issuer;
+  final Future<void> Function(KdfUser target) _validate;
+  bool _used = false;
+}
+
+final class WalletDeletionReviewRequiredException implements Exception {
+  const WalletDeletionReviewRequiredException();
+  @override
+  String toString() => 'Review wallet deletion before confirming it';
+}
 
 /// The [KomodoDefiAuth] class provides a simplified local authentication
 /// service for managing user sign-in, registration, and mnemonic handling
@@ -19,6 +36,37 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 ///
 /// NB: Pubkey address
 abstract interface class KomodoDefiAuth {
+  /// Captures ownership of the current runtime session without requiring a
+  /// fresh public-key hash. Use it for asynchronous work, not as secret-access
+  /// authorization. Metadata refresh and identity enrichment preserve it.
+  Future<AuthSessionContext> captureSessionContext();
+  bool isSessionContextCurrent(AuthSessionContext context);
+  void ensureSessionContextCurrent(AuthSessionContext context);
+  Stream<AuthSessionContext?> watchSessionContext();
+
+  /// Merges metadata atomically after fresh identity verification. Null values
+  /// remove keys. Throws [AuthIdentityUnavailableException] for retryable proof
+  /// loss and [AuthSessionChangedException] when the original session ended.
+  Future<KdfUser> updateMetadataForSession(
+    AuthSessionContext context,
+    Map<String, dynamic> updates,
+  );
+
+  /// Synchronous revision of the underlying authentication session.
+  ///
+  /// Capture before asynchronous sensitive work and compare before using its
+  /// result. Session transitions invalidate it even when the wallet is the
+  /// same.
+  /// The revision is instance-local and is not a persisted wallet identifier.
+  int get authGeneration;
+
+  /// Synchronous invalidations for immediately clearing sensitive UI state.
+  Stream<int> get authGenerationChanges;
+
+  /// Sensitive work cannot start while an authentication transition is pending
+  /// or after this service is disposed.
+  bool get isAuthTransitionInProgress;
+
   /// Ensures that the local authentication system has been initialized.
   ///
   /// This method must be called before interacting with authentication features.
@@ -54,7 +102,8 @@ abstract interface class KomodoDefiAuth {
     ),
   });
 
-  /// Registers a new user with the specified [walletName] and [password].
+  /// Creates a new wallet and saves [initialMetadata] before publishing it.
+  /// Existing names always fail with [AuthExceptionType.walletAlreadyExists].
   ///
   /// By default, the system will launch in HD mode (enabled in the [AuthOptions]),
   /// which may differ from the non-HD mode used in other areas of the KDF API.
@@ -70,9 +119,11 @@ abstract interface class KomodoDefiAuth {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   });
 
-  /// Registers a new user with the specified [walletName] and [password].
+  /// Creates a new wallet and saves [initialMetadata] before publishing it.
+  /// Existing names always fail with [AuthExceptionType.walletAlreadyExists].
   ///
   /// Returns a stream of [AuthenticationState] that provides real-time updates
   /// of the registration process. For Trezor wallets, this includes device
@@ -84,6 +135,7 @@ abstract interface class KomodoDefiAuth {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   });
 
   /// A stream that emits authentication state changes for the current user.
@@ -151,6 +203,7 @@ abstract interface class KomodoDefiAuth {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    WalletDeletionPermit? permit,
   });
 
   /// Sets the value of a single key in the active user's metadata.
@@ -170,6 +223,9 @@ abstract interface class KomodoDefiAuth {
   ///
   /// Example:
   /// final _komodoDefiSdk = KomodoDefiSdk.global;
+  /// final user = await _komodoDefiSdk.auth.currentUser;
+  /// if (user == null) return;
+  /// final expectedWalletId = user.walletId;
   ///
   ///   await _komodoDefiSdk.auth.setOrRemoveActiveUserKeyValue(
   ///   'custom_tokens',
@@ -183,6 +239,7 @@ abstract interface class KomodoDefiAuth {
   ///       }
   ///     ],
   ///   }.toJsonString(),
+  ///   expectedWalletId: expectedWalletId,
   /// );
   /// final tokenJson = (await _komodoDefiSdk.auth.currentUser)
   ///     ?.metadata
@@ -190,16 +247,29 @@ abstract interface class KomodoDefiAuth {
   ///
   /// print('Custom tokens: $tokenJson');
 
-  Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value);
+  /// [expectedWalletId] must be the verified identity captured when the
+  /// operation began, before any asynchronous work whose result is being saved.
+  /// A missing public-key hash in either identity, or a mismatch with the
+  /// freshly resolved active wallet, throws [WalletChangedDisconnectException]
+  /// before metadata is changed. Do not retry against a replacement wallet.
+  Future<void> setOrRemoveActiveUserKeyValue(
+    String key,
+    dynamic value, {
+    required WalletId expectedWalletId,
+  });
 
   /// Atomically reads the current value of [key] from the active user's
   /// metadata, applies [transform], and writes the result back.
   ///
   /// Safe to call concurrently — uses a dedicated metadata mutex internally.
+  /// [expectedWalletId] follows the same identity requirements as
+  /// [setOrRemoveActiveUserKeyValue]. Identity is checked before [transform]
+  /// runs, while the authentication write lock is held.
   Future<void> updateActiveUserKeyValue(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  );
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  });
 
   /// Provides PIN to a Trezor hardware device during authentication.
   ///
@@ -256,10 +326,27 @@ abstract interface class KomodoDefiAuth {
   /// keyed by [WalletId], and the identity cannot be recovered after the fact,
   /// so it is resolved before the deletion and published here.
   ///
-  /// Broadcast, and emitted only after the deletion succeeds. Listeners should
-  /// treat purging as best-effort: a failure to clear a derived cache must not
-  /// make the wallet look undeleted.
+  /// Broadcast, and emitted only after the deletion succeeds - including its
+  /// registered [onWalletDeletion] hooks. A stream listener runs *after*
+  /// [deleteWallet] has already returned, so anything that must be purged
+  /// before the caller can act on the deletion belongs in a hook, not here.
   Stream<WalletId> get walletDeletions;
+
+  /// Registers [hook] to run - and be awaited - inside [deleteWallet], after
+  /// KDF and secure storage no longer know the wallet but before the call
+  /// returns.
+  ///
+  /// This is what makes deletion safe to chain: a caller that deletes and
+  /// immediately recreates the same wallet must not have a still-running
+  /// purge sweep away the new wallet's freshly persisted pubkeys, activation
+  /// config, or history. A [walletDeletions] listener cannot give that
+  /// guarantee - it is not awaited - so purge owners register here and the
+  /// stream stays for passive observers.
+  ///
+  /// Hook failures are contained and logged by the caller of the hook:
+  /// purging is best-effort, and a cache that will not clear must not make
+  /// the wallet look undeleted.
+  void onWalletDeletion(Future<void> Function(WalletId walletId) hook);
 
   /// Disposes of any resources held by the authentication service.
   ///
@@ -280,10 +367,82 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
 
   final SecureLocalStorage _secureStorage = SecureLocalStorage();
   final _walletDeletions = StreamController<WalletId>.broadcast();
+  final _walletDeletionHooks = <Future<void> Function(WalletId)>[];
+  Object? _walletDeletionAuthority;
+
+  /// Installs the sole coordinator allowed to authorize SDK wallet deletion.
+  void requireWalletDeletionReview(Object authority) {
+    if (_walletDeletionAuthority != null &&
+        !identical(authority, _walletDeletionAuthority)) {
+      throw StateError('A wallet deletion coordinator is already installed');
+    }
+    _walletDeletionAuthority = authority;
+  }
+
+  WalletDeletionPermit authorizeWalletDeletion(
+    Object authority,
+    Future<void> Function(KdfUser target) validate,
+  ) {
+    if (!identical(authority, _walletDeletionAuthority)) {
+      throw const WalletDeletionReviewRequiredException();
+    }
+    return WalletDeletionPermit._(authority, validate);
+  }
+
   final bool _allowRegistrations;
   late final IAuthService _authService;
   late final TrezorAuthService _trezorAuthService;
   bool _initialized = false;
+
+  @override
+  Future<AuthSessionContext> captureSessionContext() =>
+      _authService.captureSessionContext();
+
+  @override
+  bool isSessionContextCurrent(AuthSessionContext context) =>
+      _authService.isSessionContextCurrent(context);
+
+  @override
+  void ensureSessionContextCurrent(AuthSessionContext context) =>
+      _authService.ensureSessionContextCurrent(context);
+
+  @override
+  Stream<AuthSessionContext?> watchSessionContext() =>
+      _authService.watchSessionContext();
+
+  @override
+  Future<KdfUser> updateMetadataForSession(
+    AuthSessionContext context,
+    Map<String, dynamic> updates,
+  ) => _authService.updateMetadataForSession(context, updates);
+
+  @override
+  int get authGeneration => _authService.authGeneration;
+
+  @override
+  Stream<int> get authGenerationChanges => _authService.authGenerationChanges;
+
+  @override
+  bool get isAuthTransitionInProgress =>
+      _authService.isAuthTransitionInProgress;
+
+  Future<T> _runAuthTransition<T>(Future<T> Function() operation) async {
+    _authService.beginAuthTransition();
+    try {
+      return await operation();
+    } finally {
+      _authService.endAuthTransition();
+    }
+  }
+
+  Stream<T> _runAuthTransitionStream<T>(Stream<T> Function() operation) async* {
+    _authService.beginAuthTransition();
+    try {
+      yield* operation();
+    } finally {
+      _authService.endAuthTransition();
+    }
+  }
 
   @override
   Future<void> ensureInitialized() async {
@@ -295,6 +454,16 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   // Save AuthOptions when registering or signing in
   @override
   Future<KdfUser> signIn({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+  }) => _runAuthTransition(
+    () => _signIn(walletName: walletName, password: password, options: options),
+  );
+
+  Future<KdfUser> _signIn({
     required String walletName,
     required String password,
     AuthOptions options = const AuthOptions(
@@ -313,13 +482,12 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       );
     }
 
-    final user = await _findUser(walletName);
-    final updatedUser = user.copyWith(
-      walletId: user.walletId.copyWith(authOptions: options),
-    );
-
-    // Save AuthOptions to secure storage by wallet name
-    await _secureStorage.saveUser(updatedUser);
+    await _secureStorage.updateUser(walletName, (user) {
+      if (user == null) throw AuthException.notFound();
+      return user.copyWith(
+        walletId: user.walletId.copyWith(authOptions: options),
+      );
+    });
 
     return _authService.signIn(
       walletName: walletName,
@@ -330,6 +498,20 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
 
   @override
   Stream<AuthenticationState> signInStream({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+  }) => _runAuthTransitionStream(
+    () => _signInStream(
+      walletName: walletName,
+      password: password,
+      options: options,
+    ),
+  );
+
+  Stream<AuthenticationState> _signInStream({
     required String walletName,
     required String password,
     AuthOptions options = const AuthOptions(
@@ -351,33 +533,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     }
   }
 
-  Future<KdfUser> _findUser(String walletName) async {
-    final matchedUsers = (await _authService.getUsers()).where(
-      (user) => user.walletId.name == walletName,
-    );
-
-    if (matchedUsers.isEmpty) {
-      throw AuthException(
-        'No user found with the specified wallet name.',
-        type: AuthExceptionType.walletNotFound,
-      );
-    }
-
-    if (matchedUsers.length > 1) {
-      throw AuthException(
-        'Multiple users found with the specified wallet name.',
-        type: AuthExceptionType.internalError,
-      );
-    }
-
-    return matchedUsers.first;
-  }
-
-  static Future<AuthOptions?> storedAuthOptions(String walletName) async {
-    return SecureLocalStorage()
-        .getUser(walletName)
-        .then((user) => user?.authOptions);
-  }
+  static Future<AuthOptions?> storedAuthOptions(String walletName) async =>
+      (await SecureLocalStorage().getUser(walletName))?.walletId.authOptions;
 
   @override
   Future<KdfUser> register({
@@ -387,6 +544,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
+  }) => _runAuthTransition(
+    () => _register(
+      walletName: walletName,
+      password: password,
+      options: options,
+      mnemonic: mnemonic,
+      initialMetadata: initialMetadata,
+    ),
+  );
+
+  Future<KdfUser> _register({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+    Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) async {
     await ensureInitialized();
     await _assertAuthState(false);
@@ -412,9 +588,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       password: password,
       options: options,
       mnemonic: mnemonic,
+      initialMetadata: initialMetadata,
     );
-
-    await _secureStorage.saveUser(user);
 
     return user;
   }
@@ -427,6 +602,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       derivationMethod: DerivationMethod.hdWallet,
     ),
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
+  }) => _runAuthTransitionStream(
+    () => _registerStream(
+      walletName: walletName,
+      password: password,
+      options: options,
+      mnemonic: mnemonic,
+      initialMetadata: initialMetadata,
+    ),
+  );
+
+  Stream<AuthenticationState> _registerStream({
+    required String walletName,
+    required String password,
+    AuthOptions options = const AuthOptions(
+      derivationMethod: DerivationMethod.hdWallet,
+    ),
+    Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) async* {
     await ensureInitialized();
     await _assertAuthState(false);
@@ -441,6 +635,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       yield* _trezorAuthService.registerStream(
         options: options,
         mnemonic: mnemonic,
+        initialMetadata: initialMetadata,
       );
     } else {
       yield* _handleRegularRegister(
@@ -448,6 +643,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         password: password,
         options: options,
         mnemonic: mnemonic,
+        initialMetadata: initialMetadata,
       );
     }
   }
@@ -477,6 +673,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     required String password,
     required AuthOptions options,
     Mnemonic? mnemonic,
+    Map<String, dynamic> initialMetadata = const {},
   }) async* {
     try {
       yield const AuthenticationState(
@@ -487,6 +684,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         password: password,
         options: options,
         mnemonic: mnemonic,
+        initialMetadata: initialMetadata,
       );
       yield AuthenticationState.completed(user);
     } catch (e) {
@@ -525,7 +723,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
-  Future<void> signOut() async {
+  Future<void> signOut() => _runAuthTransition(_signOut);
+
+  Future<void> _signOut() async {
     await ensureInitialized();
     await _assertAuthState(true);
 
@@ -559,9 +759,9 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       );
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while retrieving the mnemonic: $e',
+        'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,
       );
     }
@@ -573,15 +773,15 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     await _assertAuthState(true);
 
     try {
-      return _authService.getMnemonic(
+      return await _authService.getMnemonic(
         encrypted: false,
         walletPassword: walletPassword,
       );
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while retrieving the mnemonic: $e',
+        'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,
       );
     }
@@ -614,25 +814,62 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   Stream<WalletId> get walletDeletions => _walletDeletions.stream;
 
   @override
+  void onWalletDeletion(Future<void> Function(WalletId walletId) hook) {
+    _walletDeletionHooks.add(hook);
+  }
+
+  @override
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    WalletDeletionPermit? permit,
   }) async {
+    if (_walletDeletionAuthority != null &&
+        (permit == null ||
+            permit._used ||
+            !identical(permit._issuer, _walletDeletionAuthority))) {
+      throw const WalletDeletionReviewRequiredException();
+    }
+    if (permit != null) permit._used = true;
     await ensureInitialized();
-    // Resolve the identity first: wallet-scoped caches are keyed by WalletId,
-    // and once the wallet is gone there is nothing left to derive one from.
-    final deleted = await _resolveWalletId(walletName);
+    late WalletId deleted;
+    Object? reviewError;
     try {
       await _authService.deleteWallet(
         walletName: walletName,
         password: password,
+        beforeDelete: (target) async {
+          deleted = target.walletId;
+          try {
+            await permit?._validate(target);
+          } catch (error) {
+            reviewError = error;
+            rethrow;
+          }
+        },
+        afterDelete: () async {
+          // The catalog lock remains held until cleanup completes. A concurrent
+          // recreation cannot have fresh caches erased by this deletion.
+          // Each purge is best-effort and independent.
+          for (final hook in _walletDeletionHooks) {
+            try {
+              await hook(deleted);
+            } on Object catch (error) {
+              log(
+                'Wallet-deletion hook failed (${error.runtimeType})',
+                name: 'KomodoDefiLocalAuth',
+              );
+            }
+          }
+          if (!_walletDeletions.isClosed) {
+            _walletDeletions.add(deleted);
+          }
+        },
       );
-      if (deleted != null && !_walletDeletions.isClosed) {
-        _walletDeletions.add(deleted);
-      }
     } on AuthException {
       rethrow;
     } catch (e) {
+      if (identical(e, reviewError)) rethrow;
       throw AuthException(
         'An unexpected error occurred while deleting the wallet: $e',
         type: AuthExceptionType.generalAuthError,
@@ -641,16 +878,29 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
-  Future<void> setOrRemoveActiveUserKeyValue(String key, dynamic value) async {
-    await _authService.updateActiveUserMetadataKey(key, (_) => value);
+  Future<void> setOrRemoveActiveUserKeyValue(
+    String key,
+    dynamic value, {
+    required WalletId expectedWalletId,
+  }) async {
+    await _authService.updateActiveUserMetadataKey(
+      key,
+      (_) => value,
+      expectedWalletId: expectedWalletId,
+    );
   }
 
   @override
   Future<void> updateActiveUserKeyValue(
     String key,
-    dynamic Function(dynamic currentValue) transform,
-  ) async {
-    await _authService.updateActiveUserMetadataKey(key, transform);
+    dynamic Function(dynamic currentValue) transform, {
+    required WalletId expectedWalletId,
+  }) async {
+    await _authService.updateActiveUserMetadataKey(
+      key,
+      transform,
+      expectedWalletId: expectedWalletId,
+    );
   }
 
   @override
@@ -723,24 +973,10 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     return _authService.ensureKdfHealthy();
   }
 
-  /// Returns the stored identity for [walletName], or `null` when it is not a
-  /// known wallet.
-  ///
-  /// Failures are swallowed: a lookup that cannot complete costs a stale cache,
-  /// whereas letting it throw would fail a deletion that is otherwise fine.
-  Future<WalletId?> _resolveWalletId(String walletName) async {
-    try {
-      for (final user in await _authService.getUsers()) {
-        if (user.walletId.name == walletName) return user.walletId;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   @override
-  Future<void> dispose() async {
+  Future<void> dispose() => _runAuthTransition(_dispose);
+
+  Future<void> _dispose() async {
     await _walletDeletions.close();
     await _authService.dispose();
   }

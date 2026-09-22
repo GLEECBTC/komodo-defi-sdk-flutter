@@ -78,8 +78,8 @@ void main() {
       expect(readBack, isNotNull);
       expect(readBack!.id.id, equals(key));
       expect(readBack.id.name, equals('Komodo'));
-      expect(readBack.id.subClass, equals(CoinSubClass.smartChain));
-      expect(readBack.protocol.subClass, equals(CoinSubClass.smartChain));
+      expect(readBack.id.subClass, equals(CoinSubClass.utxo));
+      expect(readBack.protocol.subClass, equals(CoinSubClass.utxo));
       expect(readBack.isWalletOnly, isFalse);
       expect(readBack.signMessagePrefix, isNull);
     });

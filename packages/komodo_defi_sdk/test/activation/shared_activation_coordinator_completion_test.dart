@@ -1,3 +1,4 @@
+import '../helpers/runtime_auth_fixture.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
@@ -13,7 +14,9 @@ import 'package:test/test.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockAssetHistory extends Mock implements AssetHistoryStorage {}
 
@@ -51,6 +54,16 @@ void main() {
     () async {
       final client = _MockApiClient();
       final auth = _MockAuth();
+      when(() => auth.currentUser).thenAnswer(
+        (_) async => const KdfUser(
+          walletId: WalletId(
+            name: 'test-wallet',
+            pubkeyHash: 'test-wallet-hash',
+            authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+          ),
+          isBip39Seed: true,
+        ),
+      );
       final assetHistory = _MockAssetHistory();
       final assetLookup = _MockAssetLookup();
       final balanceManager = _MockBalanceManager();

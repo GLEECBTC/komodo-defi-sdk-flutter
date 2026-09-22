@@ -46,12 +46,24 @@ class _NativeRuntimeIdentity {
   const _NativeRuntimeIdentity({
     required this.entrypointFilenames,
     required this.runtimeFilenames,
+    this.discardableFilenames = const <String>{},
   });
 
   final Set<String> entrypointFilenames;
   final Set<String> runtimeFilenames;
 
+  /// Build residue the upstream packaging job is known to include, which must
+  /// be dropped rather than installed - and which must not fail the extraction.
+  ///
+  /// This is deliberately a *named* list, not a relaxation of [matches]: an
+  /// unrecognised file still fails closed, and a discarded file never reaches
+  /// the destination folder or the runtime-set digest.
+  final Set<String> discardableFilenames;
+
   bool matches(String filename) => runtimeFilenames.contains(filename);
+
+  bool isDiscardable(String filename) =>
+      discardableFilenames.contains(filename);
 }
 
 const Map<String, _NativeRuntimeIdentity> _nativeRuntimeIdentities = {
@@ -115,6 +127,21 @@ const Map<String, _NativeRuntimeIdentity> _nativeRuntimeIdentities = {
       'kdflib.dll',
       'libkdflib.dll',
       'mm2.dll',
+    },
+    // Rust proc-macro crates. Cargo emits them into `target/release/` and the
+    // KDF Windows packaging job globs the directory, so they ride along in the
+    // archive: `kdf_f3efd2c-win-x86-64.zip` carries all three, where
+    // `kdf_538724e-win-x86-64.zip` carried only `kdf.exe` and `kdflib.dll`.
+    //
+    // They are compile-time only - nothing loads them at runtime - so shipping
+    // them would put ~3.9 MB of unreferenced DLLs into the Windows bundle and
+    // fold them into the runtime-set digest. Dropped instead. The real fix is
+    // in the KDF release workflow's file list; this keeps the published
+    // artefact usable until that lands.
+    discardableFilenames: {
+      'enum_derives.dll',
+      'ser_error_derive.dll',
+      'serialization_derive.dll',
     },
   ),
 };
@@ -358,6 +385,7 @@ Future<void> replaceExtractedApiArtifactAtomically({
         '$relativePath',
       );
     }
+    if (_isDiscardableStagedFile(platform, relativePath)) continue;
     stagedFiles[relativePath] = File(entity.path);
   }
   if (stagedFiles.isEmpty) {
@@ -492,6 +520,19 @@ Iterable<FileSystemEntity> _runtimeEntitiesForPlatform(
   return destination
       .listSync(followLinks: false)
       .where((entity) => identity.matches(path.basename(entity.path)));
+}
+
+/// Whether a staged archive entry is known build residue to drop.
+///
+/// Only top-level entries qualify: a nested path is never residue, and letting
+/// one match by basename alone would give an archive a way to smuggle a file
+/// past [_validateStagedPlatformFiles] by burying it in a directory.
+bool _isDiscardableStagedFile(String platform, String relativePath) {
+  if (platform == 'web') return false;
+  if (path.dirname(relativePath) != '.') return false;
+  final identity = _nativeRuntimeIdentities[platform];
+  if (identity == null) return false;
+  return identity.isDiscardable(path.basename(relativePath));
 }
 
 void _validateStagedPlatformFiles(

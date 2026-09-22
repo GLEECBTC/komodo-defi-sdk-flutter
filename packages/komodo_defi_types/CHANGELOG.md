@@ -1,4 +1,30 @@
-## 1.0.0
+## 0.6.0 (unreleased)
+
+ - **BREAKING**(coins): rename `CoinSubClass.matic` to `CoinSubClass.polygon`
+   and return `POL` from its `ticker` and `iconTicker`, following the
+   MATIC -> POL rename in the coins configuration. `formatted` ("Polygon") and
+   `tokenStandardSuffix` ("PLG20") are unchanged, so `CoinSubClass.parse` now
+   resolves "Polygon" by exact enum name and "POL" by exact ticker rather than
+   by substring fallback — the latter previously resolved to the unsupported
+   `CoinSubClass.slp`.
+ - **FEAT**(private-keys): add the structured per-asset export result types used
+   by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
+   `zDerivationPath` on private-key metadata. Coverage describes supported
+   offline exports; TRON/TRC20 return `unsupportedProtocol`. Remove the
+   active-address coverage, limited-coverage flag, separate signing-asset
+   attribution, TRON opt-in and TRON-only failure categories from the
+   unreleased export API.
+ - **FEAT**(diagnostics): add `DiagnosticSanitizer` for metadata-only
+   diagnostics, and expose the shared sensitive-field taxonomy through
+   `SecurityUtils.isSensitiveDiagnosticKey`.
+ - **SECURITY**(diagnostics): reduce every non-primitive value to `<redacted>`
+   when censoring recursively, treat a non-string key as sensitive, and give
+   key-bearing types a redacting `toString()`.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_rpc_methods` `^0.7.0`.
+
+## 0.5.0 — preparation history
 
 > Note: This release has breaking GasFree withdrawal interfaces.
 
@@ -12,8 +38,26 @@
    data, never signed authorization material or provider credentials.
  - **FEAT**(gasfree): rename the local reservation identity to `journalId`;
    migrate trace-backed records and keep trace-less records outcome-unknown.
+ - **BREAKING** **REFACTOR**(activation): remove `BatchActivationProgress`.
+   Multi-asset progress is now tracked by the SDK's activation coordinator and
+   surfaced as `AssetActivationState`; `ActivationProgress` itself is unchanged.
+ - **FEAT**(activation): add `AssetActivationState` and `AssetActivationStatus`
+   for per-asset activation state with a guaranteed terminal value.
+ - **FEAT**(pubkeys): add `HdGapLimit`, which resolves the HD address gap to
+   scan - 3 by default, 1 on a newly generated wallet's first sign-in, and the
+   full 20 for hardware wallets.
+ - **FIX**(transactions): treat an absent `received_by_me` or `spent_by_me` as
+   zero when converting a KDF transaction, rather than parsing null.
+ - **SECURITY**(logging): replace the log-censoring key list with a set that
+   also covers authorization headers, bearer/API tokens, cookies and GasFree
+   authorization material, and redact to `<redacted>` rather than a run of
+   asterisks that leaked the value's length.
+ - **FIX**(deps): declare the `flutter_test` dev dependency that
+   `sia_protocol_test.dart` imports.
+ - **CHORE**(analysis): drop two null assertions the analyzer proves are
+   no-ops, which `dart pub publish` reports as warnings.
 
-## 0.4.1
+## 0.4.1 — preparation history
 
  - **FIX**(tron): support TRON explorer URL templates and correct TRC20 badge classification (#338, #344).
  - **FIX**(models): accept numeric JSON values encoded as either `int` or `num` (#336).
@@ -21,7 +65,7 @@
  - **FEAT**(fees): expose richer fee information for balance recovery flows (#341).
  - **FEAT**(transaction-history): add strategy metadata needed by the Tronscan history provider (#339).
 
-## 0.4.0
+## 0.4.0 — preparation history
 
 > Note: This release has breaking changes.
 

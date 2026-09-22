@@ -1,8 +1,32 @@
-## 2.0.1
+## 2.1.1 (unreleased)
+
+ - **SECURITY**(seed-nodes): keep the configured URL out of seed-node fetch
+   failures by building the URI inside the same diagnostic boundary as transport
+   and response parsing, and raising a dedicated failure type.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_types` `^0.6.0`.
+
+## 2.1.0 — preparation history
+
+ - **FEAT**(config): add `CoinConfigTransformer.additionalTransforms`, applied
+   after the built-in normalization set so an application can amend normalized
+   asset configuration without replacing SDK defaults.
+ - **FEAT**(tron): add `TronQuickNodeTransform`, keeping mainnet TRX and TRC20
+   assets pointed at the Gleec proxy while preserving upstream fallback nodes.
+ - **FIX**(custom-tokens): stop rejecting a re-store of an existing custom token
+   as a contract collision. Assets read back through `AssetAdapter` are rebuilt
+   without known parent ids, so the stored copy never carries a `parentId`;
+   comparing that absence against a live parsed parent made every `upsert` and
+   `addCustomTokenIfNotExists` on an existing token throw. Parents are now only
+   compared when both sides carry one - a differing contract address still
+   conflicts.
+
+## 2.0.1 — preparation history
 
  - Update a dependency to the latest release.
 
-## 2.0.0
+## 2.0.0 — preparation history
 
 > Note: This release has breaking changes.
 

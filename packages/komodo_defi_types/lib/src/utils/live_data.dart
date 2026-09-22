@@ -140,7 +140,7 @@ class LiveData<T> extends ChangeNotifier implements ValueListenable<T> {
     _setLoading(true);
 
     try {
-      final newValue = await _refreshFunction!();
+      final newValue = await _refreshFunction();
       if (!_areEqual(_value, newValue)) {
         _value = newValue;
         _lastRefreshed = DateTime.now();
@@ -188,7 +188,7 @@ class LiveData<T> extends ChangeNotifier implements ValueListenable<T> {
 
   bool _areEqual(T a, T b) {
     if (_equalityComparer != null) {
-      return _equalityComparer!(a, b);
+      return _equalityComparer(a, b);
     }
     return a == b;
   }

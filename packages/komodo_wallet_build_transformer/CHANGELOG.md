@@ -1,3 +1,19 @@
+## 0.5.0
+
+ - **BREAKING** **FEAT**(build): write and verify artefact provenance markers
+   next to each extracted KDF artefact. A marker is authoritative only when it
+   identifies the pinned commit, the downloaded archive, the extracted core
+   artefact and the complete platform runtime set; legacy partial markers fail
+   closed and force a re-fetch.
+ - **FEAT**(build): support `require_full_commit_hash` and `required_platforms`
+   in the API build config, so an incomplete pin fails the build.
+ - **FIX**(build): discard the Rust proc-macro DLLs that KDF's Windows archive
+   ships, which the owned-runtime guard otherwise rejected - failing every
+   `flutter test` that runs the transformer.
+ - **FIX**(assets): decide whether a platform asset needs recopying by
+   comparing SHA-256 content rather than modification time, which a checkout or
+   a restored cache can reorder.
+
 ## 0.4.2
 
  - **FIX**(github): accept numeric GitHub API values encoded as either `int` or `num` (#336).

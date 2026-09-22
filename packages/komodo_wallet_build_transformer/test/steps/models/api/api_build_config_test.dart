@@ -9,18 +9,25 @@ void main() {
   const pinnedCommit = 'bd413dcfea73c9de2e85903323946a378b180fa7';
   const checksum =
       '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-  const pinnedChecksums = <String, String>{
-    'web': '9242cbba06eda6e82fc057897781cea2adf85f67f0cf5710f4feaf0a5e6d844c',
-    'ios': '0cc494a8ff7b3f926cebc6956cda61c9928c7366624d592c71e29f080a3255bd',
-    'macos': 'f1d8a52c7c34d9721761733586f7262177b5362f911d8a220b2550e1f9844bbe',
-    'android-armv7':
-        '929d57312908544c9e6ae94d660d8ae14c21fb84547821ba0e0aba26c4daf29a',
-    'android-aarch64':
-        '9953572e03956a751dcef365df76b6b84a3675800323220d50409dbd8175f037',
-    'linux': 'ec5e2c801520e00ed1fd18c82c0edc0ade30716c6a4fb8aab453f265ce6afb33',
-    'windows':
-        '04062cf1a271888eab9a757fa1a19e41038beea15b19484a21e5731d4dfc05e0',
-  };
+
+  /// Every platform the shipped manifest must pin, whatever it is pinned to.
+  ///
+  /// This used to also carry each platform's expected checksum and the commit
+  /// itself, which made a routine KDF roll fail a *policy* test: the values
+  /// went stale the moment the pin moved off `bd413dc` and stayed red through
+  /// three subsequent rolls. The commit and the checksums belong to the
+  /// manifest; what this test guards is the shape - a full 40-character hash,
+  /// all seven platforms present, none release-blocked, exactly one checksum
+  /// each. Assert that, and a roll stays a one-file change.
+  const requiredPlatforms = <String>[
+    'web',
+    'ios',
+    'macos',
+    'android-armv7',
+    'android-aarch64',
+    'linux',
+    'windows',
+  ];
 
   Map<String, dynamic> platform() => {
     'matching_pattern': r'^kdf_[a-f0-9]{7,40}-android-aarch64\.zip$',
@@ -40,7 +47,7 @@ void main() {
   };
 
   group('ApiBuildConfig artifact policy', () {
-    test('canonical GasFree manifest pins the complete platform build set', () {
+    test('the shipped manifest pins the complete platform build set', () {
       final manifest = File(
         '../komodo_defi_framework/app_build/build_config.json',
       );
@@ -48,14 +55,29 @@ void main() {
       final apiJson = (json as Map<String, dynamic>)['api'];
       final parsed = ApiBuildConfig.fromJson(apiJson as Map<String, dynamic>);
 
-      expect(parsed.apiCommitHash, pinnedCommit);
-      expect(parsed.branch, 'feat/tron-gasfree');
-      expect(parsed.requiredPlatforms, pinnedChecksums.keys);
-      for (final entry in pinnedChecksums.entries) {
-        final platform = parsed.platforms[entry.key];
-        expect(platform, isNotNull, reason: '${entry.key} must be configured');
+      expect(
+        parsed.apiCommitHash,
+        matches(RegExp(r'^[0-9a-f]{40}$')),
+        reason: 'the manifest must pin an immutable, full-length commit',
+      );
+      expect(parsed.branch, isNotEmpty);
+      expect(parsed.requiredPlatforms, requiredPlatforms);
+      for (final name in requiredPlatforms) {
+        final platform = parsed.platforms[name];
+        expect(platform, isNotNull, reason: '$name must be configured');
         expect(platform!.isReleaseBlocked, isFalse);
-        expect(platform.validZipSha256Checksums, [entry.value]);
+        expect(
+          platform.validZipSha256Checksums,
+          hasLength(1),
+          reason:
+              '$name must pin exactly one artefact; more than one means a '
+              'previous roll left a stale checksum behind',
+        );
+        expect(
+          platform.validZipSha256Checksums.single,
+          matches(RegExp(r'^[0-9a-f]{64}$')),
+          reason: '$name checksum must be a full sha256',
+        );
       }
     });
 

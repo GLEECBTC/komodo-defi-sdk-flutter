@@ -8,15 +8,20 @@ import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_manager.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import '../helpers/runtime_auth_fixture.dart';
+
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockAssetProvider extends Mock implements IAssetProvider {}
 
@@ -67,18 +72,14 @@ class _SeededStorage implements TransactionStorage {
   Future<StorageStats> getStats() => throw UnimplementedError();
 
   @override
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
     int? pageNumber,
     int limit = 10,
-  }) async => TransactionPage(
-    transactions: seeded,
-    total: seeded.length,
-    currentPage: pageNumber ?? 1,
-    totalPages: 1,
-  );
+  }) async =>
+      CachedTransactionPage(transactions: seeded, cachedCount: seeded.length);
 
   @override
   Future<void> storeTransaction(
@@ -91,6 +92,76 @@ class _SeededStorage implements TransactionStorage {
     List<Transaction> transactions,
     WalletId walletId,
   ) async {}
+}
+
+/// Mimics the persisted stores' contract: an unknown cursor throws, it does
+/// not read as an empty page.
+class _CursorRejectingStorage extends _SeededStorage {
+  _CursorRejectingStorage() : super(const []);
+
+  @override
+  Future<CachedTransactionPage> getTransactions(
+    AssetId assetId,
+    WalletId walletId, {
+    String? fromId,
+    int? pageNumber,
+    int limit = 10,
+  }) async {
+    if (fromId != null) {
+      throw TransactionStorageException('Starting transaction not found');
+    }
+    return super.getTransactions(
+      assetId,
+      walletId,
+      pageNumber: pageNumber,
+      limit: limit,
+    );
+  }
+}
+
+/// Serves a second page addressed by a strategy-owned opaque cursor, the way
+/// the TronGrid strategy does.
+class _OpaqueCursorStrategy extends TransactionHistoryStrategy {
+  @override
+  Set<Type> get supportedPaginationModes => const {TransactionBasedPagination};
+
+  @override
+  Future<MyTxHistoryResponse> fetchTransactionHistory(
+    ApiClient client,
+    Asset asset,
+    TransactionPagination pagination,
+  ) async => MyTxHistoryResponse(
+    mmrpc: '2.0',
+    currentBlock: 100,
+    fromId: 'next-opaque-cursor',
+    limit: 10,
+    skipped: 0,
+    syncStatus: SyncStatusResponse(state: TransactionSyncStatusEnum.finished),
+    total: 100,
+    totalPages: 10,
+    pageNumber: null,
+    pagingOptions: null,
+    transactions: [
+      TransactionInfo(
+        txHash: 'hash-page-2',
+        from: const ['cosmos1source'],
+        to: const ['cosmos1destination'],
+        myBalanceChange: '1',
+        blockHeight: 98,
+        confirmations: 2,
+        timestamp: 1000,
+        feeDetails: null,
+        coin: asset.id.id,
+        internalId: 'internal-page-2',
+        spentByMe: '0',
+        receivedByMe: '1',
+        memo: null,
+      ),
+    ],
+  );
+
+  @override
+  bool supportsAsset(Asset asset) => true;
 }
 
 Asset _asset() {
@@ -195,4 +266,125 @@ void main() {
       reason: 'cached rows must not wait on activation',
     );
   });
+
+  test('an opaque strategy cursor falls through to the strategy', () async {
+    // The TronGrid strategy hands back an encoded per-address cursor as
+    // nextPageId. Storage rejects it as an unknown starting transaction; the
+    // manager must read that as "not ours to serve" and let the strategy
+    // consume its own cursor - not fail the second-page request.
+    final client = _MockApiClient();
+    final auth = _MockAuth();
+    final assetProvider = _MockAssetProvider();
+    final activation = _MockActivationCoordinator();
+    final pubkeys = _MockPubkeyManager();
+    final streaming = _MockEventStreamingManager();
+    final assetHistory = _MockAssetHistoryStorage();
+    final asset = _asset();
+    final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+
+    when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+    when(() => auth.currentUser).thenAnswer((_) async => wallet);
+    when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+    when(
+      () => activation.activateAsset(asset),
+    ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+    final manager = TransactionHistoryManager(
+      client,
+      auth,
+      assetProvider,
+      activation,
+      pubkeyManager: pubkeys,
+      eventStreamingManager: streaming,
+      storage: _CursorRejectingStorage(),
+      assetHistoryStorage: assetHistory,
+      transactionHistoryStrategies: [_OpaqueCursorStrategy()],
+    );
+    addTearDown(() async {
+      await authChanges.close();
+      await manager.dispose();
+    });
+
+    final page = await manager.getTransactionHistory(
+      asset,
+      pagination: const TransactionBasedPagination(
+        fromId: 'trongrid-opaque-cursor',
+        itemCount: 10,
+      ),
+    );
+
+    expect(page.transactions.single.txHash, 'hash-page-2');
+    expect(page.nextPageId, 'next-opaque-cursor');
+  });
+  for (final pagination in <TransactionPagination>[
+    const PagePagination(pageNumber: 2, itemsPerPage: 1),
+    const TransactionBasedPagination(fromId: 'internal-newest', itemCount: 1),
+  ]) {
+    test('bounded cached rows preserve provider metadata '
+        'for ${pagination.runtimeType}', () async {
+      final client = _MockApiClient();
+      final auth = _MockAuth();
+      final assetProvider = _MockAssetProvider();
+      final activation = _MockActivationCoordinator();
+      final pubkeys = _MockPubkeyManager();
+      final streaming = _MockEventStreamingManager();
+      final assetHistory = _MockAssetHistoryStorage();
+      final asset = _asset();
+      final authChanges = StreamController<KdfUser?>.broadcast(sync: true);
+
+      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
+      when(() => auth.currentUser).thenAnswer((_) async => wallet);
+      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
+      when(
+        () => activation.activateAsset(asset),
+      ).thenAnswer((_) async => ActivationResult.success(asset.id));
+
+      final storage = InMemoryTransactionStorage(
+        policy: const TransactionHistoryCachePolicy(maxTransactionsPerAsset: 2),
+      );
+      await storage.storeTransactions([
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-newest',
+          timestamp: DateTime.utc(2026, 1, 3),
+        ),
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-cached',
+          timestamp: DateTime.utc(2026, 1, 2),
+        ),
+        _cachedTx(asset.id).copyWith(
+          internalId: 'internal-evicted',
+          timestamp: DateTime.utc(2026),
+        ),
+      ], wallet.walletId);
+      expect(
+        (await storage.getTransactions(asset.id, wallet.walletId)).cachedCount,
+        2,
+      );
+      final manager = TransactionHistoryManager(
+        client,
+        auth,
+        assetProvider,
+        activation,
+        pubkeyManager: pubkeys,
+        eventStreamingManager: streaming,
+        storage: storage,
+        assetHistoryStorage: assetHistory,
+        transactionHistoryStrategies: [_OpaqueCursorStrategy()],
+      );
+      addTearDown(() async {
+        await authChanges.close();
+        await manager.dispose();
+      });
+
+      final page = await manager.getTransactionHistory(
+        asset,
+        pagination: pagination,
+      );
+
+      expect(page.transactions.single.txHash, 'hash-page-2');
+      expect(page.nextPageId, 'next-opaque-cursor');
+      expect(page.total, 100);
+      expect(page.totalPages, 10);
+    });
+  }
 }

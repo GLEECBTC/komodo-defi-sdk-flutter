@@ -120,7 +120,7 @@ EventStreamUnsubscribe connectEventStream({
       }
 
       if (kDebugMode) {
-        print('EventStream: Received message: $data');
+        print('EventStream: Received message');
       }
       onMessage(data);
     }

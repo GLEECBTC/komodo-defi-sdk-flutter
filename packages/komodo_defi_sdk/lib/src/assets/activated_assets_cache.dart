@@ -143,8 +143,15 @@ class ActivatedAssetsCache {
       completer.completeError(e);
       rethrow;
     } finally {
-      _pendingCompleter = null;
-      _pendingFetchStartedAt = null;
+      // Only clear the slot this fetch still owns. A forced refresh that
+      // outlived the join window has been invalidated and replaced by a newer
+      // fetch's completer; clearing that one here would let every subsequent
+      // caller start yet another `get_enabled_coins` round trip, defeating
+      // the coalescing exactly when KDF is slow.
+      if (identical(_pendingCompleter, completer)) {
+        _pendingCompleter = null;
+        _pendingFetchStartedAt = null;
+      }
     }
   }
 

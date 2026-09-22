@@ -1,9 +1,59 @@
-## 0.4.1
+## 0.6.0 (unreleased)
+
+Prepared for SDK 0.8.0 with verified metadata writes. Callers and custom
+authentication implementations must migrate before adopting this version.
+
+ - **BREAKING** **FIX**(auth): require `expectedWalletId` on metadata setters
+   and atomic updates, including custom auth implementations. Capture the
+   original wallet identity before asynchronous work and forward it through
+   every write. See [migration guidance](README.md#migrating-metadata-writes).
+ - **FIX**(auth): reject metadata writes when either identity lacks a verified
+   public-key hash, preventing stale confirmations from reaching a different
+   wallet recreated under the same name during an identity lookup outage.
+ - **BREAKING** **FEAT**(auth): add `authGeneration` and `authGenerationChanges`
+   to `KomodoDefiAuth` and the auth service interface. A capability holder can
+   revoke synchronously as the generation advances, before an authentication
+   transition completes; custom implementations must provide both members,
+   transition state and
+   the session invalidation/transition methods. See the
+   [authentication lifecycle migration](README.md#migrating-authentication-lifecycle).
+ - **FIX**(auth): run sign-in, registration, sign-out, session restore and
+   disposal through one serialized authentication transition, so a transition
+   cannot interleave with another or with KDF lifecycle changes.
+
+ - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
+   `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,
+   `komodo_defi_rpc_methods` `^0.7.0`.
+
+## 0.5.0 — preparation history
+
+ - **FEAT**(auth): add `KomodoDefiAuth.onWalletDeletion`, an awaited hook that
+   runs inside `deleteWallet` after KDF and secure storage have forgotten the
+   wallet but before the call returns. Wallet-scoped cache owners register here
+   so deleting and immediately recreating the same wallet cannot race a
+   still-running purge; the `walletDeletions` stream remains for passive
+   observers.
+ - **FIX**(auth): stop treating a transient transport failure as an
+   authentication failure - a brief network drop no longer ends the session.
+ - **FIX**(auth): resolve the deleted wallet's identity before deletion, since
+   it cannot be recovered afterwards.
+ - **FIX**(trezor): surface the device's own message in `TrezorException`
+   instead of `GeneralErrorResponse.toString()`, which is deliberately reduced
+   to its `error_type` to keep request payloads out of logs and so read as
+   `GeneralErrorResponse(errorType: ...)` to the user. `error_data` is still
+   never included.
+ - **FIX**(storage): open Android secure storage with `resetOnError: false`, so
+   a read failure surfaces instead of silently clearing stored credentials.
+ - **FIX**(deps): raise the `flutter_secure_storage` lower bound off the
+   `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
+   10.x, and pub warns when a stable release depends on a pre-release.
+
+## 0.4.1 — preparation history
 
  - **FIX**(auth,migration): wait for KDF RPC readiness and guard unsupported platforms during migration.
  - **FEAT**(migration): add local-auth integration for legacy wallet verification and import flows.
 
-## 0.4.0
+## 0.4.0 — preparation history
 
 > Note: This release has breaking changes.
 

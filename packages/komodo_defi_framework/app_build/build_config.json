@@ -1,7 +1,7 @@
 {
   "api": {
-    "api_commit_hash": "538724e9e497ab4bc581b71ebcc2aed9cd681de3",
-    "branch": "perf/evm-rpc-429-backoff",
+    "api_commit_hash": "4872ef2e0bb07348673e1578aca4aca53f3d73b6",
+    "branch": "feat/lifi-integration",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
     "require_full_commit_hash": true,
@@ -14,24 +14,19 @@
       "linux",
       "windows"
     ],
-    "source_urls": [
-      "https://kdf-dev-builds.nitride.app",
-      "https://nitride-kdf-builds.web.app",
-      "https://devbuilds.gleec.com",
-      "https://nebula.decker.im"
-    ],
+    "source_urls": ["https://devbuilds.gleec.com", "https://nebula.decker.im"],
     "platforms": {
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "a29143ca75d1c8e15315bb667783435ac7641e43c492298df883b5816959d1c9"
+          "7ff633ec88282d25d06f07d0bedac2319c29eeaf518c0543d6cdc45aa9291ac1"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "9b343c550bfce28cb3e964e127b4778c003bb9f4b14a8f9a961a89f227f08355"
+          "e1c5a228be71d1f0910c8936e1e76a312210a94d334d4f69a46b04d7fbbe5707"
         ],
         "path": "ios"
       },
@@ -39,35 +34,35 @@
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
         "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
         "valid_zip_sha256_checksums": [
-          "edf3d7767b1ad747ece8c0a2938b2de89d27878393a52ad4720498c3073a7d15"
+          "daa5560ce3f18b48e7f19116e76166e401c2965b981cb672bc6d45c78dba5e2b"
         ],
         "path": "macos/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "ee7e51be6e630ec65f825409c4476bfb2b2acc5c5a676395040c81e6b569c48d"
+          "22e5aa17db02499243afb24356278f42e784c116fc2c9c7e9fc14b0d8a3d6c0d"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "85d5b5e99443f6591dc54e2b2e855474a79a1f3466c4a085fe9c5ce785016b84"
+          "3c0191e61255f0693059c6b73e61e3384a8e94b1452911e7c20e196c8f16b50d"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "9fb03fc9d88d42009e31956b7eb84959d271bba561cc54c93825719850fa62f1"
+          "c573074b452755846b0f318a6f066eaa51cba45c871eb2f2b8ed3cb8f058eca1"
         ],
         "path": "linux/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "aec61ac354b1c4f4599e23c10cad1bc5a3bffcd0bbb9884793390ff4257bb7c4"
+          "4e15b76d7ba41e9fc709d933fdbb6636c2a46652ed1b6ba55db0bd1370b6dca9"
         ],
         "path": "windows/bin"
       }
@@ -76,7 +71,7 @@
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "c17260f7c67ea018017f2df234692617c94a5ae0",
+    "bundled_coins_repo_commit": "b9d25ab3380a654674bf9d27615905b215a7814a",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
     "coins_repo_branch": "master",

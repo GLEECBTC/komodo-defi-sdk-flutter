@@ -1,4 +1,26 @@
-## 2.0.1
+## 3.0.0 (unreleased)
+
+> Note: This version has breaking storage and logger interfaces.
+
+ - **BREAKING** **FEAT**(storage): `LogStorage.init` and `LoggerInterface.init`
+   take `storageNamespace` and `purgeLegacy`, both interfaces gained `dispose`,
+   and `FileLogStorage` is no longer a process-wide singleton. `DragonLogs.init`
+   mirrors the new parameters and every API now fails closed before it runs.
+ - **FEAT**(storage): version persisted storage by namespace and purge records
+   written by an older, unversioned client before the new epoch is created.
+ - **FEAT**(diagnostics): add `DragonLogs.writeRecord` for one caller-sanitized
+   JSON object per line, without legacy message or metadata decoration.
+ - **FIX**(storage): serialize appends, snapshots, migrations and disposal
+   behind one queue and a cross-process lock, using Web Locks in the browser.
+ - **FEAT**(export): `DragonLogs.clearLogs` also removes cached exports.
+ - **FIX**(export): keep the artefacts of a running export out of that clear.
+   Writing and sharing deliberately run outside the storage queue, so a clear
+   could otherwise delete the snapshot being read or the file being shared.
+ - **FIX**(export): share native export ownership across storage instances in
+   one isolate using canonical paths, and serialize snapshot cleanup with clear.
+   Retention survives disposal; concurrent shares use separate cache directories.
+
+## 2.0.1 — preparation history
 
  - **FIX**(web): improve wasm JS interop bindings (#315).
  - **FIX**(zhltc): zhltc activation fixes (#227).

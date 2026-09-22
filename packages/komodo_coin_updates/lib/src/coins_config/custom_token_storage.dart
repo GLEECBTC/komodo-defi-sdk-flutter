@@ -226,11 +226,21 @@ class CustomTokenStorage implements CustomTokenStore {
   }
 
   bool _hasMatchingContract(Asset existingAsset, Asset requestedAsset) {
+    // A parent is only compared when both sides actually carry one. Assets
+    // read back out of Hive come through `AssetAdapter`, which reconstructs
+    // them with `Asset.fromJson` and no `knownIds`, so `parentId` is always
+    // null on the stored copy - `getAllCustomTokens` is what restores it.
+    // Treating that absence as a mismatch made every re-store of an existing
+    // token look like a contract collision.
+    final parentsDisagree =
+        existingAsset.id.parentId != null &&
+        requestedAsset.id.parentId != null &&
+        existingAsset.id.parentId != requestedAsset.id.parentId;
     final hasMatchingIdentity =
         existingAsset.id.subClass == requestedAsset.id.subClass &&
         existingAsset.id.chainId.formattedChainId ==
             requestedAsset.id.chainId.formattedChainId &&
-        existingAsset.id.parentId == requestedAsset.id.parentId;
+        !parentsDisagree;
     if (!hasMatchingIdentity) {
       return false;
     }
