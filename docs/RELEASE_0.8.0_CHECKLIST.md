@@ -46,7 +46,10 @@ Example, playground and product versions also remain unchanged.
 The authoritative input is
 [`build_config.json`](../packages/komodo_defi_framework/app_build/build_config.json).
 Its full contents, including required platforms, download sources and archive
-checksums, are unchanged by this PR.
+checksums, are unchanged by the 0.8.0 preparation PR. `add/routed-swap`
+changes `api.branch`, `api.api_commit_hash` and all seven
+`valid_zip_sha256_checksums` - see
+[`packages/komodo_defi_framework/CHANGELOG.md`](../packages/komodo_defi_framework/CHANGELOG.md).
 
 | Input | Pin |
 | --- | --- |

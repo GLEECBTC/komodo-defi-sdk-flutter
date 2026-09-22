@@ -23,6 +23,9 @@ below, plus the earlier changes since that tag:
    validation and cleanup, and ETH-BASE asset support. See the
    [0.5.0 preparation](#2026-03-23--sdk-050-preparation) and
    [0.6.0 preparation](#2026-05-02--sdk-060-preparation) for package details.
+ - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
+   on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
+   harness fixture. A liquidity source separate from the atomic-swap orderbook.
  - **FEAT**(gasfree): KDF's activation-time provider configuration, four-state
    account status, maximum-send contract, wallet journal and trace recovery.
    Recovery preserves uncertain outcomes without automatic resubmission.
