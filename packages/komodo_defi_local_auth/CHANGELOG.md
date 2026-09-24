@@ -1,7 +1,8 @@
 ## 0.6.0 (unreleased)
 
-Prepared for SDK 0.8.0 with verified metadata writes. Callers and custom
-authentication implementations must migrate before adopting this version.
+Prepared for SDK 0.8.0 with verified metadata writes, session contexts, atomic
+wallet creation and reviewed deletion. Callers and custom authentication
+implementations must migrate before adopting this version.
 
  - **BREAKING** **FIX**(auth): require `expectedWalletId` on metadata setters
    and atomic updates, including custom auth implementations. Capture the
@@ -20,14 +21,43 @@ authentication implementations must migrate before adopting this version.
  - **FIX**(auth): run sign-in, registration, sign-out, session restore and
    disposal through one serialized authentication transition, so a transition
    cannot interleave with another or with KDF lifecycle changes.
+ - **BREAKING** **FEAT**(auth): add session contexts to `KomodoDefiAuth` and the
+   auth service interface: `captureSessionContext`, `isSessionContextCurrent`,
+   `ensureSessionContextCurrent`, `watchSessionContext` and
+   `updateMetadataForSession`. A context survives metadata and identity
+   refreshes but not a sign-out, a wallet switch or reauthentication.
+   `AuthSessionContext`, `AuthSessionChangedException` and
+   `AuthIdentityUnavailableException` are exported, and custom implementations
+   must provide the new members. See the
+   [migration guide](../../docs/RELEASE_0.8.0.md#wallet-identity-and-authentication).
+ - **BREAKING** **FEAT**(auth): `register` and `registerStream` accept
+   `initialMetadata`, saved with the new wallet's first record before it is
+   published. A name that already exists fails with `walletAlreadyExists`
+   instead of signing into that wallet.
+ - **BREAKING** **FEAT**(auth): `deleteWallet` accepts a one-use
+   `WalletDeletionPermit`. Once `requireWalletDeletionReview` installs a
+   coordinator, deletion without a permit from `authorizeWalletDeletion` throws
+   `WalletDeletionReviewRequiredException`. The permit's check runs against the
+   fresh catalog record before the RPC, and the auth service's `deleteWallet`
+   gains `beforeDelete` and `afterDelete`. See the
+   [migration guide](../../docs/RELEASE_0.8.0.md#wallet-deletion-and-retained-recovery).
+ - **FIX**(auth): serialize wallet creation, listing and deletion across local
+   SDK instances and browser tabs with a catalog lock, and stored-user writes
+   with a record lock; both are Web Locks in the browser. Stored users change
+   through atomic read-modify-write updates. `onWalletDeletion` hooks run
+   inside the deletion's catalog transaction, so a hook must not wait on
+   `getUsers`, registration or another deletion.
+ - **FEAT**(auth): stamp each stored wallet with an SDK-owned entry identity
+   (`walletEntryIdMetadataKey`), renewed when the wallet is recreated, so a
+   deletion review cannot apply to a replacement with the same name. Metadata
+   updates cannot write that key.
  - **FIX**(auth): report a KDF outage during mnemonic retrieval as
    `apiConnectionError`, so callers can retry, without the failed RPC's text.
- - **DOCS**(auth): state that `onWalletDeletion` hooks run under the wallet
-   catalog lock and must not wait on `getUsers`, registration or deletion.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,
    `komodo_defi_rpc_methods` `^0.7.0`.
+ - **CHORE**(deps): add `web` `^1.1.1` for the browser Web Locks.
 
 ## 0.5.0 — preparation history
 

@@ -2,8 +2,10 @@
 
 Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export
 remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-overview).
-Metadata writes have a breaking API change; this is not a source-compatible
-patch of 0.7.0.
+Metadata writes, sessions, wallet creation and deletion, activation and the
+transaction history cache have breaking API changes; this is not a
+source-compatible patch of 0.7.0. See the
+[migration guide](../../docs/RELEASE_0.8.0.md).
 
  - **SECURITY**(history): authenticate the transaction cache. Records were
    AES-CBC with no authentication tag, and the surrounding CRC-32 gave no
@@ -13,6 +15,15 @@ patch of 0.7.0.
    and is dropped instead of decoding into plausible bytes. The key is
    re-derived under a new label, so a cache from a previous release is rejected
    at open and rebuilt from providers.
+ - **BREAKING** **FEAT**(history): bound the persisted transaction cache and
+   hide its metadata. Database keys are opaque keyed identifiers, and
+   timestamps, wallet and asset scope and transaction IDs live inside the
+   encrypted records. Retention defaults to 1,000 transactions per wallet and
+   asset, 20,000 overall and 64 MiB, set through
+   `KomodoDefiSdkConfig.transactionHistoryCachePolicy`. Storage reads return
+   `CachedTransactionPage`, whose `cachedCount` counts retained rows rather
+   than a provider total. The previous plaintext cache is deleted, never read
+   or migrated.
  - **BREAKING** **FEAT**(auth): issue session contexts. Runtime work survives
    metadata and hash refreshes, while work from a replaced, signed-out or
    reauthenticated session is rejected. Sensitive writes still verify identity

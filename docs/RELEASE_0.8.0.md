@@ -249,6 +249,13 @@ issuing manager. Retain it through the operation and recheck it immediately
 before presenting or sharing sensitive output. An authentication transition
 invalidates pending results even when the wallet name stays the same.
 
+## Polygon (POL) rename
+
+The bundled coins configuration follows the MATIC -> POL rename.
+`CoinSubClass.matic` is now `CoinSubClass.polygon`, and its `ticker` and
+`iconTicker` return `POL`; replace references to the old value. Transaction
+history stored under the old `matic` sub-class still decodes as Polygon.
+
 ## Earlier migrations included in this release
 
 Consumers upgrading from the last SDK tag also need the changes documented in
@@ -260,5 +267,5 @@ Preserve unknown GasFree submission outcomes for explicit recovery and do not
 resubmit them automatically. Provider outages must not erase recovery state.
 
 The current KDF contract and artefacts are pinned in the release checklist.
-This release does not add a new KDF/coins roll or broaden native/browser
-validation beyond the checks recorded there.
+Apart from the coins roll above, this release does not roll KDF or broaden
+native/browser validation beyond the checks recorded there.
