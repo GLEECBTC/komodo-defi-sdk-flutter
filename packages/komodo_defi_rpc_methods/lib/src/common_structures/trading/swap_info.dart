@@ -58,6 +58,8 @@ class SwapInfo {
     this.takerAmountRat,
     this.makerAmountFraction,
     this.makerAmountRat,
+    this.eventTypes = const [],
+    this.isFinishedFlag,
   });
 
   /// Creates a [SwapInfo] instance from a JSON map.
@@ -78,6 +80,8 @@ class SwapInfo {
       errorEvents: json.value<List<String>>('error_events'),
       startedAt: json.valueOrNull<int?>('started_at'),
       finishedAt: json.valueOrNull<int?>('finished_at'),
+      eventTypes: _eventTypesOf(json.valueOrNull<List<dynamic>>('events')),
+      isFinishedFlag: json.valueOrNull<bool>('is_finished'),
       takerAmountFraction:
           json.valueOrNull<JsonMap>('taker_amount_fraction') != null
               ? Fraction.fromJson(json.value<JsonMap>('taker_amount_fraction'))
@@ -188,6 +192,18 @@ class SwapInfo {
   /// Optional rational representation of the maker amount
   final Rational? makerAmountRat;
 
+  /// The types of the events that have actually happened, in order.
+  ///
+  /// Not to be confused with [successEvents] and [errorEvents], which KDF
+  /// reports as the *static* lists of event names that count as success or
+  /// error for this swap type — [errorEvents] is never empty, so it says
+  /// nothing about whether an error occurred. Whether one did is answered by
+  /// intersecting it with these.
+  final List<String> eventTypes;
+
+  /// KDF's own `is_finished` flag, when the payload carries one.
+  final bool? isFinishedFlag;
+
   /// Converts this [SwapInfo] instance to a JSON map.
   ///
   /// The resulting map can be serialized to JSON and follows the
@@ -206,6 +222,14 @@ class SwapInfo {
     'error_events': errorEvents,
     if (startedAt != null) 'started_at': startedAt,
     if (finishedAt != null) 'finished_at': finishedAt,
+    if (eventTypes.isNotEmpty)
+      'events': [
+        for (final type in eventTypes)
+          {
+            'event': {'type': type},
+          },
+      ],
+    if (isFinishedFlag != null) 'is_finished': isFinishedFlag,
     if (takerAmountFraction != null)
       'taker_amount_fraction': takerAmountFraction!.toJson(),
     if (takerAmountRat != null)
@@ -218,13 +242,22 @@ class SwapInfo {
 
   /// Whether this swap has completed (successfully or with failure).
   ///
-  /// A swap is considered complete if it has a [finishedAt] timestamp.
-  bool get isComplete => finishedAt != null;
+  /// Complete when it has a [finishedAt] timestamp, KDF flags it finished,
+  /// or its event log contains `Finished`.
+  bool get isComplete =>
+      finishedAt != null ||
+      (isFinishedFlag ?? false) ||
+      eventTypes.contains('Finished');
 
-  /// Whether this swap completed successfully.
+  /// Whether an error event has actually occurred.
   ///
-  /// A swap is successful if it's complete and has no error events.
-  bool get isSuccessful => isComplete && errorEvents.isEmpty;
+  /// [errorEvents] alone cannot answer this: it is the static list of event
+  /// names that would count as errors, and it is never empty.
+  bool get hasFailed => eventTypes.any(errorEvents.contains);
+
+  /// Whether this swap completed successfully: complete, with no error event
+  /// in its log.
+  bool get isSuccessful => isComplete && !hasFailed;
 
   /// Duration of the swap in seconds.
   ///
@@ -234,3 +267,22 @@ class SwapInfo {
     return finishedAt! - startedAt!;
   }
 }
+
+/// Reads the event types from an `events` list.
+///
+/// Legacy swaps report `{timestamp, event: {type, data}}`; newer payloads have
+/// used `{event_type, event_data}` and a flat `{type}`. Anything else is
+/// skipped rather than failing the whole swap.
+List<String> _eventTypesOf(List<dynamic>? events) {
+  if (events == null) return const [];
+  final types = <String>[];
+  for (final entry in events) {
+    if (entry is! Map) continue;
+    final event = entry['event'];
+    final type =
+        event is Map ? event['type'] : entry['event_type'] ?? entry['type'];
+    if (type is String) types.add(type);
+  }
+  return types;
+}
+

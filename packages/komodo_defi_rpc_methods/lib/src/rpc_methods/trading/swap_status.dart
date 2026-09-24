@@ -38,10 +38,13 @@ class SwapStatusResponse extends BaseResponse {
 
   factory SwapStatusResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
+    // The v2 `my_swap_status` wraps the saved swap as
+    // `{swap_type, swap_data}`; the legacy method returns it bare.
+    final swapData = result.valueOrNull<JsonMap>('swap_data') ?? result;
 
     return SwapStatusResponse(
       mmrpc: json.value<String>('mmrpc'),
-      swapInfo: SwapInfo.fromJson(result),
+      swapInfo: SwapInfo.fromJson(swapData),
     );
   }
 
