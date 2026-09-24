@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:decimal/decimal.dart';
 import 'package:hive_ce/hive.dart';
+// The lock the deletion hooks run under; not public API.
+// ignore: implementation_imports
+import 'package:komodo_defi_local_auth/src/auth/wallet_catalog_lock.dart';
 import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/hive_transaction_storage.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_record_codec.dart';
@@ -92,6 +96,13 @@ void main() {
     ) async =>
         (await storage.getTransactions(asset, wallet)).transactions.length;
 
+    /// Opens via getStats, which reads no wallet: a read marks its scope in use
+    /// and the sweep spares it.
+    Future<void> openAndSweep(HiveTransactionStorage storage) async {
+      await storage.getStats();
+      await storage.orphanSweep;
+    }
+
     test(
       'drops history for a wallet that is no longer in the catalogue',
       () async {
@@ -104,6 +115,7 @@ void main() {
         final storage = await openWithCatalogue(
           () async => {walletStorageNamespace(kept)},
         );
+        await openAndSweep(storage);
 
         expect(await countFor(storage, deleted), 0);
         expect(
@@ -120,6 +132,7 @@ void main() {
         await seedBothWallets();
 
         final storage = await openWithCatalogue(() async => <String>{});
+        await openAndSweep(storage);
 
         expect(await countFor(storage, kept), 1);
         expect(await countFor(storage, deleted), 1);
@@ -132,6 +145,7 @@ void main() {
       final storage = await openWithCatalogue(
         () async => throw StateError('cannot list wallets'),
       );
+      await openAndSweep(storage);
 
       expect(await countFor(storage, kept), 1);
       expect(await countFor(storage, deleted), 1);
@@ -141,9 +155,108 @@ void main() {
       await seedBothWallets();
 
       final storage = await openWithCatalogue(null);
+      await openAndSweep(storage);
 
       expect(await countFor(storage, kept), 1);
       expect(await countFor(storage, deleted), 1);
+    });
+
+    /// Released at teardown, so an open that regresses into waiting on it
+    /// unwinds instead of wedging every later test's open.
+    Completer<Set<String>> heldListing() {
+      final listing = Completer<Set<String>>();
+      addTearDown(() {
+        if (!listing.isCompleted) listing.complete(<String>{});
+      });
+      return listing;
+    }
+
+    test('cache operations never wait for the wallet listing', () async {
+      await seedBothWallets();
+      final listing = heldListing();
+      final storage = await openWithCatalogue(() => listing.future);
+
+      await storage.purgeWallet(deleted).timeout(const Duration(seconds: 5));
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'kept-2'),
+      ], kept);
+      expect(await countFor(storage, kept), 2);
+
+      listing.complete({walletStorageNamespace(kept)});
+      await storage.orphanSweep;
+      expect(await countFor(storage, kept), 2);
+      expect(await countFor(storage, deleted), 0);
+    });
+
+    test('history stored after a stale listing is kept', () async {
+      await seedBothWallets();
+      final created = testWallet(name: 'created', pubkeyHash: 'created-key');
+      final listing = heldListing();
+      final storage = await openWithCatalogue(() => listing.future);
+      await storage.getStats();
+
+      await storage.storeTransactions([
+        testTransaction(assetId: asset, internalId: 'created-1'),
+      ], created);
+      listing.complete({walletStorageNamespace(kept)});
+      await storage.orphanSweep;
+
+      expect(await countFor(storage, created), 1);
+      expect(await countFor(storage, kept), 1);
+      expect(await countFor(storage, deleted), 0);
+    });
+
+    // Timeouts sit inside the lock: the native lock is process-wide, and a
+    // regression must release it rather than wedge every later catalog test.
+    group('under the wallet catalog lock', () {
+      Future<HiveTransactionStorage> openListingThroughCatalog({
+        void Function()? onListing,
+      }) => openWithCatalogue(() {
+        onListing?.call();
+        return withWalletCatalogLock(
+          () async => {walletStorageNamespace(kept)},
+        );
+      });
+
+      test('a purge that opens the cache completes', () async {
+        await seedBothWallets();
+        final storage = await openListingThroughCatalog();
+
+        await withWalletCatalogLock(
+          () =>
+              storage.purgeWallet(deleted).timeout(const Duration(seconds: 5)),
+        );
+        await storage.orphanSweep;
+
+        expect(await countFor(storage, deleted), 0);
+        expect(await countFor(storage, kept), 1);
+      });
+
+      test('a purge completes while another caller opens the cache', () async {
+        await seedBothWallets();
+        final listingStarted = Completer<void>();
+        final storage = await openListingThroughCatalog(
+          onListing: listingStarted.complete,
+        );
+        final catalogHeld = Completer<void>();
+
+        final deletion = withWalletCatalogLock(() async {
+          catalogHeld.complete();
+          await listingStarted.future;
+          await storage
+              .purgeWallet(deleted)
+              .timeout(const Duration(seconds: 5));
+        });
+        await catalogHeld.future;
+        final read = countFor(storage, kept);
+
+        await Future.wait([
+          read,
+          deletion,
+        ]).timeout(const Duration(seconds: 10));
+        await storage.orphanSweep;
+        expect(await countFor(storage, deleted), 0);
+      });
     });
   });
 

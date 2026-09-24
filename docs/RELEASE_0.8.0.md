@@ -133,6 +133,9 @@ to `delete(acknowledgedReview: ..., password: ...)`. Handle `busy`,
 `reviewChanged` and `targetChanged` explicitly. Raw SDK auth deletion requires
 the manager's one-use review permit. Directly constructed `WithdrawalManager`
 instances now require `auth`; wallet-ID resolvers cannot represent reauthentication.
+Hooks registered with `onWalletDeletion` run while deletion holds the wallet
+catalog lock, which is not re-entrant: a hook must not wait on `getUsers`,
+registration or another deletion, directly or through a cache it opens.
 
 Deletion retains unresolved encrypted GasFree records and discovery metadata.
 It does not cancel a transfer. Recovery requires re-importing the same signing

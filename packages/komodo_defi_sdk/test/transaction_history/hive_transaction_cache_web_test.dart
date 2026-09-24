@@ -8,6 +8,10 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:hive_ce/hive.dart';
+// The lock the deletion hooks run under; not public API.
+// ignore: implementation_imports
+import 'package:komodo_defi_local_auth/src/auth/wallet_catalog_lock.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/history_cache_lease.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/hive_transaction_storage.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
@@ -126,6 +130,73 @@ void main() {
     await persistent.storeTransaction(testTransaction(), wallet);
     expect(persistent.isDegraded, isFalse);
     expect(Hive.isBoxOpen(name), isTrue);
+  });
+
+  group('under the wallet catalog Web Lock', () {
+    final kept = testWallet(name: 'kept', pubkeyHash: 'kept-pubkey');
+    final deleted = testWallet(name: 'deleted', pubkeyHash: 'deleted-pubkey');
+
+    Future<void> seedBothWallets() async {
+      final store = open();
+      await store.storeTransaction(testTransaction(internalId: 'kept'), kept);
+      await store.storeTransaction(
+        testTransaction(internalId: 'deleted'),
+        deleted,
+      );
+      await store.close();
+    }
+
+    HiveTransactionStorage openListingThroughCatalog({
+      void Function()? onListing,
+    }) {
+      final store = HiveTransactionStorage(
+        boxName: name,
+        keyProvider: testHistoryCacheKeys,
+        knownWalletNamespaces: () {
+          onListing?.call();
+          return withWalletCatalogLock(
+            () async => {walletStorageNamespace(kept)},
+          );
+        },
+      );
+      handles.add(store);
+      return store;
+    }
+
+    test('a purge that opens the cache completes', () async {
+      await seedBothWallets();
+      final store = openListingThroughCatalog();
+
+      // Timeouts sit inside the lock so that a regression releases it.
+      await withWalletCatalogLock(
+        () => store.purgeWallet(deleted).timeout(const Duration(seconds: 5)),
+      );
+      await store.orphanSweep;
+
+      expect((await store.getTransactions(asset, deleted)).cachedCount, 0);
+      expect((await store.getTransactions(asset, kept)).cachedCount, 1);
+    });
+
+    test('a purge completes while another caller opens the cache', () async {
+      await seedBothWallets();
+      final listingStarted = Completer<void>();
+      final store = openListingThroughCatalog(
+        onListing: listingStarted.complete,
+      );
+      final catalogHeld = Completer<void>();
+
+      final deletion = withWalletCatalogLock(() async {
+        catalogHeld.complete();
+        await listingStarted.future;
+        await store.purgeWallet(deleted).timeout(const Duration(seconds: 5));
+      });
+      await catalogHeld.future;
+      final read = store.getTransactions(asset, kept);
+
+      await Future.wait([read, deletion]).timeout(const Duration(seconds: 10));
+      await store.orphanSweep;
+      expect((await store.getTransactions(asset, deleted)).cachedCount, 0);
+    });
   });
 
   test('legacy plaintext retirement closes its own database handles', () async {

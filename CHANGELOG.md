@@ -110,6 +110,10 @@ existing unreleased entries are extended in place.
  - **FIX**(gasfree): cancel local waits during disposal, drain journal writes
    before releasing submission ownership, and suppress detached relay/trace
    continuations while preserving unresolved outcomes for recovery (#377).
+ - **FIX**(wallet): stop wallet deletion deadlocking when the history cache has
+   not been opened yet. The cache's orphaned-wallet sweep now runs after the
+   open and lists wallets without holding the cache lock, so it no longer waits
+   on the catalog lock that `deleteWallet` holds around its purge hooks.
 
 #### `komodo_defi_local_auth` - `v0.6.0`
 
@@ -130,6 +134,8 @@ existing unreleased entries are extended in place.
  - **FIX**(auth): run sign-in, registration, sign-out, session restore and
    disposal through one serialized authentication transition, so a transition
    cannot interleave with another or with KDF lifecycle changes.
+ - **DOCS**(auth): state that `onWalletDeletion` hooks run under the wallet
+   catalog lock and must not wait on `getUsers`, registration or deletion.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,

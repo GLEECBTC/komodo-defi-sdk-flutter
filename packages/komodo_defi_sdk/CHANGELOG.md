@@ -33,6 +33,12 @@ patch of 0.7.0.
    the sweep a deleted wallet's encrypted history survived until ordinary
    eviction. The sweep fails open: an empty or throwing catalogue means "do not
    know", never "delete everything".
+ - **FIX**(wallet): stop wallet deletion deadlocking when the history cache has
+   not been opened yet. The deletion purge opened the cache while
+   `deleteWallet` held the wallet catalog lock, and the open's orphaned-wallet
+   sweep then listed wallets through that same non-reentrant lock. The sweep
+   now runs after the open, lists wallets without holding the cache lock, and
+   keeps history used since the open.
  - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
    as a value. One future is handed to every caller joining the same in-flight
    work, and those callers do not share an error zone, because `retry()` runs

@@ -20,6 +20,8 @@ authentication implementations must migrate before adopting this version.
  - **FIX**(auth): run sign-in, registration, sign-out, session restore and
    disposal through one serialized authentication transition, so a transition
    cannot interleave with another or with KDF lifecycle changes.
+ - **DOCS**(auth): state that `onWalletDeletion` hooks run under the wallet
+   catalog lock and must not wait on `getUsers`, registration or deletion.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,
