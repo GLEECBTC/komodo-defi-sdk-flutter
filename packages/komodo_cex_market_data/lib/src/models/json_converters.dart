@@ -52,6 +52,32 @@ class DecimalConverter implements JsonConverter<Decimal?, dynamic> {
   }
 }
 
+/// [DecimalConverter] for non-nullable [Decimal] fields.
+///
+/// json_serializable does not apply a nullable converter to a non-nullable
+/// field: `@DecimalConverter()` on a `Decimal` field is silently ignored, and
+/// the generated code calls `Decimal.fromJson(json as String)`, which throws on
+/// a JSON number.
+class NonNullableDecimalConverter implements JsonConverter<Decimal, dynamic> {
+  const NonNullableDecimalConverter();
+
+  /// Converts a JSON string or number to [Decimal].
+  ///
+  /// Throws a [FormatException] if [json] is null or cannot be parsed.
+  @override
+  Decimal fromJson(dynamic json) {
+    final decimal = const DecimalConverter().fromJson(json);
+    if (decimal == null) {
+      throw FormatException('Cannot convert "$json" to Decimal');
+    }
+    return decimal;
+  }
+
+  /// Converts [Decimal] to its JSON string representation.
+  @override
+  String toJson(Decimal decimal) => decimal.toString();
+}
+
 /// Custom JSON converter for Unix timestamps in seconds to UTC [DateTime].
 ///
 /// This converter handles Unix epoch timestamps (seconds since 1970-01-01 UTC)

@@ -137,14 +137,15 @@ class TestFixtures {
             'category': 'Spot',
             'fee_type': 'Percentage',
             'outlier': false,
-            'adjusted_volume24h_share': 12.5,
+            'adjusted_volume_24h_share': 12.5,
             'last_updated': TestConstants.currentTimestamp,
             'quotes': {
               TestConstants.usdQuote: {
-                'price': TestConstants.bitcoinPrice.toString(),
-                'volume_24h': TestConstants.highVolume.toString(),
+                'price': TestConstants.bitcoinPrice,
+                'volume_24h': TestConstants.highVolume,
               },
             },
+            'trust_score': 'high',
           },
         ];
 
