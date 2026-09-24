@@ -5,6 +5,7 @@ import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
+import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
@@ -218,9 +219,51 @@ void main() {
       final progress = await manager.activateAsset(_parent).toList();
       expect(progress.single.isSuccess, isTrue);
       expect(manager.activationStateOf(_parent.id)?.isActive, isTrue);
+      final coordinator = SharedActivationCoordinator(manager, auth);
+      addTearDown(coordinator.dispose);
+      final result = await coordinator.activateAsset(_parent);
+      expect(result.wasAlreadyActive, isTrue);
       verifyZeroInteractions(client);
     },
   );
+
+  for (final status in [
+    ActivationPolicyStatus.ready,
+    ActivationPolicyStatus.unavailable,
+  ]) {
+    test(
+      'a restriction applies to assets KDF still has enabled ($status)',
+      () async {
+        enabled.addAll({_parent.id, _child.id});
+        final methods = <String>[];
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request = invocation.positionalArguments.first as Map;
+          methods.add(request['method'] as String);
+          throw StateError('disable_coin unavailable');
+        });
+        final coordinator = SharedActivationCoordinator(manager, auth);
+        addTearDown(coordinator.dispose);
+        policy.update(
+          ActivationPolicySnapshot(status: status, blockedAssets: {_parent.id}),
+        );
+
+        await expectLater(
+          coordinator.activateAsset(_child),
+          throwsA(isA<ActivationPolicyException>()),
+        );
+        for (final stream in [
+          manager.activateAsset(_parent),
+          manager.activateAssets([_parent, _child]),
+        ]) {
+          await expectLater(
+            stream.toList(),
+            throwsA(isA<ActivationPolicyException>()),
+          );
+        }
+        expect(methods, everyElement('disable_coin'));
+      },
+    );
+  }
 
   test(
     'successful policy recovery allows the same previously gated asset',

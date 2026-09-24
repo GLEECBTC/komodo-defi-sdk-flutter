@@ -167,6 +167,7 @@ class SharedActivationCoordinator {
       );
     }
     if (isActive && !shouldRefreshTronGaslessActivation) {
+      _activationManager.ensureActiveAssetAllowed(asset.id);
       return ActivationResult.alreadyActive(asset.id);
     }
 
@@ -353,6 +354,10 @@ class SharedActivationCoordinator {
   Future<bool> isAssetActive(AssetId assetId) {
     return _activationManager.isAssetActive(assetId);
   }
+
+  /// See [ActivationManager.ensureActiveAssetAllowed].
+  void ensureActiveAssetAllowed(AssetId assetId) =>
+      _activationManager.ensureActiveAssetAllowed(assetId);
 
   /// Whether [assetId] was activated during this session rather than found
   /// already enabled. See [ActivationManager.wasFreshlyActivated].

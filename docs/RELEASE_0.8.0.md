@@ -124,6 +124,11 @@ policy changes through the SDK activation-policy contract. Start with loading
 until the lookup succeeds; setting policy after initialization leaves restored
 recovery free to activate assets too early. SDK standalone consumers default to
 ready. Preserve selected assets while policy defers or deactivates runtime work.
+An asset that is already active stays usable while the policy is loading or
+unavailable, but a restriction on it or its parent applies even while KDF still
+has it enabled. Activation throws `ActivationPolicyException` instead of
+reporting the asset already active, and a Tendermint or SIA withdrawal fails
+with an `SdkError` whose `source` is that exception.
 
 ## Wallet deletion and retained recovery
 

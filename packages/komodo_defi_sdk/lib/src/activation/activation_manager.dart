@@ -376,6 +376,10 @@ class ActivationManager {
   void ensureActivationAllowed(AssetId assetId) =>
       _activationPolicy.ensureAllowed(assetId);
 
+  /// Checks an asset KDF already has enabled against retained restrictions.
+  void ensureActiveAssetAllowed(AssetId assetId) =>
+      _activationPolicy.ensureNotBlocked(assetId);
+
   /// Retains an SDK service's specialized activation parameters for recovery.
   /// The registration expires at the next runtime session boundary.
   @internal
@@ -686,6 +690,9 @@ class ActivationManager {
       _requireWalletContextCurrentSync(walletContext);
       if (activationStatus.isComplete) {
         if (!shouldRefreshTronGaslessActivation) {
+          // Restricted assets stay enabled in KDF until reconciliation
+          // disables them.
+          _ensureGroupNotBlocked(group);
           // Already active. Publish it: this branch is otherwise invisible to
           // observers, and it is the common case on a warm re-login.
           _setActivationStates(_groupStates(group, _activeState));
@@ -752,6 +759,7 @@ class ActivationManager {
                 )
               : joinedStatus;
           _requireWalletContextCurrentSync(walletContext);
+          _ensureGroupNotBlocked(group);
           yield verified;
           continue;
         }
@@ -1038,6 +1046,12 @@ class ActivationManager {
 
   static AssetActivationState _activeState(AssetId id) =>
       AssetActivationState.active(id);
+
+  void _ensureGroupNotBlocked(_AssetGroup group) {
+    for (final asset in [group.primary, ...group.children]) {
+      _activationPolicy.ensureNotBlocked(asset.id);
+    }
+  }
 
   void _failGroupIfStillActivating(_AssetGroup group, String errorMessage) {
     final stuck = [group.primary, ...group.children]

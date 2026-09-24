@@ -1265,6 +1265,8 @@ class WithdrawalManager {
 
       // Tendermint assets are not yet supported by the task-based API
       if (isTendermintProtocol || isSiaProtocol) {
+        // This branch skips the activation that enforces restrictions below.
+        _activationCoordinator.ensureActiveAssetAllowed(asset.id);
         yield* _legacyManager.executeWithdrawal(preview, assetId);
         return;
       }
@@ -3097,6 +3099,7 @@ class WithdrawalManager {
       // Tendermint assets are not yet supported by the task-based API
       // and require a legacy implementation
       if (isTendermintProtocol || isSiaProtocol) {
+        _activationCoordinator.ensureActiveAssetAllowed(asset.id);
         yield* _legacyManager.withdraw(parameters);
         return;
       }
