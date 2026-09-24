@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## Unreleased
+
+ - **FIX**(market-data): request Komodo price-feed tickers updated within the
+   last 30 minutes instead of 10, so KMD stays in the response until the feed
+   replaces it rather than falling through to the fallback providers; see the
+   [komodo_cex_market_data changelog](packages/komodo_cex_market_data/CHANGELOG.md).
+
 ## 2026-09-24 — SDK 0.8.0
 
 ### SDK 0.8.0 overview
