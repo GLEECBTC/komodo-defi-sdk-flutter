@@ -3,6 +3,7 @@ import 'dart:developer' show log;
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
+import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Shared coordinator for asset activations across all managers.
@@ -153,7 +154,7 @@ class SharedActivationCoordinator {
     final existingActivation = _pendingActivations[asset.id];
     if (existingActivation != null) {
       log('Joining existing activation', name: 'SharedActivationCoordinator');
-      return (await existingActivation.future).unwrap();
+      return _allowedResult((await existingActivation.future).unwrap());
     }
 
     final shouldRefreshTronGaslessActivation = _activationManager
@@ -193,7 +194,25 @@ class SharedActivationCoordinator {
     // the initiating caller would still wait forever. Joiners were unaffected,
     // which is what made it easy to miss.
     unawaited(_driveActivation(asset, completer, deadline, session));
-    return (await completer.future).unwrap();
+    return _allowedResult((await completer.future).unwrap());
+  }
+
+  /// Rechecks a shared success against the policy as each caller receives it.
+  ///
+  /// A finished attempt stays registered until the manager has cleaned up, so
+  /// a caller can join it after a restriction was published.
+  ActivationResult _allowedResult(ActivationResult result) {
+    if (result.isFailure) return result;
+    try {
+      _activationManager.ensureActiveAssetAllowed(result.assetId);
+      return result;
+    } on ActivationPolicyException catch (error) {
+      return ActivationResult.failure(
+        result.assetId,
+        error.toString(),
+        cause: error,
+      );
+    }
   }
 
   /// Runs one activation attempt to a terminal state and completes [completer].
@@ -254,6 +273,10 @@ class SharedActivationCoordinator {
             try {
               await _waitForCoinAvailability(asset.id);
               _auth.ensureSessionContextCurrent(session);
+              final result = ActivationResult.success(asset.id);
+              if (!completer.isCompleted) {
+                completer.complete(_ActivationOutcome.result(result));
+              }
             } catch (e) {
               if (completer.isCompleted) break;
               _activationManager.recordActivationFailure(
@@ -267,15 +290,6 @@ class SharedActivationCoordinator {
               if (!completer.isCompleted) {
                 completer.complete(_ActivationOutcome.result(result));
               }
-              break;
-            }
-            // Joiners share this outcome, so a restriction published during
-            // the wait must fail it; the outer catch keeps the typed cause.
-            _activationManager.ensureActiveAssetAllowed(asset.id);
-            if (!completer.isCompleted) {
-              completer.complete(
-                _ActivationOutcome.result(ActivationResult.success(asset.id)),
-              );
             }
           } else {
             final result = ActivationResult.failure(

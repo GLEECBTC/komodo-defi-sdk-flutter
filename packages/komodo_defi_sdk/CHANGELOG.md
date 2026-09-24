@@ -55,9 +55,11 @@ source-compatible patch of 0.7.0. See the
    could evict a recently used wallet or asset under a smaller global limit.
  - **FIX**(activation): reject a restricted asset that KDF still has enabled
    instead of reporting it already active, in the shared coordinator and in
-   warm or joined manager activation. A shared activation rechecks the policy
-   before reporting success, so a restriction published while it waits for the
-   coin fails it for every joiner. Every withdrawal, including Tendermint and
+   warm or joined manager activation. A success is rechecked against the
+   policy as each caller receives it, including a caller that joins a finished
+   shared activation, so a restriction published before then fails it. A
+   restriction that stops an activation now also fails the callers that joined
+   it, which used to wait forever. Every withdrawal, including Tendermint and
    SIA withdrawals that skip activation, rechecks the restriction immediately
    before it broadcasts, so a consumer holding a progress event cannot
    broadcast after a restriction lands. Cached activation stays usable while

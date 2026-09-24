@@ -727,6 +727,8 @@ class ActivationManager {
           _requireWalletContextCurrentSync(walletContext);
         } on WalletChangedDisconnectException {
           rethrow;
+        } on ActivationPolicyException {
+          rethrow;
         } catch (e, st) {
           final mappedError = _mapError(e, group.primary.id);
           yield ActivationProgress.error(
@@ -904,6 +906,8 @@ class ActivationManager {
           }
 
           _requireWalletContextCurrentSync(walletContext);
+          // A restriction can land during the completion awaits above.
+          _ensureGroupNotBlocked(group);
           yield progress;
         }
 
@@ -934,6 +938,7 @@ class ActivationManager {
               walletContext: walletContext,
             );
             _requireWalletContextCurrentSync(walletContext);
+            _ensureGroupNotBlocked(group);
             yield verified;
           } else {
             final mappedError = _mapError(
@@ -955,7 +960,14 @@ class ActivationManager {
         }
       } on WalletChangedDisconnectException {
         rethrow;
-      } on ActivationPolicyException {
+      } on ActivationPolicyException catch (error, stackTrace) {
+        // Cleanup deregisters this attempt without completing it, which would
+        // strand anyone who joined it.
+        if (!primaryCompleter.isCompleted) {
+          primaryCompleter.complete(
+            _ActivationJoinOutcome.error(error, stackTrace),
+          );
+        }
         rethrow;
       } catch (e, st) {
         await _requireWalletContextCurrent(walletContext);
@@ -969,6 +981,7 @@ class ActivationManager {
             primaryCompleter.complete(const _ActivationJoinOutcome.success());
           }
           _setActivationStates(_groupStates(group, _activeState));
+          _ensureGroupNotBlocked(group);
           yield recoveredProgress;
           continue;
         }

@@ -35,6 +35,8 @@ class _Updates extends Mock implements KomodoAssetsUpdateManager {}
 
 class _Cache extends Mock implements ActivatedAssetsCache {}
 
+class _Manager extends Mock implements ActivationManager {}
+
 final _parent = Asset.fromJson(const {
   'coin': 'TRX',
   'type': 'TRX',
@@ -105,6 +107,7 @@ void main() {
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
     registerFallbackValue(_parent);
+    registerFallbackValue(_parent.id);
     registerFallbackValue(_user.walletId);
   });
 
@@ -292,6 +295,125 @@ void main() {
     expect(restricted, isTrue);
     expect(result.isSuccess, isFalse);
     expect(result.cause, isA<ActivationPolicyException>());
+  });
+
+  test(
+    'a caller joining a finished activation rechecks the restriction',
+    () async {
+      final activation = _Manager();
+      var restricted = false;
+      // Holds the manager's cleanup open, which keeps the finished attempt
+      // registered for joiners.
+      final cleanup = Completer<void>();
+      final progress = StreamController<ActivationProgress>(
+        onCancel: () => cleanup.future,
+      );
+      when(
+        () => activation.shouldRefreshTronGaslessActivation(any()),
+      ).thenReturn(false);
+      when(
+        () => activation.isAssetActive(any()),
+      ).thenAnswer((_) async => false);
+      when(
+        () => activation.isAssetActive(any(), forceRefresh: true),
+      ).thenAnswer((_) async => true);
+      when(
+        () => activation.activateAsset(any()),
+      ).thenAnswer((_) => progress.stream);
+      when(() => activation.ensureActiveAssetAllowed(any())).thenAnswer((_) {
+        if (restricted) {
+          throw ActivationPolicyException(
+            _parent.id,
+            ActivationPolicyStatus.ready,
+          );
+        }
+      });
+      final coordinator = SharedActivationCoordinator(activation, auth);
+      addTearDown(coordinator.dispose);
+
+      final first = coordinator.activateAsset(_parent);
+      progress.add(ActivationProgress.success());
+      expect((await first).isSuccess, isTrue);
+      restricted = true;
+      final joined = await coordinator.activateAsset(_parent);
+      cleanup.complete();
+
+      verify(() => activation.activateAsset(any())).called(1);
+      expect(joined.isSuccess, isFalse);
+      expect(joined.cause, isA<ActivationPolicyException>());
+    },
+  );
+
+  test('a restriction published while completion is recorded fails '
+      'the activation', () async {
+    when(() => history.addAssetToWallet(any(), any())).thenAnswer((_) async {
+      policy.update(
+        ActivationPolicySnapshot(
+          status: ActivationPolicyStatus.ready,
+          blockedAssets: {_parent.id},
+        ),
+      );
+    });
+    final events = <ActivationProgress>[];
+
+    await expectLater(
+      manager.activateAsset(_parent).forEach(events.add),
+      throwsA(isA<ActivationPolicyException>()),
+    );
+    expect(events.where((event) => event.isSuccess), isEmpty);
+  });
+
+  test('a restriction during activation releases joined callers', () {
+    fakeAsync((clock) {
+      unawaited(manager.dispose());
+      unawaited(policy.dispose());
+      arrange();
+      final response = Completer<Map<String, dynamic>>();
+      when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+        final request = invocation.positionalArguments.first as Map;
+        if (request['method'] == 'disable_coin') {
+          enabled.remove(_parent.id);
+          return {'result': 'success'};
+        }
+        final result = await response.future;
+        enabled.add(_parent.id);
+        return result;
+      });
+      final failures = <Object>[];
+      final events = <ActivationProgress>[];
+      final subscriptions = [
+        for (var i = 0; i < 2; i++)
+          manager
+              .activateAsset(_parent)
+              .listen(events.add, onError: failures.add),
+      ];
+      clock.flushMicrotasks();
+      policy.update(
+        ActivationPolicySnapshot(
+          status: ActivationPolicyStatus.ready,
+          blockedAssets: {_parent.id},
+        ),
+      );
+      clock.flushMicrotasks();
+      response.complete(_activationSuccess());
+      clock
+        ..flushMicrotasks()
+        ..elapse(const Duration(seconds: 5));
+
+      expect(failures, hasLength(2));
+      expect(failures, everyElement(isA<ActivationPolicyException>()));
+      expect(events.any((event) => event.isSuccess), isFalse);
+      verify(
+        () => client.executeRpc(
+          any(that: containsPair('method', 'enable_eth_with_tokens')),
+        ),
+      ).called(1);
+      for (final subscription in subscriptions) {
+        unawaited(subscription.cancel());
+      }
+      unawaited(manager.dispose());
+      clock.flushMicrotasks();
+    });
   });
 
   test(
