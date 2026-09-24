@@ -1,5 +1,16 @@
 ## 0.1.0+2 (unreleased)
 
+ - **FIX**(coinpaprika): return current prices and 24h changes for stablecoin
+   quotes such as the default USDT. CoinPaprika rejects stablecoin quotes, so
+   the provider requests the underlying fiat and the response is keyed `USD`.
+   The repository looked the quote up as `USDT`, so every lookup threw and fell
+   through to the next repository. Both sides now use the new
+   `coinPaprikaQuoteCurrency` getter on `QuoteCurrency`.
+
+ - **FIX**(coinpaprika): parse ticker quote fields with a number in their
+   name, such as `percent_change_24h` and `volume_24h`. They were read as
+   `percent_change24h` and `volume24h`, so they always came back as 0.
+
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 

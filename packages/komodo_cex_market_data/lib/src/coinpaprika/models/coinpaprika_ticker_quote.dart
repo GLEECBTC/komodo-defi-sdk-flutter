@@ -7,49 +7,56 @@ part 'coinpaprika_ticker_quote.g.dart';
 @freezed
 abstract class CoinPaprikaTickerQuote with _$CoinPaprikaTickerQuote {
   /// Creates a CoinPaprika ticker quote instance.
+  // FieldRename.snake would read `percentChange24h` from `percent_change24h`,
+  // but CoinPaprika sends `percent_change_24h`, so fields with a number in
+  // their name set their JSON key explicitly.
   @JsonSerializable(fieldRename: FieldRename.snake)
   const factory CoinPaprikaTickerQuote({
     /// Current price in the quote currency
     required double price,
 
     /// 24-hour trading volume
-    @Default(0.0) double volume24h,
+    @JsonKey(name: 'volume_24h') @Default(0.0) double volume24h,
 
     /// 24-hour volume change percentage
-    @Default(0.0) double volume24hChange24h,
+    @JsonKey(name: 'volume_24h_change_24h')
+    @Default(0.0)
+    double volume24hChange24h,
 
     /// Market capitalization
     @Default(0.0) double marketCap,
 
     /// 24-hour market cap change percentage
-    @Default(0.0) double marketCapChange24h,
+    @JsonKey(name: 'market_cap_change_24h')
+    @Default(0.0)
+    double marketCapChange24h,
 
     /// Price change percentage in the last 15 minutes
-    @Default(0.0) double percentChange15m,
+    @JsonKey(name: 'percent_change_15m') @Default(0.0) double percentChange15m,
 
     /// Price change percentage in the last 30 minutes
-    @Default(0.0) double percentChange30m,
+    @JsonKey(name: 'percent_change_30m') @Default(0.0) double percentChange30m,
 
     /// Price change percentage in the last 1 hour
-    @Default(0.0) double percentChange1h,
+    @JsonKey(name: 'percent_change_1h') @Default(0.0) double percentChange1h,
 
     /// Price change percentage in the last 6 hours
-    @Default(0.0) double percentChange6h,
+    @JsonKey(name: 'percent_change_6h') @Default(0.0) double percentChange6h,
 
     /// Price change percentage in the last 12 hours
-    @Default(0.0) double percentChange12h,
+    @JsonKey(name: 'percent_change_12h') @Default(0.0) double percentChange12h,
 
     /// Price change percentage in the last 24 hours
-    @Default(0.0) double percentChange24h,
+    @JsonKey(name: 'percent_change_24h') @Default(0.0) double percentChange24h,
 
     /// Price change percentage in the last 7 days
-    @Default(0.0) double percentChange7d,
+    @JsonKey(name: 'percent_change_7d') @Default(0.0) double percentChange7d,
 
     /// Price change percentage in the last 30 days
-    @Default(0.0) double percentChange30d,
+    @JsonKey(name: 'percent_change_30d') @Default(0.0) double percentChange30d,
 
     /// Price change percentage in the last 1 year
-    @Default(0.0) double percentChange1y,
+    @JsonKey(name: 'percent_change_1y') @Default(0.0) double percentChange1y,
 
     /// All-time high price (nullable)
     double? athPrice,

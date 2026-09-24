@@ -908,4 +908,18 @@ extension CoinPaprikaQuoteCurrency on QuoteCurrency {
       commodity: (commodity) => commodity.symbol.toLowerCase(),
     );
   }
+
+  /// The currency CoinPaprika is asked for, and answers in, for this quote.
+  ///
+  /// CoinPaprika rejects stablecoin quotes, so a stablecoin is requested as its
+  /// underlying fiat and its response is keyed by that fiat: USDT comes back
+  /// as `USD`. Other quotes map to themselves.
+  QuoteCurrency get coinPaprikaQuoteCurrency {
+    return when(
+      fiat: (_, __) => this,
+      stablecoin: (_, __, underlyingFiat) => underlyingFiat,
+      crypto: (_, __) => this,
+      commodity: (_, __) => this,
+    );
+  }
 }
