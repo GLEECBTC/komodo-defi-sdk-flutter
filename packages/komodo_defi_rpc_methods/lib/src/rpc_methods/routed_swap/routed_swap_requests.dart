@@ -2,12 +2,12 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
-/// Preferred route ordering for `routed_swap::quote`.
+/// Preferred route ordering for `routed_swap::quote` and `init`.
 enum RoutedSwapOrder {
-  /// Best net return. The default.
+  /// Minimises the quoted cost. The default.
   cheapest('cheapest'),
 
-  /// Shortest execution time.
+  /// Minimises the estimated execution time.
   fastest('fastest');
 
   const RoutedSwapOrder(this.wire);
@@ -16,9 +16,25 @@ enum RoutedSwapOrder {
   final String wire;
 }
 
+/// Shared by every routed-swap request: typed routed errors are parsed before
+/// the global registry, whose name-only lookup types several of them into
+/// unrelated domains.
+abstract class RoutedSwapRequestBase<T extends BaseResponse>
+    extends BaseRequest<T, RoutedSwapRpcException> {
+  RoutedSwapRequestBase({required super.rpcPass, required super.method})
+    : super(mmrpc: RpcVersion.v2_0);
+
+  @override
+  RoutedSwapRpcException? parseCustomErrorResponse(JsonMap json) =>
+      RoutedSwapRpcException.tryParse(json);
+}
+
 /// `routed_swap::quote` — display-only pricing. Reserves and executes nothing.
+///
+/// Optional fields are omitted when null, never sent as `null`: the engine
+/// rejects unknown and null fields.
 class RoutedSwapQuoteRequest
-    extends BaseRequest<RoutedSwapQuoteResponse, GeneralErrorResponse> {
+    extends RoutedSwapRequestBase<RoutedSwapQuoteResponse> {
   RoutedSwapQuoteRequest({
     required super.rpcPass,
     required this.from,
@@ -27,7 +43,7 @@ class RoutedSwapQuoteRequest
     this.slippage,
     this.order,
     this.provider,
-  }) : super(method: 'routed_swap::quote', mmrpc: RpcVersion.v2_0);
+  }) : super(method: 'routed_swap::quote');
 
   /// KDF ticker to sell. Must be activated.
   final String from;
@@ -73,10 +89,11 @@ class RoutedSwapQuoteResponse extends BaseResponse {
   factory RoutedSwapQuoteResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
     return RoutedSwapQuoteResponse(
-      mmrpc: json.value<String>('mmrpc'),
+      mmrpc: json.valueOrNull<String>('mmrpc') ?? '2.0',
       routes: result
           .value<List<dynamic>>('routes')
-          .map((e) => RoutedSwapRoute.fromJson(e as JsonMap))
+          .whereType<Map<dynamic, dynamic>>()
+          .map((e) => RoutedSwapRoute.fromJson(convertToJsonMap(e)))
           .toList(),
     );
   }
@@ -90,16 +107,17 @@ class RoutedSwapQuoteResponse extends BaseResponse {
   @override
   JsonMap toJson() => {
     'mmrpc': mmrpc,
-    'result': {'routes': routes.length},
+    'result': {
+      'routes': [for (final route in routes) route.toJson()],
+    },
   };
 }
 
 /// `routed_swap::supported_coins` — which activated coins may be quoted.
 class RoutedSwapSupportedCoinsRequest
-    extends
-        BaseRequest<RoutedSwapSupportedCoinsResponse, GeneralErrorResponse> {
+    extends RoutedSwapRequestBase<RoutedSwapSupportedCoinsResponse> {
   RoutedSwapSupportedCoinsRequest({required super.rpcPass, this.provider})
-    : super(method: 'routed_swap::supported_coins', mmrpc: RpcVersion.v2_0);
+    : super(method: 'routed_swap::supported_coins');
 
   /// Defaults to `lifi`.
   final String? provider;
@@ -127,11 +145,12 @@ class RoutedSwapSupportedCoinsResponse extends BaseResponse {
   factory RoutedSwapSupportedCoinsResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
     return RoutedSwapSupportedCoinsResponse(
-      mmrpc: json.value<String>('mmrpc'),
-      provider: result.value<String>('provider'),
+      mmrpc: json.valueOrNull<String>('mmrpc') ?? '2.0',
+      provider: result.valueOrNull<String>('provider') ?? 'lifi',
       coins: result
           .value<List<dynamic>>('coins')
-          .map((e) => RoutedSwapSupportedCoin.fromJson(e as JsonMap))
+          .whereType<Map<dynamic, dynamic>>()
+          .map((e) => RoutedSwapSupportedCoin.fromJson(convertToJsonMap(e)))
           .toList(),
     );
   }
@@ -148,7 +167,12 @@ class RoutedSwapSupportedCoinsResponse extends BaseResponse {
   @override
   JsonMap toJson() => {
     'mmrpc': mmrpc,
-    'result': {'provider': provider, 'coins': coins.length},
+    'result': {
+      'provider': provider,
+      'coins': [
+        for (final coin in coins) {'coin': coin.coin, 'chain_id': coin.chainId},
+      ],
+    },
   };
 }
 
@@ -158,7 +182,7 @@ class RoutedSwapSupportedCoinsResponse extends BaseResponse {
 /// KDF-side before execution begins and surfaces on the first status read; a
 /// GUI that wants a durable reference before cancelling must read status once.
 class RoutedSwapInitRequest
-    extends BaseRequest<RoutedSwapInitResponse, GeneralErrorResponse> {
+    extends RoutedSwapRequestBase<RoutedSwapInitResponse> {
   RoutedSwapInitRequest({
     required super.rpcPass,
     required this.from,
@@ -169,7 +193,7 @@ class RoutedSwapInitRequest
     this.order,
     this.provider,
     this.clientId,
-  }) : super(method: 'task::routed_swap::init', mmrpc: RpcVersion.v2_0);
+  }) : super(method: 'task::routed_swap::init');
 
   /// KDF ticker to sell.
   final String from;
@@ -191,7 +215,8 @@ class RoutedSwapInitRequest
   /// Decimal fraction, max 0.5.
   final double? slippage;
 
-  /// Route preference.
+  /// Route preference. The internal re-quote uses it, so it must match the
+  /// order the displayed quote was priced with.
   final RoutedSwapOrder? order;
 
   /// Defaults to `lifi`.
@@ -224,13 +249,17 @@ class RoutedSwapInitRequest
 typedef RoutedSwapInitResponse = NewTaskResponse;
 
 /// `task::routed_swap::status`.
+///
+/// A terminal task `Error` is a normal response here, not an exception. A
+/// top-level error — [RoutedSwapNoSuchTaskException] for a forgotten,
+/// cancelled or restarted task — still throws.
 class RoutedSwapStatusRequest
-    extends BaseRequest<RoutedSwapStatusResponse, GeneralErrorResponse> {
+    extends RoutedSwapRequestBase<RoutedSwapStatusResponse> {
   RoutedSwapStatusRequest({
     required super.rpcPass,
     required this.taskId,
     this.forgetIfFinished = false,
-  }) : super(method: 'task::routed_swap::status', mmrpc: RpcVersion.v2_0);
+  }) : super(method: 'task::routed_swap::status');
 
   /// The ephemeral task id from `init`.
   final int taskId;
@@ -273,7 +302,7 @@ class RoutedSwapStatusResponse extends BaseResponse {
     final result = json.value<JsonMap>('result');
     final status = result.value<String>('status');
     return RoutedSwapStatusResponse(
-      mmrpc: json.value<String>('mmrpc'),
+      mmrpc: json.valueOrNull<String>('mmrpc') ?? '2.0',
       status: status,
       details: RoutedSwapStatus.parse(status, result.value<JsonMap>('details')),
     );
@@ -283,10 +312,6 @@ class RoutedSwapStatusResponse extends BaseResponse {
   final String status;
 
   /// The parsed routed-swap state.
-  ///
-  /// A terminal `Error` arrives here rather than as a thrown exception — see
-  /// [RoutedSwapStatusRequest.shouldParseErrorAsResponse]. A top-level MMRPC
-  /// error (`NoSuchTask`, a malformed request) still throws.
   final RoutedSwapStatus details;
 
   @override
@@ -300,11 +325,15 @@ class RoutedSwapStatusResponse extends BaseResponse {
 ///
 /// Accepted only before `Broadcasting`. On success the task is removed, so a
 /// later status lookup returns `NoSuchTask` — the GUI confirms the cancellation
-/// through history, not by polling for a `TaskCancelled` result.
+/// through history, not by polling for a `TaskCancelled` result. Refusals are
+/// typed: [RoutedSwapNoSuchTaskException] (404),
+/// [RoutedSwapTaskFinishedException] (409),
+/// [RoutedSwapTaskAlreadyBroadcastException] (409) and
+/// [RoutedSwapInternalException] (500).
 class RoutedSwapCancelRequest
-    extends BaseRequest<RoutedSwapCancelResponse, GeneralErrorResponse> {
+    extends RoutedSwapRequestBase<RoutedSwapCancelResponse> {
   RoutedSwapCancelRequest({required super.rpcPass, required this.taskId})
-    : super(method: 'task::routed_swap::cancel', mmrpc: RpcVersion.v2_0);
+    : super(method: 'task::routed_swap::cancel');
 
   /// The task to cancel.
   final int taskId;
@@ -324,12 +353,12 @@ class RoutedSwapCancelRequest
 class RoutedSwapCancelResponse extends BaseResponse {
   RoutedSwapCancelResponse({required super.mmrpc, required this.result});
 
-  /// Parses `result`, which KDF returns either as a bare string or as
-  /// `{result: ...}` depending on the task implementation.
+  /// Parses `result`, a bare `"success"` string on the wire; a
+  /// `{result: ...}` object is tolerated too.
   factory RoutedSwapCancelResponse.parse(JsonMap json) {
     final raw = json['result'];
     return RoutedSwapCancelResponse(
-      mmrpc: json.value<String>('mmrpc'),
+      mmrpc: json.valueOrNull<String>('mmrpc') ?? '2.0',
       result: raw is Map
           ? convertToJsonMap(raw).valueOrNull<String>('result') ?? 'success'
           : raw?.toString() ?? 'success',

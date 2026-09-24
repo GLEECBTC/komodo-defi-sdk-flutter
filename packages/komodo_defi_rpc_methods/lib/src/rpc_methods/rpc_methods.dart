@@ -57,6 +57,7 @@ export 'orderbook/orderbook_rpc_namespace.dart';
 export 'orderbook/set_order.dart';
 export 'qtum/enable_qtum.dart';
 export 'qtum/qtum_rpc_namespace.dart';
+export 'routed_swap/routed_swap_errors.dart';
 export 'routed_swap/routed_swap_history.dart';
 export 'routed_swap/routed_swap_models.dart';
 export 'routed_swap/routed_swap_requests.dart';

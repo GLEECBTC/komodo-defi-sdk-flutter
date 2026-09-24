@@ -3,6 +3,25 @@
  - **FEAT**(routed-swap): add the `routed_swap` method namespace - quote,
    start, status, cancel and history requests with their typed models -
    covering aggregator-executed swaps such as cross-chain bridges.
+ - **FEAT**(routed-swap): align the models with the contract at
+   `gleec-specs#2` `0b209b2`, as emitted by KDF `feat/lifi-integration`
+   `4872ef2`:
+   - the route carries `approval`, `total_gas_costs`, addresses and typed
+     `steps`;
+   - status carries `stage`, `executed_route`, `partial_reason`, and
+     `source_tx_hash` (with a fallback to `tx_hash`);
+   - a failed task carries a sealed error type for every row of the
+     contract's error table;
+   - history carries its filters, `total_pages`, and the entry envelope with
+     timestamps, the requested side, the accepted minimum and gas spent.
+
+   Requests parse their typed errors through `RoutedSwapRpcException`.
+   Errors that happen to share a name with another method's error no longer
+   decode as that method's class.
+ - **FIX**(trading): read `my_swap_status`'s v2 `swap_data` envelope. Report
+   `SwapInfo.isSuccessful` from the swap's events: `error_events` is KDF's
+   list of every *possible* error, not the ones that occurred, so every swap
+   used to read as failed.
  - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
    `account_balance_read` wrappers used by the removed TRON export workaround.
  - **SECURITY**(wallet): redact `toString()` on private-key requests, responses

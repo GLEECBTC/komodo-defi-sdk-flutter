@@ -10,6 +10,8 @@ import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 /// Provider-generic by design: `lifi` is the only v1 value, and requests accept
 /// an optional `provider` so a second aggregator does not force a rename of
 /// anything the app codes against.
+///
+/// Top-level errors throw a typed [RoutedSwapRpcException].
 class RoutedSwapMethodsNamespace extends BaseRpcMethodNamespace {
   /// Creates the namespace.
   RoutedSwapMethodsNamespace(super.client);
@@ -96,7 +98,7 @@ class RoutedSwapMethodsNamespace extends BaseRpcMethodNamespace {
   /// both reconciliation polling and SSE recovery need to re-read a terminal
   /// result. Pass true only from a caller that owns the task outright.
   ///
-  /// Throws a top-level `NoSuchTask` once the task has been forgotten,
+  /// Throws [RoutedSwapNoSuchTaskException] once the task has been forgotten,
   /// cancelled or lost to a restart. That is not an error state for the swap —
   /// resolve it through [history] by `uuid`.
   Future<RoutedSwapStatusResponse> status(
@@ -115,7 +117,8 @@ class RoutedSwapMethodsNamespace extends BaseRpcMethodNamespace {
   /// Cancels a swap, if it has not yet been broadcast.
   ///
   /// Accepted through `FetchingQuote`, `CheckingAllowance`, `Approving` and
-  /// `Signing`. From `Broadcasting` the handoff is irreversible and this fails.
+  /// `Signing`. From `Broadcasting` the handoff is irreversible and this throws
+  /// [RoutedSwapTaskAlreadyBroadcastException].
   ///
   /// On success the task is removed, so a following [status] call answers
   /// `NoSuchTask` — confirm the cancellation through [history] instead. An
@@ -126,24 +129,31 @@ class RoutedSwapMethodsNamespace extends BaseRpcMethodNamespace {
     );
   }
 
-  /// PROVISIONAL — the durable routed-swap record.
+  /// The durable routed-swap record, newest first on `created_at`.
   ///
-  /// §7 of the contract publishes no response schema, so the parsed shape is
-  /// the GUI team's review proposal. Do not ship a history screen on this
-  /// until §7 lands. See `routed_swap_history.dart`.
+  /// Every argument is optional and omitted when null, so KDF's defaults apply
+  /// (`status_filter: all`, `limit: 10`, `page_number: 1`).
   Future<RoutedSwapHistoryResponse> history({
-    int limit = 20,
-    int pageNumber = 1,
     String? uuid,
     RoutedSwapHistoryFilter? filter,
+    String? myCoin,
+    String? otherCoin,
+    int? fromTimestamp,
+    int? toTimestamp,
+    int? limit,
+    int? pageNumber,
   }) {
     return execute(
       RoutedSwapHistoryRequest(
         rpcPass: rpcPass ?? '',
-        limit: limit,
-        pageNumber: pageNumber,
         uuid: uuid,
         filter: filter,
+        myCoin: myCoin,
+        otherCoin: otherCoin,
+        fromTimestamp: fromTimestamp,
+        toTimestamp: toTimestamp,
+        limit: limit,
+        pageNumber: pageNumber,
       ),
     );
   }
