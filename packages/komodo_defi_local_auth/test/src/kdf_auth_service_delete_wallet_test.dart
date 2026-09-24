@@ -517,6 +517,32 @@ void main() {
       );
     }
 
+    test('keeps a KDF outage retryable and secret-free', () async {
+      final auth = _createPublicAuth(
+        mnemonicResponseHandler: () =>
+            Future.error(ClientException(secretCanary)),
+      );
+      addTearDown(auth.dispose);
+
+      await expectLater(
+        auth.getMnemonicPlainText('synthetic-password'),
+        throwsA(
+          isA<AuthException>()
+              .having(
+                (error) => error.type,
+                'type',
+                AuthExceptionType.apiConnectionError,
+              )
+              .having((error) => error.details, 'details', isEmpty)
+              .having(
+                (error) => error.toString(),
+                'redacted error',
+                isNot(contains(secretCanary)),
+              ),
+        ),
+      );
+    });
+
     test('keeps other delayed failures generic and secret-free', () async {
       final auth = _createPublicAuth(
         mnemonicResponseHandler: () => Future.error(StateError(secretCanary)),

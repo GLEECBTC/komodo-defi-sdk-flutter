@@ -1265,7 +1265,15 @@ class WithdrawalManager {
 
       // Tendermint assets are not yet supported by the task-based API
       if (isTendermintProtocol || isSiaProtocol) {
-        yield* _legacyManager.executeWithdrawal(preview, assetId);
+        // This branch skips the activation that enforces restrictions below.
+        void ensureAllowed() =>
+            _activationCoordinator.ensureActiveAssetAllowed(asset.id);
+        ensureAllowed();
+        yield* _legacyManager.executeWithdrawal(
+          preview,
+          assetId,
+          beforeBroadcast: ensureAllowed,
+        );
         return;
       }
 
@@ -1347,6 +1355,11 @@ class WithdrawalManager {
         await _requireWalletContextCurrent(walletContext!);
         traceStreamSession.requireActiveForSubmission();
       }
+
+      // Activation checked the policy, but the consumer may have held the
+      // progress event above since. Before the relay flag, so a rejection
+      // still clears the GasFree reservation.
+      _activationCoordinator.ensureActiveAssetAllowed(asset.id);
 
       // Broadcast the pre-signed transaction (or relay the gas-free payload).
       final SendRawTransactionResponse response;
@@ -3097,7 +3110,13 @@ class WithdrawalManager {
       // Tendermint assets are not yet supported by the task-based API
       // and require a legacy implementation
       if (isTendermintProtocol || isSiaProtocol) {
-        yield* _legacyManager.withdraw(parameters);
+        void ensureAllowed() =>
+            _activationCoordinator.ensureActiveAssetAllowed(asset.id);
+        ensureAllowed();
+        yield* _legacyManager.withdraw(
+          parameters,
+          beforeBroadcast: ensureAllowed,
+        );
         return;
       }
 

@@ -5,6 +5,8 @@
  - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
    and key metadata, and preserve strict account/range semantics in
    `get_private_keys`.
+ - **FEAT**(activation): add `DisableCoinRequest` for `disable_coin`, which
+   disables a runtime asset without changing the wallet's saved selection.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_types` `^0.6.0`.

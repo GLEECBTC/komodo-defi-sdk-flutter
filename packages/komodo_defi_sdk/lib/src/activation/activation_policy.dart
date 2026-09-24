@@ -90,6 +90,15 @@ class ActivationPolicy {
     }
   }
 
+  /// Throws [ActivationPolicyException] when an active asset is restricted.
+  /// Unlike [ensureAllowed], ignores status, so cached activation survives a
+  /// loading or unavailable policy.
+  void ensureNotBlocked(AssetId asset) {
+    if (_current.isBlocked(asset)) {
+      throw ActivationPolicyException(asset, _current.status);
+    }
+  }
+
   /// Releases the policy stream after its consumers have stopped.
   Future<void> dispose() => _changes.close();
 }

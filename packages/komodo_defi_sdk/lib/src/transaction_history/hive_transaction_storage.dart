@@ -16,6 +16,7 @@ import 'package:komodo_defi_sdk/src/transaction_history/transaction_record_codec
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage_key.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:meta/meta.dart';
 import 'package:mutex/mutex.dart';
 
 /// A cache that can release its backing resources.
@@ -35,6 +36,10 @@ abstract interface class ClosableTransactionStorage {
 /// Every acquisition of a box shares one index and a reference-counted owner.
 /// On web an exclusive lease prevents another tab from maintaining a competing
 /// Hive index. A tab without the lease uses bounded memory instead.
+///
+/// The storage mutex is the last lock in the order catalog -> auth -> storage.
+/// Nothing awaited under it may enter authentication or the wallet catalog:
+/// wallet deletion purges this cache while it holds the catalog lock.
 class HiveTransactionStorage
     implements TransactionStorage, ClosableTransactionStorage {
   /// Acquires the shared encrypted cache, opening it lazily on first use.
@@ -121,7 +126,7 @@ class HiveTransactionStorage
   final HistoryCacheKeyProvider _keyProvider;
 
   /// Lists the wallets that still exist, consulted once per successful open.
-  /// See [_collectOrphanedWallets].
+  /// See [_sweepOrphanedWallets].
   final Future<Set<String>> Function()? _knownWalletNamespaces;
   final CompactionStrategy _compactionStrategy;
   final void Function(String, Object, StackTrace) _onError;
@@ -133,6 +138,7 @@ class HiveTransactionStorage
 
   LazyBox<String>? _box;
   Future<LazyBox<String>?>? _opening;
+  Future<void>? _orphanSweep;
   InMemoryTransactionStorage? _fallback;
   HistoryCacheLease? _lease;
   HiveCipher? _cipher;
@@ -143,6 +149,10 @@ class HiveTransactionStorage
   /// Whether this owner serves bounded memory because persistence is
   /// unavailable.
   bool get isDegraded => _fallback != null;
+
+  /// The orphaned-wallet sweep started by the most recent open, if any.
+  @visibleForTesting
+  Future<void>? get orphanSweep => _orphanSweep;
 
   /// Logical retained bytes, including serialized metadata and index
   /// allowances.
@@ -407,7 +417,12 @@ class HiveTransactionStorage
   ///
   /// Fails open in every uncertain case - a throwing or empty provider means
   /// "do not know", never "delete everything".
-  Future<void> _collectOrphanedWallets(LazyBox<String> box) async {
+  ///
+  /// Detached from the open, with the provider awaited outside the mutex:
+  /// listing wallets takes the catalog lock (see the class docs). The listing
+  /// may then be stale, so scopes used since the open are kept, as they may
+  /// belong to a wallet created after it.
+  Future<void> _sweepOrphanedWallets(LazyBox<String> box) async {
     final provider = _knownWalletNamespaces;
     if (provider == null) return;
 
@@ -423,16 +438,25 @@ class HiveTransactionStorage
     final knownTokens = known
         .map(TransactionStorageKey.tokenForNamespace)
         .toSet();
-    final orphaned = <String>{
-      for (final scope in _index.prefixes)
-        if (!knownTokens.contains(
-          scope.split(TransactionStorageKey.separator).first,
-        ))
-          scope,
-    };
-    if (orphaned.isEmpty) return;
-
-    await _removeScopes(box, orphaned.toList());
+    try {
+      await _mutex.protect(() async {
+        // Closed, degraded or reopened while the wallets were being listed.
+        if (!identical(_box, box)) return;
+        // Every read, write or id lookup since the open marks its scope dirty,
+        // and only close flushes that set.
+        final orphaned = [
+          for (final scope in _index.prefixes)
+            if (!_dirtyScopes.contains(scope) &&
+                !knownTokens.contains(
+                  scope.split(TransactionStorageKey.separator).first,
+                ))
+              scope,
+        ];
+        if (orphaned.isNotEmpty) await _removeScopes(box, orphaned);
+      });
+    } on TransactionStorageException {
+      // Already reported; the next open sweeps again.
+    }
   }
 
   Future<void> _removeScopes(LazyBox<String> box, List<String> scopes) async {
@@ -627,7 +651,7 @@ class HiveTransactionStorage
       }
       _box = opened;
       await _rebuildFromEnvelopes(opened);
-      await _collectOrphanedWallets(opened);
+      _orphanSweep = _sweepOrphanedWallets(opened);
       return opened;
     } on Object catch (error, stack) {
       await _degrade(
@@ -685,11 +709,18 @@ class HiveTransactionStorage
           _lastAccess = envelope.accessedAt;
         }
       }
-      invalid.addAll(_retention.prune());
       if (invalid.isNotEmpty) {
         await box.deleteAll(invalid);
         deleted = true;
       }
+    }
+    // Only once every row is indexed: a scope's recency lives on its latest
+    // row alone (see [_flushAccesses]), so pruning a partial index can evict
+    // a recently used scope whose latest row is in a later batch.
+    final evicted = _retention.prune();
+    if (evicted.isNotEmpty) {
+      await box.deleteAll(evicted);
+      deleted = true;
     }
     _rebuildIndex();
     if (deleted) await box.compact();
