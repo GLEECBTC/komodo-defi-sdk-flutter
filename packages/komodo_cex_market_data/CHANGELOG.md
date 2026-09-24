@@ -1,5 +1,9 @@
 ## 0.1.0+2 (unreleased)
 
+ - **FIX**(coinpaprika): parse ticker quote fields with a number in their
+   name, such as `percent_change_24h` and `volume_24h`. They were read as
+   `percent_change24h` and `volume24h`, so they always came back as 0.
+
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 

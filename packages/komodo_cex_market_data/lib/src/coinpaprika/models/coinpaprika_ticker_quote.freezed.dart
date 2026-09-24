@@ -17,19 +17,19 @@ mixin _$CoinPaprikaTickerQuote {
 
 /// Current price in the quote currency
  double get price;/// 24-hour trading volume
- double get volume24h;/// 24-hour volume change percentage
- double get volume24hChange24h;/// Market capitalization
+@JsonKey(name: 'volume_24h') double get volume24h;/// 24-hour volume change percentage
+@JsonKey(name: 'volume_24h_change_24h') double get volume24hChange24h;/// Market capitalization
  double get marketCap;/// 24-hour market cap change percentage
- double get marketCapChange24h;/// Price change percentage in the last 15 minutes
- double get percentChange15m;/// Price change percentage in the last 30 minutes
- double get percentChange30m;/// Price change percentage in the last 1 hour
- double get percentChange1h;/// Price change percentage in the last 6 hours
- double get percentChange6h;/// Price change percentage in the last 12 hours
- double get percentChange12h;/// Price change percentage in the last 24 hours
- double get percentChange24h;/// Price change percentage in the last 7 days
- double get percentChange7d;/// Price change percentage in the last 30 days
- double get percentChange30d;/// Price change percentage in the last 1 year
- double get percentChange1y;/// All-time high price (nullable)
+@JsonKey(name: 'market_cap_change_24h') double get marketCapChange24h;/// Price change percentage in the last 15 minutes
+@JsonKey(name: 'percent_change_15m') double get percentChange15m;/// Price change percentage in the last 30 minutes
+@JsonKey(name: 'percent_change_30m') double get percentChange30m;/// Price change percentage in the last 1 hour
+@JsonKey(name: 'percent_change_1h') double get percentChange1h;/// Price change percentage in the last 6 hours
+@JsonKey(name: 'percent_change_6h') double get percentChange6h;/// Price change percentage in the last 12 hours
+@JsonKey(name: 'percent_change_12h') double get percentChange12h;/// Price change percentage in the last 24 hours
+@JsonKey(name: 'percent_change_24h') double get percentChange24h;/// Price change percentage in the last 7 days
+@JsonKey(name: 'percent_change_7d') double get percentChange7d;/// Price change percentage in the last 30 days
+@JsonKey(name: 'percent_change_30d') double get percentChange30d;/// Price change percentage in the last 1 year
+@JsonKey(name: 'percent_change_1y') double get percentChange1y;/// All-time high price (nullable)
  double? get athPrice;/// Date of all-time high (nullable)
  DateTime? get athDate;/// Percentage from all-time high price (nullable)
  double? get percentFromPriceAth;
@@ -65,7 +65,7 @@ abstract mixin class $CoinPaprikaTickerQuoteCopyWith<$Res>  {
   factory $CoinPaprikaTickerQuoteCopyWith(CoinPaprikaTickerQuote value, $Res Function(CoinPaprikaTickerQuote) _then) = _$CoinPaprikaTickerQuoteCopyWithImpl;
 @useResult
 $Res call({
- double price, double volume24h, double volume24hChange24h, double marketCap, double marketCapChange24h, double percentChange15m, double percentChange30m, double percentChange1h, double percentChange6h, double percentChange12h, double percentChange24h, double percentChange7d, double percentChange30d, double percentChange1y, double? athPrice, DateTime? athDate, double? percentFromPriceAth
+ double price,@JsonKey(name: 'volume_24h') double volume24h,@JsonKey(name: 'volume_24h_change_24h') double volume24hChange24h, double marketCap,@JsonKey(name: 'market_cap_change_24h') double marketCapChange24h,@JsonKey(name: 'percent_change_15m') double percentChange15m,@JsonKey(name: 'percent_change_30m') double percentChange30m,@JsonKey(name: 'percent_change_1h') double percentChange1h,@JsonKey(name: 'percent_change_6h') double percentChange6h,@JsonKey(name: 'percent_change_12h') double percentChange12h,@JsonKey(name: 'percent_change_24h') double percentChange24h,@JsonKey(name: 'percent_change_7d') double percentChange7d,@JsonKey(name: 'percent_change_30d') double percentChange30d,@JsonKey(name: 'percent_change_1y') double percentChange1y, double? athPrice, DateTime? athDate, double? percentFromPriceAth
 });
 
 
@@ -186,7 +186,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( double price,  double volume24h,  double volume24hChange24h,  double marketCap,  double marketCapChange24h,  double percentChange15m,  double percentChange30m,  double percentChange1h,  double percentChange6h,  double percentChange12h,  double percentChange24h,  double percentChange7d,  double percentChange30d,  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( double price, @JsonKey(name: 'volume_24h')  double volume24h, @JsonKey(name: 'volume_24h_change_24h')  double volume24hChange24h,  double marketCap, @JsonKey(name: 'market_cap_change_24h')  double marketCapChange24h, @JsonKey(name: 'percent_change_15m')  double percentChange15m, @JsonKey(name: 'percent_change_30m')  double percentChange30m, @JsonKey(name: 'percent_change_1h')  double percentChange1h, @JsonKey(name: 'percent_change_6h')  double percentChange6h, @JsonKey(name: 'percent_change_12h')  double percentChange12h, @JsonKey(name: 'percent_change_24h')  double percentChange24h, @JsonKey(name: 'percent_change_7d')  double percentChange7d, @JsonKey(name: 'percent_change_30d')  double percentChange30d, @JsonKey(name: 'percent_change_1y')  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CoinPaprikaTickerQuote() when $default != null:
 return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marketCap,_that.marketCapChange24h,_that.percentChange15m,_that.percentChange30m,_that.percentChange1h,_that.percentChange6h,_that.percentChange12h,_that.percentChange24h,_that.percentChange7d,_that.percentChange30d,_that.percentChange1y,_that.athPrice,_that.athDate,_that.percentFromPriceAth);case _:
@@ -207,7 +207,7 @@ return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marke
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( double price,  double volume24h,  double volume24hChange24h,  double marketCap,  double marketCapChange24h,  double percentChange15m,  double percentChange30m,  double percentChange1h,  double percentChange6h,  double percentChange12h,  double percentChange24h,  double percentChange7d,  double percentChange30d,  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( double price, @JsonKey(name: 'volume_24h')  double volume24h, @JsonKey(name: 'volume_24h_change_24h')  double volume24hChange24h,  double marketCap, @JsonKey(name: 'market_cap_change_24h')  double marketCapChange24h, @JsonKey(name: 'percent_change_15m')  double percentChange15m, @JsonKey(name: 'percent_change_30m')  double percentChange30m, @JsonKey(name: 'percent_change_1h')  double percentChange1h, @JsonKey(name: 'percent_change_6h')  double percentChange6h, @JsonKey(name: 'percent_change_12h')  double percentChange12h, @JsonKey(name: 'percent_change_24h')  double percentChange24h, @JsonKey(name: 'percent_change_7d')  double percentChange7d, @JsonKey(name: 'percent_change_30d')  double percentChange30d, @JsonKey(name: 'percent_change_1y')  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaTickerQuote():
 return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marketCap,_that.marketCapChange24h,_that.percentChange15m,_that.percentChange30m,_that.percentChange1h,_that.percentChange6h,_that.percentChange12h,_that.percentChange24h,_that.percentChange7d,_that.percentChange30d,_that.percentChange1y,_that.athPrice,_that.athDate,_that.percentFromPriceAth);case _:
@@ -227,7 +227,7 @@ return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marke
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( double price,  double volume24h,  double volume24hChange24h,  double marketCap,  double marketCapChange24h,  double percentChange15m,  double percentChange30m,  double percentChange1h,  double percentChange6h,  double percentChange12h,  double percentChange24h,  double percentChange7d,  double percentChange30d,  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( double price, @JsonKey(name: 'volume_24h')  double volume24h, @JsonKey(name: 'volume_24h_change_24h')  double volume24hChange24h,  double marketCap, @JsonKey(name: 'market_cap_change_24h')  double marketCapChange24h, @JsonKey(name: 'percent_change_15m')  double percentChange15m, @JsonKey(name: 'percent_change_30m')  double percentChange30m, @JsonKey(name: 'percent_change_1h')  double percentChange1h, @JsonKey(name: 'percent_change_6h')  double percentChange6h, @JsonKey(name: 'percent_change_12h')  double percentChange12h, @JsonKey(name: 'percent_change_24h')  double percentChange24h, @JsonKey(name: 'percent_change_7d')  double percentChange7d, @JsonKey(name: 'percent_change_30d')  double percentChange30d, @JsonKey(name: 'percent_change_1y')  double percentChange1y,  double? athPrice,  DateTime? athDate,  double? percentFromPriceAth)?  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaTickerQuote() when $default != null:
 return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marketCap,_that.marketCapChange24h,_that.percentChange15m,_that.percentChange30m,_that.percentChange1h,_that.percentChange6h,_that.percentChange12h,_that.percentChange24h,_that.percentChange7d,_that.percentChange30d,_that.percentChange1y,_that.athPrice,_that.athDate,_that.percentFromPriceAth);case _:
@@ -242,37 +242,37 @@ return $default(_that.price,_that.volume24h,_that.volume24hChange24h,_that.marke
 
 @JsonSerializable(fieldRename: FieldRename.snake)
 class _CoinPaprikaTickerQuote implements CoinPaprikaTickerQuote {
-  const _CoinPaprikaTickerQuote({required this.price, this.volume24h = 0.0, this.volume24hChange24h = 0.0, this.marketCap = 0.0, this.marketCapChange24h = 0.0, this.percentChange15m = 0.0, this.percentChange30m = 0.0, this.percentChange1h = 0.0, this.percentChange6h = 0.0, this.percentChange12h = 0.0, this.percentChange24h = 0.0, this.percentChange7d = 0.0, this.percentChange30d = 0.0, this.percentChange1y = 0.0, this.athPrice, this.athDate, this.percentFromPriceAth});
+  const _CoinPaprikaTickerQuote({required this.price, @JsonKey(name: 'volume_24h') this.volume24h = 0.0, @JsonKey(name: 'volume_24h_change_24h') this.volume24hChange24h = 0.0, this.marketCap = 0.0, @JsonKey(name: 'market_cap_change_24h') this.marketCapChange24h = 0.0, @JsonKey(name: 'percent_change_15m') this.percentChange15m = 0.0, @JsonKey(name: 'percent_change_30m') this.percentChange30m = 0.0, @JsonKey(name: 'percent_change_1h') this.percentChange1h = 0.0, @JsonKey(name: 'percent_change_6h') this.percentChange6h = 0.0, @JsonKey(name: 'percent_change_12h') this.percentChange12h = 0.0, @JsonKey(name: 'percent_change_24h') this.percentChange24h = 0.0, @JsonKey(name: 'percent_change_7d') this.percentChange7d = 0.0, @JsonKey(name: 'percent_change_30d') this.percentChange30d = 0.0, @JsonKey(name: 'percent_change_1y') this.percentChange1y = 0.0, this.athPrice, this.athDate, this.percentFromPriceAth});
   factory _CoinPaprikaTickerQuote.fromJson(Map<String, dynamic> json) => _$CoinPaprikaTickerQuoteFromJson(json);
 
 /// Current price in the quote currency
 @override final  double price;
 /// 24-hour trading volume
-@override@JsonKey() final  double volume24h;
+@override@JsonKey(name: 'volume_24h') final  double volume24h;
 /// 24-hour volume change percentage
-@override@JsonKey() final  double volume24hChange24h;
+@override@JsonKey(name: 'volume_24h_change_24h') final  double volume24hChange24h;
 /// Market capitalization
 @override@JsonKey() final  double marketCap;
 /// 24-hour market cap change percentage
-@override@JsonKey() final  double marketCapChange24h;
+@override@JsonKey(name: 'market_cap_change_24h') final  double marketCapChange24h;
 /// Price change percentage in the last 15 minutes
-@override@JsonKey() final  double percentChange15m;
+@override@JsonKey(name: 'percent_change_15m') final  double percentChange15m;
 /// Price change percentage in the last 30 minutes
-@override@JsonKey() final  double percentChange30m;
+@override@JsonKey(name: 'percent_change_30m') final  double percentChange30m;
 /// Price change percentage in the last 1 hour
-@override@JsonKey() final  double percentChange1h;
+@override@JsonKey(name: 'percent_change_1h') final  double percentChange1h;
 /// Price change percentage in the last 6 hours
-@override@JsonKey() final  double percentChange6h;
+@override@JsonKey(name: 'percent_change_6h') final  double percentChange6h;
 /// Price change percentage in the last 12 hours
-@override@JsonKey() final  double percentChange12h;
+@override@JsonKey(name: 'percent_change_12h') final  double percentChange12h;
 /// Price change percentage in the last 24 hours
-@override@JsonKey() final  double percentChange24h;
+@override@JsonKey(name: 'percent_change_24h') final  double percentChange24h;
 /// Price change percentage in the last 7 days
-@override@JsonKey() final  double percentChange7d;
+@override@JsonKey(name: 'percent_change_7d') final  double percentChange7d;
 /// Price change percentage in the last 30 days
-@override@JsonKey() final  double percentChange30d;
+@override@JsonKey(name: 'percent_change_30d') final  double percentChange30d;
 /// Price change percentage in the last 1 year
-@override@JsonKey() final  double percentChange1y;
+@override@JsonKey(name: 'percent_change_1y') final  double percentChange1y;
 /// All-time high price (nullable)
 @override final  double? athPrice;
 /// Date of all-time high (nullable)
@@ -313,7 +313,7 @@ abstract mixin class _$CoinPaprikaTickerQuoteCopyWith<$Res> implements $CoinPapr
   factory _$CoinPaprikaTickerQuoteCopyWith(_CoinPaprikaTickerQuote value, $Res Function(_CoinPaprikaTickerQuote) _then) = __$CoinPaprikaTickerQuoteCopyWithImpl;
 @override @useResult
 $Res call({
- double price, double volume24h, double volume24hChange24h, double marketCap, double marketCapChange24h, double percentChange15m, double percentChange30m, double percentChange1h, double percentChange6h, double percentChange12h, double percentChange24h, double percentChange7d, double percentChange30d, double percentChange1y, double? athPrice, DateTime? athDate, double? percentFromPriceAth
+ double price,@JsonKey(name: 'volume_24h') double volume24h,@JsonKey(name: 'volume_24h_change_24h') double volume24hChange24h, double marketCap,@JsonKey(name: 'market_cap_change_24h') double marketCapChange24h,@JsonKey(name: 'percent_change_15m') double percentChange15m,@JsonKey(name: 'percent_change_30m') double percentChange30m,@JsonKey(name: 'percent_change_1h') double percentChange1h,@JsonKey(name: 'percent_change_6h') double percentChange6h,@JsonKey(name: 'percent_change_12h') double percentChange12h,@JsonKey(name: 'percent_change_24h') double percentChange24h,@JsonKey(name: 'percent_change_7d') double percentChange7d,@JsonKey(name: 'percent_change_30d') double percentChange30d,@JsonKey(name: 'percent_change_1y') double percentChange1y, double? athPrice, DateTime? athDate, double? percentFromPriceAth
 });
 
 
