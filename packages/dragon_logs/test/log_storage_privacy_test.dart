@@ -11,6 +11,7 @@ import 'package:dragon_logs/src/storage/queue_mixin.dart';
 import 'package:dragon_logs/src/storage/storage_lifecycle.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/widgets.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:test/test.dart';
 
@@ -153,6 +154,25 @@ void main() {
     expect(
       records.map((record) => (jsonDecode(record) as Map)['index']).toSet(),
       Set<int>.from(List.generate(30, (index) => index)),
+    );
+  });
+
+  test('export and retention follow file dates, not names', () async {
+    await init();
+    final epoch = '${documents.path}/$_epoch';
+    await File('$epoch/APP-LOGS_2026-01-01.log').writeAsString('"2026"\n');
+    await File('$epoch/Z_2020-01-01.log').writeAsString('"2020"\n');
+    await File('$epoch/my.app_2019-12-31.log').writeAsString('"2019"\n');
+
+    expect(await storage.exportLogsStream().join(), '"2019"\n"2020"\n"2026"\n');
+    await storage.deleteOldLogs('"2026"\n'.length);
+    expect(
+      await Directory(epoch)
+          .list()
+          .where((entity) => entity is File)
+          .map((file) => p.basename(file.path))
+          .toList(),
+      ['APP-LOGS_2026-01-01.log'],
     );
   });
 

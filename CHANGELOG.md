@@ -3,7 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## 2026-09-11 — SDK 0.8.0 (unreleased)
+## Unreleased
+
+ - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
+   on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
+   harness fixture. A liquidity source separate from the atomic-swap orderbook.
+ - **BUILD**(kdf): the bundled KDF artefact is repinned to
+   `feat/lifi-integration` `4872ef2e0bb07348673e1578aca4aca53f3d73b6`, which
+   implements the routed-swap contract; see the
+   [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
+
+## 2026-09-24 — SDK 0.8.0
 
 ### SDK 0.8.0 overview
 
@@ -23,9 +33,6 @@ below, plus the earlier changes since that tag:
    validation and cleanup, and ETH-BASE asset support. See the
    [0.5.0 preparation](#2026-03-23--sdk-050-preparation) and
    [0.6.0 preparation](#2026-05-02--sdk-060-preparation) for package details.
- - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
-   on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
-   harness fixture. A liquidity source separate from the atomic-swap orderbook.
  - **FEAT**(gasfree): KDF's activation-time provider configuration, four-state
    account status, maximum-send contract, wallet journal and trace recovery.
    Recovery preserves uncertain outcomes without automatic resubmission.
@@ -43,17 +50,16 @@ Adopters coming from the tagged SDK must also migrate the earlier GasFree,
 activation-progress, SIA and asset-snapshot interfaces described in those
 package entries. Read the [migration guide](docs/RELEASE_0.8.0.md) and
 [release checklist](docs/RELEASE_0.8.0_CHECKLIST.md) before repinning a consumer.
-The KDF binary/coin pins and supported Dart/Flutter constraints are unchanged
-by this preparation PR. The `add/routed-swap` branch has since repinned the KDF
-artefact to `feat/lifi-integration`
-`4872ef2e0bb07348673e1578aca4aca53f3d73b6`; see the
-[komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
+The KDF binary pin and supported Dart/Flutter constraints are unchanged. The
+bundled coins configuration moves to the POL rename on the coins repository's
+`master` (`f766b261`), and `CoinSubClass.matic` is renamed to
+`CoinSubClass.polygon` to match.
 
 ### Package versions
 
 Packages with breaking API changes in this promotion: `komodo_defi_sdk`,
-`komodo_defi_local_auth`, `dragon_logs`. Earlier breaking changes are described
-in the linked preparation history.
+`komodo_defi_local_auth`, `komodo_defi_types`, `dragon_logs`. Earlier breaking
+changes are described in the linked preparation history.
 
 | Package | Stable version |
 | --- | --- |
@@ -74,6 +80,74 @@ existing unreleased entries are extended in place.
 
 #### `komodo_defi_sdk` - `v0.8.0`
 
+ - **SECURITY**(history): authenticate the transaction cache. Records were
+   AES-CBC with no authentication tag, and the surrounding CRC-32 gave no
+   integrity - CRC-32 is affine, so an edit could be corrected without knowing
+   the seed, and the web backend writes no CRC at all. Records are now
+   AES-256-GCM: an altered, truncated or relocated record fails its tag check
+   and is dropped instead of decoding into plausible bytes. The key is
+   re-derived under a new label, so a cache from a previous release is rejected
+   at open and rebuilt from providers.
+ - **BREAKING** **FEAT**(history): bound the persisted transaction cache and
+   hide its metadata. Database keys are opaque keyed identifiers, and
+   timestamps, wallet and asset scope and transaction IDs live inside the
+   encrypted records. Retention defaults to 1,000 transactions per wallet and
+   asset, 20,000 overall and 64 MiB, set through
+   `KomodoDefiSdkConfig.transactionHistoryCachePolicy`. Storage reads return
+   `CachedTransactionPage`, whose `cachedCount` counts retained rows rather
+   than a provider total. The previous plaintext cache is deleted, never read
+   or migrated.
+ - **BREAKING** **FEAT**(auth): issue session contexts. Runtime work survives
+   metadata and hash refreshes, while work from a replaced, signed-out or
+   reauthenticated session is rejected. Sensitive writes still verify identity
+   inside the persistence lock.
+ - **BREAKING** **FEAT**(auth): make wallet creation and initial metadata
+   persistence atomic. A name collision fails with a typed error, and an
+   existing wallet requires an explicit login rather than being adopted.
+ - **BREAKING** **FEAT**(assets): separate saved selection from runtime
+   activation. Activation returns typed outcomes, and the host's policy applies
+   before a restored session can activate anything.
+ - **BREAKING** **FEAT**(wallet): prepare deletion against a reviewed wallet and
+   recovery snapshot, recheck it under the submission lease, report busy while
+   an outcome is being recorded, and retain unresolved GasFree recovery records
+   after deletion.
+ - **FIX**(wallet): restore the open-time orphaned-wallet sweep as a deletion
+   backstop. The deletion-time purge stays the primary path, but in the store's
+   degraded memory-only mode it throws and its failure is swallowed, so without
+   the sweep a deleted wallet's encrypted history survived until ordinary
+   eviction. The sweep fails open: an empty or throwing catalogue means "do not
+   know", never "delete everything".
+ - **FIX**(wallet): stop wallet deletion deadlocking when the history cache has
+   not been opened yet. The deletion purge opened the cache while
+   `deleteWallet` held the wallet catalog lock, and the open's orphaned-wallet
+   sweep then listed wallets through that same non-reentrant lock. The sweep
+   now runs after the open, lists wallets without holding the cache lock, and
+   keeps history used since the open.
+ - **FIX**(history): prune a reopened cache only once every row is indexed. A
+   scope's recency lives on its latest row alone, so pruning batch by batch
+   could evict a recently used wallet or asset under a smaller global limit.
+ - **FIX**(activation): reject a restricted asset that KDF still has enabled
+   instead of reporting it already active, in the shared coordinator and in
+   warm or joined manager activation. A success is rechecked against the
+   policy as each caller receives it, including a caller that joins a finished
+   shared activation, so a restriction published before then fails it. A
+   restriction that stops an activation now also fails the callers that joined
+   it, which used to wait forever. Every withdrawal, including Tendermint and
+   SIA withdrawals that skip activation, rechecks the restriction immediately
+   before it broadcasts, so a consumer holding a progress event cannot
+   broadcast after a restriction lands. Cached activation stays usable while
+   the policy is loading or unavailable, unless a retained restriction covers
+   the asset or its parent.
+ - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
+   as a value. One future is handed to every caller joining the same in-flight
+   work, and those callers do not share an error zone, because `retry()` runs
+   each attempt inside its own `runZonedGuarded`. Dart will not deliver a
+   future's error across that boundary: it reports the error as uncaught in the
+   creating zone and leaves the cross-zone joiner waiting forever. Each caller
+   now rethrows the outcome in its own zone.
+ - **FIX**(history): decode the legacy `matic` `sub_class` name as
+   `CoinSubClass.polygon`, so transaction history stored before the rename is
+   not downgraded to `CoinSubClass.unknown`.
  - **FIX**(history): preserve verified wallet identity and active history streams
    during degraded same-wallet authentication events.
  - **FIX**(history): retain one wallet context across historical and live results
@@ -136,13 +210,50 @@ existing unreleased entries are extended in place.
  - **FIX**(auth): run sign-in, registration, sign-out, session restore and
    disposal through one serialized authentication transition, so a transition
    cannot interleave with another or with KDF lifecycle changes.
+ - **BREAKING** **FEAT**(auth): add session contexts to `KomodoDefiAuth` and the
+   auth service interface: `captureSessionContext`, `isSessionContextCurrent`,
+   `ensureSessionContextCurrent`, `watchSessionContext` and
+   `updateMetadataForSession`. A context survives metadata and identity
+   refreshes but not a sign-out, a wallet switch or reauthentication.
+   `AuthSessionContext`, `AuthSessionChangedException` and
+   `AuthIdentityUnavailableException` are exported, and custom implementations
+   must provide the new members. See the
+   [migration guide](docs/RELEASE_0.8.0.md#wallet-identity-and-authentication).
+ - **BREAKING** **FEAT**(auth): `register` and `registerStream` accept
+   `initialMetadata`, saved with the new wallet's first record before it is
+   published. A name that already exists fails with `walletAlreadyExists`
+   instead of signing into that wallet.
+ - **BREAKING** **FEAT**(auth): `deleteWallet` accepts a one-use
+   `WalletDeletionPermit`. Once `requireWalletDeletionReview` installs a
+   coordinator, deletion without a permit from `authorizeWalletDeletion` throws
+   `WalletDeletionReviewRequiredException`. The permit's check runs against the
+   fresh catalog record before the RPC, and the auth service's `deleteWallet`
+   gains `beforeDelete` and `afterDelete`. See the
+   [migration guide](docs/RELEASE_0.8.0.md#wallet-deletion-and-retained-recovery).
+ - **FIX**(auth): serialize wallet creation, listing and deletion across local
+   SDK instances and browser tabs with a catalog lock, and stored-user writes
+   with a record lock; both are Web Locks in the browser. Stored users change
+   through atomic read-modify-write updates. `onWalletDeletion` hooks run
+   inside the deletion's catalog transaction, so a hook must not wait on
+   `getUsers`, registration or another deletion.
+ - **FEAT**(auth): stamp each stored wallet with an SDK-owned entry identity
+   (`walletEntryIdMetadataKey`), renewed when the wallet is recreated, so a
+   deletion review cannot apply to a replacement with the same name. Metadata
+   updates cannot write that key.
+ - **FIX**(auth): report a KDF outage during mnemonic retrieval as
+   `apiConnectionError`, so callers can retry, without the failed RPC's text.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_framework` `^0.6.0`, `komodo_defi_types` `^0.6.0`,
    `komodo_defi_rpc_methods` `^0.7.0`.
+ - **CHORE**(deps): add `web` `^1.1.1` for the browser Web Locks.
 
 #### `komodo_defi_framework` - `v0.6.0`
 
+ - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
+   the coins repository's `master` (`f766b261`). It was pinned to the
+   `config-generate/test-pol` branch while the rename was in review; the
+   release ships the `master` commit.
  - **SECURITY**(diagnostics): omit request, configuration, response and
    exception bodies from native, remote, WASM, RPC-client and startup logging.
    Every message reaching `logStream` or an external log callback is sanitized
@@ -156,6 +267,15 @@ existing unreleased entries are extended in place.
 
 #### `komodo_defi_types` - `v0.6.0`
 
+ - **BREAKING**(coins): rename `CoinSubClass.matic` to `CoinSubClass.polygon`
+   and return `POL` from its `ticker` and `iconTicker`, following the
+   MATIC -> POL rename in the coins configuration. `formatted` ("Polygon") and
+   `tokenStandardSuffix` ("PLG20") are unchanged, so `CoinSubClass.parse` now
+   resolves "Polygon" by exact enum name and "POL" by exact ticker rather than
+   by substring fallback — the latter previously resolved to the unsupported
+   `CoinSubClass.slp`. The pre-rename "Matic" label still parses as
+   `CoinSubClass.polygon`, so asset configs and custom tokens stored before the
+   rename keep loading.
  - **FEAT**(private-keys): add the structured per-asset export result types used
    by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
    `zDerivationPath` on private-key metadata. Coverage describes supported
@@ -180,6 +300,8 @@ existing unreleased entries are extended in place.
  - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
    and key metadata, and preserve strict account/range semantics in
    `get_private_keys`.
+ - **FEAT**(activation): add `DisableCoinRequest` for `disable_coin`, which
+   disables a runtime asset without changing the wallet's saved selection.
 
  - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
    `komodo_defi_types` `^0.6.0`.
@@ -212,6 +334,12 @@ existing unreleased entries are extended in place.
  - **FIX**(export): share native export ownership across storage instances in
    one isolate using canonical paths, and serialize snapshot cleanup with clear.
    Retention survives disposal; concurrent shares use separate cache directories.
+ - **FIX**(export): hold a Web Lock on each browser export snapshot, so a clear
+   in another same-origin tab or worker skips it. The browser releases the lock
+   if the owning context exits.
+ - **FIX**(storage): order log files by the date in their names for retention
+   and export. A name may carry any prefix, so lexical order could delete newer
+   logs first and export them out of order.
 
 ## 2026-09-01 — SDK 0.7.0 preparation
 

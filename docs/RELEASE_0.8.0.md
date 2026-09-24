@@ -124,6 +124,13 @@ policy changes through the SDK activation-policy contract. Start with loading
 until the lookup succeeds; setting policy after initialization leaves restored
 recovery free to activate assets too early. SDK standalone consumers default to
 ready. Preserve selected assets while policy defers or deactivates runtime work.
+An asset that is already active stays usable while the policy is loading or
+unavailable, but a restriction on it or its parent applies even while KDF still
+has it enabled. Activation fails with `ActivationPolicyException` instead of
+reporting the asset already active: it is thrown, or is the `cause` of the
+failed `ActivationResult` when the restriction lands while activation is in
+flight. A withdrawal about to broadcast fails with an `SdkError` whose `source`
+is that exception.
 
 ## Wallet deletion and retained recovery
 
@@ -133,6 +140,9 @@ to `delete(acknowledgedReview: ..., password: ...)`. Handle `busy`,
 `reviewChanged` and `targetChanged` explicitly. Raw SDK auth deletion requires
 the manager's one-use review permit. Directly constructed `WithdrawalManager`
 instances now require `auth`; wallet-ID resolvers cannot represent reauthentication.
+Hooks registered with `onWalletDeletion` run while deletion holds the wallet
+catalog lock, which is not re-entrant: a hook must not wait on `getUsers`,
+registration or another deletion, directly or through a cache it opens.
 
 Deletion retains unresolved encrypted GasFree records and discovery metadata.
 It does not cancel a transfer. Recovery requires re-importing the same signing
@@ -199,8 +209,11 @@ isolate**, using canonical directory paths. It survives storage disposal.
 Disk locks serialize storage operations, but export retention is not a lease
 across isolates or processes: keep native export and export-cache cleanup in
 the same isolate. Browser writes and migration require Web Locks and fail
-closed when unavailable. Older clients can recreate legacy records; close them
-to complete migration. Files already downloaded or shared cannot be revoked.
+closed when unavailable. A browser export also holds a Web Lock on its
+snapshot, so a clear in any same-origin tab or worker skips it; the browser
+releases that lock if the owning context exits. Older clients can recreate
+legacy records; close them to complete migration. Files already downloaded or
+shared cannot be revoked.
 
 See [Dragon Logs migration guidance](../packages/dragon_logs/README.md#migrating-to-sanitized-diagnostic-records).
 
@@ -238,6 +251,15 @@ issuing manager. Retain it through the operation and recheck it immediately
 before presenting or sharing sensitive output. An authentication transition
 invalidates pending results even when the wallet name stays the same.
 
+## Polygon (POL) rename
+
+The bundled coins configuration follows the MATIC -> POL rename.
+`CoinSubClass.matic` is now `CoinSubClass.polygon`, and its `ticker` and
+`iconTicker` return `POL`; replace references to the old value. Transaction
+history stored under the old `matic` sub-class still decodes as Polygon, and
+asset configs stored with the old `Matic` type label, including custom tokens,
+still load as Polygon.
+
 ## Earlier migrations included in this release
 
 Consumers upgrading from the last SDK tag also need the changes documented in
@@ -249,5 +271,5 @@ Preserve unknown GasFree submission outcomes for explicit recovery and do not
 resubmit them automatically. Provider outages must not erase recovery state.
 
 The current KDF contract and artefacts are pinned in the release checklist.
-This release does not add a new KDF/coins roll or broaden native/browser
-validation beyond the checks recorded there.
+Apart from the coins roll above, this release does not roll KDF or broaden
+native/browser validation beyond the checks recorded there.

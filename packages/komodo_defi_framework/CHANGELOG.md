@@ -1,4 +1,4 @@
-## 0.6.0 (unreleased)
+## Unreleased
 
  - **FIX**(rpc): keep KDF's typed error body when a remote or local
    executable answers with a non-200 status. It used to be replaced with a
@@ -11,6 +11,9 @@
    from `main` at `750be938` and does not carry the five later `main` merges;
    it still lacks the websocket `.expect` fix, so `ws_url` expansion stays off
    on web.
+
+## 0.6.0 (2026-09-24)
+
  - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
    the coins repository's `master` (`f766b261`). It was pinned to the
    `config-generate/test-pol` branch while the rename was in review; the

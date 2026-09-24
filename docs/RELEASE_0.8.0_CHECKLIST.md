@@ -14,6 +14,15 @@ Distribution remains a pinned GitHub checkout/submodule.
   superseded by this removal.
 - [x] Carry native export retention across storage instances in a separate
   commit, addressing [review r3989814001](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/375#discussion_r3989814001).
+- [x] Resolve [the September 23 review](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/382#issuecomment-5798363928)
+  and the outstanding Codex threads in #386: wallet deletion no longer
+  deadlocks on an unopened history cache, restricted assets that KDF still has
+  enabled are rejected, and log ordering, browser export retention, cache
+  pruning and mnemonic outage errors are corrected.
+- [x] Keep parsing the pre-rename `Matic` type label as Polygon, following
+  [the September 24 review](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/382#discussion_r4091498753),
+  so assets stored before the MATIC -> POL rename still load, and date the
+  0.8.0 changelog sections 2026-09-24.
 - [x] Promote the seven candidates and all 19 dependency constraints that
   reference them. Preserve other versions and supported-version constraints.
 - [x] Consolidate candidate notes, retain earlier preparation history, and
@@ -45,16 +54,14 @@ Example, playground and product versions also remain unchanged.
 
 The authoritative input is
 [`build_config.json`](../packages/komodo_defi_framework/app_build/build_config.json).
-Its full contents, including required platforms, download sources and archive
-checksums, are unchanged by the 0.8.0 preparation PR. `add/routed-swap`
-changes `api.branch`, `api.api_commit_hash` and all seven
-`valid_zip_sha256_checksums` - see
-[`packages/komodo_defi_framework/CHANGELOG.md`](../packages/komodo_defi_framework/CHANGELOG.md).
+Since preparation only the bundled coins pin has changed: #384 moved it to the
+POL rename on the coins repository's `master`. Required platforms, download
+sources and archive checksums are unchanged.
 
 | Input | Pin |
 | --- | --- |
-| KDF | `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`, `main`) at 0.8.0 preparation; repinned on `add/routed-swap` to `4872ef2e0bb07348673e1578aca4aca53f3d73b6` (`feat/lifi-integration`) |
-| Bundled coins | `a4fa5547a2c508223dc4e5c449549699c9049856` |
+| KDF | `f3efd2ca10420f2982fa127dde84dcc17891f577` (`3.1.0-beta_f3efd2c`, `main`) |
+| Bundled coins | `f766b261cd0f13be832034b86427dc9bb2669e0a` (POL rename, #384) |
 | Coin repository | `GLEECBTC/coins`, `master` |
 | KDF mirrors | `https://devbuilds.gleec.com`, then `https://nebula.decker.im` |
 | Validation toolchain | Flutter `3.41.4` / Dart `3.11.1`, macOS arm64 |
@@ -129,8 +136,8 @@ harness cases retained their existing skip policy.
 | Former pinned KDF active TRON export, HD indices 0 and 7 | Historical: 1 passed with synthetic local fixtures; workaround and contract test removed on September 14 |
 | Harness replay, HD | 28 passed, 3 skipped |
 | Harness replay, legacy/Iguana | 28 passed, 3 skipped |
-| SDK example web release build | Passed; embedded KDF and coin pins match the table above |
-| Playground web release build | Passed; embedded KDF and coin pins match the table above |
+| SDK example web release build | Passed; embedded the KDF pin above and the then-current coins pin `a4fa5547` |
+| Playground web release build | Passed; embedded the KDF pin above and the then-current coins pin `a4fa5547` |
 | Isolated wallet unit gate | 991 passed, 3 existing skips, all four GasFree defines |
 | Compliance console sample | 8 passed |
 | Changed Dart formatting / diff whitespace | Passed; four Dart files already formatted |

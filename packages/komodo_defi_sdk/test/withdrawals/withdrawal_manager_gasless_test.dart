@@ -6,6 +6,7 @@ import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
     hide Bip44Chain;
+import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
 import 'package:komodo_defi_sdk/src/fees/fee_manager.dart';
@@ -3392,6 +3393,44 @@ void main() {
       expect(progress.last.withdrawalResult?.gaslessTraceId, isNull);
       expect(await pendingRepository.list(_wallet), isEmpty);
     });
+
+    test(
+      'standard broadcast rechecks a restriction after a held event',
+      () async {
+        final methods = <String>[];
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          methods.add(request['method'] as String);
+          return {'tx_hash': 'standard-hash'};
+        });
+        final progress = StreamIterator(
+          makeManager().executeWithdrawal(_standardPreview(), _coin),
+        );
+        expect(await progress.moveNext(), isTrue);
+
+        when(
+          () => activationCoordinator.ensureActiveAssetAllowed(trc20Asset.id),
+        ).thenThrow(
+          ActivationPolicyException(
+            trc20Asset.id,
+            ActivationPolicyStatus.ready,
+          ),
+        );
+        await expectLater(
+          progress.moveNext(),
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.source,
+              'source',
+              isA<ActivationPolicyException>(),
+            ),
+          ),
+        );
+        await progress.cancel();
+        expect(methods, isEmpty);
+      },
+    );
 
     test(
       'raw GasFree relay marker cannot select the typed GasFree rail',

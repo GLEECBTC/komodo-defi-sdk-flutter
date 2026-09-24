@@ -317,6 +317,43 @@ void main() {
     },
   );
 
+  test('reopening under a smaller global cap keeps recent scopes', () async {
+    // Must span several reopen batches; see the prune in _rebuildFromEnvelopes.
+    final recentAssets = [
+      for (var a = 0; a < 5; a++) testAssetId(id: 'RECENT-$a'),
+    ];
+    final store = open();
+    for (final recent in recentAssets) {
+      await store.storeTransactions([
+        for (var i = 0; i < 10; i++)
+          testTransaction(
+            assetId: recent,
+            internalId: '${recent.id}-$i',
+            timestamp: DateTime.utc(2026, 1, 1, 0, i),
+          ),
+      ], wallet);
+    }
+    await store.storeTransactions([
+      for (var i = 0; i < 400; i++)
+        testTransaction(
+          internalId: 'stale-$i',
+          timestamp: DateTime.utc(2026, 2, 1, 0, i),
+        ),
+    ], wallet);
+    for (final recent in recentAssets) {
+      await store.getTransactions(recent, wallet);
+    }
+    await store.close();
+
+    final smaller = open(
+      policy: const TransactionHistoryCachePolicy(maxTransactions: 60),
+    );
+    for (final recent in recentAssets) {
+      expect((await smaller.getTransactions(recent, wallet)).cachedCount, 10);
+    }
+    expect((await smaller.getTransactions(asset, wallet)).cachedCount, 10);
+  });
+
   for (final persistent in [false, true]) {
     test(
       '${persistent ? 'disk' : 'memory'} evicts the least recently used scope '

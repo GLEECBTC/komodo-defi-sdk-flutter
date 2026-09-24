@@ -346,6 +346,11 @@ abstract interface class KomodoDefiAuth {
   /// Hook failures are contained and logged by the caller of the hook:
   /// purging is best-effort, and a cache that will not clear must not make
   /// the wallet look undeleted.
+  ///
+  /// Hooks run while [deleteWallet] holds the wallet catalog lock, which is
+  /// not re-entrant. A hook must never wait - directly, or through a cache it
+  /// opens - on [getUsers], registration or another deletion: that deadlocks
+  /// the deletion.
   void onWalletDeletion(Future<void> Function(WalletId walletId) hook);
 
   /// Disposes of any resources held by the authentication service.

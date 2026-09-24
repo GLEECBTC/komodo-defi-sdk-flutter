@@ -56,9 +56,9 @@ Map<String, dynamic> _historyResult() => {
   },
 };
 
-KdfScript _script() {
+KdfScript _script({bool walletExists = false}) {
   final script =
-      (KdfWalletFixture()
+      (KdfWalletFixture(walletExists: walletExists)
             ..enableUtxo(_ticker)
             ..balance(_ticker))
           .build();
@@ -106,6 +106,51 @@ void main() {
           (candidate) => candidate.walletId.name == user.walletId.name,
         ),
         isTrue,
+      );
+    });
+
+    test('deleting a wallet after a cold start purges its history', () async {
+      const password = 'harness-ColdStart1!';
+      final first = await KdfHarness.replayed(
+        script: _script(),
+        workspace: workspace,
+        deleteWorkspaceOnDispose: false,
+      );
+      final user = await first.signIn(
+        walletType: KdfWalletType.iguana,
+        password: password,
+      );
+      await first.sdk.transactions
+          .getTransactionsStreamed(_assetFor(first))
+          .first
+          .timeout(const Duration(seconds: 20));
+      await first.dispose();
+
+      // Fresh SDK, not signed in: the purge hook must be the first to open the
+      // history cache, whose orphan sweep then needs the catalog lock
+      // deleteWallet holds.
+      final second = await KdfHarness.replayed(
+        script: _script(walletExists: true),
+        workspace: workspace,
+        deleteWorkspaceOnDispose: false,
+      );
+      addTearDown(second.dispose);
+      final review = await second.sdk.walletDeletion.prepare(
+        user.walletId.name,
+      );
+      final deletion = await second.sdk.walletDeletion
+          .delete(acknowledgedReview: review, password: password)
+          .timeout(const Duration(seconds: 20));
+      expect(deletion.status, WalletDeletionStatus.deleted);
+
+      final storage = HiveTransactionStorage();
+      addTearDown(storage.close);
+      expect(
+        (await storage.getTransactions(
+          _assetFor(second).id,
+          user.walletId,
+        )).cachedCount,
+        0,
       );
     });
 
