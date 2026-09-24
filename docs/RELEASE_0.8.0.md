@@ -256,7 +256,9 @@ invalidates pending results even when the wallet name stays the same.
 The bundled coins configuration follows the MATIC -> POL rename.
 `CoinSubClass.matic` is now `CoinSubClass.polygon`, and its `ticker` and
 `iconTicker` return `POL`; replace references to the old value. Transaction
-history stored under the old `matic` sub-class still decodes as Polygon.
+history stored under the old `matic` sub-class still decodes as Polygon, and
+asset configs stored with the old `Matic` type label, including custom tokens,
+still load as Polygon.
 
 ## Earlier migrations included in this release
 

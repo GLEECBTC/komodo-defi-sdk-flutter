@@ -172,7 +172,8 @@ enum CoinSubClass {
   ///
   /// Attempts to match the string to a coin subclass with the following
   /// precedence:
-  /// - Exact enum name match (highest priority)
+  /// - The legacy `Matic` label, as [CoinSubClass.polygon]
+  /// - Exact enum name match
   /// - Exact ticker match (with tie-breakers, e.g. 'UTXO' -> utxo)
   /// - Partial match to the subclass name
   /// - Partial match to the subclass ticker
@@ -185,6 +186,9 @@ enum CoinSubClass {
     final regex = RegExp('(${filteredChars.join('|')})');
 
     final sanitizedValue = value.toLowerCase().replaceAll(regex, '');
+
+    // Configs stored before the MATIC -> POL rename still carry "Matic".
+    if (sanitizedValue == 'matic') return CoinSubClass.polygon;
 
     // First, try to find exact enum name match (highest priority)
     try {
