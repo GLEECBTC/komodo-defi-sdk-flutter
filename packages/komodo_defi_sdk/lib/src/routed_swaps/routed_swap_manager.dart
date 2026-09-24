@@ -101,10 +101,12 @@ class RoutedSwapManager {
 
   /// How much of the probed network fee a native-coin Max holds back.
   ///
-  /// Gas moves between the probe and the swap, so the reserve carries a
-  /// margin; leftover dust is the cheaper failure than a swap that cannot pay
-  /// for itself.
-  static final Decimal maxSellFeeMargin = Decimal.parse('1.25');
+  /// The probe reports the provider's gas estimate at today's price, but
+  /// KDF checks the balance at start against the route's gas limit at its
+  /// own maximum fee per gas, which runs well above that. A reserve short of
+  /// KDF's figure fails the start, so the margin is generous: leftover dust
+  /// is the cheaper failure.
+  static final Decimal maxSellFeeMargin = Decimal.parse('3');
 
   /// Wallet assets that are eligible to be quoted.
   ///

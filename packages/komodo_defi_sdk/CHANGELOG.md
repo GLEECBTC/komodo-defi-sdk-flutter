@@ -22,6 +22,10 @@
      start.
    - **Cancelling:** refusals are typed.
    - **Max:** `maxSellAmount` is an interim Max until the contract has one.
+     For a network's own coin it keeps back three times the probed network
+     fee: KDF checks the balance at start against the route's gas limit at
+     its own maximum fee per gas, which runs well above the provider's
+     estimate.
 
 ## 0.8.0 (2026-09-24)
 

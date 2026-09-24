@@ -204,7 +204,7 @@ void _cases1() {
       expect(client.requestsFor('routed_swap::quote'), isEmpty);
     });
 
-    test('a native sell holds back 1.25x its network fee', () async {
+    test('a native sell holds back 3x its network fee', () async {
       final fixture = RoutedSwapFixture()
         ..quote(
           route(
@@ -219,9 +219,9 @@ void _cases1() {
       final max = await _managerFor(
         client,
       ).maxSellAmount(from: low, to: usdc, balance: Decimal.one);
-      // 0.0013 * 1.25 = 0.001625, ceiled to 4 decimals; the rest floored.
-      expect(max.reservedForFees, Decimal.parse('0.0017'));
-      expect(max.amount, Decimal.parse('0.9983'));
+      // 0.0013 * 3 = 0.0039, ceiled to 4 decimals; the rest floored.
+      expect(max.reservedForFees, Decimal.parse('0.0039'));
+      expect(max.amount, Decimal.parse('0.9961'));
       expect(max.feeAsset, low);
       expect(client.paramsFor('routed_swap::quote').single['amount'], '1');
     });
