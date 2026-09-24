@@ -1,4 +1,4 @@
-## 2.1.1 (unreleased)
+## 2.1.1 (2026-09-24)
 
  - **SECURITY**(seed-nodes): keep the configured URL out of seed-node fetch
    failures by building the URI inside the same diagnostic boundary as transport

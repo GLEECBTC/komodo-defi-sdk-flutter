@@ -1,4 +1,4 @@
-## 0.8.0 (unreleased)
+## 0.8.0 (2026-09-24)
 
 Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export
 remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-overview).

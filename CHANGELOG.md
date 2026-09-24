@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## 2026-09-11 — SDK 0.8.0 (unreleased)
+## 2026-09-24 — SDK 0.8.0
 
 ### SDK 0.8.0 overview
 
@@ -263,7 +263,9 @@ existing unreleased entries are extended in place.
    `tokenStandardSuffix` ("PLG20") are unchanged, so `CoinSubClass.parse` now
    resolves "Polygon" by exact enum name and "POL" by exact ticker rather than
    by substring fallback — the latter previously resolved to the unsupported
-   `CoinSubClass.slp`.
+   `CoinSubClass.slp`. The pre-rename "Matic" label still parses as
+   `CoinSubClass.polygon`, so asset configs and custom tokens stored before the
+   rename keep loading.
  - **FEAT**(private-keys): add the structured per-asset export result types used
    by `SecurityManager.exportPrivateKeys`, and carry `viewingKey` and
    `zDerivationPath` on private-key metadata. Coverage describes supported

@@ -19,6 +19,10 @@ Distribution remains a pinned GitHub checkout/submodule.
   deadlocks on an unopened history cache, restricted assets that KDF still has
   enabled are rejected, and log ordering, browser export retention, cache
   pruning and mnemonic outage errors are corrected.
+- [x] Keep parsing the pre-rename `Matic` type label as Polygon, following
+  [the September 24 review](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/382#discussion_r4091498753),
+  so assets stored before the MATIC -> POL rename still load, and date the
+  0.8.0 changelog sections 2026-09-24.
 - [x] Promote the seven candidates and all 19 dependency constraints that
   reference them. Preserve other versions and supported-version constraints.
 - [x] Consolidate candidate notes, retain earlier preparation history, and

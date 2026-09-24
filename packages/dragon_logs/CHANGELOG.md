@@ -1,4 +1,4 @@
-## 3.0.0 (unreleased)
+## 3.0.0 (2026-09-24)
 
 > Note: This version has breaking storage and logger interfaces.
 
