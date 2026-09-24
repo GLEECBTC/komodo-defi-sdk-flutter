@@ -19,7 +19,7 @@ enum CoinSubClass {
   ethereumClassic,
   ubiq,
   bep20,
-  matic,
+  polygon,
   utxo,
   smartBch,
   erc20,
@@ -77,8 +77,8 @@ enum CoinSubClass {
         return 'UBQ';
       case CoinSubClass.bep20:
         return 'BNB';
-      case CoinSubClass.matic:
-        return 'MATIC';
+      case CoinSubClass.polygon:
+        return 'POL';
       case CoinSubClass.smartBch:
         return 'BCH';
       case CoinSubClass.erc20:
@@ -141,8 +141,8 @@ enum CoinSubClass {
         return 'UBQ';
       case CoinSubClass.bep20:
         return 'BNB';
-      case CoinSubClass.matic:
-        return 'MATIC';
+      case CoinSubClass.polygon:
+        return 'POL';
       case CoinSubClass.smartBch:
         return 'BCH';
       case CoinSubClass.erc20:
@@ -172,7 +172,8 @@ enum CoinSubClass {
   ///
   /// Attempts to match the string to a coin subclass with the following
   /// precedence:
-  /// - Exact enum name match (highest priority)
+  /// - The legacy `Matic` label, as [CoinSubClass.polygon]
+  /// - Exact enum name match
   /// - Exact ticker match (with tie-breakers, e.g. 'UTXO' -> utxo)
   /// - Partial match to the subclass name
   /// - Partial match to the subclass ticker
@@ -185,6 +186,9 @@ enum CoinSubClass {
     final regex = RegExp('(${filteredChars.join('|')})');
 
     final sanitizedValue = value.toLowerCase().replaceAll(regex, '');
+
+    // Configs stored before the MATIC -> POL rename still carry "Matic".
+    if (sanitizedValue == 'matic') return CoinSubClass.polygon;
 
     // First, try to find exact enum name match (highest priority)
     try {
@@ -305,7 +309,7 @@ enum CoinSubClass {
         return 'Ubiq';
       case CoinSubClass.bep20:
         return 'Binance Smart Chain';
-      case CoinSubClass.matic:
+      case CoinSubClass.polygon:
         return 'Polygon';
       case CoinSubClass.utxo:
         return 'Native';
@@ -370,8 +374,8 @@ enum CoinSubClass {
         return const Color(0xFF04E88E); // ubq: "#04e88e"
       case CoinSubClass.bep20:
         return const Color(0xFFF1B82E); // bnb: "#f1b82e"
-      case CoinSubClass.matic:
-        return const Color(0xFF6E40D7); // matic: "#6e40d7"
+      case CoinSubClass.polygon:
+        return const Color(0xFF6E40D7); // polygon: "#6e40d7"
       case CoinSubClass.utxo:
         return const Color(0xFF58C0AB); // kmd: "#58C0AB"
       case CoinSubClass.smartBch:
@@ -424,7 +428,7 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'BASE';
       case CoinSubClass.avx20:
         return 'AVX20';
-      case CoinSubClass.matic:
+      case CoinSubClass.polygon:
         return 'PLG20';
       case CoinSubClass.moonriver:
         return 'MVR20';
@@ -459,7 +463,7 @@ const Set<CoinSubClass> evmCoinSubClasses = {
   CoinSubClass.avx20,
   CoinSubClass.bep20,
   CoinSubClass.ftm20,
-  CoinSubClass.matic,
+  CoinSubClass.polygon,
   CoinSubClass.hrc20,
   CoinSubClass.arbitrum,
   CoinSubClass.base,

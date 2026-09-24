@@ -1,9 +1,11 @@
-## 0.1.0+2
+## 0.1.0+2 (unreleased)
+
+ - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
+   retain this package version from the earlier preparation milestone.
 
  - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
    imports. It resolved only through the workspace, so `dart pub publish`
    rejected the package.
- - Update a dependency to the latest release.
 
 ## 0.1.0+1
 

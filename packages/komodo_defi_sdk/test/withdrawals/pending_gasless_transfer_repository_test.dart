@@ -893,6 +893,221 @@ void main() {
     );
   });
 
+  group('atomic acceptance', () {
+    test('attaches a trace only to its existing request', () async {
+      final repository = SecurePendingGaslessTransferRepository(
+        storage: _MemoryStorage(),
+      );
+      final accepted = _transfer();
+      expect(await repository.accept(_wallet, accepted), isFalse);
+      expect(
+        await repository.reserve(_wallet, _transfer(traceId: null)),
+        isTrue,
+      );
+      expect(await repository.accept(_wallet, accepted), isTrue);
+      expect(await repository.list(_wallet), [accepted]);
+    });
+
+    test(
+      'retry retains advanced progress and never resurrects terminal work',
+      () async {
+        final storage = _MemoryStorage();
+        final repository = SecurePendingGaslessTransferRepository(
+          storage: storage,
+        );
+        final accepted = _transfer();
+        await repository.reserve(_wallet, _transfer(traceId: null));
+        expect(await repository.accept(_wallet, accepted), isTrue);
+        await repository.reconcile(
+          _wallet,
+          accepted.copyWith(state: GaslessTransferState.confirming),
+        );
+        expect(await repository.accept(_wallet, accepted), isTrue);
+        expect(
+          (await repository.list(_wallet)).single.state,
+          GaslessTransferState.confirming,
+        );
+        await repository.reconcile(
+          _wallet,
+          accepted.copyWith(state: GaslessTransferState.confirmed),
+        );
+        final restarted = SecurePendingGaslessTransferRepository(
+          storage: storage,
+        );
+        expect(await restarted.accept(_wallet, accepted), isFalse);
+        expect(await restarted.list(_wallet), isEmpty);
+      },
+    );
+
+    test(
+      'retry cannot overwrite a replacement trace or authorization',
+      () async {
+        for (final replacement in [
+          _transfer(traceId: 'replacement-trace'),
+          _transfer(authorizationDeadline: BigInt.from(1783691000)),
+        ]) {
+          final repository = SecurePendingGaslessTransferRepository(
+            storage: _MemoryStorage(),
+          );
+          await repository.upsert(_wallet, replacement);
+          expect(await repository.accept(_wallet, _transfer()), isFalse);
+          expect(await repository.list(_wallet), [replacement]);
+        }
+      },
+    );
+  });
+
+  group('atomic trace reconciliation', () {
+    for (final state in [
+      GaslessTransferState.confirmed,
+      GaslessTransferState.failedFinal,
+    ]) {
+      test(
+        '$state cannot be resurrected across repository instances',
+        () async {
+          final storage = _MemoryStorage();
+          final first = SecurePendingGaslessTransferRepository(
+            storage: storage,
+          );
+          final second = SecurePendingGaslessTransferRepository(
+            storage: storage,
+          );
+          final pending = _transfer();
+          await first.upsert(_wallet, pending);
+          final stale = (await second.list(_wallet)).single;
+
+          final terminal = await first.reconcile(
+            _wallet,
+            pending.copyWith(state: state),
+          );
+          expect(terminal?.state, state);
+          expect(await second.reconcile(_wallet, stale), isNull);
+          expect(
+            await second.reconcile(
+              _wallet,
+              stale.copyWith(
+                state: state == GaslessTransferState.confirmed
+                    ? GaslessTransferState.failedFinal
+                    : GaslessTransferState.confirmed,
+              ),
+            ),
+            isNull,
+          );
+          final restarted = SecurePendingGaslessTransferRepository(
+            storage: storage,
+          );
+          expect(await restarted.list(_wallet), isEmpty);
+          expect(await restarted.reconcile(_wallet, stale), isNull);
+          expect(
+            await restarted.reserve(
+              _wallet,
+              _transfer(journalId: 'new-request', traceId: null),
+            ),
+            isTrue,
+          );
+        },
+      );
+    }
+
+    test('late snapshots retain more advanced durable lifecycle', () async {
+      final storage = _MemoryStorage();
+      final first = SecurePendingGaslessTransferRepository(storage: storage);
+      final second = SecurePendingGaslessTransferRepository(storage: storage);
+      final pending = _transfer();
+      await first.upsert(_wallet, pending);
+      await first.reconcile(
+        _wallet,
+        pending.copyWith(state: GaslessTransferState.confirming),
+      );
+      for (final staleState in [
+        GaslessTransferState.submittedPending,
+        GaslessTransferState.submittedUnknown,
+        GaslessTransferState.preparing,
+      ]) {
+        final effective = await second.reconcile(
+          _wallet,
+          pending.copyWith(state: staleState, updatedAt: DateTime.utc(2030)),
+        );
+        expect(effective?.state, GaslessTransferState.confirming);
+      }
+      final restarted = SecurePendingGaslessTransferRepository(
+        storage: storage,
+      );
+      expect(
+        (await restarted.list(_wallet)).single.state,
+        GaslessTransferState.confirming,
+      );
+    });
+
+    for (final replacement in [
+      _transfer(journalId: 'new-request'),
+      _transfer(traceId: 'new-trace'),
+      _transfer(sourceAddress: 'TAnotherSource'),
+      _transfer(authorizationDeadline: BigInt.from(1783691000)),
+    ]) {
+      test('stale trace cannot modify replacement ${replacement.journalId}/'
+          '${replacement.traceId}/${replacement.sourceAddress}/'
+          '${replacement.authorizationDeadline}', () async {
+        final storage = _MemoryStorage();
+        final repository = SecurePendingGaslessTransferRepository(
+          storage: storage,
+        );
+        final stale = _transfer();
+        await repository.upsert(_wallet, stale);
+        await repository.remove(_wallet, stale.journalId);
+        await repository.upsert(_wallet, replacement);
+
+        expect(await repository.reconcile(_wallet, stale), isNull);
+        for (final terminal in [
+          GaslessTransferState.confirmed,
+          GaslessTransferState.failedFinal,
+        ]) {
+          expect(
+            await repository.reconcile(
+              _wallet,
+              stale.copyWith(state: terminal),
+            ),
+            isNull,
+          );
+        }
+        expect(await repository.list(_wallet), [replacement]);
+      });
+    }
+
+    test('terminal write failure keeps the recovery record durable', () async {
+      final storage = _MemoryStorage();
+      final repository = SecurePendingGaslessTransferRepository(
+        storage: storage,
+      );
+      final pending = _transfer();
+      // Retain another source so terminal removal uses the encrypted write.
+      final other = _transfer(
+        journalId: 'other',
+        traceId: 'other-trace',
+        custodyAddress: 'TOtherCustody',
+      );
+      await repository.upsert(_wallet, pending);
+      await repository.upsert(_wallet, other);
+      storage.failNextWriteFor = _scopedKey(_wallet);
+
+      await expectLater(
+        repository.reconcile(
+          _wallet,
+          pending.copyWith(state: GaslessTransferState.confirmed),
+        ),
+        throwsStateError,
+      );
+      final restarted = SecurePendingGaslessTransferRepository(
+        storage: storage,
+      );
+      expect(await restarted.find(_wallet, pending.journalId), pending);
+      expect(
+        await restarted.reserve(_wallet, _transfer(journalId: 'retry')),
+        isFalse,
+      );
+    });
+  });
+
   test('terminal state removes the durable correlation', () async {
     final repository = SecurePendingGaslessTransferRepository(
       storage: _MemoryStorage(),

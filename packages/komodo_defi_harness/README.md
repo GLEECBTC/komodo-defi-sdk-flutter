@@ -231,6 +231,11 @@ bootstrap mints its own password for auth's `LocalConfig` by reading
 `rpc_password` out of secure storage; a mismatch makes `startKdf` throw an
 `ArgumentError` far from the cause.
 
+Replay harnesses keep this mock in memory per persistence workspace. Reopening
+the same workspace preserves the SDK's cache encryption key; deleting it through
+`dispose` clears that mock. This models key lifetime, not native keychain
+protection, and never writes mock secrets to disk.
+
 **SSE event streaming escapes the replay seam.** It dials a hardcoded
 `127.0.0.1:7783` outside `mm2Rpc`
 (`komodo_defi_framework/lib/src/streaming/event_streaming_platform_io.dart`).

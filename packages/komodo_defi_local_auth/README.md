@@ -6,17 +6,11 @@ Authentication and wallet management on top of the Komodo DeFi Framework. This p
 
 ## Install
 
-```sh
-dart pub add komodo_defi_local_auth
-```
-
-This checkout prepares `0.6.0-rc.1`, which requires the
-[metadata-write migration](#migrating-metadata-writes). Test it from a pinned
-checkout before publication. Once published, opt in explicitly:
-
-```sh
-flutter pub add komodo_defi_local_auth:0.6.0-rc.1
-```
+This checkout prepares `komodo_defi_local_auth` `0.6.0` for SDK 0.8.0. Use the
+[pinned checkout/submodule instructions](../../docs/RELEASE_0.8.0.md#pin-the-complete-checkout)
+and resolve all SDK dependencies from the same reviewed commit. Stable version
+metadata here does not imply pub.dev publication. Review the
+[release migrations](../../docs/RELEASE_0.8.0.md) before updating a consumer.
 
 ## Getting started
 
@@ -98,6 +92,24 @@ the latest active wallet immediately before persistence, or retry with that
 wallet's identity. Custom implementations and test doubles must accept and
 forward the required argument. Prefer atomic key updates to replacing the whole
 metadata map, which can still overwrite concurrent changes for the same wallet.
+
+## Migrating authentication lifecycle
+
+Custom `IAuthService` implementations and test doubles must provide
+`authGeneration`, `authGenerationChanges`, `isAuthTransitionInProgress`,
+`invalidateAuthSession()`, `beginAuthTransition()` and `endAuthTransition()`.
+`KomodoDefiAuth` forwards the source-owned generation so capability users can
+observe revocation synchronously.
+
+Increase the generation and notify its stream synchronously before any
+asynchronous authentication transition proceeds. `beginAuthTransition` must
+mark the service busy before notifying listeners; pair it with
+`endAuthTransition` in `finally`, including nested transitions. Disposal also
+revokes the generation and leaves the service unavailable. Serialize sign-in,
+registration, sign-out, session restore and disposal so KDF lifecycle work
+cannot interleave. A sign-out and sign-in to the same wallet still invalidates
+previous export sessions; an asynchronous auth-state event alone is too late.
+Use the existing `KdfAuthService` implementation as the lifecycle reference.
 
 ## License
 

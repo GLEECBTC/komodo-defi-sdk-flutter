@@ -1,5 +1,8 @@
-import 'package:collection/collection.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_cache_retention.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_merge_utils.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_record_codec.dart';
+import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage_key.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mutex/mutex.dart';
 
@@ -18,7 +21,7 @@ abstract interface class TransactionStorage {
   );
 
   /// Retrieve transactions for an asset with pagination
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
@@ -39,309 +42,228 @@ abstract interface class TransactionStorage {
   Future<StorageStats> getStats();
 }
 
-class InMemoryTransactionStorage implements TransactionStorage {
-  /// Creates an in-memory store.
-  ///
-  /// [maxTransactionsPerAsset] caps how many transactions are retained per
-  /// (wallet, asset) pair, evicting oldest-first. Defaults to `null`
-  /// (unbounded), which is the historical behaviour.
-  InMemoryTransactionStorage({int? maxTransactionsPerAsset})
-    : _storage = {},
-      _maxTransactionsPerAsset = maxTransactionsPerAsset;
+/// A slice of retained cache data, never a provider history page.
+///
+/// The cache may contain holes or omit older rows. Its count is not a network
+/// total, and its internal IDs must never be substituted for provider cursors.
+class CachedTransactionPage {
+  /// Describes retained rows without asserting provider completeness.
+  const CachedTransactionPage({
+    required this.transactions,
+    required this.cachedCount,
+  });
 
+  /// Cached transactions in newest-first display order.
+  final List<Transaction> transactions;
+
+  /// Total rows retained for this wallet and asset, including other slices.
+  final int cachedCount;
+}
+
+/// Bounded, reconstructible history used when persistence is off or
+/// unavailable.
+class InMemoryTransactionStorage implements TransactionStorage {
+  /// Creates a bounded memory cache.
+  InMemoryTransactionStorage({
+    this.policy = const TransactionHistoryCachePolicy(),
+  }) : _retention = TransactionCacheRetention(policy);
+
+  /// Creates a memory cache with the default finite limits.
   static Future<InMemoryTransactionStorage> create() async =>
       InMemoryTransactionStorage();
 
+  /// Retention limits applied after each batch.
+  final TransactionHistoryCachePolicy policy;
   final _mutex = Mutex();
-  final Map<AssetTransactionHistoryId, Map<String, Transaction>> _storage;
-  final int? _maxTransactionsPerAsset;
+  final TransactionCacheRetention _retention;
+  final _rows = <String, (String, Transaction)>{};
+  final _scopes = <String, AssetTransactionHistoryId>{};
 
-  /// Orders transactions newest-first, with `internalId` descending as a stable
-  /// tiebreaker for equal timestamps.
-  ///
-  /// This used to be a `SplayTreeMap` comparator that resolved each key through
-  /// a map captured when the tree was built. That made the tree's ordering
-  /// depend on a snapshot of its own contents, so any lookup for a key added
-  /// after construction - `existingMap[newInternalId]` on the second batch for
-  /// an asset, or `containsKey` in [getTransactionById] - threw
-  /// `Transaction not found in comparison`. In practice that meant every page
-  /// of history after the first failed to store. Ordering is now applied on
-  /// read over a plain map, which cannot go stale.
-  static int _compareTransactions(Transaction a, Transaction b) {
-    final byTimestamp = b.timestamp.compareTo(a.timestamp);
-    if (byTimestamp != 0) return byTimestamp;
-    return b.internalId.compareTo(a.internalId);
-  }
+  /// Logical payload and index bytes charged against the configured budget.
+  int get logicalBytes => _retention.logicalBytes;
 
-  /// Returns this asset's transactions in display order.
-  ///
-  /// The caller must already hold [_mutex].
-  List<Transaction> _orderedLocked(AssetTransactionHistoryId assetHistoryId) {
-    final assetTransactions = _storage[assetHistoryId];
-    if (assetTransactions == null || assetTransactions.isEmpty) {
-      return const [];
+  String _scope(WalletId walletId, AssetId assetId) {
+    final scope = TransactionStorageKey.prefix(walletId, assetId);
+    if (_retention.scopeAccess.containsKey(scope)) {
+      _scopes[scope] = AssetTransactionHistoryId(walletId, assetId);
+      _retention.touch(scope, DateTime.now().microsecondsSinceEpoch);
     }
-    return assetTransactions.values.toList()..sort(_compareTransactions);
+    return scope;
   }
 
-  /// Merges [incoming] into this asset's map, preserving the monotonic
-  /// balance-component semantics of
-  /// [TransactionMergeUtils.mergeTransactionFields].
-  ///
-  /// The caller must already hold [_mutex].
-  void _mergeIntoLocked(
-    AssetTransactionHistoryId assetHistoryId,
-    Iterable<Transaction> incoming,
-  ) {
-    final assetTransactions = _storage.putIfAbsent(
-      assetHistoryId,
-      () => <String, Transaction>{},
-    );
-    for (final transaction in incoming) {
-      assetTransactions.update(
-        transaction.internalId,
-        (existing) =>
-            TransactionMergeUtils.mergeTransactionFields(existing, transaction),
-        ifAbsent: () => transaction,
-      );
-    }
-  }
+  List<Transaction> _ordered(String scope) =>
+      _rows.values.where((row) => row.$1 == scope).map((row) => row.$2).toList()
+        ..sort((a, b) {
+          final byTimestamp = b.timestamp.compareTo(a.timestamp);
+          return byTimestamp != 0
+              ? byTimestamp
+              : b.internalId.compareTo(a.internalId);
+        });
 
   @override
-  Future<void> storeTransaction(
-    Transaction transaction,
-    WalletId walletId,
-  ) async {
-    if (transaction.internalId.isEmpty) {
-      throw TransactionStorageException(
-        'Transaction internal ID cannot be empty',
-      );
-    }
-
-    try {
-      await _mutex.protect(() async {
-        final assetHistoryId = AssetTransactionHistoryId(
-          walletId,
-          transaction.assetId,
-        );
-        _mergeIntoLocked(assetHistoryId, [transaction]);
-        _enforceStorageLimitLocked(transaction.assetId, walletId);
-      });
-    } catch (e) {
-      throw TransactionStorageException('Failed to store transaction', e);
-    }
-  }
+  Future<void> storeTransaction(Transaction transaction, WalletId walletId) =>
+      storeTransactions([transaction], walletId);
 
   @override
   Future<void> storeTransactions(
     List<Transaction> transactions,
-    WalletId user,
+    WalletId walletId,
   ) async {
-    if (transactions.isEmpty) return;
-
-    try {
-      await _mutex.protect(() async {
-        final grouped = groupBy(transactions, (tx) => tx.assetId);
-
-        for (final entry in grouped.entries) {
-          // Collapse duplicates within the batch first so two perspectives of
-          // the same transfer arriving on one page merge rather than overwrite.
-          final newTxMap = <String, Transaction>{};
-          for (final transaction in entry.value) {
-            newTxMap.update(
-              transaction.internalId,
-              (existing) => TransactionMergeUtils.mergeTransactionFields(
-                existing,
-                transaction,
-              ),
-              ifAbsent: () => transaction,
-            );
-          }
-          _mergeIntoLocked(
-            AssetTransactionHistoryId(user, entry.key),
-            newTxMap.values,
-          );
-        }
-
-        // Already inside `_mutex.protect`: call the non-locking variant, or
-        // this deadlocks permanently. See [_enforceStorageLimitLocked].
-        for (final assetId in grouped.keys) {
-          _enforceStorageLimitLocked(assetId, user);
-        }
-      });
-    } catch (e) {
-      throw TransactionStorageException('Failed to store transactions', e);
+    if (transactions.any((transaction) => transaction.internalId.isEmpty)) {
+      throw TransactionStorageException(
+        'Transaction internal ID cannot be empty',
+      );
     }
+    await _mutex.protect(() async {
+      for (final incoming in transactions) {
+        final scope = _scope(walletId, incoming.assetId);
+        _scopes[scope] = AssetTransactionHistoryId(walletId, incoming.assetId);
+        final key =
+            '$scope${TransactionStorageKey.idTokenFor(incoming.internalId)}';
+        final previous = _rows[key]?.$2;
+        final merged = previous == null
+            ? incoming
+            : TransactionMergeUtils.mergeTransactionFields(previous, incoming);
+        final orderKey = TransactionStorageKey.build(
+          prefix: scope,
+          timestamp: merged.timestamp,
+          internalId: merged.internalId,
+        );
+        final record = TransactionRecordCodec.encode(merged);
+        _rows[key] = (scope, merged);
+        _retention.put(
+          key,
+          TransactionCacheEntry(
+            scope: scope,
+            orderKey: orderKey,
+            logicalBytes: TransactionCacheEntry.sizeOf(record, orderKey),
+          ),
+          DateTime.now().microsecondsSinceEpoch,
+        );
+      }
+      for (final key in _retention.prune()) {
+        _rows.remove(key);
+      }
+      _scopes.removeWhere(
+        (scope, _) => !_retention.scopeAccess.containsKey(scope),
+      );
+    });
   }
 
   @override
-  Future<TransactionPage> getTransactions(
+  Future<CachedTransactionPage> getTransactions(
     AssetId assetId,
-    WalletId user, {
+    WalletId walletId, {
     String? fromId,
     int? pageNumber,
     int limit = 10,
-  }) async {
-    return _mutex.protect(() async {
-      final assetTransactionsId = AssetTransactionHistoryId(user, assetId);
-      var transactions = _orderedLocked(assetTransactionsId);
-      final total = transactions.length;
-
-      if (total == 0) {
-        return TransactionPage(
-          transactions: const [],
-          total: 0,
-          currentPage: pageNumber ?? 1,
-          totalPages: 0,
-        );
+  }) => _mutex.protect(() async {
+    final ordered = _ordered(_scope(walletId, assetId));
+    var start = 0;
+    if (fromId != null && ordered.isNotEmpty) {
+      final index = ordered.indexWhere((row) => row.internalId == fromId);
+      if (index == -1) {
+        throw TransactionStorageException('Starting transaction not found');
       }
-
-      if (fromId != null) {
-        final startIndex = transactions.indexWhere(
-          (t) => t.internalId == fromId,
-        );
-        if (startIndex == -1) {
-          throw TransactionStorageException('Starting transaction not found');
-        }
-        transactions = transactions.sublist(startIndex + 1);
-      } else if (pageNumber != null && pageNumber > 1) {
-        final startIndex = (pageNumber - 1) * limit;
-        if (startIndex >= transactions.length) {
-          transactions = [];
-        } else {
-          transactions = transactions.sublist(startIndex);
-        }
-      }
-
-      final page = transactions.take(limit).toList();
-      final totalPages = (total / limit).ceil();
-
-      return TransactionPage(
-        transactions: page,
-        total: total,
-        nextPageId: page.lastOrNull?.internalId,
-        currentPage: pageNumber ?? 1,
-        totalPages: totalPages,
-      );
-    });
-  }
-
-  @override
-  Future<Transaction?> getTransactionById(String internalId) async {
-    return _mutex.protect(() async {
-      for (final assetTransactions in _storage.values) {
-        if (assetTransactions.containsKey(internalId)) {
-          return assetTransactions[internalId];
-        }
-      }
-      return null;
-    });
-  }
-
-  @override
-  Future<void> clearTransactions(AssetId assetId, WalletId user) async {
-    await _mutex.protect(() async {
-      final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
-      _storage.remove(assetTxHistoryId);
-    });
-  }
-
-  @override
-  Future<String?> getLatestTransactionId(AssetId assetId, WalletId user) async {
-    return _mutex.protect(() async {
-      final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
-      final transactions = _orderedLocked(assetTxHistoryId);
-      if (transactions.isEmpty) return null;
-      return transactions.first.internalId;
-    });
-  }
-
-  /// Evicts the oldest transactions once an asset exceeds the configured cap.
-  ///
-  /// The caller **must** already hold [_mutex]. `package:mutex`'s [Mutex] is a
-  /// write-only [ReadWriteMutex] and is not reentrant: re-acquiring it from
-  /// inside a protected section blocks on a future that only `release()` can
-  /// complete, and `release()` is in the `finally` that is itself waiting. The
-  /// result is a permanent hang, not an exception, so every later call on this
-  /// instance would block forever too.
-  void _enforceStorageLimitLocked(AssetId assetId, WalletId user) {
-    final maxTransactions = _maxTransactionsPerAsset;
-    if (maxTransactions == null) return;
-
-    final assetTxHistoryId = AssetTransactionHistoryId(user, assetId);
-    final assetTransactions = _storage[assetTxHistoryId];
-    if (assetTransactions == null) return;
-
-    if (assetTransactions.length > maxTransactions) {
-      final excess = assetTransactions.length - maxTransactions;
-      final sortedEntries = assetTransactions.entries.toList()
-        ..sort((a, b) {
-          final timestampComparison = a.value.timestamp.compareTo(
-            b.value.timestamp,
-          );
-          return timestampComparison != 0
-              ? timestampComparison
-              : a.value.internalId.compareTo(b.value.internalId);
-        });
-
-      final keysToRemove = sortedEntries
-          .take(excess)
-          .map((e) => e.key)
-          .toList();
-
-      for (final key in keysToRemove) {
-        assetTransactions.remove(key);
-      }
+      start = index + 1;
+    } else if (pageNumber != null && pageNumber > 1) {
+      start = (pageNumber - 1) * limit;
     }
-  }
+    return CachedTransactionPage(
+      transactions: limit <= 0
+          ? const []
+          : ordered.skip(start).take(limit).toList(growable: false),
+      cachedCount: ordered.length,
+    );
+  });
 
   @override
-  Future<StorageStats> getStats() async {
-    return _mutex.protect(() async {
-      final allTransactions = _storage.values
-          .expand((assetTransactions) => assetTransactions.values)
-          .toList();
+  Future<Transaction?> getTransactionById(String internalId) =>
+      _mutex.protect(() async {
+        for (final row in _rows.values) {
+          if (row.$2.internalId == internalId) {
+            _retention.touch(row.$1, DateTime.now().microsecondsSinceEpoch);
+            return row.$2;
+          }
+        }
+        return null;
+      });
 
-      if (allTransactions.isEmpty) {
-        throw TransactionStorageException('No transactions available');
-      }
+  @override
+  Future<void> clearTransactions(AssetId assetId, WalletId walletId) =>
+      _mutex.protect(() async => _removeScope(_scope(walletId, assetId)));
 
-      final totalTransactions = allTransactions.length;
-
-      final transactionsPerAsset = _storage.map(
-        (assetId, assetTransactions) =>
-            MapEntry(assetId, assetTransactions.length),
-      );
-
-      final oldestTransaction = allTransactions
-          .map((tx) => tx.timestamp)
-          .reduce((a, b) => a.isBefore(b) ? a : b);
-
-      final newestTransaction = allTransactions
-          .map((tx) => tx.timestamp)
-          .reduce((a, b) => a.isAfter(b) ? a : b);
-
-      return StorageStats(
-        totalTransactions: totalTransactions,
-        transactionsPerAsset: transactionsPerAsset,
-        oldestTransaction: oldestTransaction,
-        newestTransaction: newestTransaction,
-      );
-    });
+  void _removeScope(String scope) {
+    final keys = _rows.entries
+        .where((entry) => entry.value.$1 == scope)
+        .map((entry) => entry.key)
+        .toList();
+    for (final key in keys) {
+      _rows.remove(key);
+      _retention.remove(key);
+    }
+    _retention.scopeAccess.remove(scope);
+    _scopes.remove(scope);
   }
+
+  /// Deletes the wallet's cache without touching its unresolved transfer
+  /// journal.
+  Future<void> purgeWallet(WalletId walletId) => _mutex.protect(() async {
+    final prefix = TransactionStorageKey.walletPrefix(walletId);
+    for (final scope in _scopes.keys.toList()) {
+      if (scope.startsWith(prefix)) _removeScope(scope);
+    }
+  });
+
+  @override
+  Future<String?> getLatestTransactionId(AssetId assetId, WalletId walletId) =>
+      _mutex.protect(
+        () async => _ordered(_scope(walletId, assetId)).firstOrNull?.internalId,
+      );
+
+  @override
+  Future<StorageStats> getStats() => _mutex.protect(() async {
+    if (_rows.isEmpty) {
+      throw TransactionStorageException('No transactions available');
+    }
+    final transactions = _rows.values.map((row) => row.$2).toList();
+    return StorageStats(
+      totalTransactions: transactions.length,
+      transactionsPerAsset: {
+        for (final scope in _scopes.entries)
+          if (_retention.scopeAccess.containsKey(scope.key))
+            scope.value: _ordered(scope.key).length,
+      },
+      oldestTransaction: transactions
+          .map((tx) => tx.timestamp)
+          .reduce((a, b) => a.isBefore(b) ? a : b),
+      newestTransaction: transactions
+          .map((tx) => tx.timestamp)
+          .reduce((a, b) => a.isAfter(b) ? a : b),
+    );
+  });
 }
 
+/// Invalid cache operations, such as an unknown internal pagination cursor.
 class TransactionStorageException implements Exception {
+  /// Describes a cache operation failure.
   TransactionStorageException(this.message, [this.cause]);
+
+  /// Human-readable description that must exclude transaction/secret contents.
   final String message;
+
+  /// Optional underlying cause supplied by the caller.
   final Object? cause;
 
   @override
   String toString() =>
-      'TransactionStorageException: $message${cause != null ? ' ($cause)' : ''}';
+      'TransactionStorageException: $message'
+      '${cause != null ? ' ($cause)' : ''}';
 }
 
+/// Counts and timestamp bounds of retained cache rows.
 class StorageStats {
+  /// Summarizes retained rows without implying a complete network history.
   StorageStats({
     required this.totalTransactions,
     required this.transactionsPerAsset,
@@ -349,8 +271,15 @@ class StorageStats {
     required this.newestTransaction,
   });
 
+  /// Number of rows retained across the cache.
   final int totalTransactions;
+
+  /// Counts for scopes whose identity is known in this process.
   final Map<AssetTransactionHistoryId, int> transactionsPerAsset;
+
+  /// Oldest timestamp among retained rows.
   final DateTime oldestTransaction;
+
+  /// Newest timestamp among retained rows.
   final DateTime newestTransaction;
 }

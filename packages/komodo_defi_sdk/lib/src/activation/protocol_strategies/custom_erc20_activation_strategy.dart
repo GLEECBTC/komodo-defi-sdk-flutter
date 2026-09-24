@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:developer' show log;
 
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
@@ -25,7 +24,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
-    CoinSubClass.matic,
+    CoinSubClass.polygon,
     CoinSubClass.avx20,
     CoinSubClass.hrc20,
     CoinSubClass.moonbeam,
@@ -102,12 +101,9 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for custom ERC20 token activation
       if (KdfLoggingConfig.verboseLogging) {
+        log('Activation started', name: 'CustomErc20ActivationStrategy');
         log(
-          '[RPC] Activating custom ERC20 token: ${asset.id.id}',
-          name: 'CustomErc20ActivationStrategy',
-        );
-        log(
-          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'platform': platform, 'contract_address': contractAddress, 'activation_params': activationParams.toRpcParams()})}',
+          'Activation request prepared',
           name: 'CustomErc20ActivationStrategy',
         );
       }
@@ -121,10 +117,7 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
       );
 
       if (KdfLoggingConfig.verboseLogging) {
-        log(
-          '[RPC] Successfully activated custom ERC20 token: ${asset.id.id}',
-          name: 'CustomErc20ActivationStrategy',
-        );
+        log('Activation progress event', name: 'CustomErc20ActivationStrategy');
       }
 
       yield ActivationProgress.success(

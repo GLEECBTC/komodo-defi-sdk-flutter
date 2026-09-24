@@ -85,6 +85,15 @@ jobs:
       #   run: dart pub global activate melos
       # - name: Bootstrap workspace
       #   run: melos bootstrap
+      # The build transformer fetches the coin assets on a clean runner and then
+      # fails on purpose, because Flutter's build system cannot pick them up in
+      # the run that produced them. The playground job above and both preview
+      # jobs already absorb that first build; this one did not, so its single
+      # build was always the one that bailed out and the deploy never ran.
+      - name: Run dry web build to generate assets (expected to fail)
+        env:
+          GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cd packages/komodo_defi_sdk/example && flutter build web --release || echo "Dry build completed (failure expected)"
       - name: Build SDK example web
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

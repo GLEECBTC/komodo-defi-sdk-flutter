@@ -1,3 +1,4 @@
+import '../helpers/runtime_auth_fixture.dart';
 import 'dart:async';
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
@@ -7,7 +8,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock
+    with RuntimeAuthFixture
+    implements KomodoDefiLocalAuth {}
 
 class _MockActivationManager extends Mock implements ActivationManager {}
 
@@ -47,6 +50,16 @@ void main() {
   setUp(() {
     asset = Asset.fromJson(_utxoConfig(), knownIds: const {});
     auth = _MockAuth();
+    when(() => auth.currentUser).thenAnswer(
+      (_) async => const KdfUser(
+        walletId: WalletId(
+          name: 'test-wallet',
+          pubkeyHash: 'test-wallet-hash',
+          authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+        ),
+        isBip39Seed: true,
+      ),
+    );
     manager = _MockActivationManager();
 
     when(

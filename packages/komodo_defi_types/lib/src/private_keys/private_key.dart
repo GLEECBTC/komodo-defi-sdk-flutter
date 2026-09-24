@@ -9,6 +9,7 @@ class PrivateKey extends Equatable {
     required this.publicKeyAddress,
     required this.privateKey,
     this.hdInfo,
+    this.viewingKey,
   });
 
   final AssetId assetId;
@@ -16,6 +17,10 @@ class PrivateKey extends Equatable {
   final String publicKeyAddress;
   final String privateKey;
   final PrivateKeyHdInfo? hdInfo;
+  final String? viewingKey;
+
+  @override
+  String toString() => 'PrivateKey(redacted)';
 
   JsonMap toJson() {
     return {
@@ -24,6 +29,7 @@ class PrivateKey extends Equatable {
       'public_key_address': publicKeyAddress,
       'private_key': privateKey,
       if (hdInfo != null) 'hd_info': hdInfo!.toJson(),
+      if (viewingKey != null) 'viewing_key': viewingKey,
     };
   }
 
@@ -33,18 +39,24 @@ class PrivateKey extends Equatable {
     publicKeySecp256k1,
     publicKeyAddress,
     privateKey,
+    hdInfo,
+    viewingKey,
   ];
 }
 
 class PrivateKeyHdInfo extends Equatable {
-  const PrivateKeyHdInfo({required this.derivationPath});
+  const PrivateKeyHdInfo({required this.derivationPath, this.zDerivationPath});
 
   final String derivationPath;
+  final String? zDerivationPath;
 
   JsonMap toJson() {
-    return {'derivation_path': derivationPath};
+    return {
+      'derivation_path': derivationPath,
+      if (zDerivationPath != null) 'z_derivation_path': zDerivationPath,
+    };
   }
 
   @override
-  List<Object?> get props => [derivationPath];
+  List<Object?> get props => [derivationPath, zDerivationPath];
 }

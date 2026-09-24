@@ -279,8 +279,8 @@ class EtherscanProtocolHelper {
     return switch (id.subClass) {
       CoinSubClass.bep20 when isParentChain => _bnbUrl,
       CoinSubClass.bep20 => _bnbTokenUrl,
-      CoinSubClass.matic when isParentChain => _maticUrl,
-      CoinSubClass.matic => _maticTokenUrl,
+      CoinSubClass.polygon when isParentChain => _maticUrl,
+      CoinSubClass.polygon => _maticTokenUrl,
       CoinSubClass.avx20 when isParentChain => _avaxUrl,
       CoinSubClass.avx20 => _avaxTokenUrl,
       CoinSubClass.moonriver when isParentChain => _mvrUrl,
@@ -308,6 +308,8 @@ class EtherscanProtocolHelper {
   String get _ethBaseUrl => '$_baseUrl/v2/base_tx_history';
   String get _bnbUrl => '$_baseUrl/v2/bnb_tx_history';
   String get _ethUrl => '$_baseUrl/v2/eth_tx_history';
+  // Proxy route names, not coin tickers: these stay `matic` after the
+  // MATIC -> POL config rename until the proxy renames its endpoints.
   String get _maticUrl => '$_baseUrl/v2/matic_tx_history';
   String get _mvrUrl => '$_baseUrl/v2/movr_tx_history';
 

@@ -4,5 +4,11 @@ library komodo_defi_local_auth;
 
 export 'src/auth/_auth_index.dart'
     show AuthenticationState, AuthenticationStatus;
+export 'src/auth/auth_session.dart'
+    show
+        AuthIdentityUnavailableException,
+        AuthSessionChangedException,
+        AuthSessionContext;
+export 'src/auth/wallet_catalog_lock.dart' show walletEntryIdMetadataKey;
 export 'src/komodo_defi_local_auth.dart';
 export 'src/trezor/_trezor_index.dart';

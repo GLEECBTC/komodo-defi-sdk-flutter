@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_harness/komodo_defi_harness.dart';
+import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 // The persisted store is deliberately not public API. This package is test
 // infrastructure for the SDK, so reaching into src is the intended way to
 // assert on it rather than a layering slip.
@@ -55,9 +56,9 @@ Map<String, dynamic> _historyResult() => {
   },
 };
 
-KdfScript _script() {
+KdfScript _script({bool walletExists = false}) {
   final script =
-      (KdfWalletFixture()
+      (KdfWalletFixture(walletExists: walletExists)
             ..enableUtxo(_ticker)
             ..balance(_ticker))
           .build();
@@ -79,6 +80,78 @@ void main() {
       if (workspace.existsSync()) {
         await workspace.delete(recursive: true);
       }
+    });
+
+    test('SDK authentication cannot bypass wallet deletion review', () async {
+      final harness = await KdfHarness.replayed(
+        script: _script(),
+        workspace: workspace,
+        deleteWorkspaceOnDispose: false,
+      );
+      addTearDown(harness.dispose);
+      const password = 'harness-Password1!';
+      final user = await harness.signIn(
+        walletType: KdfWalletType.iguana,
+        password: password,
+      );
+      await expectLater(
+        harness.sdk.auth.deleteWallet(
+          walletName: user.walletId.name,
+          password: password,
+        ),
+        throwsA(isA<WalletDeletionReviewRequiredException>()),
+      );
+      expect(
+        (await harness.sdk.auth.getUsers()).any(
+          (candidate) => candidate.walletId.name == user.walletId.name,
+        ),
+        isTrue,
+      );
+    });
+
+    test('deleting a wallet after a cold start purges its history', () async {
+      const password = 'harness-ColdStart1!';
+      final first = await KdfHarness.replayed(
+        script: _script(),
+        workspace: workspace,
+        deleteWorkspaceOnDispose: false,
+      );
+      final user = await first.signIn(
+        walletType: KdfWalletType.iguana,
+        password: password,
+      );
+      await first.sdk.transactions
+          .getTransactionsStreamed(_assetFor(first))
+          .first
+          .timeout(const Duration(seconds: 20));
+      await first.dispose();
+
+      // Fresh SDK, not signed in: the purge hook must be the first to open the
+      // history cache, whose orphan sweep then needs the catalog lock
+      // deleteWallet holds.
+      final second = await KdfHarness.replayed(
+        script: _script(walletExists: true),
+        workspace: workspace,
+        deleteWorkspaceOnDispose: false,
+      );
+      addTearDown(second.dispose);
+      final review = await second.sdk.walletDeletion.prepare(
+        user.walletId.name,
+      );
+      final deletion = await second.sdk.walletDeletion
+          .delete(acknowledgedReview: review, password: password)
+          .timeout(const Duration(seconds: 20));
+      expect(deletion.status, WalletDeletionStatus.deleted);
+
+      final storage = HiveTransactionStorage();
+      addTearDown(storage.close);
+      expect(
+        (await storage.getTransactions(
+          _assetFor(second).id,
+          user.walletId,
+        )).cachedCount,
+        0,
+      );
     });
 
     test('deleting a wallet drops its transaction history', () async {
@@ -105,6 +178,7 @@ void main() {
       // through fresh instances, which share the process-global Hive boxes the
       // SDK is using.
       final storage = HiveTransactionStorage();
+      addTearDown(storage.close);
       final pubkeys = HivePubkeysStorage();
       expect(
         (await storage.getTransactions(
@@ -123,19 +197,20 @@ void main() {
       // No settling delay after this: the purge runs as an awaited
       // deleteWallet hook, so the caches must already be clear when the call
       // returns - that immediacy is part of what this test asserts.
-      await harness.sdk.auth.deleteWallet(
-        walletName: user.walletId.name,
+      final review = await harness.sdk.walletDeletion.prepare(
+        user.walletId.name,
+      );
+      final deletion = await harness.sdk.walletDeletion.delete(
+        acknowledgedReview: review,
         password: password,
       );
+      expect(deletion.status, WalletDeletionStatus.deleted);
 
       // A fresh instance, deliberately: the order index is per-instance and
       // rebuilt at open, so the reader above still holds the pre-deletion view.
       // Only one instance exists in production, where the purge updates it.
       expect(
-        (await HiveTransactionStorage().getTransactions(
-          asset.id,
-          user.walletId,
-        )).total,
+        (await storage.getTransactions(asset.id, user.walletId)).cachedCount,
         0,
         reason: 'the deleted wallet must not leave history behind',
       );
@@ -174,19 +249,24 @@ void main() {
         authOptions: user.walletId.authOptions,
       );
       final otherStorage = HiveTransactionStorage();
+      addTearDown(otherStorage.close);
       await otherStorage.storeTransactions([
         (await harness.sdk.transactions.getTransactionHistory(
           asset,
         )).transactions.single,
       ], other);
 
-      await harness.sdk.auth.deleteWallet(
-        walletName: user.walletId.name,
+      final review = await harness.sdk.walletDeletion.prepare(
+        user.walletId.name,
+      );
+      final deletion = await harness.sdk.walletDeletion.delete(
+        acknowledgedReview: review,
         password: password,
       );
+      expect(deletion.status, WalletDeletionStatus.deleted);
 
       expect(
-        (await otherStorage.getTransactions(asset.id, other)).total,
+        (await otherStorage.getTransactions(asset.id, other)).cachedCount,
         1,
         reason: 'only the deleted wallet should be purged',
       );
