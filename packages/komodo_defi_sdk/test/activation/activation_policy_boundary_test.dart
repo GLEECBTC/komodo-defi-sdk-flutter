@@ -265,6 +265,35 @@ void main() {
     );
   }
 
+  test('a restriction published while availability is awaited fails '
+      'the shared activation', () async {
+    // The coordinator's availability poll is the first forced refresh after
+    // the manager reports success.
+    var restricted = false;
+    when(() => cache.getActivatedAssetIds(forceRefresh: true)).thenAnswer((
+      _,
+    ) async {
+      if (!restricted) {
+        restricted = true;
+        policy.update(
+          ActivationPolicySnapshot(
+            status: ActivationPolicyStatus.ready,
+            blockedAssets: {_parent.id},
+          ),
+        );
+      }
+      return {...enabled};
+    });
+    final coordinator = SharedActivationCoordinator(manager, auth);
+    addTearDown(coordinator.dispose);
+
+    final result = await coordinator.activateAsset(_parent);
+
+    expect(restricted, isTrue);
+    expect(result.isSuccess, isFalse);
+    expect(result.cause, isA<ActivationPolicyException>());
+  });
+
   test(
     'successful policy recovery allows the same previously gated asset',
     () async {

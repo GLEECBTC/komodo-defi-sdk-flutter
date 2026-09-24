@@ -118,8 +118,10 @@ existing unreleased entries are extended in place.
    could evict a recently used wallet or asset under a smaller global limit.
  - **FIX**(activation): reject a restricted asset that KDF still has enabled
    instead of reporting it already active, in the shared coordinator and in
-   warm or joined manager activation. Tendermint and SIA withdrawals, which
-   skip activation, check the same restriction before broadcasting. Cached
+   warm or joined manager activation. A shared activation rechecks the policy
+   before reporting success, so a restriction published while it waits for the
+   coin fails it for every joiner. Tendermint and SIA withdrawals, which skip
+   activation, check the same restriction before broadcasting. Cached
    activation stays usable while the policy is loading or unavailable, unless
    a retained restriction covers the asset or its parent.
  - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure

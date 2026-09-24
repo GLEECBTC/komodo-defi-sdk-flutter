@@ -254,10 +254,6 @@ class SharedActivationCoordinator {
             try {
               await _waitForCoinAvailability(asset.id);
               _auth.ensureSessionContextCurrent(session);
-              final result = ActivationResult.success(asset.id);
-              if (!completer.isCompleted) {
-                completer.complete(_ActivationOutcome.result(result));
-              }
             } catch (e) {
               if (completer.isCompleted) break;
               _activationManager.recordActivationFailure(
@@ -271,6 +267,15 @@ class SharedActivationCoordinator {
               if (!completer.isCompleted) {
                 completer.complete(_ActivationOutcome.result(result));
               }
+              break;
+            }
+            // Joiners share this outcome, so a restriction published during
+            // the wait must fail it; the outer catch keeps the typed cause.
+            _activationManager.ensureActiveAssetAllowed(asset.id);
+            if (!completer.isCompleted) {
+              completer.complete(
+                _ActivationOutcome.result(ActivationResult.success(asset.id)),
+              );
             }
           } else {
             final result = ActivationResult.failure(
