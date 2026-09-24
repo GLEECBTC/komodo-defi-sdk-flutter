@@ -334,7 +334,7 @@ void main() {
         expect(
           Stablecoin.usdt.coinPaprikaId,
           equals('usdt'),
-          reason: 'USDT should use usdt identifier for CoinPaprika',
+          reason: 'USDT keeps its id, which CoinPaprika rejects as a quote',
         );
 
         // Test EUR-pegged stablecoin
@@ -347,7 +347,7 @@ void main() {
         expect(
           Stablecoin.eurs.coinPaprikaId,
           equals('eurs'),
-          reason: 'EURS should use eurs identifier for CoinPaprika',
+          reason: 'EURS keeps its id, which CoinPaprika rejects as a quote',
         );
       });
 
@@ -480,7 +480,7 @@ class MockGeckoStyleRepository implements CexRepository {
   String toString() => 'MockGeckoStyleRepository';
 }
 
-// Mock repository that simulates CoinPaprika-style mapping (USDT -> usdt)
+// Mock repository that simulates CoinPaprika-style mapping (USDT -> USD)
 class MockPaprikaStyleRepository implements CexRepository {
   @override
   Future<bool> supports(
@@ -488,12 +488,17 @@ class MockPaprikaStyleRepository implements CexRepository {
     QuoteCurrency fiatCurrency,
     PriceRequestType requestType,
   ) async {
-    // Simulate CoinPaprika behavior: uses coinPaprikaId for quote mapping
-    final mappedQuote = fiatCurrency.coinPaprikaId;
+    // Simulate CoinPaprika behavior: a stablecoin is checked as its fiat
+    final mappedQuote = fiatCurrency
+        .maybeWhen(
+          stablecoin: (_, __, underlyingFiat) => underlyingFiat,
+          orElse: () => fiatCurrency,
+        )
+        .coinPaprikaId;
 
     // Support common assets and direct quote currencies
     final supportedAssets = {'BTC', 'ETH'};
-    final supportedQuotes = {'usd', 'eur', 'usdt', 'usdc'};
+    final supportedQuotes = {'usd', 'eur'};
 
     final assetSupported = supportedAssets.contains(
       assetId.symbol.configSymbol.toUpperCase(),

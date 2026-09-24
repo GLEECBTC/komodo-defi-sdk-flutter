@@ -1,5 +1,16 @@
 ## 0.1.0+2 (unreleased)
 
+ - **FIX**(coinpaprika): parse live `fetchCoinMarkets` responses, which
+   always threw. `CoinPaprikaMarket.marketUrl` is now nullable because many
+   markets have none, and the adjusted 24h volume share is read from
+   `adjusted_volume_24h_share`. Quote prices and volumes use the new
+   `NonNullableDecimalConverter`, because the API sends them as numbers.
+
+ - **FIX**(coingecko): parse the 24h market data fields, such as
+   `price_change_percentage_24h` and `high_24h`. They were read as
+   `price_change_percentage24h` and `high24h`, so they were always null and
+   `getCoin24hrPriceChange` always threw "Price change data not available".
+
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 
