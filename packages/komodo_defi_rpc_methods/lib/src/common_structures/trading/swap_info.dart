@@ -64,20 +64,57 @@ class SwapInfo {
 
   /// Creates a [SwapInfo] instance from a JSON map.
   ///
-  /// Parses the swap information from the API response format.
+  /// Accepts a bare saved swap (which carries its own `type`) or the v2
+  /// `{swap_type, swap_data}` envelope that `my_swap_status`,
+  /// `my_recent_swaps` and `active_swaps` return. Inside the envelope a
+  /// legacy swap has no `type` and may lack its order uuid and amounts, and a
+  /// v2-protocol swap reports `my_coin`/`other_coin` and volumes instead;
+  /// missing strings read as empty rather than failing the whole swap.
   factory SwapInfo.fromJson(JsonMap json) {
+    final data = json.valueOrNull<JsonMap>('swap_data');
+    if (data != null) {
+      return SwapInfo._fromSwapData(
+        data,
+        json.valueOrNull<String>('swap_type'),
+      );
+    }
+    return SwapInfo._fromSwapData(json, null);
+  }
+
+  factory SwapInfo._fromSwapData(JsonMap json, String? swapType) {
+    final type =
+        json.valueOrNull<String>('type') ??
+        switch (swapType) {
+          'MakerV1' || 'MakerV2' => 'Maker',
+          'TakerV1' || 'TakerV2' => 'Taker',
+          _ => swapType ?? '',
+        };
+    final isTaker = type == 'Taker';
+    final myCoin = json.valueOrNull<String>('my_coin');
+    final otherCoin = json.valueOrNull<String>('other_coin');
+    String volume(String key) =>
+        json.valueOrNull<JsonMap>(key)?.valueOrNull<String>('decimal') ?? '';
     return SwapInfo(
       uuid: json.value<String>('uuid'),
-      myOrderUuid: json.value<String>('my_order_uuid'),
-      takerAmount: json.value<String>('taker_amount'),
-      takerCoin: json.value<String>('taker_coin'),
-      makerAmount: json.value<String>('maker_amount'),
-      makerCoin: json.value<String>('maker_coin'),
-      type: json.value<String>('type'),
+      myOrderUuid: json.valueOrNull<String>('my_order_uuid') ?? '',
+      takerAmount:
+          json.valueOrNull<String>('taker_amount') ?? volume('taker_volume'),
+      takerCoin:
+          json.valueOrNull<String>('taker_coin') ??
+          (isTaker ? myCoin : otherCoin) ??
+          '',
+      makerAmount:
+          json.valueOrNull<String>('maker_amount') ?? volume('maker_volume'),
+      makerCoin:
+          json.valueOrNull<String>('maker_coin') ??
+          (isTaker ? otherCoin : myCoin) ??
+          '',
+      type: type,
       gui: json.valueOrNull<String?>('gui'),
       mmVersion: json.valueOrNull<String?>('mm_version'),
-      successEvents: json.value<List<String>>('success_events'),
-      errorEvents: json.value<List<String>>('error_events'),
+      successEvents:
+          json.valueOrNull<List<String>>('success_events') ?? const [],
+      errorEvents: json.valueOrNull<List<String>>('error_events') ?? const [],
       startedAt: json.valueOrNull<int?>('started_at'),
       finishedAt: json.valueOrNull<int?>('finished_at'),
       eventTypes: _eventTypesOf(json.valueOrNull<List<dynamic>>('events')),
@@ -252,8 +289,12 @@ class SwapInfo {
   /// Whether an error event has actually occurred.
   ///
   /// [errorEvents] alone cannot answer this: it is the static list of event
-  /// names that would count as errors, and it is never empty.
-  bool get hasFailed => eventTypes.any(errorEvents.contains);
+  /// names that would count as errors, and it is never empty. A v2-protocol
+  /// swap reports no such list, so its abort and refund events are checked
+  /// by name.
+  bool get hasFailed => eventTypes.any(
+    (type) => errorEvents.contains(type) || _v2FailureEvents.contains(type),
+  );
 
   /// Whether this swap completed successfully: complete, with no error event
   /// in its log.
@@ -267,6 +308,18 @@ class SwapInfo {
     return finishedAt! - startedAt!;
   }
 }
+
+/// The v2-protocol (`TakerSwapEvent`/`MakerSwapEvent`) events that mean the
+/// swap did not complete as agreed.
+const _v2FailureEvents = {
+  'Aborted',
+  'TakerFundingRefundRequired',
+  'TakerPaymentRefundRequired',
+  'MakerPaymentRefundRequired',
+  'TakerFundingRefunded',
+  'TakerPaymentRefunded',
+  'MakerPaymentRefunded',
+};
 
 /// Reads the event types from an `events` list.
 ///

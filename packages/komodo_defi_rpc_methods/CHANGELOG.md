@@ -18,10 +18,14 @@
    Requests parse their typed errors through `RoutedSwapRpcException`.
    Errors that happen to share a name with another method's error no longer
    decode as that method's class.
- - **FIX**(trading): read `my_swap_status`'s v2 `swap_data` envelope. Report
-   `SwapInfo.isSuccessful` from the swap's events: `error_events` is KDF's
-   list of every *possible* error, not the ones that occurred, so every swap
-   used to read as failed.
+ - **FIX**(trading): read the v2 `{swap_type, swap_data}` envelope that
+   `my_swap_status`, `my_recent_swaps` and `active_swaps` return. The swap
+   inside has no `type` of its own (it comes from `swap_type`), a legacy swap
+   may lack its order uuid and amounts, and a v2-protocol swap reports
+   `my_coin`/`other_coin` and volumes, so each of these used to fail to parse.
+   Report `SwapInfo.isSuccessful` from the swap's events: `error_events` is
+   KDF's list of every *possible* error, not the ones that occurred, so every
+   swap used to read as failed.
  - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
    `account_balance_read` wrappers used by the removed TRON export workaround.
  - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
