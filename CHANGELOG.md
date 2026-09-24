@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## 2026-09-11 — SDK 0.8.0 (unreleased)
+## 2026-09-24 — SDK 0.8.0
 
 ### SDK 0.8.0 overview
 

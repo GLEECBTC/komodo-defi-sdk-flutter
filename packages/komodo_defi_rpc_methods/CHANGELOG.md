@@ -1,4 +1,4 @@
-## 0.7.0 (unreleased)
+## 0.7.0 (2026-09-24)
 
  - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
    `account_balance_read` wrappers used by the removed TRON export workaround.

@@ -1,4 +1,4 @@
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-09-24)
 
  - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
    the coins repository's `master` (`f766b261`). It was pinned to the

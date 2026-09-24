@@ -1,4 +1,4 @@
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-09-24)
 
  - **BREAKING**(coins): rename `CoinSubClass.matic` to `CoinSubClass.polygon`
    and return `POL` from its `ticker` and `iconTicker`, following the
