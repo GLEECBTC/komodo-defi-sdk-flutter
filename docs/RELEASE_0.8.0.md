@@ -127,7 +127,7 @@ ready. Preserve selected assets while policy defers or deactivates runtime work.
 An asset that is already active stays usable while the policy is loading or
 unavailable, but a restriction on it or its parent applies even while KDF still
 has it enabled. Activation throws `ActivationPolicyException` instead of
-reporting the asset already active, and a Tendermint or SIA withdrawal fails
+reporting the asset already active, and a withdrawal about to broadcast fails
 with an `SdkError` whose `source` is that exception.
 
 ## Wallet deletion and retained recovery

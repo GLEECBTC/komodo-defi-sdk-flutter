@@ -120,10 +120,12 @@ existing unreleased entries are extended in place.
    instead of reporting it already active, in the shared coordinator and in
    warm or joined manager activation. A shared activation rechecks the policy
    before reporting success, so a restriction published while it waits for the
-   coin fails it for every joiner. Tendermint and SIA withdrawals, which skip
-   activation, check the same restriction before broadcasting. Cached
-   activation stays usable while the policy is loading or unavailable, unless
-   a retained restriction covers the asset or its parent.
+   coin fails it for every joiner. Every withdrawal, including Tendermint and
+   SIA withdrawals that skip activation, rechecks the restriction immediately
+   before it broadcasts, so a consumer holding a progress event cannot
+   broadcast after a restriction lands. Cached activation stays usable while
+   the policy is loading or unavailable, unless a retained restriction covers
+   the asset or its parent.
  - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
    as a value. One future is handed to every caller joining the same in-flight
    work, and those callers do not share an error zone, because `retry()` runs
