@@ -279,6 +279,27 @@ void _cases1() {
       ['ETH', 1],
       ['USDC-POLYGON', 137],
     ]);
+    expect(response.skipped, 0);
+  });
+
+  test('routed_swap::supported_coins skips an entry it cannot read', () {
+    // A later phase may list a coin whose chain id is not an EVM integer.
+    // That coin is left out; every other coin stays eligible.
+    final response = rpc.RoutedSwapSupportedCoinsRequest(rpcPass: '')
+        .parseResponseJson(
+          _envelope({
+            'provider': 'lifi',
+            'coins': [
+              {'coin': 'ETH', 'chain_id': 1},
+              {'coin': 'BTC', 'chain_id': 'bitcoin'},
+              {'coin': 'SOL'},
+              'not-an-entry',
+              {'coin': 'USDC-POLYGON', 'chain_id': 137},
+            ],
+          }),
+        );
+    expect(response.coins.map((c) => c.coin), ['ETH', 'USDC-POLYGON']);
+    expect(response.skipped, 3);
   });
 
   test('task::routed_swap::init answers the task id only', () {

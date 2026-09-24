@@ -18,6 +18,10 @@
    Requests parse their typed errors through `RoutedSwapRpcException`.
    Errors that happen to share a name with another method's error no longer
    decode as that method's class.
+ - **FIX**(routed-swap): read `routed_swap::supported_coins` entries one at a
+   time. An entry the SDK cannot read, such as one with a non-EVM chain id, is
+   logged, left out and counted in `skipped`, instead of failing the whole
+   response and emptying the list of routed-swap assets.
  - **FIX**(trading): read the v2 `{swap_type, swap_data}` envelope that
    `my_swap_status`, `my_recent_swaps` and `active_swaps` return. The swap
    inside has no `type` of its own (it comes from `swap_type`), a legacy swap

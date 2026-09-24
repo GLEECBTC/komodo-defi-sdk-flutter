@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -139,19 +141,35 @@ class RoutedSwapSupportedCoinsResponse extends BaseResponse {
     required super.mmrpc,
     required this.provider,
     required this.coins,
+    this.skipped = 0,
   });
 
   /// Parses `result.{provider, coins}`.
+  ///
+  /// Each entry is parsed on its own and one that fails is logged and
+  /// skipped: a coin this SDK cannot read — a non-EVM chain id from a later
+  /// phase, say — must not withdraw every other coin from routed swaps.
   factory RoutedSwapSupportedCoinsResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
+    final coins = <RoutedSwapSupportedCoin>[];
+    var skipped = 0;
+    for (final raw in result.value<List<dynamic>>('coins')) {
+      try {
+        if (raw is! Map) throw FormatException('not an object', raw);
+        coins.add(RoutedSwapSupportedCoin.fromJson(convertToJsonMap(raw)));
+      } on Object catch (error) {
+        skipped++;
+        log(
+          'Skipped a supported_coins entry: $raw ($error)',
+          name: 'RoutedSwapSupportedCoinsResponse',
+        );
+      }
+    }
     return RoutedSwapSupportedCoinsResponse(
       mmrpc: json.valueOrNull<String>('mmrpc') ?? '2.0',
       provider: result.valueOrNull<String>('provider') ?? 'lifi',
-      coins: result
-          .value<List<dynamic>>('coins')
-          .whereType<Map<dynamic, dynamic>>()
-          .map((e) => RoutedSwapSupportedCoin.fromJson(convertToJsonMap(e)))
-          .toList(),
+      coins: coins,
+      skipped: skipped,
     );
   }
 
@@ -163,6 +181,9 @@ class RoutedSwapSupportedCoinsResponse extends BaseResponse {
   /// Two coins appearing here means the pair may be *quoted*, not that a route
   /// exists. Coverage, liquidity and bounds can still fail the quote.
   final List<RoutedSwapSupportedCoin> coins;
+
+  /// How many entries could not be read and were left out of [coins].
+  final int skipped;
 
   @override
   JsonMap toJson() => {
