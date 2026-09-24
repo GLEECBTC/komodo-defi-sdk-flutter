@@ -32,12 +32,40 @@ export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
         AuthenticationState,
         AuthenticationStatus,
         WalletDeletionReviewRequiredException;
-// ZHTLC sync parameters + GasFree custody account status
+// ZHTLC sync parameters, GasFree custody account status, and the routed-swap
+// wire enums and typed errors the public routed-swap types expose.
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
     show
         GaslessAccountAvailability,
         GaslessAccountStatusResponse,
         GaslessTraceState,
+        RoutedSwapAmountOutOfBoundsException,
+        RoutedSwapApprovalFailureReason,
+        RoutedSwapBridgeStage,
+        RoutedSwapCoinNotActiveException,
+        RoutedSwapHistoryFilter,
+        RoutedSwapInternalException,
+        RoutedSwapInvalidConfigException,
+        RoutedSwapInvalidParamException,
+        RoutedSwapMyAddressException,
+        RoutedSwapNoRouteException,
+        RoutedSwapNoSuchTaskException,
+        RoutedSwapOrder,
+        RoutedSwapOutcome,
+        RoutedSwapPairNotSupportedException,
+        RoutedSwapPartialReason,
+        RoutedSwapPreflightCheck,
+        RoutedSwapProviderException,
+        RoutedSwapRateLimitedException,
+        RoutedSwapRouteKind,
+        RoutedSwapRpcException,
+        RoutedSwapSigningRejectionReason,
+        RoutedSwapStepType,
+        RoutedSwapTaskAlreadyBroadcastException,
+        RoutedSwapTaskFinishedException,
+        RoutedSwapTransportException,
+        RoutedSwapTxFailureReason,
+        RoutedSwapUnknownRpcException,
         ZhtlcSyncParams;
 export 'package:komodo_defi_sdk/src/addresses/address_operations.dart'
     show AddressOperations;
@@ -46,7 +74,11 @@ export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
 export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show MarketDataManager;
 export 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_manager.dart'
-    show RoutedSwapHandle, RoutedSwapManager;
+    show
+        RoutedSwapAssetResolver,
+        RoutedSwapHandle,
+        RoutedSwapManager,
+        RoutedSwapTaskNudges;
 export 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_types.dart';
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
 export 'package:komodo_defi_sdk/src/security/private_key_export_request.dart';

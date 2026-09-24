@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart' as rpc;
@@ -26,11 +27,15 @@ abstract interface class RoutedSwapHandle {
   /// The durable swap id.
   String get uuid;
 
-  /// Progress updates until the swap reaches a terminal state.
+  /// The most recent snapshot.
+  RoutedSwapProgress get latest;
+
+  /// Progress until the swap reaches a terminal state, then done.
   ///
-  /// Broadcast: several listeners may follow the same swap, and a screen that
-  /// subscribes late still receives every update from that point on. Missed
-  /// and duplicate observations are already reconciled internally.
+  /// Every access returns a fresh stream that first replays [latest], so any
+  /// number of listeners may follow the same swap and a late subscriber is
+  /// never left blank. Missed and duplicate observations are reconciled
+  /// internally; an unchanged snapshot is not re-emitted.
   Stream<RoutedSwapProgress> get progress;
 
   /// Resolves with the terminal snapshot.
@@ -39,44 +44,21 @@ abstract interface class RoutedSwapHandle {
   /// Stops the swap, if it has not been broadcast.
   ///
   /// Throws [RoutedSwapNotCancellableException] once the transaction has been
-  /// handed to the network. An approval already confirmed on-chain cannot be
-  /// undone, so the user may still have spent gas.
+  /// handed to the network, when the swap has already ended, or when it is
+  /// only known from the durable record. Throws
+  /// [RoutedSwapCancelUnconfirmedException] when the answer could not be
+  /// read. An approval already confirmed on-chain cannot be undone.
   Future<void> cancel();
-}
-
-/// The handle backed by a live session or a persisted record.
-class _RoutedSwapHandle implements RoutedSwapHandle {
-  _RoutedSwapHandle({
-    required this.uuid,
-    required Stream<RoutedSwapProgress> progress,
-    required Future<void> Function() cancel,
-  }) : _progress = progress,
-       _cancel = cancel;
-
-  @override
-  final String uuid;
-
-  final Stream<RoutedSwapProgress> _progress;
-  final Future<void> Function() _cancel;
-
-  @override
-  Stream<RoutedSwapProgress> get progress => _progress;
-
-  @override
-  Future<RoutedSwapProgress> get result async =>
-      _progress.firstWhere((p) => p.isTerminal);
-
-  @override
-  Future<void> cancel() => _cancel();
 }
 
 /// Routed (aggregator-executed) swaps.
 ///
 /// KDF owns the lifecycle: it quotes, approves, signs, broadcasts and tracks
 /// the bridge. This manager owns everything a caller would otherwise have to
-/// get right by hand — allocating and recovering the durable id, preferring
-/// the event stream but never trusting it, never destroying a terminal result,
-/// and falling back to persistent history when the in-memory task is gone.
+/// get right by hand — resolving and recovering the durable id, preferring the
+/// event stream but never trusting it, reading a terminal result before
+/// releasing it, and falling back to persistent history when the in-memory
+/// task is gone.
 ///
 /// Nothing in the public surface mentions a task.
 class RoutedSwapManager {
@@ -86,28 +68,39 @@ class RoutedSwapManager {
     required RoutedSwapAssetResolver resolveAsset,
     RoutedSwapTaskNudges? taskNudges,
     Duration pollInterval = const Duration(seconds: 3),
-    Duration streamStaleAfter = const Duration(seconds: 8),
+    Duration historyPollInterval = const Duration(seconds: 5),
+    Duration maxBackoff = const Duration(seconds: 30),
+    int delayedAfterFailures = 3,
+    Duration firstReadRetryDelay = const Duration(milliseconds: 500),
+    int firstReadAttempts = 3,
   }) : _client = client,
        _resolveAsset = resolveAsset,
        _taskNudges = taskNudges,
        _pollInterval = pollInterval,
-       _streamStaleAfter = streamStaleAfter;
+       _historyPollInterval = historyPollInterval,
+       _maxBackoff = maxBackoff,
+       _delayedAfterFailures = delayedAfterFailures,
+       _firstReadRetryDelay = firstReadRetryDelay,
+       _firstReadAttempts = firstReadAttempts;
 
   final ApiClient _client;
   final RoutedSwapAssetResolver _resolveAsset;
   final RoutedSwapTaskNudges? _taskNudges;
+  final Duration _pollInterval;
+  final Duration _historyPollInterval;
+  final Duration _maxBackoff;
+  final int _delayedAfterFailures;
+  final Duration _firstReadRetryDelay;
+  final int _firstReadAttempts;
 
   final Map<String, _RoutedSwapSession> _sessions = {};
 
-  /// How often to poll when the event stream is quiet.
-  final Duration _pollInterval;
-
-  /// How long to trust the event stream before polling anyway.
+  /// How much of the probed network fee a native-coin Max holds back.
   ///
-  /// KDF sends task events with a non-blocking try-send, so a busy or briefly
-  /// disconnected client silently misses transitions. Polling is the source of
-  /// truth; the stream only makes it feel immediate.
-  final Duration _streamStaleAfter;
+  /// Gas moves between the probe and the swap, so the reserve carries a
+  /// margin; leftover dust is the cheaper failure than a swap that cannot pay
+  /// for itself.
+  static final Decimal maxSellFeeMargin = Decimal.parse('1.25');
 
   /// Wallet assets that are eligible to be quoted.
   ///
@@ -123,7 +116,7 @@ class RoutedSwapManager {
     );
     final eligible = <AssetId>{};
     for (final coin in response.coins) {
-      final assetId = _resolveAssetId(coin.coin);
+      final assetId = _resolveAsset(coin.coin);
       if (assetId != null) eligible.add(assetId);
     }
     return eligible;
@@ -131,9 +124,9 @@ class RoutedSwapManager {
 
   /// Prices a swap. Reserves nothing and moves nothing.
   ///
-  /// Throws the typed quote errors — no route, rate limited, amount out of
-  /// bounds, pair unsupported — as exceptions, because none of them produce a
-  /// usable offer.
+  /// Throws a typed [rpc.RoutedSwapRpcException] — no route, rate limited,
+  /// amount out of bounds, pair unsupported, … — because none of them produce
+  /// a usable offer.
   Future<RoutedSwapOffer> quote({
     required AssetId from,
     required AssetId to,
@@ -159,106 +152,225 @@ class RoutedSwapManager {
         'failure must be a typed error.',
       );
     }
-    return _offerFrom(route, from: from, to: to, slippage: slippage);
+    return _offerFrom(
+      route,
+      from: from,
+      to: to,
+      order: order,
+      slippage: slippage,
+    );
+  }
+
+  /// The largest amount of [from] that can be sold for [to] while keeping the
+  /// source chain's gas.
+  ///
+  /// Interim, until the contract grows a max option of its own: a token sell
+  /// may use its whole [balance], because its gas is paid in the chain's
+  /// native coin; a native sell holds back the route's network fee, probed at
+  /// the full balance, times [maxSellFeeMargin].
+  Future<RoutedSwapMaxSell> maxSellAmount({
+    required AssetId from,
+    required AssetId to,
+    required Decimal balance,
+    double? slippage,
+    rpc.RoutedSwapOrder? order,
+    String? provider,
+  }) async {
+    if (balance <= Decimal.zero) {
+      return RoutedSwapMaxSell(
+        amount: Decimal.zero,
+        reservedForFees: Decimal.zero,
+        feeAsset: from.parentId ?? from,
+      );
+    }
+    if (from.isChildAsset) {
+      return RoutedSwapMaxSell(
+        amount: balance,
+        reservedForFees: Decimal.zero,
+        feeAsset: from.parentId,
+      );
+    }
+
+    final probe = await quote(
+      from: from,
+      to: to,
+      amount: balance,
+      slippage: slippage,
+      order: order,
+      provider: provider,
+    );
+    final gas = probe.networkFees
+        .where((fee) => fee.assetId == from || fee.ticker == from.id)
+        .fold<Decimal>(Decimal.zero, (sum, fee) => sum + fee.amount);
+
+    final decimals = from.chainId.decimals;
+    var reserve = gas * maxSellFeeMargin;
+    var amount = balance - reserve;
+    if (decimals != null) {
+      reserve = reserve.ceil(scale: decimals);
+      amount = (balance - reserve).floor(scale: decimals);
+    }
+    if (amount < Decimal.zero) amount = Decimal.zero;
+
+    return RoutedSwapMaxSell(
+      amount: amount,
+      reservedForFees: reserve,
+      feeAsset: from,
+    );
   }
 
   /// Starts a swap and returns a handle whose [RoutedSwapHandle.uuid] is
   /// already resolved.
   ///
-  /// The durable id is read back before this returns, so a caller that
-  /// persists it can always recover the swap — including when the process is
-  /// killed moments later, which on mobile is routine rather than exotic.
-  ///
   /// The guard sent to KDF is the offer's guaranteed receive, so a swap can
-  /// never be started against a number the user was not shown.
+  /// never be started against a number the user was not shown, and the
+  /// offer's route order is passed on so the engine's internal re-quote
+  /// targets the same route.
+  ///
+  /// Throws the typed [rpc.RoutedSwapRpcException] when KDF rejects the
+  /// request before creating a task — nothing started. Throws
+  /// [RoutedSwapStartUnconfirmedException] when the swap may have started but
+  /// its durable id could not be read back: never retry on that; check
+  /// history.
   Future<RoutedSwapHandle> start(RoutedSwapOffer offer) async {
-    final init = await _client.rpc.routedSwap.init(
-      from: offer.from.id,
-      to: offer.to.id,
-      amount: offer.sellAmount.toString(),
-      minToAmount: offer.guaranteedReceive.toString(),
-      slippage: offer.slippage,
-      provider: offer.provider,
-    );
+    final startedAt = DateTime.now();
+    final rpc.RoutedSwapInitResponse init;
+    try {
+      init = await _client.rpc.routedSwap.init(
+        from: offer.from.id,
+        to: offer.to.id,
+        amount: offer.sellAmount.toString(),
+        minToAmount: offer.guaranteedReceive.toString(),
+        slippage: offer.slippage,
+        order: offer.order,
+        provider: offer.provider,
+      );
+    } on rpc.RoutedSwapRpcException {
+      // A typed rejection comes back before any task exists.
+      rethrow;
+    } on Object catch (error) {
+      // The request may have reached KDF and created the task.
+      throw RoutedSwapStartUnconfirmedException(error);
+    }
 
     // Resolve the uuid before handing back a handle. Everything after this
     // point is recoverable; the window before it is not, so it is closed here
     // rather than left to each caller.
-    final first = await _client.rpc.routedSwap.status(init.taskId);
-    final session = _RoutedSwapSession(
-      uuid: first.details.uuid,
-      taskId: init.taskId,
-      manager: this,
-      offer: offer,
-      seed: _progressFrom(first.details, offer: offer),
-    );
-    _sessions[session.uuid] = session;
+    Object? lastError;
+    for (var attempt = 0; attempt < _firstReadAttempts; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(_firstReadRetryDelay * attempt);
+      }
+      try {
+        final first = await _client.rpc.routedSwap.status(init.taskId);
+        final seed = _progressFromStatus(first.details, accepted: offer);
+        final session = _RoutedSwapSession(
+          manager: this,
+          uuid: first.details.uuid,
+          taskId: init.taskId,
+          offer: offer,
+          seed: seed,
+        ).._lastLivePhase = seed.isTerminal ? null : seed.phase;
+        return _register(session);
+      } on Object catch (error) {
+        lastError = error;
+      }
+    }
 
-    return _RoutedSwapHandle(
-      uuid: session.uuid,
-      progress: session.stream,
-      cancel: session.cancel,
+    // KDF persists the uuid before the task starts executing, so the durable
+    // record can still identify the swap this request created.
+    final entry = await _findStartedEntry(offer, since: startedAt);
+    if (entry == null) {
+      throw RoutedSwapStartUnconfirmedException(
+        lastError ?? StateError('No status for task ${init.taskId}'),
+        taskId: init.taskId,
+      );
+    }
+    final session = _RoutedSwapSession(
+      manager: this,
+      uuid: entry.uuid,
+      taskId: init.taskId,
+      offer: offer,
+      seed: _progressFromEntry(entry, accepted: offer),
     );
+    return _register(session);
   }
 
   /// Re-attaches to a swap by its durable id.
   ///
   /// Returns the live session when one is running in this process, and
-  /// otherwise a handle that replays the persisted record — so a screen opened
+  /// otherwise a handle that follows the persisted record — so a screen opened
   /// after a restart behaves the same as one that never closed.
   ///
   /// Throws [RoutedSwapNotFoundException] when nothing is known about [uuid].
   Future<RoutedSwapHandle> watch(String uuid) async {
     final live = _sessions[uuid];
-    if (live != null && !live.isClosed) {
-      return _RoutedSwapHandle(
-        uuid: uuid,
-        progress: live.stream,
-        cancel: live.cancel,
-      );
-    }
+    if (live != null && !live.isDisposed) return _RoutedSwapHandle(live);
 
-    final record = await _recordFor(uuid);
-    if (record == null) throw RoutedSwapNotFoundException(uuid);
+    final entry = await _entryFor(uuid);
+    if (entry == null) throw RoutedSwapNotFoundException(uuid);
 
     // A swap KDF is still tracking after a restart has no task id any client
     // can hold, so history polling is the only way to follow it.
-    final replay = record.isInFlight
-        ? _historyPollingStream(uuid)
-        : Stream<RoutedSwapProgress>.value(_progressFromRecord(record));
-
-    return _RoutedSwapHandle(
+    final session = _RoutedSwapSession(
+      manager: this,
       uuid: uuid,
-      progress: replay,
-      cancel: () async => throw RoutedSwapNotCancellableException(
-        uuid,
-        _progressFromRecord(record).phase,
-      ),
+      seed: _progressFromEntry(entry),
     );
+    return _register(session);
   }
 
-  /// Swaps that have not finished, newest first.
+  /// Swaps that have not finished, newest first, across every page.
   ///
   /// The cold-start question: after a relaunch, what is still running? A
   /// 30-minute bridge outlives most app sessions, so this is the normal path.
-  Future<List<RoutedSwapProgress>> inFlight({int limit = 20}) async {
-    final page = await _client.rpc.routedSwap.history(
-      limit: limit,
-      filter: rpc.RoutedSwapHistoryFilter.inFlight,
-    );
-    return page.entries.map(_progressFromRecord).toList();
+  Future<List<RoutedSwapProgress>> inFlight({int pageSize = 50}) async {
+    final entries = <RoutedSwapProgress>[];
+    for (var page = 1; page <= 20; page++) {
+      final result = await history(
+        filter: rpc.RoutedSwapHistoryFilter.inFlight,
+        limit: pageSize,
+        pageNumber: page,
+      );
+      entries.addAll(result.entries);
+      if (!result.hasMore) break;
+    }
+    return entries;
   }
 
   /// Past and present swaps, newest first.
-  Future<List<RoutedSwapProgress>> history({
-    int limit = 20,
+  Future<RoutedSwapHistoryPage> history({
     int pageNumber = 1,
+    int limit = 20,
+    rpc.RoutedSwapHistoryFilter? filter,
+    AssetId? from,
+    AssetId? to,
+    DateTime? createdAfter,
+    DateTime? createdBefore,
   }) async {
     final page = await _client.rpc.routedSwap.history(
+      filter: filter,
+      myCoin: from?.id,
+      otherCoin: to?.id,
+      fromTimestamp: createdAfter == null ? null : _unixSeconds(createdAfter),
+      toTimestamp: createdBefore == null ? null : _unixSeconds(createdBefore),
       limit: limit,
       pageNumber: pageNumber,
     );
-    return page.entries.map(_progressFromRecord).toList();
+    return RoutedSwapHistoryPage(
+      entries: [
+        for (final entry in page.entries)
+          _progressFromEntry(
+            entry,
+            accepted: _sessions[entry.uuid]?.offer,
+            previous: _sessions[entry.uuid]?.latest,
+            lastLivePhase: _sessions[entry.uuid]?.lastLivePhase,
+          ),
+      ],
+      total: page.total,
+      pageNumber: page.pageNumber,
+      totalPages: page.totalPages,
+    );
   }
 
   /// Releases every live session.
@@ -266,37 +378,89 @@ class RoutedSwapManager {
     final sessions = _sessions.values.toList();
     _sessions.clear();
     for (final session in sessions) {
-      await session.close();
+      await session.dispose();
     }
   }
 
   // ------------------------------------------------------------- internals
 
-  AssetId? _resolveAssetId(String ticker) => _resolveAsset(ticker);
+  RoutedSwapHandle _register(_RoutedSwapSession session) {
+    final existing = _sessions[session.uuid];
+    if (existing != null && !existing.isDisposed) {
+      unawaited(session.dispose());
+      return _RoutedSwapHandle(existing);
+    }
+    _sessions[session.uuid] = session;
+    session.start();
+    return _RoutedSwapHandle(session);
+  }
 
-  Future<rpc.RoutedSwapHistoryEntry?> _recordFor(String uuid) async {
-    final page = await _client.rpc.routedSwap.history(limit: 1, uuid: uuid);
+  Future<rpc.RoutedSwapHistoryEntry?> _entryFor(String uuid) async {
+    final page = await _client.rpc.routedSwap.history(uuid: uuid, limit: 1);
     return page.entries.isEmpty ? null : page.entries.first;
   }
 
-  /// Polls history for a swap KDF is tracking but no client can address.
-  Stream<RoutedSwapProgress> _historyPollingStream(String uuid) async* {
-    while (true) {
-      final record = await _recordFor(uuid);
-      if (record == null) throw RoutedSwapNotFoundException(uuid);
-      final progress = _progressFromRecord(record);
-      yield progress;
-      if (progress.isTerminal) return;
-      await Future<void>.delayed(_pollInterval);
+  /// Finds the record `init` created for [offer] when its task could not be
+  /// read back.
+  Future<rpc.RoutedSwapHistoryEntry?> _findStartedEntry(
+    RoutedSwapOffer offer, {
+    required DateTime since,
+  }) async {
+    try {
+      final page = await _client.rpc.routedSwap.history(
+        myCoin: offer.from.id,
+        otherCoin: offer.to.id,
+        fromTimestamp: _unixSeconds(since) - 5,
+        limit: 10,
+      );
+      for (final entry in page.entries) {
+        final amount = Decimal.tryParse(entry.requested.amount);
+        final minimum = Decimal.tryParse(entry.minToAmountAccepted);
+        if (amount == offer.sellAmount &&
+            minimum == offer.guaranteedReceive &&
+            !_sessions.containsKey(entry.uuid)) {
+          return entry;
+        }
+      }
+    } on Object {
+      // The caller reports the start as unconfirmed.
     }
+    return null;
   }
+
+  static int _unixSeconds(DateTime time) =>
+      time.toUtc().millisecondsSinceEpoch ~/ 1000;
+
+  static DateTime? _fromUnix(int? seconds) => seconds == null || seconds == 0
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
+
+  Decimal? _decimal(String? value) =>
+      value == null ? null : Decimal.tryParse(value);
 
   RoutedSwapOffer _offerFrom(
     rpc.RoutedSwapRoute route, {
     required AssetId from,
     required AssetId to,
+    rpc.RoutedSwapOrder? order,
     double? slippage,
+    DateTime? quotedAt,
   }) {
+    RoutedSwapCost gasCost(
+      rpc.RoutedSwapGasCost gas,
+      RoutedSwapCostKind kind,
+    ) => RoutedSwapCost(
+      label: kind == RoutedSwapCostKind.approvalGas
+          ? 'Approval network fee'
+          : 'Network fee',
+      amount: Decimal.parse(gas.amount.amount),
+      kind: kind,
+      isDeductedFromReceive: false,
+      assetId: gas.amount.coin == null ? null : _resolveAsset(gas.amount.coin!),
+      symbol: gas.amount.symbol,
+      usdValue: _decimal(gas.amountUsd),
+    );
+
     final costs = <RoutedSwapCost>[
       for (final fee in route.feeCosts)
         RoutedSwapCost(
@@ -306,202 +470,460 @@ class RoutedSwapManager {
           isDeductedFromReceive: fee.included,
           assetId: fee.amount.coin == null
               ? null
-              : _resolveAssetId(fee.amount.coin!),
+              : _resolveAsset(fee.amount.coin!),
           symbol: fee.amount.symbol,
-          usdValue: fee.amountUsd == null
-              ? null
-              : Decimal.parse(fee.amountUsd!),
+          usdValue: _decimal(fee.amountUsd),
         ),
-      for (final gas in route.gasCosts)
-        RoutedSwapCost(
-          label: 'Network fee',
-          amount: Decimal.parse(gas.amount.amount),
-          kind: RoutedSwapCostKind.gas,
-          isDeductedFromReceive: false,
-          assetId: gas.amount.coin == null
-              ? null
-              : _resolveAssetId(gas.amount.coin!),
-          symbol: gas.amount.symbol,
-          usdValue: gas.amountUsd == null
-              ? null
-              : Decimal.parse(gas.amountUsd!),
-        ),
+      for (final gas in route.gasCosts) gasCost(gas, RoutedSwapCostKind.gas),
+      for (final gas
+          in route.approval?.gasCosts ?? const <rpc.RoutedSwapGasCost>[])
+        gasCost(gas, RoutedSwapCostKind.approvalGas),
     ];
 
+    final approval = route.approval;
     return RoutedSwapOffer(
       from: from,
       to: to,
       sellAmount: Decimal.parse(route.from.amount),
       expectedReceive: Decimal.parse(route.to.amount),
       guaranteedReceive: Decimal.parse(route.toMinimum.amount),
+      kind: route.kind,
+      costs: costs,
+      networkFees: _networkFeesOf(route),
+      legs: [
+        for (final step in route.steps)
+          RoutedSwapLeg(
+            type: step.stepType,
+            chainId: step.chainId,
+            fromChainId: step.fromChainId,
+            toChainId: step.toChainId,
+          ),
+      ],
+      quotedAt: quotedAt ?? DateTime.now(),
+      provider: route.provider,
+      toolKey: route.tool.key,
       toolName: route.tool.name,
       toolLogoUrl: route.tool.logoUrl,
-      isCrossChain: route.kind == rpc.RoutedSwapRouteKind.crossChain,
-      costs: costs,
+      route: route,
+      order: order,
+      fromAddress: route.fromAddress,
+      toAddress: route.toAddress,
+      approval: approval == null
+          ? null
+          : RoutedSwapApprovalInfo(
+              txCount: approval.txCount,
+              resetsFirst: approval.resetsFirst,
+              spender: approval.spender,
+            ),
       estimatedDuration: route.executionDurationS == null
           ? null
           : Duration(seconds: route.executionDurationS!),
-      quotedAt: DateTime.now(),
-      // The quote never says whether an approval is coming. A native sell
-      // never needs one; a token sell may need one or two. Deriving it from
-      // the asset is the only honest answer available, and it is better than
-      // making every caller re-learn the rule.
-      mayRequireApproval: !_isNativeAsset(from),
-      provider: route.provider,
       slippage: slippage,
     );
   }
 
-  bool _isNativeAsset(AssetId assetId) => assetId.parentId == null;
+  /// The per-coin network fee. Uses the engine's totals when present, and
+  /// otherwise sums execution and approval gas the same way — a USD value
+  /// only when every contributing row has one.
+  List<RoutedSwapNetworkFee> _networkFeesOf(rpc.RoutedSwapRoute route) {
+    final rows = route.totalGasCosts.isNotEmpty
+        ? route.totalGasCosts
+        : [...route.gasCosts, ...?route.approval?.gasCosts];
+    final amounts = <String, Decimal>{};
+    final usd = <String, Decimal?>{};
+    for (final row in rows) {
+      final ticker = row.amount.label;
+      amounts[ticker] =
+          (amounts[ticker] ?? Decimal.zero) + Decimal.parse(row.amount.amount);
+      final rowUsd = _decimal(row.amountUsd);
+      usd[ticker] = !usd.containsKey(ticker)
+          ? rowUsd
+          : (usd[ticker] == null || rowUsd == null
+                ? null
+                : usd[ticker]! + rowUsd);
+    }
+    return [
+      for (final entry in amounts.entries)
+        RoutedSwapNetworkFee(
+          ticker: entry.key,
+          assetId: _resolveAsset(entry.key),
+          amount: entry.value,
+          usdValue: usd[entry.key],
+        ),
+    ];
+  }
 
-  RoutedSwapProgress _progressFrom(
-    rpc.RoutedSwapStatus status, {
-    RoutedSwapOffer? offer,
+  RoutedSwapOffer? _offerFromExecuted(
+    rpc.RoutedSwapRoute? route,
+    RoutedSwapOffer? accepted, {
+    RoutedSwapOffer? previous,
   }) {
+    if (route == null) return null;
+    // Every poll re-reports the same executed route. Reusing the offer built
+    // from it keeps snapshots equal, so an unchanged swap does not re-emit.
+    if (previous != null && previous.route == route) return previous;
+    final from = accepted?.from ?? _resolveAssetOf(route.from);
+    final to = accepted?.to ?? _resolveAssetOf(route.toMinimum);
+    if (from == null || to == null) return null;
+    return _offerFrom(
+      route,
+      from: from,
+      to: to,
+      order: accepted?.order,
+      slippage: accepted?.slippage,
+      quotedAt: accepted?.quotedAt ?? previous?.quotedAt,
+    );
+  }
+
+  AssetId? _resolveAssetOf(rpc.RoutedSwapAmount amount) =>
+      amount.coin == null ? null : _resolveAsset(amount.coin!);
+
+  RoutedSwapProgress _progressFromStatus(
+    rpc.RoutedSwapStatus status, {
+    RoutedSwapOffer? accepted,
+    RoutedSwapOffer? previousExecuted,
+    List<String> approvalTxHashes = const [],
+    RoutedSwapPhase? lastLivePhase,
+    bool fromHistory = false,
+  }) {
+    final executed = _offerFromExecuted(
+      status.executedRoute,
+      accepted,
+      previous: previousExecuted,
+    );
     switch (status) {
       case rpc.RoutedSwapInProgress():
+        final hashes = [
+          ...approvalTxHashes,
+          if (status.approveTxHash != null &&
+              !approvalTxHashes.contains(status.approveTxHash))
+            status.approveTxHash!,
+        ];
         return RoutedSwapProgress(
           uuid: status.uuid,
+          provider: status.provider,
           phase: _phaseOf(status.state),
-          canCancel: status.state.isCancellable,
+          // A record recovered from history has no addressable task, so there
+          // is nothing to cancel even when the phase would otherwise allow it.
+          canCancel: !fromHistory && status.state.isCancellable,
           rawState: status.rawState,
-          approvalTxHash: status.approveTxHash,
-          sourceTxHash: status.txHash,
+          bridgeStage: status.stage,
+          acceptedOffer: accepted,
+          executedOffer: executed,
+          approvalTxHashes: hashes,
+          sourceTxHash: status.sourceTxHash,
           explorerUrl: status.providerExplorerUrl,
           providerStatusDetail: status.substatusMessage ?? status.substatus,
           estimatedDuration: status.executionDurationS == null
-              ? null
+              ? executed?.estimatedDuration
               : Duration(seconds: status.executionDurationS!),
+          actionUrl: status.actionUrl,
         );
-      case rpc.RoutedSwapSuccess():
+      case rpc.RoutedSwapFinished():
         return RoutedSwapProgress(
           uuid: status.uuid,
+          provider: status.provider,
           phase: RoutedSwapPhase.finished,
           canCancel: false,
+          acceptedOffer: accepted,
+          executedOffer: executed,
           receipt: RoutedSwapReceipt(
             outcome: status.outcome,
+            partialReason: status.partialReason,
             amount: Decimal.parse(status.received.amount),
-            assetId: status.received.coin == null
-                ? null
-                : _resolveAssetId(status.received.coin!),
+            assetId: _resolveAssetOf(status.received),
             symbol: status.received.symbol,
           ),
+          approvalTxHashes: approvalTxHashes,
           sourceTxHash: status.sourceTxHash,
           destinationTxHash: status.destTxHash,
           explorerUrl: status.providerExplorerUrl,
         );
-      case rpc.RoutedSwapFailure():
+      case rpc.RoutedSwapErrored():
+        final failure = _failureFrom(
+          status,
+          accepted: accepted ?? executed,
+          approvalTxHashes: approvalTxHashes,
+          lastLivePhase: lastLivePhase,
+        );
         return RoutedSwapProgress(
           uuid: status.uuid,
+          provider: status.provider,
           phase: RoutedSwapPhase.failed,
           canCancel: false,
-          failure: _failureFrom(
-            errorType: status.errorType,
-            message: status.message,
-            data: status.errorData,
-            fundsUntouched: status.nothingWasSent,
-            offer: offer,
-          ),
+          acceptedOffer: accepted,
+          executedOffer: executed,
+          failure: failure,
+          approvalTxHashes: approvalTxHashes,
+          sourceTxHash: failure.sourceTxHash,
+          explorerUrl: failure.providerExplorerUrl,
         );
     }
   }
 
-  RoutedSwapProgress _progressFromRecord(rpc.RoutedSwapHistoryEntry record) {
-    if (record.errorType != null) {
-      return RoutedSwapProgress(
-        uuid: record.uuid,
-        phase: RoutedSwapPhase.failed,
-        canCancel: false,
-        approvalTxHash: record.approveTxHash,
-        sourceTxHash: record.sourceTxHash,
-        failure: _failureFrom(
-          errorType: record.errorType!,
-          message: record.errorType!,
-          data: record.errorData ?? const {},
-          // A record only reaches history's terminal error states after KDF
-          // has stopped, so trust the same conservative rule used live.
-          fundsUntouched: const {
-            'TaskCancelled',
-            'AbortedOnRestart',
-            'QuoteWorsened',
-            'InsufficientBalance',
-            'ApprovalFailed',
-          }.contains(record.errorType),
-        ),
-      );
-    }
-
-    if (record.status == 'Ok' && record.received != null) {
-      return RoutedSwapProgress(
-        uuid: record.uuid,
-        phase: RoutedSwapPhase.finished,
-        canCancel: false,
-        receipt: RoutedSwapReceipt(
-          outcome: record.outcome ?? rpc.RoutedSwapOutcome.unknown,
-          amount: Decimal.parse(record.received!.amount),
-          assetId: record.received!.coin == null
-              ? null
-              : _resolveAssetId(record.received!.coin!),
-          symbol: record.received!.symbol,
-        ),
-        sourceTxHash: record.sourceTxHash,
-        destinationTxHash: record.destTxHash,
-      );
-    }
-
-    final state = record.state == null
-        ? rpc.RoutedSwapState.unknown
-        : rpc.RoutedSwapState.parse(record.state!);
-    return RoutedSwapProgress(
-      uuid: record.uuid,
-      phase: _phaseOf(state),
-      // A record recovered from history has no addressable task, so there is
-      // nothing to cancel even when the phase would otherwise allow it.
-      canCancel: false,
-      rawState: record.state,
-      approvalTxHash: record.approveTxHash,
-      sourceTxHash: record.sourceTxHash,
+  RoutedSwapProgress _progressFromEntry(
+    rpc.RoutedSwapHistoryEntry entry, {
+    RoutedSwapOffer? accepted,
+    RoutedSwapProgress? previous,
+    RoutedSwapPhase? lastLivePhase,
+  }) {
+    final hashes = entry.approvalTxHashes.isNotEmpty
+        ? entry.approvalTxHashes
+        : previous?.approvalTxHashes ?? const <String>[];
+    final base = _progressFromStatus(
+      entry.swap,
+      accepted: accepted,
+      previousExecuted: previous?.executedOffer,
+      approvalTxHashes: hashes,
+      // Only a phase this process watched live can prove a failure happened
+      // before broadcast.
+      lastLivePhase: lastLivePhase,
+      fromHistory: true,
+    );
+    final requested = entry.requested;
+    return base.copyWith(
+      approvalTxHashes: hashes,
+      createdAt: _fromUnix(entry.createdAt),
+      updatedAt: _fromUnix(entry.updatedAt),
+      finishedAt: _fromUnix(entry.finishedAt),
+      requested: RoutedSwapRequest(
+        fromTicker: requested.from,
+        toTicker: requested.to,
+        from: _resolveAsset(requested.from),
+        to: _resolveAsset(requested.to),
+        amount: Decimal.tryParse(requested.amount) ?? Decimal.zero,
+      ),
+      minToAmountAccepted: _decimal(entry.minToAmountAccepted),
+      gasSpent: [
+        for (final gas in entry.gasSpent)
+          RoutedSwapGasPaid(
+            txHash: gas.txHash.isEmpty ? null : gas.txHash,
+            ticker: gas.coin,
+            assetId: _resolveAsset(gas.coin),
+            amount: Decimal.tryParse(gas.amount) ?? Decimal.zero,
+          ),
+      ],
+      totalGasSpent: [
+        for (final gas in entry.totalGasSpent)
+          RoutedSwapGasPaid(
+            ticker: gas.coin,
+            assetId: _resolveAsset(gas.coin),
+            amount: Decimal.tryParse(gas.amount) ?? Decimal.zero,
+          ),
+      ],
     );
   }
 
-  RoutedSwapFailure _failureFrom({
-    required String errorType,
-    required String message,
-    required Map<String, dynamic> data,
-    required bool fundsUntouched,
-    RoutedSwapOffer? offer,
+  RoutedSwapFailure _failureFrom(
+    rpc.RoutedSwapErrored status, {
+    required List<String> approvalTxHashes,
+    RoutedSwapOffer? accepted,
+    RoutedSwapPhase? lastLivePhase,
   }) {
-    final kind = switch (errorType) {
-      'QuoteWorsened' => RoutedSwapFailureKind.priceMoved,
-      'InsufficientBalance' => RoutedSwapFailureKind.insufficientBalance,
-      'ApprovalFailed' => RoutedSwapFailureKind.approvalFailed,
-      'SwapTxFailed' => RoutedSwapFailureKind.swapTransactionFailed,
-      'BridgeFailed' => RoutedSwapFailureKind.bridgeFailed,
-      'AbortedOnRestart' => RoutedSwapFailureKind.abortedOnRestart,
-      'TaskCancelled' => RoutedSwapFailureKind.cancelled,
-      _ => RoutedSwapFailureKind.unknown,
+    final error = status.error;
+    final kind = switch (error) {
+      rpc.RoutedSwapQuoteWorsenedError() => RoutedSwapFailureKind.priceMoved,
+      rpc.RoutedSwapInsufficientBalanceError() =>
+        RoutedSwapFailureKind.insufficientBalance,
+      rpc.RoutedSwapApprovalFailedError() =>
+        RoutedSwapFailureKind.approvalFailed,
+      rpc.RoutedSwapTxFailedError() =>
+        RoutedSwapFailureKind.swapTransactionFailed,
+      rpc.RoutedSwapSigningRejectedError() =>
+        RoutedSwapFailureKind.signingRejected,
+      rpc.RoutedSwapBridgeFailedError() => RoutedSwapFailureKind.bridgeFailed,
+      rpc.RoutedSwapPreflightRejectedError() =>
+        RoutedSwapFailureKind.preflightRejected,
+      rpc.RoutedSwapNoRouteTaskError() ||
+      rpc.RoutedSwapRateLimitedTaskError() ||
+      rpc.RoutedSwapProviderTaskError() ||
+      rpc.RoutedSwapAmountOutOfBoundsTaskError() =>
+        RoutedSwapFailureKind.quoteUnavailable,
+      rpc.RoutedSwapAbortedOnRestartError() =>
+        RoutedSwapFailureKind.abortedOnRestart,
+      rpc.RoutedSwapTaskCancelledError() => RoutedSwapFailureKind.cancelled,
+      rpc.RoutedSwapInternalTaskError() ||
+      rpc.RoutedSwapTransportTaskError() => RoutedSwapFailureKind.internalError,
+      rpc.RoutedSwapUnknownTaskError() => RoutedSwapFailureKind.unknown,
     };
 
+    final movement = _fundsMovementOf(
+      error,
+      approved: approvalTxHashes.isNotEmpty,
+      lastLivePhase: lastLivePhase,
+    );
+
     RoutedSwapOffer? freshOffer;
-    if (kind == RoutedSwapFailureKind.priceMoved && offer != null) {
-      final raw = data['fresh_route'];
-      if (raw is Map<String, dynamic>) {
+    if (error case rpc.RoutedSwapQuoteWorsenedError(:final freshRoute?)) {
+      final from = accepted?.from ?? _resolveAssetOf(freshRoute.from);
+      final to = accepted?.to ?? _resolveAssetOf(freshRoute.toMinimum);
+      if (from != null && to != null) {
         freshOffer = _offerFrom(
-          rpc.RoutedSwapRoute.fromJson(raw),
-          from: offer.from,
-          to: offer.to,
-          slippage: offer.slippage,
+          freshRoute,
+          from: from,
+          to: to,
+          order: accepted?.order,
+          slippage: accepted?.slippage,
         );
       }
     }
 
     return RoutedSwapFailure(
       kind: kind,
-      message: message,
-      fundsUntouched: fundsUntouched,
-      details: data,
+      errorType: status.errorType,
+      message: status.message,
+      fundsMovement: movement,
+      retryPolicy: _retryPolicyOf(error, movement),
+      details: switch (error) {
+        rpc.RoutedSwapUnknownTaskError(:final data) => data,
+        _ => const {},
+      },
       freshOffer: freshOffer,
+      approvalFailureReason: switch (error) {
+        rpc.RoutedSwapApprovalFailedError(:final reason) => reason,
+        _ => null,
+      },
+      txFailureReason: switch (error) {
+        rpc.RoutedSwapTxFailedError(:final reason) => reason,
+        _ => null,
+      },
+      signingRejectionReason: switch (error) {
+        rpc.RoutedSwapSigningRejectedError(:final reason) => reason,
+        _ => null,
+      },
+      preflightCheck: switch (error) {
+        rpc.RoutedSwapPreflightRejectedError(:final check) => check,
+        _ => null,
+      },
+      shortfall: switch (error) {
+        rpc.RoutedSwapInsufficientBalanceError(
+          :final coin,
+          :final available,
+          :final required,
+        ) =>
+          RoutedSwapShortfall(
+            ticker: coin,
+            assetId: _resolveAsset(coin),
+            available: Decimal.tryParse(available) ?? Decimal.zero,
+            required: Decimal.tryParse(required) ?? Decimal.zero,
+          ),
+        _ => null,
+      },
+      bounds: switch (error) {
+        rpc.RoutedSwapAmountOutOfBoundsTaskError(:final min, :final max) =>
+          RoutedSwapAmountBounds(min: _decimal(min), max: _decimal(max)),
+        _ => null,
+      },
+      noRouteReasons: switch (error) {
+        rpc.RoutedSwapNoRouteTaskError(:final reasons) => reasons,
+        _ => const [],
+      },
+      providerRequestId: error.providerRequestId,
+      sourceTxHash: switch (error) {
+        rpc.RoutedSwapTxFailedError(:final sourceTxHash) => sourceTxHash,
+        rpc.RoutedSwapBridgeFailedError(:final sourceTxHash) => sourceTxHash,
+        _ => null,
+      },
+      providerExplorerUrl: switch (error) {
+        rpc.RoutedSwapBridgeFailedError(:final providerExplorerUrl) =>
+          providerExplorerUrl,
+        _ => null,
+      },
     );
+  }
+
+  /// Whether the sold funds moved, never claiming "untouched" without proof.
+  static RoutedSwapFundsMovement _fundsMovementOf(
+    rpc.RoutedSwapTaskError error, {
+    required bool approved,
+    RoutedSwapPhase? lastLivePhase,
+  }) {
+    final untouched = approved
+        ? RoutedSwapFundsMovement.feesOnly
+        : RoutedSwapFundsMovement.none;
+    final watchedBeforeBroadcast =
+        lastLivePhase != null && _isPreBroadcast(lastLivePhase);
+
+    switch (error) {
+      case rpc.RoutedSwapTxFailedError(:final reason):
+        return reason == rpc.RoutedSwapTxFailureReason.sourceTransactionReverted
+            ? RoutedSwapFundsMovement.feesOnly
+            : RoutedSwapFundsMovement.uncertain;
+      case rpc.RoutedSwapBridgeFailedError():
+        return RoutedSwapFundsMovement.sent;
+      case rpc.RoutedSwapApprovalFailedError(:final reason):
+        // The swap never went out; an approval or reset may still have cost
+        // gas.
+        return !approved &&
+                reason ==
+                    rpc.RoutedSwapApprovalFailureReason.approvalBroadcastFailed
+            ? RoutedSwapFundsMovement.none
+            : RoutedSwapFundsMovement.feesOnly;
+      case rpc.RoutedSwapSigningRejectedError(:final reason):
+        if (reason != rpc.RoutedSwapSigningRejectionReason.timeout) {
+          return untouched;
+        }
+        return watchedBeforeBroadcast
+            ? untouched
+            : RoutedSwapFundsMovement.uncertain;
+      case rpc.RoutedSwapInternalTaskError():
+        // Rare, but it can follow an uncertain wallet handoff after
+        // Broadcasting; only a live observation before broadcast rules that
+        // out.
+        return watchedBeforeBroadcast
+            ? untouched
+            : RoutedSwapFundsMovement.uncertain;
+      case rpc.RoutedSwapUnknownTaskError():
+        return RoutedSwapFundsMovement.uncertain;
+      default:
+        return error.isPreBroadcast
+            ? untouched
+            : RoutedSwapFundsMovement.uncertain;
+    }
+  }
+
+  static bool _isPreBroadcast(RoutedSwapPhase phase) =>
+      phase == RoutedSwapPhase.preparing ||
+      phase == RoutedSwapPhase.approving ||
+      phase == RoutedSwapPhase.signing;
+
+  static RoutedSwapRetryPolicy _retryPolicyOf(
+    rpc.RoutedSwapTaskError error,
+    RoutedSwapFundsMovement movement,
+  ) {
+    return switch (error) {
+      rpc.RoutedSwapQuoteWorsenedError() => RoutedSwapRetryPolicy.requote,
+      rpc.RoutedSwapInsufficientBalanceError() =>
+        RoutedSwapRetryPolicy.fixAndRetry,
+      rpc.RoutedSwapApprovalFailedError() => RoutedSwapRetryPolicy.retry,
+      rpc.RoutedSwapTxFailedError(:final reason) =>
+        reason == rpc.RoutedSwapTxFailureReason.sourceTransactionReverted
+            ? RoutedSwapRetryPolicy.requote
+            : RoutedSwapRetryPolicy.wait,
+      rpc.RoutedSwapSigningRejectedError() =>
+        movement == RoutedSwapFundsMovement.uncertain
+            ? RoutedSwapRetryPolicy.wait
+            : RoutedSwapRetryPolicy.retry,
+      rpc.RoutedSwapBridgeFailedError() => RoutedSwapRetryPolicy.contactSupport,
+      rpc.RoutedSwapPreflightRejectedError(:final check) =>
+        check.isRetryable
+            ? RoutedSwapRetryPolicy.retry
+            : check.mayPassOnRequote
+            ? RoutedSwapRetryPolicy.requote
+            : RoutedSwapRetryPolicy.contactSupport,
+      rpc.RoutedSwapRateLimitedTaskError() ||
+      rpc.RoutedSwapProviderTaskError() => RoutedSwapRetryPolicy.retry,
+      rpc.RoutedSwapNoRouteTaskError() ||
+      rpc.RoutedSwapAmountOutOfBoundsTaskError() =>
+        RoutedSwapRetryPolicy.requote,
+      rpc.RoutedSwapAbortedOnRestartError() ||
+      rpc.RoutedSwapTaskCancelledError() => RoutedSwapRetryPolicy.retry,
+      rpc.RoutedSwapInternalTaskError() || rpc.RoutedSwapTransportTaskError() =>
+        movement == RoutedSwapFundsMovement.uncertain
+            ? RoutedSwapRetryPolicy.contactSupport
+            : RoutedSwapRetryPolicy.retry,
+      rpc.RoutedSwapUnknownTaskError() => RoutedSwapRetryPolicy.contactSupport,
+    };
   }
 
   static RoutedSwapPhase _phaseOf(rpc.RoutedSwapState state) => switch (state) {
@@ -516,141 +938,333 @@ class RoutedSwapManager {
   };
 }
 
-/// Drives one live swap: event stream where available, polling as the truth,
-/// history once the task is gone.
+class _RoutedSwapHandle implements RoutedSwapHandle {
+  _RoutedSwapHandle(this._session);
+
+  final _RoutedSwapSession _session;
+
+  @override
+  String get uuid => _session.uuid;
+
+  @override
+  RoutedSwapProgress get latest => _session.latest;
+
+  @override
+  Stream<RoutedSwapProgress> get progress => _session.stream;
+
+  @override
+  Future<RoutedSwapProgress> get result => _session.result;
+
+  @override
+  Future<void> cancel() => _session.cancel();
+}
+
+/// Follows one swap: its task while it exists, polled as the truth with the
+/// event stream as a nudge, and the durable record once the task is gone.
+///
+/// Runs independently of listeners — a screen closing must not stop a swap
+/// from being followed — until the swap is terminal.
 class _RoutedSwapSession {
   _RoutedSwapSession({
-    required this.uuid,
-    required this.taskId,
     required RoutedSwapManager manager,
-    required RoutedSwapOffer offer,
+    required this.uuid,
     required RoutedSwapProgress seed,
+    int? taskId,
+    this.offer,
   }) : _manager = manager,
-       _offer = offer,
-       _latest = seed {
-    _controller = StreamController<RoutedSwapProgress>.broadcast(
-      onListen: _start,
-      onCancel: () {
-        if (!_controller.hasListener) _stopWatching();
-      },
-    );
-  }
+       _taskId = taskId,
+       _latest = seed;
 
-  final String uuid;
-  final int taskId;
   final RoutedSwapManager _manager;
-  final RoutedSwapOffer _offer;
+  final String uuid;
 
-  late final StreamController<RoutedSwapProgress> _controller;
-  StreamSubscription<void>? _events;
-  Timer? _timer;
-  DateTime? _lastEventAt;
+  /// The offer the user accepted, for swaps started in this process.
+  final RoutedSwapOffer? offer;
+
+  int? _taskId;
   RoutedSwapProgress _latest;
-  var _started = false;
-  var _finished = false;
-  var _polling = false;
 
-  bool get isClosed => _controller.isClosed;
+  /// The last phase read from the live task — the only kind of observation
+  /// that can prove a later failure happened before broadcast.
+  RoutedSwapPhase? _lastLivePhase;
+  final StreamController<RoutedSwapProgress> _updates =
+      StreamController<RoutedSwapProgress>.broadcast();
+  final Completer<RoutedSwapProgress> _result = Completer<RoutedSwapProgress>();
 
-  /// The progress stream, seeded with the snapshot taken at start so a late
-  /// subscriber is never left with a blank screen waiting for the next poll.
-  Stream<RoutedSwapProgress> get stream async* {
-    yield _latest;
-    yield* _controller.stream;
+  Timer? _timer;
+  StreamSubscription<void>? _nudges;
+  var _refreshing = false;
+  var _failures = 0;
+  var _disposed = false;
+
+  RoutedSwapProgress get latest => _latest;
+
+  RoutedSwapPhase? get lastLivePhase => _lastLivePhase;
+
+  bool get isDisposed => _disposed;
+
+  Future<RoutedSwapProgress> get result => _result.future;
+
+  Stream<RoutedSwapProgress> get stream => Stream.multi((out) {
+    out.add(_latest);
+    if (_updates.isClosed) {
+      unawaited(out.close());
+      return;
+    }
+    final subscription = _updates.stream.listen(
+      out.add,
+      onError: out.addError,
+      onDone: out.close,
+    );
+    out.onCancel = subscription.cancel;
+  });
+
+  void start() {
+    if (_latest.isTerminal) {
+      final taskId = _taskId;
+      if (taskId == null) {
+        _finish();
+      } else {
+        unawaited(_settleTerminalSeed(taskId));
+      }
+      return;
+    }
+    final taskId = _taskId;
+    if (taskId != null) {
+      try {
+        _nudges = _manager._taskNudges
+            ?.call(taskId)
+            .listen((_) => _refreshSoon(), onError: (_) {});
+      } on Object {
+        // A stream that will not start is not worth surfacing; polling covers
+        // it.
+      }
+    }
+    _schedule(_taskId != null ? _manager._pollInterval : Duration.zero);
   }
 
-  void _start() {
-    if (_started) return;
-    _started = true;
-
-    // Best-effort. KDF drops events on a slow client, so this only makes
-    // updates feel immediate — the timer below is what guarantees progress.
-    try {
-      _events = _manager._taskNudges?.call(taskId).listen((_) {
-        _lastEventAt = DateTime.now();
-        unawaited(_refresh());
-      }, onError: (_) {});
-    } on Object {
-      // A stream that will not start is not a failure worth surfacing; the
-      // poller covers it.
-    }
-
-    _timer = Timer.periodic(_manager._pollInterval, (_) {
-      final last = _lastEventAt;
-      final streamIsFresh =
-          last != null &&
-          DateTime.now().difference(last) < _manager._streamStaleAfter;
-      if (!streamIsFresh) unawaited(_refresh());
-    });
-
+  void _refreshSoon() {
+    if (_refreshing || _disposed || _latest.isTerminal) return;
+    _timer?.cancel();
     unawaited(_refresh());
   }
 
+  void _schedule(Duration delay) {
+    _timer?.cancel();
+    if (_disposed || _latest.isTerminal) return;
+    _timer = Timer(delay, () => unawaited(_refresh()));
+  }
+
   Future<void> _refresh() async {
-    if (_finished || _polling || _controller.isClosed) return;
-    _polling = true;
+    if (_refreshing || _disposed || _latest.isTerminal) return;
+    _refreshing = true;
+    var next = _taskId != null
+        ? _manager._pollInterval
+        : _manager._historyPollInterval;
     try {
-      // Never forget: a terminal result read once and discarded cannot be
-      // recovered from the task, and any other listener would lose it.
-      // Never forget the result: reading a terminal status with
-      // forget_if_finished would destroy it for every other listener.
-      final status = await _manager._client.rpc.routedSwap.status(taskId);
-      _emit(_manager._progressFrom(status.details, offer: _offer));
-    } on Object catch (_) {
-      // The task is gone — forgotten, cancelled, or lost to a restart. The
-      // swap itself may be entirely fine, so resolve it from the durable
-      // record rather than reporting a failure the user did not have.
-      await _resolveFromHistory();
+      if (_taskId != null) {
+        await _refreshFromTask(_taskId!);
+      } else {
+        await _refreshFromHistory();
+      }
+      _failures = 0;
+      if (_latest.delayedSince != null && !_latest.isTerminal) {
+        _emit(_latest.copyWith(clearDelayedSince: true));
+      }
+    } on rpc.RoutedSwapNoSuchTaskException {
+      // The task is gone — cancelled, forgotten, or lost to a restart. The
+      // swap itself may be entirely fine; the durable record decides.
+      _taskId = null;
+      next = Duration.zero;
+    } on Object {
+      _failures++;
+      next = _backoff(next);
+      if (_failures >= _manager._delayedAfterFailures &&
+          _latest.delayedSince == null) {
+        _emit(_latest.copyWith(delayedSince: DateTime.now()));
+      }
     } finally {
-      _polling = false;
+      _refreshing = false;
+    }
+    if (_latest.isTerminal) {
+      _finish();
+    } else {
+      _schedule(next);
     }
   }
 
-  Future<void> _resolveFromHistory() async {
+  Duration _backoff(Duration base) {
+    final factor = math.pow(2, math.min(_failures, 5)).toInt();
+    final delay = base * factor;
+    return delay > _manager._maxBackoff ? _manager._maxBackoff : delay;
+  }
+
+  Future<void> _refreshFromTask(int taskId) async {
+    final response = await _manager._client.rpc.routedSwap.status(taskId);
+    // KDF numbers tasks from zero again after a restart, so this id can now
+    // belong to a different swap. Treat it as gone; history decides.
+    if (response.details.uuid != uuid) {
+      throw rpc.RoutedSwapNoSuchTaskException(
+        message: 'Task $taskId now belongs to another swap',
+        taskId: taskId,
+      );
+    }
+    final progress = _manager._progressFromStatus(
+      response.details,
+      accepted: offer,
+      previousExecuted: _latest.executedOffer,
+      approvalTxHashes: _latest.approvalTxHashes,
+      lastLivePhase: _lastLivePhase,
+    );
+    if (!progress.isTerminal) {
+      _lastLivePhase = progress.phase;
+      _emit(progress);
+      return;
+    }
+    _emit(await _enriched(progress));
+    unawaited(_forget(taskId));
+  }
+
+  /// [terminal], completed from the durable record — timestamps, every
+  /// approval, the gas actually spent — when the record has caught up.
+  Future<RoutedSwapProgress> _enriched(RoutedSwapProgress terminal) async {
     try {
-      final record = await _manager._recordFor(uuid);
-      if (record == null) return;
-      _emit(_manager._progressFromRecord(record));
-    } on Object catch (error, trace) {
-      if (!_controller.isClosed) _controller.addError(error, trace);
+      final entry = await _manager._entryFor(uuid);
+      if (entry != null && entry.swap.isTerminal) {
+        return _manager._progressFromEntry(
+          entry,
+          accepted: offer,
+          previous: terminal,
+          lastLivePhase: _lastLivePhase,
+        );
+      }
+    } on Object {
+      // The live terminal result stands on its own.
+    }
+    return terminal;
+  }
+
+  /// A swap whose very first read was already terminal still gets the
+  /// durable record's details, and its task is still released.
+  Future<void> _settleTerminalSeed(int taskId) async {
+    _emit(await _enriched(_latest));
+    await _forget(taskId);
+    _finish();
+  }
+
+  Future<void> _refreshFromHistory() async {
+    final entry = await _manager._entryFor(uuid);
+    if (entry == null) throw RoutedSwapNotFoundException(uuid);
+    _emit(
+      _manager._progressFromEntry(
+        entry,
+        accepted: offer,
+        previous: _latest,
+        lastLivePhase: _lastLivePhase,
+      ),
+    );
+  }
+
+  /// Releases the finished task. The result has been read and emitted, and
+  /// the durable record keeps it.
+  Future<void> _forget(int taskId) async {
+    _taskId = null;
+    try {
+      await _manager._client.rpc.routedSwap.status(
+        taskId,
+        forgetIfFinished: true,
+      );
+    } on Object {
+      // Already gone is the same outcome.
     }
   }
 
   void _emit(RoutedSwapProgress progress) {
-    if (_controller.isClosed) return;
+    if (_disposed || _updates.isClosed) return;
+    if (progress == _latest) return;
     _latest = progress;
-    _controller.add(progress);
-    if (progress.isTerminal) {
-      _finished = true;
-      _stopWatching();
-    }
+    _updates.add(progress);
+    if (progress.isTerminal) _finish();
+  }
+
+  void _finish() {
+    _timer?.cancel();
+    _timer = null;
+    unawaited(_nudges?.cancel());
+    _nudges = null;
+    if (!_result.isCompleted) _result.complete(_latest);
+    if (!_updates.isClosed) unawaited(_updates.close());
   }
 
   Future<void> cancel() async {
+    final taskId = _taskId;
+    if (_latest.isTerminal) {
+      throw RoutedSwapNotCancellableException(
+        uuid,
+        _latest.phase,
+        refusal: RoutedSwapCancelRefusal.alreadyFinished,
+      );
+    }
+    if (taskId == null) {
+      throw RoutedSwapNotCancellableException(
+        uuid,
+        _latest.phase,
+        refusal: RoutedSwapCancelRefusal.notAddressable,
+      );
+    }
     if (!_latest.canCancel) {
       throw RoutedSwapNotCancellableException(uuid, _latest.phase);
     }
+
     try {
       await _manager._client.rpc.routedSwap.cancel(taskId);
-    } on Object {
-      // Losing the race is the expected failure here: the transaction was
-      // broadcast between the check and the call.
-      throw RoutedSwapNotCancellableException(uuid, _latest.phase);
+    } on rpc.RoutedSwapTaskAlreadyBroadcastException {
+      _refreshSoon();
+      throw RoutedSwapNotCancellableException(uuid, RoutedSwapPhase.sending);
+    } on rpc.RoutedSwapTaskFinishedException {
+      _refreshSoon();
+      throw RoutedSwapNotCancellableException(
+        uuid,
+        _latest.phase,
+        refusal: RoutedSwapCancelRefusal.alreadyFinished,
+      );
+    } on rpc.RoutedSwapNoSuchTaskException {
+      // Gone already — an earlier cancel may have landed. The durable record
+      // says whether this one is moot or impossible.
+      _taskId = null;
+      await _refreshNow();
+      if (_latest.failure?.kind == RoutedSwapFailureKind.cancelled) return;
+      throw RoutedSwapNotCancellableException(
+        uuid,
+        _latest.phase,
+        refusal: _latest.isTerminal
+            ? RoutedSwapCancelRefusal.alreadyFinished
+            : RoutedSwapCancelRefusal.notAddressable,
+      );
+    } on Object catch (error) {
+      _refreshSoon();
+      throw RoutedSwapCancelUnconfirmedException(uuid, error);
     }
-    // Cancellation removes the task, so the outcome is only readable in the
-    // durable record.
-    await _resolveFromHistory();
+
+    // Accepted: the task is removed and history records the cancellation.
+    _taskId = null;
+    await _refreshNow();
   }
 
-  void _stopWatching() {
+  Future<void> _refreshNow() async {
+    _timer?.cancel();
+    while (_refreshing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await _refresh();
+  }
+
+  Future<void> dispose() async {
+    _disposed = true;
     _timer?.cancel();
     _timer = null;
-    unawaited(_events?.cancel());
-    _events = null;
-  }
-
-  Future<void> close() async {
-    _stopWatching();
-    await _controller.close();
+    await _nudges?.cancel();
+    _nudges = null;
+    if (!_updates.isClosed) await _updates.close();
   }
 }

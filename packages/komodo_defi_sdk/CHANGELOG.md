@@ -9,6 +9,24 @@ patch of 0.7.0.
    `KomodoDefiSdk.routedSwaps`. A liquidity source separate from `trading`'s
    atomic-swap orderbook: KDF executes the swap against an external aggregator,
    and the manager hides the task lifecycle behind a `RoutedSwapHandle`.
+ - **FEAT**(routed-swap): rewrite `RoutedSwapManager`.
+   - **Following a swap:** each swap is followed by one session that replays
+     its latest state, keeps polling whether or not anyone listens, and
+     emits only real changes.
+   - **Resuming:** `watch(uuid)` picks a swap back up after a restart;
+     `inFlight()` and paged `history()` list what is running and what has
+     finished.
+   - **Tasks that disappear:** a task that vanished, or whose id KDF has
+     reused for another swap after a restart, is resolved against history.
+   - **Finishing:** a finished task's result is read once with
+     `forget_if_finished`, then released.
+   - **Starting:** `start` passes the route order through, retries the first
+     status read, and otherwise finds the swap it created in history. If the
+     start still can't be confirmed, it raises
+     `RoutedSwapStartUnconfirmedException` rather than inviting a second
+     start.
+   - **Cancelling:** refusals are typed.
+   - **Max:** `maxSellAmount` is an interim Max until the contract has one.
  - **SECURITY**(history): authenticate the transaction cache. Records were
    AES-CBC with no authentication tag, and the surrounding CRC-32 gave no
    integrity - CRC-32 is affine, so an edit could be corrected without knowing
