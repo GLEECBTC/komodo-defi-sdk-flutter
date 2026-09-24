@@ -208,6 +208,14 @@ extension KdfExtensions on KdfAuthService {
           type: AuthExceptionType.incorrectPassword,
         );
       }
+      // Keep the retryable type, not the error: the retry wrapper's details
+      // carry the last cause's text, which can include the RPC response.
+      if (_isKdfUnreachable(error)) {
+        throw AuthException(
+          'KDF is not available. Please try again.',
+          type: AuthExceptionType.apiConnectionError,
+        );
+      }
       throw AuthException(
         'Failed to retrieve mnemonic',
         type: AuthExceptionType.generalAuthError,

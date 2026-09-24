@@ -20,6 +20,8 @@ authentication implementations must migrate before adopting this version.
  - **FIX**(auth): run sign-in, registration, sign-out, session restore and
    disposal through one serialized authentication transition, so a transition
    cannot interleave with another or with KDF lifecycle changes.
+ - **FIX**(auth): report a KDF outage during mnemonic retrieval as
+   `apiConnectionError`, so callers can retry, without the failed RPC's text.
  - **DOCS**(auth): state that `onWalletDeletion` hooks run under the wallet
    catalog lock and must not wait on `getUsers`, registration or deletion.
 
