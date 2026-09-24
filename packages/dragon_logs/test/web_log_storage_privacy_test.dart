@@ -240,6 +240,22 @@ void main() {
     );
   });
 
+  test('export and retention follow file dates, not names', () async {
+    await init();
+    final epoch = await root.getDirectoryHandle(_epoch).toDart;
+    await _write(epoch, 'APP-LOGS_2026-01-01.log', '"2026"\n');
+    await _write(epoch, 'Z_2020-01-01.log', '"2020"\n');
+    await _write(epoch, 'my.app_2019-12-31.log', '"2019"\n');
+
+    expect(await storage.exportLogsStream().join(), '"2019"\n"2020"\n"2026"\n');
+    await storage.deleteOldLogs('"2026"\n'.length);
+    final remaining = <String>[];
+    await for (final handle in epoch.valuesStream()) {
+      if (handle.kind == 'file') remaining.add(handle.name);
+    }
+    expect(remaining, ['APP-LOGS_2026-01-01.log']);
+  });
+
   test(
     'a real worker lock prevents migration until the worker releases it',
     () async {

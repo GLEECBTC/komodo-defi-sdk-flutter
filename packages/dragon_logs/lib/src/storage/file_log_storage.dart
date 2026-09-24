@@ -304,7 +304,12 @@ class FileLogStorage
         )
         .cast<File>()
         .toList();
-    files.sort((a, b) => a.path.compareTo(b.path));
+    files.sort(
+      (a, b) => CommonLogStorageOperations.compareLogFileNames(
+        p.basename(a.path),
+        p.basename(b.path),
+      ),
+    );
     return files;
   }
 

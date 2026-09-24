@@ -19,6 +19,9 @@
  - **FIX**(export): share native export ownership across storage instances in
    one isolate using canonical paths, and serialize snapshot cleanup with clear.
    Retention survives disposal; concurrent shares use separate cache directories.
+ - **FIX**(storage): order log files by the date in their names for retention
+   and export. A name may carry any prefix, so lexical order could delete newer
+   logs first and export them out of order.
 
 ## 2.0.1 — preparation history
 

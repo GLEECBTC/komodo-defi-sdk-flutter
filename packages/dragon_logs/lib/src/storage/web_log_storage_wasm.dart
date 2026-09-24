@@ -294,7 +294,9 @@ class WebLogStorageWasm
         files.add(handle as FileSystemFileHandle);
       }
     }
-    files.sort((a, b) => a.name.compareTo(b.name));
+    files.sort(
+      (a, b) => CommonLogStorageOperations.compareLogFileNames(a.name, b.name),
+    );
     return files;
   }
 

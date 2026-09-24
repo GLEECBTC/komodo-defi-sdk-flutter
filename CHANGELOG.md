@@ -219,6 +219,9 @@ existing unreleased entries are extended in place.
  - **FIX**(export): share native export ownership across storage instances in
    one isolate using canonical paths, and serialize snapshot cleanup with clear.
    Retention survives disposal; concurrent shares use separate cache directories.
+ - **FIX**(storage): order log files by the date in their names for retention
+   and export. A name may carry any prefix, so lexical order could delete newer
+   logs first and export them out of order.
 
 ## 2026-09-01 — SDK 0.7.0 preparation
 
