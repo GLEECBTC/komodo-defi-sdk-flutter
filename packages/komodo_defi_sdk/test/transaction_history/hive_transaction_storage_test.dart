@@ -206,6 +206,23 @@ void main() {
       expect(await countFor(storage, deleted), 0);
     });
 
+    test('history looked up by id after a stale listing is kept', () async {
+      await seedBothWallets();
+      final listing = heldListing();
+      final storage = await openWithCatalogue(() => listing.future);
+      await storage.getStats();
+
+      // `deleted` was re-created after the listing began, so its rows are live.
+      expect(
+        (await storage.getTransactionById('deleted-1'))?.internalId,
+        'deleted-1',
+      );
+      listing.complete({walletStorageNamespace(kept)});
+      await storage.orphanSweep;
+
+      expect(await countFor(storage, deleted), 1);
+    });
+
     // Timeouts sit inside the lock: the native lock is process-wide, and a
     // regression must release it rather than wedge every later catalog test.
     group('under the wallet catalog lock', () {

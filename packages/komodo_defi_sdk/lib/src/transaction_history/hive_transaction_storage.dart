@@ -442,9 +442,11 @@ class HiveTransactionStorage
       await _mutex.protect(() async {
         // Closed, degraded or reopened while the wallets were being listed.
         if (!identical(_box, box)) return;
+        // Every read, write or id lookup since the open marks its scope dirty,
+        // and only close flushes that set.
         final orphaned = [
           for (final scope in _index.prefixes)
-            if (!_sessionScopes.containsKey(scope) &&
+            if (!_dirtyScopes.contains(scope) &&
                 !knownTokens.contains(
                   scope.split(TransactionStorageKey.separator).first,
                 ))
