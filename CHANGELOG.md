@@ -114,6 +114,8 @@ existing unreleased entries are extended in place.
    not been opened yet. The cache's orphaned-wallet sweep now runs after the
    open and lists wallets without holding the cache lock, so it no longer waits
    on the catalog lock that `deleteWallet` holds around its purge hooks.
+ - **FIX**(history): prune a reopened cache only once every row is indexed, so
+   a recently used scope is not evicted under a smaller global limit.
 
 #### `komodo_defi_local_auth` - `v0.6.0`
 

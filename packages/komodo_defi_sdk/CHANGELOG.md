@@ -39,6 +39,9 @@ patch of 0.7.0.
    sweep then listed wallets through that same non-reentrant lock. The sweep
    now runs after the open, lists wallets without holding the cache lock, and
    keeps history used since the open.
+ - **FIX**(history): prune a reopened cache only once every row is indexed. A
+   scope's recency lives on its latest row alone, so pruning batch by batch
+   could evict a recently used wallet or asset under a smaller global limit.
  - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
    as a value. One future is handed to every caller joining the same in-flight
    work, and those callers do not share an error zone, because `retry()` runs

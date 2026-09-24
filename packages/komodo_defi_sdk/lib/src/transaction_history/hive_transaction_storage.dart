@@ -707,11 +707,18 @@ class HiveTransactionStorage
           _lastAccess = envelope.accessedAt;
         }
       }
-      invalid.addAll(_retention.prune());
       if (invalid.isNotEmpty) {
         await box.deleteAll(invalid);
         deleted = true;
       }
+    }
+    // Only once every row is indexed: a scope's recency lives on its latest
+    // row alone (see [_flushAccesses]), so pruning a partial index can evict
+    // a recently used scope whose latest row is in a later batch.
+    final evicted = _retention.prune();
+    if (evicted.isNotEmpty) {
+      await box.deleteAll(evicted);
+      deleted = true;
     }
     _rebuildIndex();
     if (deleted) await box.compact();
