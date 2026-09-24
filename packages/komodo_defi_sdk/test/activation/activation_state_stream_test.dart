@@ -1,4 +1,3 @@
-import '../helpers/runtime_auth_fixture.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
@@ -13,9 +12,7 @@ import 'package:test/test.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockAssetHistory extends Mock implements AssetHistoryStorage {}
 

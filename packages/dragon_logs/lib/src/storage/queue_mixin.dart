@@ -1,67 +1,77 @@
 import 'dart:async';
 
-/// Serializes queue drains and storage snapshots within one logger instance.
 mixin QueueMixin {
   List<String> _logQueue = [];
-  Future<void> _operations = Future<void>.value();
-  Timer? _flushTimer;
-  bool _acceptingLogs = false;
+  Completer<void>? _flushCompleter;
+  bool _isQueueEnabled = false;
 
   void initQueueFlusher() {
-    if (_acceptingLogs) return;
-    _acceptingLogs = true;
-    _flushTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      // Retain failed batches for a later flush. Never log the exception: it
-      // may contain the record whose persistence failed.
-      flushQueue().catchError((Object _) {});
-    });
+    if (_isQueueEnabled) return;
+
+    _isQueueEnabled = true;
+
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 5));
+      await flushQueue().catchError((e) {
+        print('Error flushing log queue: $e');
+      });
+      return _isQueueEnabled;
+    }).ignore();
   }
 
-  void stopQueueFlusher() {
-    _acceptingLogs = false;
-    _flushTimer?.cancel();
-    _flushTimer = null;
-  }
-
-  void discardQueuedLogs() => _logQueue = [];
+  bool get isFlushing => _flushCompleter != null;
 
   void enqueue(String log) {
-    if (!_acceptingLogs) throw StateError('Log storage is not ready');
     _logQueue.add(log);
   }
 
-  Future<T> serializeStorage<T>(Future<T> Function() operation) {
-    final result = _operations.then((_) => operation());
-    _operations = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
+  Future<void> startFlush() async {
+    // assert(_flushCompleter == null, 'Flush already in progress');
+
+    while (isFlushing) {
+      await (_flushCompleter?.future ?? Future.delayed(Duration(seconds: 1)));
+    }
+
+    _flushCompleter ??= Completer<void>();
   }
 
-  Future<void> _flushQueuedLogs() async {
+  void endFlush() {
+    _flushCompleter?.complete();
+    _flushCompleter = null;
+  }
+
+  Future<void> flushQueue() async {
     if (_logQueue.isEmpty) return;
-    final batch = _logQueue;
+
+    startFlush();
+
+    // This way of re-assigning the queue instead of mutating it helps reduce
+    // memory use and CPU to copy the object. It should be safe from race
+    // conditions, but if issues arrise, pay attention to these lines.
+    final List<String> toWrite = _logQueue;
+
     _logQueue = [];
+
     try {
-      await writeToTextFile(batch.join('\n'));
-    } catch (_) {
-      _logQueue.insertAll(0, batch);
-      rethrow;
+      final logConcat = StringBuffer();
+
+      logConcat.writeAll(toWrite, '\n');
+
+      final bufferWritten = logConcat.toString();
+
+      await writeToTextFile(bufferWritten);
+    } catch (e) {
+      _logQueue.add('FAILED TO WRITE LOGS: $e');
+      _logQueue.insertAll(0, toWrite);
+    } finally {
+      endFlush();
     }
   }
 
-  Future<void> flushQueue() => serializeStorage(_flushQueuedLogs);
+  Future<void> appendLog(DateTime date, String text) async {
+    enqueue(text);
+  }
 
-  /// The queue is drained and the operation finishes before another local
-  /// flush, export, or retention operation can run.
-  Future<T> withFlushedQueue<T>(Future<T> Function() operation) =>
-      serializeStorage(() async {
-        await _flushQueuedLogs();
-        return operation();
-      });
-
-  Future<void> appendLog(DateTime date, String text) async => enqueue(text);
-
+  /// Writes a String to the log text file for today.
   Future<void> writeToTextFile(String logs);
 }

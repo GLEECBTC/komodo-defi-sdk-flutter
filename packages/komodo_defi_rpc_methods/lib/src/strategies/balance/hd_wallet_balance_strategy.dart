@@ -69,8 +69,10 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
             );
 
             log(
-              'HD balance retry attempt=${retryCount + 1} '
-              'delay_ms=${delay.inMilliseconds}',
+              'Retrying HD wallet balance fetch for $assetId\n'
+              'Delay: ${delay.inMilliseconds}ms\n'
+              'Attempt: ${retryCount + 1}/${_maxRetries + 1}\n'
+              'Timeout: ${timeout.inSeconds}s',
               name: 'HDWalletBalanceStrategy',
             );
 
@@ -116,8 +118,10 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
             client.rpc.hdWallet.accountBalanceCancel(taskId: taskId);
           } catch (e) {
             log(
-              'HD balance task cancellation failed',
+              'Error cancelling HD wallet balance task',
               name: 'HDWalletBalanceStrategy',
+              error: e,
+              stackTrace: StackTrace.current,
             );
           }
         }
@@ -158,7 +162,12 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
         } catch (e) {
           consecutiveErrorCount++;
 
-          log('HD balance task status failed', name: 'HDWalletBalanceStrategy');
+          log(
+            'Error checking HD wallet balance task status',
+            name: 'HDWalletBalanceStrategy',
+            error: e,
+            stackTrace: StackTrace.current,
+          );
 
           // If we get "No such task" error or too many consecutive errors, stop polling
           final errorString = e.toString().toLowerCase();
@@ -239,8 +248,11 @@ class HDWalletBalanceStrategy extends BalanceStrategy {
 
             // Log the error
             log(
-              'HD balance fetch failed attempt=$consecutiveErrors',
+              'Error fetching HD wallet balance for $assetId\n'
+              'Attempt: $consecutiveErrors',
               name: 'HDWalletBalanceStrategy',
+              error: e,
+              stackTrace: stackTrace,
             );
 
             // Only propagate error if it persists

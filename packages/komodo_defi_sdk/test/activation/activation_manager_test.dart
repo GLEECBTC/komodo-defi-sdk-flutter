@@ -1,4 +1,3 @@
-import '../helpers/runtime_auth_fixture.dart';
 import 'dart:async';
 
 import 'package:komodo_coins/komodo_coins.dart';
@@ -17,9 +16,7 @@ import 'package:test/test.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockAssetHistory extends Mock implements AssetHistoryStorage {}
 
@@ -167,9 +164,6 @@ void main() {
     setUp(() {
       client = _MockApiClient();
       auth = _MockAuth();
-      when(
-        () => auth.authStateChanges,
-      ).thenAnswer((_) => const Stream<KdfUser?>.empty());
       assetHistory = _MockAssetHistory();
       assetLookup = _MockAssetLookup();
       balanceManager = _MockBalanceManager();
@@ -555,10 +549,7 @@ void main() {
       });
 
       final manager = buildManager();
-      final pending = expectLater(
-        manager.activateAssets([parent, child]).toList(),
-        throwsA(isA<WalletChangedDisconnectException>()),
-      );
+      final pending = manager.activateAssets([parent, child]).toList();
       await statusStarted.future;
       manager.resetActivationSessionState();
       currentUser = const KdfUser(
@@ -571,9 +562,9 @@ void main() {
       );
       statusResponse.complete(_availableStatus());
 
-      await pending;
+      final progress = await pending;
+      expect(progress.last.isError, isTrue);
       expect(capabilities.statusFor(child.id), isNull);
-      expect(manager.activationStates, isEmpty);
       expect(capabilities.isReady(child.id), isFalse);
     });
   });

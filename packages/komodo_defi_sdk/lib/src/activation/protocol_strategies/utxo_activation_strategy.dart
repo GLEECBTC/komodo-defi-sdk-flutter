@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:developer' show log;
 
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
@@ -77,8 +78,14 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for UTXO/Electrum activation
       if (KdfLoggingConfig.verboseLogging) {
-        log('Activation started', name: 'UtxoActivationStrategy');
-        log('Activation request prepared', name: 'UtxoActivationStrategy');
+        log(
+          '[ELECTRUM] Activating UTXO coin: ${asset.id.id}',
+          name: 'UtxoActivationStrategy',
+        );
+        log(
+          '[ELECTRUM] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'mode': activationParams.mode?.rpc, 'utxo_params': activationParams.toRpcParams(), 'protocol_type': protocol.subClass.formatted, 'tx_version': protocol.txVersion, 'pubtype': protocol.pubtype, 'p2shtype': protocol.p2shtype, 'wiftype': protocol.wiftype, 'electrum_servers': protocol.requiredServers.toJsonRequest(), 'priv_key_policy': privKeyPolicy.toJson()})}',
+          name: 'UtxoActivationStrategy',
+        );
       }
 
       final taskResponse = await client.rpc.utxo.enableUtxoInit(
@@ -87,7 +94,10 @@ class UtxoActivationStrategy extends ProtocolActivationStrategy {
       );
 
       if (KdfLoggingConfig.verboseLogging) {
-        log('Activation task started', name: 'UtxoActivationStrategy');
+        log(
+          '[ELECTRUM] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
+          name: 'UtxoActivationStrategy',
+        );
       }
 
       yield ActivationProgress(

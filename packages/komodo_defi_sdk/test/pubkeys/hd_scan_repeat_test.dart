@@ -9,8 +9,6 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
-
 /// The HD address gap scan must not repeat on every poll.
 ///
 /// `watchPubkeys` calls `_fetchFreshPubkeys` on every 30-second tick, and
@@ -33,9 +31,7 @@ import '../helpers/runtime_auth_fixture.dart';
 /// GRC-20 tokens, against an endpoint measured at ~20 req/s.
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -217,9 +213,7 @@ void main() {
   });
 
   void stubActive(Asset asset, {required bool freshlyActivated}) {
-    when(
-      () => activation.isAssetActive(asset.id),
-    ).thenAnswer((_) async => true);
+    when(() => activation.isAssetActive(asset.id)).thenAnswer((_) async => true);
     when(
       () => activation.activateAsset(asset),
     ).thenAnswer((_) async => ActivationResult.success(asset.id));

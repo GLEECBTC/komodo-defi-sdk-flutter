@@ -242,7 +242,7 @@ sealed class KdfEvent {
   /// Handles unknown event types by logging and returning an UnknownEvent
   static UnknownEvent _handleUnknownEvent(String typeString, JsonMap message) {
     if (kDebugMode) {
-      print('[EventStream] Unknown event type');
+      print('[EventStream] Unknown event type: $typeString');
     }
     return UnknownEvent(typeString: typeString, rawData: message);
   }

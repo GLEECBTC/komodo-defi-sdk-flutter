@@ -35,7 +35,7 @@ class EventStreamingManager {
     _disconnectSubscription = _eventService.disconnections.listen(
       _handleServiceDisconnected,
     );
-    _log('EventStreamingManager initialized');
+    _log('EventStreamingManager initialized (instance=${hashCode})');
   }
 
   final KomodoDefiRpcMethods _rpcMethods;
@@ -112,7 +112,7 @@ class EventStreamingManager {
     // Check if stream is already active
     final existing = _activeStreams[key];
     if (existing != null && !existing.isCancelled) {
-      _log('Stream already active');
+      _log('Stream already active: $key (refCount=${_streamRefCounts[key]})');
       _incrementRefCount(key);
       return _createTypedSubscription<T>(key, eventStream);
     }
@@ -120,7 +120,7 @@ class EventStreamingManager {
     // Check if there's already an in-flight enable for this key
     final inFlight = _inFlightEnables[key];
     if (inFlight != null) {
-      _log('Stream enable already in progress');
+      _log('Enable already in-flight for $key, awaiting completion...');
       await inFlight;
       final enabled = _activeStreams[key];
       if (enabled == null || enabled.isCancelled) {
@@ -163,7 +163,10 @@ class EventStreamingManager {
   }) async {
     await _waitForSseReadiness(expectedGeneration);
 
-    _log('Stream enable started');
+    final coinInfo = coin != null ? ', coin=$coin' : '';
+    _log(
+      'Enable stream attempt: type=$streamType, key=$key, client_id=$_defaultClientId$coinInfo',
+    );
 
     final response = await enableStream();
     if (expectedGeneration != _connectionGeneration ||
@@ -184,7 +187,9 @@ class EventStreamingManager {
     );
     _incrementRefCount(key);
 
-    _log('Stream enable succeeded');
+    _log(
+      'Enable stream success: type=$streamType, key=$key, streamer_id=$streamerId',
+    );
     return _createTypedSubscription<T>(key, eventStream);
   }
 
@@ -517,7 +522,7 @@ class EventStreamingManager {
       );
     } catch (e) {
       if (kDebugMode) {
-        print('Stream disable failed');
+        print('Failed to disable stream ${subscription.streamerId}: $e');
       }
     }
   }

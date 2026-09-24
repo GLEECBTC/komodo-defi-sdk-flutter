@@ -1,17 +1,4 @@
-## 0.7.0 (2026-09-24)
-
- - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
-   `account_balance_read` wrappers used by the removed TRON export workaround.
- - **SECURITY**(wallet): redact `toString()` on private-key requests, responses
-   and key metadata, and preserve strict account/range semantics in
-   `get_private_keys`.
- - **FEAT**(activation): add `DisableCoinRequest` for `disable_coin`, which
-   disables a runtime asset without changing the wallet's saved selection.
-
- - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
-   `komodo_defi_types` `^0.6.0`.
-
-## 0.6.0 — preparation history
+## 0.6.0
 
 > Note: This release has breaking GasFree relay response interfaces.
 
@@ -34,7 +21,7 @@
  - **FIX**(requests): encode request bodies through a single encodable path so
    nested parameter objects serialize consistently.
 
-## 0.5.0 — preparation history
+## 0.5.0
 
 > Note: This release has breaking changes.
 
@@ -43,7 +30,7 @@
  - **FEAT**(auth): add the RPC request and activation parameter support needed by legacy wallet migration.
  - **BREAKING** **FEAT**(sia): move SIA withdrawal handling onto hardened SIA-specific RPC models and namespace methods (#343).
 
-## 0.4.0 — preparation history
+## 0.4.0
 
 > Note: This release has breaking changes.
 

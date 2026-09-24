@@ -10,13 +10,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
-
 class _MockPubkeyManager extends Mock implements PubkeyManager {}
 
-class _MockLocalAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockLocalAuth extends Mock implements KomodoDefiLocalAuth {}
 
 const _myAddress = '0x20C3E0c4A8d438f01B1C59376D83519d53b716Ad';
 const _otherAddress = '0xe99a6931c84d04973bb237b79d8dc45c6bc8ae15';
@@ -368,35 +364,32 @@ void main() {
       expect(response.fromId, isNull);
     });
 
-    test(
-      '"No transactions found" with a non-list result is still empty',
-      () async {
-        final asset = _gleec();
-        stubPubkeys(asset, [_myAddress]);
-        // Some Etherscan-compatible deployments answer the no-history case
-        // with a null result instead of an empty list.
-        final api = _FakeApi(
-          (_) => jsonEncode({
-            'message': 'No transactions found',
-            'status': '0',
-            'result': null,
-          }),
-        );
+    test('"No transactions found" with a non-list result is still empty', () async {
+      final asset = _gleec();
+      stubPubkeys(asset, [_myAddress]);
+      // Some Etherscan-compatible deployments answer the no-history case
+      // with a null result instead of an empty list.
+      final api = _FakeApi(
+        (_) => jsonEncode({
+          'message': 'No transactions found',
+          'status': '0',
+          'result': null,
+        }),
+      );
 
-        final response =
-            await BlockscoutTransactionStrategy(
-              pubkeyManager: pubkeyManager,
-              httpClient: api.client,
-            ).fetchTransactionHistory(
-              _MockApiClient(),
-              asset,
-              const PagePagination(pageNumber: 1, itemsPerPage: 50),
-            );
+      final response =
+          await BlockscoutTransactionStrategy(
+            pubkeyManager: pubkeyManager,
+            httpClient: api.client,
+          ).fetchTransactionHistory(
+            _MockApiClient(),
+            asset,
+            const PagePagination(pageNumber: 1, itemsPerPage: 50),
+          );
 
-        expect(response.transactions, isEmpty);
-        expect(response.total, 0);
-      },
-    );
+      expect(response.transactions, isEmpty);
+      expect(response.total, 0);
+    });
 
     test('an error envelope throws instead of reading as no history', () async {
       final asset = _gleec();

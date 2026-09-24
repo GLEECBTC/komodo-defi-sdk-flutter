@@ -1,7 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_service.dart';
-import 'package:komodo_defi_local_auth/src/trezor/trezor_wallet_password_store.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -25,18 +24,23 @@ class TrezorAuthService implements IAuthService {
     String Function(int length)? passwordGenerator,
   }) : _connectionMonitor =
            connectionMonitor ?? TrezorConnectionMonitor(_trezor),
-       _passwordStore = TrezorWalletPasswordStore(
-         storage: secureStorage,
-         passwordGenerator: passwordGenerator,
-       );
+       _secureStorage =
+           secureStorage ??
+           const FlutterSecureStorage(
+             aOptions: AndroidOptions(resetOnError: false),
+           ),
+       _generatePassword =
+           passwordGenerator ?? SecurityUtils.generatePasswordSecure;
 
   static const String trezorWalletName = 'My Trezor';
+  static const String _passwordKey = 'trezor_wallet_password';
   static final _log = Logger('TrezorAuthService');
 
   final IAuthService _authService;
   final TrezorRepository _trezor;
-  final TrezorWalletPasswordStore _passwordStore;
+  final FlutterSecureStorage _secureStorage;
   final TrezorConnectionMonitor _connectionMonitor;
+  final String Function(int length) _generatePassword;
 
   Future<void> provideTrezorPin(int taskId, String pin) =>
       _trezor.providePin(taskId, pin);
@@ -63,10 +67,9 @@ class TrezorAuthService implements IAuthService {
   Stream<AuthenticationState> registerStream({
     required AuthOptions options,
     Mnemonic? mnemonic,
-    Map<String, dynamic> initialMetadata = const {},
   }) async* {
     try {
-      yield* _authenticateTrezorStream(initialMetadata: initialMetadata);
+      yield* _authenticateTrezorStream();
     } catch (e) {
       await _signOutCurrentTrezorUser();
       yield AuthenticationState.error('Trezor registration failed: $e');
@@ -74,47 +77,6 @@ class TrezorAuthService implements IAuthService {
   }
 
   // IAuthService implementation - delegate to composed auth service
-  @override
-  Future<AuthSessionContext> captureSessionContext() =>
-      _authService.captureSessionContext();
-
-  @override
-  bool isSessionContextCurrent(AuthSessionContext context) =>
-      _authService.isSessionContextCurrent(context);
-
-  @override
-  void ensureSessionContextCurrent(AuthSessionContext context) =>
-      _authService.ensureSessionContextCurrent(context);
-
-  @override
-  Stream<AuthSessionContext?> watchSessionContext() =>
-      _authService.watchSessionContext();
-
-  @override
-  Future<KdfUser> updateMetadataForSession(
-    AuthSessionContext context,
-    Map<String, dynamic> updates,
-  ) => _authService.updateMetadataForSession(context, updates);
-
-  @override
-  int get authGeneration => _authService.authGeneration;
-
-  @override
-  Stream<int> get authGenerationChanges => _authService.authGenerationChanges;
-
-  @override
-  bool get isAuthTransitionInProgress =>
-      _authService.isAuthTransitionInProgress;
-
-  @override
-  void invalidateAuthSession() => _authService.invalidateAuthSession();
-
-  @override
-  void beginAuthTransition() => _authService.beginAuthTransition();
-
-  @override
-  void endAuthTransition() => _authService.endAuthTransition();
-
   @override
   Future<List<KdfUser>> getUsers() => _authService.getUsers();
 
@@ -185,14 +147,7 @@ class TrezorAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
-    Future<void> Function(KdfUser target)? beforeDelete,
-    Future<void> Function()? afterDelete,
-  }) => _authService.deleteWallet(
-    walletName: walletName,
-    password: password,
-    beforeDelete: beforeDelete,
-    afterDelete: afterDelete,
-  );
+  }) => _authService.deleteWallet(walletName: walletName, password: password);
 
   @override
   Future<bool> ensureKdfHealthy() => _authService.ensureKdfHealthy();
@@ -234,7 +189,6 @@ class TrezorAuthService implements IAuthService {
     required String password,
     required AuthOptions options,
     Mnemonic? mnemonic,
-    Map<String, dynamic> initialMetadata = const {},
   }) async {
     // Throw exception if PrivateKeyPolicy is NOT trezor
     if (options.privKeyPolicy != const PrivateKeyPolicy.trezor()) {
@@ -245,10 +199,7 @@ class TrezorAuthService implements IAuthService {
     }
 
     try {
-      final user = await _initializeTrezorWithPassphrase(
-        passphrase: password,
-        initialMetadata: initialMetadata,
-      );
+      final user = await _initializeTrezorWithPassphrase(passphrase: password);
 
       _startConnectionMonitoring();
 
@@ -264,8 +215,28 @@ class TrezorAuthService implements IAuthService {
     }
   }
 
+  Future<String> _getPassword({required bool isNewUser}) async {
+    final existing = await _secureStorage.read(key: _passwordKey);
+    if (!isNewUser) {
+      if (existing == null) {
+        throw AuthException(
+          'Authentication failed for Trezor wallet',
+          type: AuthExceptionType.generalAuthError,
+        );
+      }
+      return existing;
+    }
+
+    if (existing != null) return existing;
+
+    final newPassword = _generatePassword(16);
+    await _secureStorage.write(key: _passwordKey, value: newPassword);
+    return newPassword;
+  }
+
   /// Clears the stored password for the Trezor wallet.
-  Future<void> clearTrezorPassword() => _passwordStore.clear();
+  Future<void> clearTrezorPassword() =>
+      _secureStorage.delete(key: _passwordKey);
 
   /// Start monitoring Trezor connection status after successful authentication.
   /// This will automatically sign out if the device becomes disconnected.
@@ -322,7 +293,6 @@ class TrezorAuthService implements IAuthService {
   Future<void> _authenticateWithTrezorWallet({
     required KdfUser? existingUser,
     required String password,
-    Map<String, dynamic> initialMetadata = const {},
     DerivationMethod derivationMethod = DerivationMethod.hdWallet,
   }) async {
     final authOptions = AuthOptions(
@@ -341,7 +311,6 @@ class TrezorAuthService implements IAuthService {
         walletName: trezorWalletName,
         password: password,
         options: authOptions,
-        initialMetadata: initialMetadata,
       );
     }
   }
@@ -362,18 +331,16 @@ class TrezorAuthService implements IAuthService {
   ///
   /// Emits [TrezorInitializationState] updates while the device is initializing
   Stream<TrezorInitializationState> _initializeTrezorAndAuthenticate(
-    DerivationMethod derivationMethod, {
-    Map<String, dynamic> initialMetadata = const {},
-  }) async* {
+    DerivationMethod derivationMethod,
+  ) async* {
     await _signOutCurrentTrezorUser();
 
     final existingUser = await _findExistingTrezorUser();
     final isNewUser = existingUser == null;
-    final password = await _passwordStore.getPassword(isNewUser: isNewUser);
+    final password = await _getPassword(isNewUser: isNewUser);
 
     await _authenticateWithTrezorWallet(
       existingUser: existingUser,
-      initialMetadata: initialMetadata,
       password: password,
       derivationMethod: derivationMethod,
     );
@@ -383,12 +350,10 @@ class TrezorAuthService implements IAuthService {
 
   Stream<AuthenticationState> _authenticateTrezorStream({
     DerivationMethod derivationMethod = DerivationMethod.hdWallet,
-    Map<String, dynamic> initialMetadata = const {},
   }) async* {
     try {
       await for (final trezorState in _initializeTrezorAndAuthenticate(
         derivationMethod,
-        initialMetadata: initialMetadata,
       )) {
         if (trezorState.status == AuthenticationStatus.completed) {
           final user = await _authService.getActiveUser();
@@ -428,13 +393,11 @@ class TrezorAuthService implements IAuthService {
   /// initialization fails or if the user is not authenticated successfully.
   Future<KdfUser> _initializeTrezorWithPassphrase({
     required String passphrase,
-    Map<String, dynamic> initialMetadata = const {},
     DerivationMethod derivationMethod = DerivationMethod.hdWallet,
   }) async {
     // Copy over contents from the streamed function
     await for (final trezorState in _initializeTrezorAndAuthenticate(
       derivationMethod,
-      initialMetadata: initialMetadata,
     )) {
       // If status is passphrase required, use the provided password
       if (trezorState.status == AuthenticationStatus.passphraseRequired) {

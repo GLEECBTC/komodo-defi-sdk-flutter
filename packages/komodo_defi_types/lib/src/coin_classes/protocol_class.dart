@@ -46,7 +46,7 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
         CoinSubClass.avx20 ||
         CoinSubClass.bep20 ||
         CoinSubClass.ftm20 ||
-        CoinSubClass.polygon ||
+        CoinSubClass.matic ||
         CoinSubClass.hrc20 ||
         CoinSubClass.arbitrum ||
         CoinSubClass.base ||

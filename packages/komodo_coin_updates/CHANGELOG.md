@@ -1,13 +1,4 @@
-## 2.1.1 (2026-09-24)
-
- - **SECURITY**(seed-nodes): keep the configured URL out of seed-node fetch
-   failures by building the URI inside the same diagnostic boundary as transport
-   and response parsing, and raising a dedicated failure type.
-
- - **CHORE**(deps): align workspace requirements with SDK 0.8.0:
-   `komodo_defi_types` `^0.6.0`.
-
-## 2.1.0 — preparation history
+## 2.1.0
 
  - **FEAT**(config): add `CoinConfigTransformer.additionalTransforms`, applied
    after the built-in normalization set so an application can amend normalized
@@ -22,11 +13,11 @@
    compared when both sides carry one - a differing contract address still
    conflicts.
 
-## 2.0.1 — preparation history
+## 2.0.1
 
  - Update a dependency to the latest release.
 
-## 2.0.0 — preparation history
+## 2.0.0
 
 > Note: This release has breaking changes.
 

@@ -136,8 +136,8 @@ class KdfEventStreamingService {
     );
     try {
       await unsubscribe?.call();
-    } catch (_) {
-      _log('SSE Disconnect: Transport cleanup failed');
+    } catch (error) {
+      _log('SSE Disconnect: Transport cleanup failed: $error');
     }
   }
 
@@ -241,19 +241,20 @@ class KdfEventStreamingService {
       final List<KdfEvent> events = KdfEvent.parseAll(map);
       for (final event in events) {
         if (kDebugMode) {
+          final summary = _summarizeEvent(event);
           // UnknownEvent.typeEnum throws by design, so resolve the label safely
-          // and never log its untrusted typeString. Known labels come from a
-          // fixed enum; event contents must remain outside diagnostics.
+          // to avoid the debug print aborting this batch (which would drop any
+          // events parsed after an unrecognized one, e.g. an ERROR:BALANCE:*).
           final typeLabel = event is UnknownEvent
-              ? 'UNKNOWN'
+              ? event.typeString
               : event.typeEnum.value;
-          print('[EventStream] Received $typeLabel');
+          print('[EventStream] Received $typeLabel: $summary');
         }
         _events.add(event);
       }
-    } catch (_) {
+    } catch (e) {
       if (kDebugMode) {
-        print('Failed to parse stream event');
+        print('Failed to parse stream event: $e');
       }
     }
   }
@@ -319,6 +320,29 @@ class KdfEventStreamingService {
     await disconnect();
     await _events.close();
     await _disconnections.close();
+  }
+
+  /// Provides a concise summary of an event for debug logging
+  String _summarizeEvent(KdfEvent event) {
+    return switch (event) {
+      BalanceEvent(:final coin, :final balance) =>
+        'coin=$coin, spendable=${balance.spendable}, '
+            'unspendable=${balance.unspendable}',
+      GaslessTraceEvent(:final coin, :final traceId, :final state) =>
+        'coin=$coin, traceId=$traceId, state=$state',
+      GaslessTraceErrorEvent(:final coin, :final traceId) =>
+        'coin=$coin, traceId=$traceId, error',
+      OrderbookEvent(:final base, :final rel) => 'pair=$base/$rel',
+      NetworkEvent(:final netid, :final peers) => 'netid=$netid, peers=$peers',
+      HeartbeatEvent(:final timestamp) => 'timestamp=$timestamp',
+      SwapStatusEvent(:final uuid) => 'uuid=$uuid',
+      OrderStatusEvent(:final uuid) => 'uuid=$uuid',
+      TaskEvent(:final taskId) => 'taskId=$taskId',
+      TxHistoryEvent(:final coin, :final transactions) =>
+        'coin=$coin, txCount=${transactions.length}',
+      ShutdownSignalEvent(:final signalName) => 'signal=$signalName',
+      UnknownEvent(:final typeString) => 'unknown type=$typeString',
+    };
   }
 
   EventStreamUnsubscribe? _unsubscribe;

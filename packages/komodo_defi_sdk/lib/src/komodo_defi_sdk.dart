@@ -212,18 +212,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// Throws [StateError] if accessed before initialization.
   AssetManager get assets => _assertSdkInitialized(_container<AssetManager>());
 
-  /// Host-supplied eligibility enforced by shared activation operations.
-  ActivationPolicy get activationPolicy =>
-      _assertSdkInitialized(_container<ActivationPolicy>());
-
-  /// Selected wallet assets, independently of temporary runtime activation.
-  WalletAssetSelection get walletAssets =>
-      _assertSdkInitialized(_container<WalletAssetSelection>());
-
-  /// Reviews and confirms deletion while preserving transfer recovery records.
-  WalletDeletionManager get walletDeletion =>
-      _assertSdkInitialized(_container<WalletDeletionManager>());
-
   /// Activates an asset through the shared activation coordinator.
   ///
   /// This is the preferred path for app code that wants to ensure an asset is
@@ -234,19 +222,13 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// for this attempt. The coordinator has always accepted one; exposing it
   /// here is what lets a test exercise the deadline in bounded time instead of
   /// waiting out the 60s production value.
-  Future<ActivationResult> activateAsset(
-    Asset asset, {
-    Duration? timeout,
-  }) async {
+  Future<bool> ensureAssetActivated(Asset asset, {Duration? timeout}) async {
     final coordinator = _assertSdkInitialized(
       _container<SharedActivationCoordinator>(),
     );
-    return coordinator.activateAsset(asset, timeout: timeout);
+    final result = await coordinator.activateAsset(asset, timeout: timeout);
+    return result.isSuccess;
   }
-
-  /// Whether [activateAsset] succeeded; use its typed outcome for recovery UI.
-  Future<bool> ensureAssetActivated(Asset asset, {Duration? timeout}) async =>
-      (await activateAsset(asset, timeout: timeout)).isSuccess;
 
   /// Current activation state of every asset the SDK has observed.
   ///
@@ -673,7 +655,7 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       try {
         await fn(_container<T>());
       } catch (e) {
-        log('SDK component disposal failed');
+        log('Error disposing $T: $e');
       }
     }
   }
@@ -711,8 +693,6 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       _disposeIfRegistered<BalanceManager>((m) => m.dispose()),
       _disposeIfRegistered<PubkeyManager>((m) => m.dispose()),
       _disposeIfRegistered<TransactionHistoryManager>((m) => m.dispose()),
-      _disposeIfRegistered<WalletAssetSelection>((m) => m.dispose()),
-      _disposeIfRegistered<ActivationPolicy>((m) => m.dispose()),
       _disposeIfRegistered<MarketDataManager>((m) => m.dispose()),
       _disposeIfRegistered<FeeManager>((m) => m.dispose()),
       _disposeIfRegistered<WithdrawalManager>((m) => m.dispose()),

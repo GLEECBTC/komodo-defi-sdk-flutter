@@ -70,8 +70,8 @@ Future<bool> _preflightCheck(IKdfHostConfig cfg) async {
     } finally {
       client.close();
     }
-  } catch (_) {
-    _log('Preflight: Failed');
+  } catch (e) {
+    _log('Preflight: Failed - $e');
     return false;
   }
 }
@@ -85,11 +85,11 @@ Future<bool> _verifyHandshake(HttpClientResponse response) async {
 
   final contentType = response.headers.contentType?.toString() ?? '';
   if (!contentType.contains('text/event-stream')) {
-    _log('Handshake: Failed - Invalid content-type');
+    _log('Handshake: Failed - Invalid content-type: $contentType');
     return false;
   }
 
-  _log('Handshake: Success - HTTP 200, event-stream');
+  _log('Handshake: Success - HTTP 200, content-type: $contentType');
   return true;
 }
 
@@ -110,7 +110,7 @@ EventStreamUnsubscribe connectEventStream({
   StreamSubscription<String>? streamSubscription;
   Future<void>? cleanupFuture;
 
-  _log('SSE Start: Initializing connection');
+  _log('SSE Start: Initializing connection to $url (client_id=$clientId)');
 
   Future<void> cleanup() => cleanupFuture ??= () async {
     request?.abort();
@@ -127,8 +127,8 @@ EventStreamUnsubscribe connectEventStream({
     // and never submits against a stale streamer.
     try {
       onDisconnected(registrationsMayPersist: false);
-    } catch (_) {
-      _log('SSE disconnect callback failed');
+    } catch (error) {
+      _log('SSE disconnect callback failed: $error');
     }
     unawaited(cleanup());
   }
@@ -154,7 +154,7 @@ EventStreamUnsubscribe connectEventStream({
       }
       httpClient = client;
 
-      _log('SSE Start: Opening connection');
+      _log('SSE Start: Opening connection to $url...');
       final pendingRequest = await client.getUrl(url);
       if (isClosed) {
         pendingRequest.abort();
@@ -186,7 +186,9 @@ EventStreamUnsubscribe connectEventStream({
       }
 
       // Step 4: Connection established, start listening to events
-      _log('SSE Connected: Connection established');
+      _log(
+        'SSE Connected: Successfully connected to $url (client_id=$clientId)',
+      );
       // HTTP 200 + text/event-stream means KDF has registered this client.
       // Waiting for an application event deadlocks a clean runtime because no
       // streamer can emit until its enable RPC is sent.
@@ -208,8 +210,8 @@ EventStreamUnsubscribe connectEventStream({
                   try {
                     final decoded = jsonFromString(data);
                     onMessage(decoded);
-                  } catch (_) {
-                    _log('SSE Data: Event processing failed');
+                  } catch (e) {
+                    _log('SSE Data: Failed to decode event - $e');
                   }
                 }
               } else if (line.isEmpty && buffer.isNotEmpty) {
@@ -217,8 +219,8 @@ EventStreamUnsubscribe connectEventStream({
                 buffer.clear();
               }
             },
-            onError: (Object _) {
-              notifyUnexpectedDisconnect('SSE Error: Transport failed');
+            onError: (Object error) {
+              notifyUnexpectedDisconnect('SSE Error: $error');
             },
             onDone: () {
               notifyUnexpectedDisconnect(
@@ -227,9 +229,9 @@ EventStreamUnsubscribe connectEventStream({
             },
             cancelOnError: false,
           );
-    } catch (_) {
+    } catch (e) {
       if (isClosed) return;
-      notifyUnexpectedDisconnect('SSE Start: Connection failed');
+      notifyUnexpectedDisconnect('SSE Start: Exception - $e');
     }
   }
 
@@ -239,11 +241,11 @@ EventStreamUnsubscribe connectEventStream({
   return () async {
     if (isClosed) return;
     isClosed = true;
-    _log('SSE Disconnect: Closing connection');
+    _log('SSE Disconnect: Closing connection (client_id=$clientId)');
     try {
       await cleanup();
-    } catch (_) {
-      _log('SSE Disconnect: Cleanup failed');
+    } catch (e) {
+      _log('SSE Disconnect: Error during cleanup - $e');
     }
   };
 }

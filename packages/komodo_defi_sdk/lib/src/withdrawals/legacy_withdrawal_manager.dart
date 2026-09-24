@@ -55,19 +55,13 @@ class LegacyWithdrawalManager implements WithdrawalManager {
 
   /// Creates a preview and immediately executes the withdrawal.
   ///
-  /// [beforeBroadcast] runs immediately before the broadcast RPC and may throw
-  /// to abort it.
-  ///
   /// **DEPRECATED:** Use [previewWithdrawal] followed by [executeWithdrawal]
   /// instead to ensure users can review transaction details before broadcasting.
   @Deprecated(
     'Use previewWithdrawal() followed by executeWithdrawal() instead.',
   )
   @override
-  Stream<WithdrawalProgress> withdraw(
-    WithdrawParameters parameters, {
-    void Function()? beforeBroadcast,
-  }) async* {
+  Stream<WithdrawalProgress> withdraw(WithdrawParameters parameters) async* {
     try {
       // Initial progress update
       yield const WithdrawalProgress(
@@ -115,9 +109,6 @@ class LegacyWithdrawalManager implements WithdrawalManager {
               : null,
         ),
       );
-
-      // The consumer may have held the event above for any length of time.
-      beforeBroadcast?.call();
 
       // Broadcast the transaction to the blockchain
       try {
@@ -210,16 +201,13 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   /// Parameters:
   /// - [preview] - The preview result from [previewWithdrawal]
   /// - [assetId] - The asset identifier (coin symbol)
-  /// - [beforeBroadcast] - Runs immediately before the broadcast RPC and may
-  ///   throw to abort it
   ///
   /// Returns a [Stream<WithdrawalProgress>] that emits progress updates.
   @override
   Stream<WithdrawalProgress> executeWithdrawal(
     WithdrawalPreview preview,
-    String assetId, {
-    void Function()? beforeBroadcast,
-  }) async* {
+    String assetId,
+  ) async* {
     try {
       // Initial progress update
       yield WithdrawalProgress(
@@ -245,9 +233,6 @@ class LegacyWithdrawalManager implements WithdrawalManager {
               : null,
         ),
       );
-
-      // The consumer may have held the event above for any length of time.
-      beforeBroadcast?.call();
 
       // Broadcast the pre-signed transaction
       final broadcastResponse = await _client.rpc.withdraw.sendRawTransaction(

@@ -1,4 +1,3 @@
-import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_storage.dart';
 import 'package:test/test.dart';
 
@@ -18,11 +17,7 @@ void main() {
     test(
       'enforcing a cap does not deadlock',
       () async {
-        final storage = InMemoryTransactionStorage(
-          policy: const TransactionHistoryCachePolicy(
-            maxTransactionsPerAsset: 2,
-          ),
-        );
+        final storage = InMemoryTransactionStorage(maxTransactionsPerAsset: 2);
         final wallet = testWallet();
 
         await storage.storeTransactions([
@@ -42,11 +37,7 @@ void main() {
     test(
       'evicts oldest-first and keeps the newest rows',
       () async {
-        final storage = InMemoryTransactionStorage(
-          policy: const TransactionHistoryCachePolicy(
-            maxTransactionsPerAsset: 3,
-          ),
-        );
+        final storage = InMemoryTransactionStorage(maxTransactionsPerAsset: 3);
         final wallet = testWallet();
 
         await storage.storeTransactions([
@@ -70,11 +61,7 @@ void main() {
     test(
       'the singular store path also enforces the cap',
       () async {
-        final storage = InMemoryTransactionStorage(
-          policy: const TransactionHistoryCachePolicy(
-            maxTransactionsPerAsset: 2,
-          ),
-        );
+        final storage = InMemoryTransactionStorage(maxTransactionsPerAsset: 2);
         final wallet = testWallet();
 
         for (var i = 0; i < 4; i++) {
@@ -93,27 +80,24 @@ void main() {
       timeout: const Timeout(Duration(seconds: 5)),
     );
 
-    test(
-      'default policy retains at most 1000 rows per wallet and asset',
-      () async {
-        final storage = InMemoryTransactionStorage();
-        final wallet = testWallet();
+    test('remains unbounded by default', () async {
+      final storage = InMemoryTransactionStorage();
+      final wallet = testWallet();
 
-        await storage.storeTransactions([
-          for (var i = 0; i < 1001; i++)
-            testTransaction(
-              internalId: 'tx-$i',
-              timestamp: DateTime.utc(2026, 7, 10).add(Duration(days: i)),
-            ),
-        ], wallet);
+      await storage.storeTransactions([
+        for (var i = 0; i < 25; i++)
+          testTransaction(
+            internalId: 'tx-$i',
+            timestamp: DateTime.utc(2026, 7, 10).add(Duration(days: i)),
+          ),
+      ], wallet);
 
-        final page = await storage.getTransactions(
-          testAssetId(),
-          wallet,
-          limit: 100,
-        );
-        expect(page.cachedCount, 1000);
-      },
-    );
+      final page = await storage.getTransactions(
+        testAssetId(),
+        wallet,
+        limit: 100,
+      );
+      expect(page.total, 25);
+    });
   });
 }

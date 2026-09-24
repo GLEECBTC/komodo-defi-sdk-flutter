@@ -19,7 +19,7 @@ class GetTokenInfoRequest
   /// Token type - e.g ERC20 for tokens on the Ethereum network
   final String protocolType;
 
-  /// The parent coin of the token's platform - e.g POL for PLG20 tokens
+  /// The parent coin of the token's platform - e.g MATIC for PLG20 tokens
   /// protocol_data.platform
   final String platform;
 

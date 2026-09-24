@@ -2,6 +2,7 @@
 // ActivationConfigService.setOneShotSyncParams() before activation.
 // See zhtlc_config_dialog.dart for UI implementation.
 
+import 'dart:convert';
 import 'dart:developer' show log;
 
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
@@ -105,10 +106,26 @@ class ZhtlcActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for ZHTLC activation
       if (KdfLoggingConfig.verboseLogging) {
-        log('Activation started', name: 'ZhtlcActivationStrategy');
+        log(
+          '[RPC] Activating ZHTLC coin: ${asset.id.id}',
+          name: 'ZhtlcActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
-        log('Activation request prepared', name: 'ZhtlcActivationStrategy');
+        final activationLogPayload = <String, dynamic>{
+          'ticker': asset.id.id,
+          'protocol': asset.protocol.subClass.formatted,
+          'activation_params': params.toRpcParams(),
+          'zcash_params_path': userConfig.zcashParamsPath,
+          'scan_blocks_per_iteration': userConfig.scanBlocksPerIteration,
+          'scan_interval_ms': userConfig.scanIntervalMs,
+          'polling_interval_ms': effectivePollingInterval.inMilliseconds,
+          'priv_key_policy': privKeyPolicy.toJson(),
+        };
+        log(
+          '[RPC] Activation parameters: ${jsonEncode(activationLogPayload)}',
+          name: 'ZhtlcActivationStrategy',
+        );
       }
 
       // Initialize task and watch via TaskShepherd

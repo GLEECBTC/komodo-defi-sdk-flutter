@@ -14,8 +14,7 @@ class KdfLoggingConfig {
   /// Whether verbose logging is enabled.
   ///
   /// When true, additional log messages will be included in the log stream,
-  /// such as RPC timing and outcome. Request/config/response/error bodies are
-  /// never included. Default is false to reduce log noise.
+  /// such as full RPC responses. Default is false to reduce log noise.
   static bool verboseLogging = false;
 
   static bool get debugLogging => KdfLoggingConfig.verboseLogging && kDebugMode;

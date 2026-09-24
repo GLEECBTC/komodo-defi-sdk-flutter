@@ -11,13 +11,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
-
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -220,84 +216,6 @@ void main() {
     );
 
     test(
-      'a failed fetch reaches a joiner that waits from another error zone',
-      () async {
-        // `retry()` runs each attempt inside its own `runZonedGuarded`, and the
-        // activation manager dispatches its balance pre-cache un-awaited from
-        // there, so that pre-cache joins the shared in-flight fetch from a
-        // different error zone than the caller that started it. Dart will not
-        // deliver a future's *error* across that boundary: it reports the error
-        // as uncaught in the zone that created the future and leaves the
-        // cross-zone waiter hanging. Both waiters must see the failure instead.
-        when(() => auth.currentUser).thenAnswer((_) async => nonHdUser());
-        await stubActivationAlwaysActive(tendermintAsset);
-
-        // The gate completes with a *value* and the stub throws afterwards, so
-        // the failure originates inside the calling zone. Completing the gate
-        // itself with an error would hit the very boundary under test, from
-        // the test's own zone.
-        final gate = Completer<void>();
-        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
-          final req =
-              invocation.positionalArguments.first as Map<String, dynamic>;
-          if (req['method'] == 'my_balance') {
-            await gate.future;
-            throw StateError('rpc down');
-          }
-          return <String, dynamic>{'result': <String, dynamic>{}};
-        });
-
-        final starterZoneErrors = <Object>[];
-        final joinerZoneErrors = <Object>[];
-        final starterOutcome = Completer<Object?>();
-        final joinerOutcome = Completer<Object?>();
-
-        Future<void> callFrom(
-          Completer<Object?> outcome,
-          List<Object> zoneErrors,
-        ) async {
-          runZonedGuarded(() async {
-            try {
-              await manager.getPubkeys(tendermintAsset);
-              outcome.complete(null);
-            } catch (e) {
-              outcome.complete(e);
-            }
-          }, (error, _) => zoneErrors.add(error));
-        }
-
-        await callFrom(starterOutcome, starterZoneErrors);
-        // Let the first call register its in-flight entry, so the second one
-        // takes the join branch rather than starting its own fetch.
-        await pumpEventQueue();
-        await callFrom(joinerOutcome, joinerZoneErrors);
-        await pumpEventQueue();
-
-        gate.complete();
-
-        const wait = Duration(seconds: 5);
-        expect(
-          await starterOutcome.future.timeout(wait),
-          isNotNull,
-          reason: 'the caller that started the fetch must see the failure',
-        );
-        expect(
-          await joinerOutcome.future.timeout(
-            wait,
-            onTimeout: () => throw StateError(
-              'the joining caller never completed: its error was dropped at '
-              'the error-zone boundary',
-            ),
-          ),
-          isNotNull,
-          reason: 'the joining caller must see the same failure',
-        );
-        expect(starterZoneErrors, isEmpty);
-        expect(joinerZoneErrors, isEmpty);
-      },
-    );
-
-    test(
       'fresh pubkeys do not inherit a cached GasFree custody address',
       () async {
         final asset = _trc20Asset();
@@ -358,7 +276,7 @@ void main() {
     );
 
     test('unbanPubkeys delegates to RPC and returns result', () async {
-      when(() => auth.currentUser).thenAnswer((_) async => nonHdUser());
+      // auth not required here
       stubWalletMyBalance(address: 'cosmos1abc', coin: tendermintAsset.id.id);
 
       final res = await manager.unbanPubkeys(const UnbanBy.all());
@@ -694,11 +612,12 @@ void main() {
     test(
       'dispose swallows auth subscription cancel errors and is idempotent',
       () async {
-        final manager = PubkeyManager(
-          client,
-          _ThrowingSessionAuth(),
-          activation,
-        );
+        // Arrange auth stream that returns a subscription whose cancel throws
+        when(
+          () => auth.authStateChanges,
+        ).thenAnswer((_) => _StreamWithThrowingCancel<KdfUser?>());
+
+        final manager = PubkeyManager(client, auth, activation);
 
         // Act + Assert: dispose does not throw even if cancel throws
         await manager.dispose();
@@ -2224,10 +2143,4 @@ class _StreamWithThrowingCancel<T> extends Stream<T> {
   }) {
     return _ThrowingCancelSubscription<T>();
   }
-}
-
-class _ThrowingSessionAuth extends Mock implements KomodoDefiLocalAuth {
-  @override
-  Stream<AuthSessionContext?> watchSessionContext() =>
-      _StreamWithThrowingCancel<AuthSessionContext?>();
 }

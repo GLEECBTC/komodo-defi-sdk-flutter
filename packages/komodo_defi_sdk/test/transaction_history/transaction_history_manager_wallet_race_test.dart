@@ -13,14 +13,11 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
 import 'transaction_fixtures.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockAssetProvider extends Mock implements IAssetProvider {}
 
@@ -76,13 +73,18 @@ class _RecordingStorage implements TransactionStorage {
   Future<StorageStats> getStats() => throw UnimplementedError();
 
   @override
-  Future<CachedTransactionPage> getTransactions(
+  Future<TransactionPage> getTransactions(
     AssetId assetId,
     WalletId walletId, {
     String? fromId,
     int? pageNumber,
     int limit = 10,
-  }) async => const CachedTransactionPage(transactions: [], cachedCount: 0);
+  }) async => TransactionPage(
+    transactions: const [],
+    total: 0,
+    currentPage: pageNumber ?? 1,
+    totalPages: 0,
+  );
 
   @override
   Future<void> storeTransaction(
@@ -658,70 +660,4 @@ void main() {
       expect(storage.storedWallets, [upgradedWallet.walletId]);
     },
   );
-  for (final boundary in ['reauthentication', 'same-identity replacement']) {
-    test('$boundary rejects old history and accepts a fresh context', () async {
-      final auth = _MockAuth();
-      final assetProvider = _MockAssetProvider();
-      final activation = _MockActivationCoordinator();
-      final storage = _RecordingStorage();
-      final assetHistory = _MockAssetHistoryStorage();
-      final authChanges = StreamController<KdfUser?>.broadcast();
-      final response = Completer<MyTxHistoryResponse>();
-      final strategy = _BlockingStrategy(response);
-      final asset = _asset();
-      var currentUser = walletA.copyWith(
-        metadata: {'_wallet_entry_id': 'original-entry'},
-      );
-      when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
-      when(() => auth.currentUser).thenAnswer((_) async => currentUser);
-      when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
-      when(
-        () => assetHistory.getWalletAssets(walletA.walletId),
-      ).thenAnswer((_) async => {asset.id.id});
-      when(
-        () => activation.activateAsset(asset),
-      ).thenAnswer((_) async => ActivationResult.success(asset.id));
-      final manager = TransactionHistoryManager(
-        _MockApiClient(),
-        auth,
-        assetProvider,
-        activation,
-        pubkeyManager: _MockPubkeyManager(),
-        eventStreamingManager: _MockEventStreamingManager(),
-        storage: storage,
-        assetHistoryStorage: assetHistory,
-        transactionHistoryStrategies: [strategy],
-      );
-      addTearDown(() async {
-        await manager.dispose();
-        await authChanges.close();
-      });
-      final pending = manager.getTransactionHistory(asset);
-      final rejected = expectLater(
-        pending,
-        throwsA(isA<WalletChangedDisconnectException>()),
-      );
-      await strategy.started.future;
-
-      if (boundary == 'reauthentication') {
-        auth.runtimeSessions.invalidate();
-      } else {
-        currentUser = currentUser.copyWith(
-          metadata: {'_wallet_entry_id': 'replacement-entry'},
-        );
-      }
-      // A session boundary need not emit a null or changed auth user.
-      auth.runtimeSessions.observe(currentUser);
-
-      response.complete(_historyResponse());
-      await rejected;
-      expect(storage.storedWallets, isEmpty);
-      expect(
-        (await manager.getTransactionHistory(asset)).transactions,
-        hasLength(1),
-      );
-      expect(storage.storedWallets, [currentUser.walletId]);
-      verify(() => activation.activateAsset(asset)).called(2);
-    });
-  }
 }

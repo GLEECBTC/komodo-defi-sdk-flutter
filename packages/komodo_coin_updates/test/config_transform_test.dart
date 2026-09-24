@@ -241,8 +241,8 @@ void main() {
     test('filters invalid EVM configs with empty node lists', () {
       const filter = CoinFilter();
       final config = JsonMap.of({
-        'coin': 'BROKENPOL',
-        'type': 'Polygon',
+        'coin': 'BROKENMATIC',
+        'type': 'Matic',
         'protocol': {
           'type': 'ETH',
           'protocol_data': {'chain_id': 137},

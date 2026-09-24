@@ -1,7 +1,4 @@
-## 0.1.1 (unreleased)
-
- - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
-   retain this package version from the earlier preparation milestone.
+## 0.1.1
 
  - **FIX**(android): open legacy encrypted shared preferences with
    `resetOnError: false`, so a read failure surfaces instead of silently

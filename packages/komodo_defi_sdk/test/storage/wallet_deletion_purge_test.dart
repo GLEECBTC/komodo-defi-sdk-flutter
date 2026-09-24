@@ -39,8 +39,7 @@ void main() {
       final kept = testWallet(pubkeyHash: 'bbbb');
       final asset = testAssetId();
 
-      final storage = HiveTransactionStorage(keyProvider: testHistoryCacheKeys);
-      addTearDown(storage.close);
+      final storage = HiveTransactionStorage();
       await storage.storeTransactions([
         testTransaction(internalId: 'deleted-tx'),
       ], deleted);
@@ -51,11 +50,8 @@ void main() {
       await storage.purgeWallet(deleted);
       await storage.close();
 
-      final reopened = HiveTransactionStorage(
-        keyProvider: testHistoryCacheKeys,
-      );
-      addTearDown(reopened.close);
-      expect((await reopened.getTransactions(asset, deleted)).cachedCount, 0);
+      final reopened = HiveTransactionStorage();
+      expect((await reopened.getTransactions(asset, deleted)).total, 0);
       expect(
         (await reopened.getTransactions(
           asset,
@@ -70,8 +66,7 @@ void main() {
       final usdt = testAssetId();
       final kmd = testAssetId(id: 'KMD', subClass: CoinSubClass.smartChain);
 
-      final storage = HiveTransactionStorage(keyProvider: testHistoryCacheKeys);
-      addTearDown(storage.close);
+      final storage = HiveTransactionStorage();
       await storage.storeTransactions([
         testTransaction(internalId: 'usdt-tx'),
         testTransaction(internalId: 'kmd-tx', assetId: kmd),
@@ -79,8 +74,8 @@ void main() {
 
       await storage.purgeWallet(wallet);
 
-      expect((await storage.getTransactions(usdt, wallet)).cachedCount, 0);
-      expect((await storage.getTransactions(kmd, wallet)).cachedCount, 0);
+      expect((await storage.getTransactions(usdt, wallet)).total, 0);
+      expect((await storage.getTransactions(kmd, wallet)).total, 0);
     });
   });
 

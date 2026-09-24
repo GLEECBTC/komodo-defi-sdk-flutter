@@ -169,11 +169,6 @@ class KdfHarness {
   /// Redacted log lines captured from the framework.
   final List<String> logs = [];
 
-  // Replay storage models the lifetime of a device keychain in memory only.
-  // Reopening a persistence workspace must keep its encryption keys, while
-  // unrelated workspaces and deleted workspaces must never inherit them.
-  static final _replaySecureStorage = <String, Map<String, String>>{};
-
   /// Brings up an SDK that is running but **not** signed in, so the sign-in
   /// itself is measurable.
   ///
@@ -230,13 +225,7 @@ class KdfHarness {
     //    not match the one in the host config below, `startKdf` throws
     //    ArgumentError on a password mismatch, and the failure surfaces
     //    nowhere near this line.
-    _replaySecureStorage.removeWhere(
-      (path, _) => !Directory(path).existsSync(),
-    );
-    final storageKey = resolvedWorkspace.absolute.path;
-    final mockSecrets = _replaySecureStorage.putIfAbsent(storageKey, () => {});
-    mockSecrets['rpc_password'] = rpcPassword;
-    FlutterSecureStorage.setMockInitialValues(mockSecrets);
+    FlutterSecureStorage.setMockInitialValues({'rpc_password': rpcPassword});
 
     // 5. Isolate everything the SDK persists: Hive boxes, the pubkey cache,
     //    the activation config store and tx history all resolve through
@@ -602,9 +591,6 @@ class KdfHarness {
     try {
       if (_deleteWorkspaceOnDispose && _workspace.existsSync()) {
         await _workspace.delete(recursive: true);
-      }
-      if (_deleteWorkspaceOnDispose) {
-        _replaySecureStorage.remove(_workspace.absolute.path)?.clear();
       }
     } catch (_) {}
   }

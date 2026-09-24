@@ -1,80 +1,8 @@
-## 0.8.0 (2026-09-24)
+## 0.8.0-rc.1
 
-Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export
-remediation. See the [complete release overview](../../CHANGELOG.md#sdk-080-overview).
-Metadata writes, sessions, wallet creation and deletion, activation and the
-transaction history cache have breaking API changes; this is not a
-source-compatible patch of 0.7.0. See the
-[migration guide](../../docs/RELEASE_0.8.0.md).
+Release candidate for the wallet-identity hotfix. Metadata writes have a breaking
+API change; this is not a source-compatible patch of 0.7.0.
 
- - **SECURITY**(history): authenticate the transaction cache. Records were
-   AES-CBC with no authentication tag, and the surrounding CRC-32 gave no
-   integrity - CRC-32 is affine, so an edit could be corrected without knowing
-   the seed, and the web backend writes no CRC at all. Records are now
-   AES-256-GCM: an altered, truncated or relocated record fails its tag check
-   and is dropped instead of decoding into plausible bytes. The key is
-   re-derived under a new label, so a cache from a previous release is rejected
-   at open and rebuilt from providers.
- - **BREAKING** **FEAT**(history): bound the persisted transaction cache and
-   hide its metadata. Database keys are opaque keyed identifiers, and
-   timestamps, wallet and asset scope and transaction IDs live inside the
-   encrypted records. Retention defaults to 1,000 transactions per wallet and
-   asset, 20,000 overall and 64 MiB, set through
-   `KomodoDefiSdkConfig.transactionHistoryCachePolicy`. Storage reads return
-   `CachedTransactionPage`, whose `cachedCount` counts retained rows rather
-   than a provider total. The previous plaintext cache is deleted, never read
-   or migrated.
- - **BREAKING** **FEAT**(auth): issue session contexts. Runtime work survives
-   metadata and hash refreshes, while work from a replaced, signed-out or
-   reauthenticated session is rejected. Sensitive writes still verify identity
-   inside the persistence lock.
- - **BREAKING** **FEAT**(auth): make wallet creation and initial metadata
-   persistence atomic. A name collision fails with a typed error, and an
-   existing wallet requires an explicit login rather than being adopted.
- - **BREAKING** **FEAT**(assets): separate saved selection from runtime
-   activation. Activation returns typed outcomes, and the host's policy applies
-   before a restored session can activate anything.
- - **BREAKING** **FEAT**(wallet): prepare deletion against a reviewed wallet and
-   recovery snapshot, recheck it under the submission lease, report busy while
-   an outcome is being recorded, and retain unresolved GasFree recovery records
-   after deletion.
- - **FIX**(wallet): restore the open-time orphaned-wallet sweep as a deletion
-   backstop. The deletion-time purge stays the primary path, but in the store's
-   degraded memory-only mode it throws and its failure is swallowed, so without
-   the sweep a deleted wallet's encrypted history survived until ordinary
-   eviction. The sweep fails open: an empty or throwing catalogue means "do not
-   know", never "delete everything".
- - **FIX**(wallet): stop wallet deletion deadlocking when the history cache has
-   not been opened yet. The deletion purge opened the cache while
-   `deleteWallet` held the wallet catalog lock, and the open's orphaned-wallet
-   sweep then listed wallets through that same non-reentrant lock. The sweep
-   now runs after the open, lists wallets without holding the cache lock, and
-   keeps history used since the open.
- - **FIX**(history): prune a reopened cache only once every row is indexed. A
-   scope's recency lives on its latest row alone, so pruning batch by batch
-   could evict a recently used wallet or asset under a smaller global limit.
- - **FIX**(activation): reject a restricted asset that KDF still has enabled
-   instead of reporting it already active, in the shared coordinator and in
-   warm or joined manager activation. A success is rechecked against the
-   policy as each caller receives it, including a caller that joins a finished
-   shared activation, so a restriction published before then fails it. A
-   restriction that stops an activation now also fails the callers that joined
-   it, which used to wait forever. Every withdrawal, including Tendermint and
-   SIA withdrawals that skip activation, rechecks the restriction immediately
-   before it broadcasts, so a consumer holding a progress event cannot
-   broadcast after a restriction lands. Cached activation stays usable while
-   the policy is loading or unavailable, unless a retained restriction covers
-   the asset or its parent.
- - **FIX**(sdk): carry a shared pubkey fetch's and a shared activation's failure
-   as a value. One future is handed to every caller joining the same in-flight
-   work, and those callers do not share an error zone, because `retry()` runs
-   each attempt inside its own `runZonedGuarded`. Dart will not deliver a
-   future's error across that boundary: it reports the error as uncaught in the
-   creating zone and leaves the cross-zone joiner waiting forever. Each caller
-   now rethrows the outcome in its own zone.
- - **FIX**(history): decode the legacy `matic` `sub_class` name as
-   `CoinSubClass.polygon`, so transaction history stored before the rename is
-   not downgraded to `CoinSubClass.unknown`.
  - **FIX**(history): preserve verified wallet identity and active history streams
    during degraded same-wallet authentication events.
  - **FIX**(history): retain one wallet context across historical and live results
@@ -86,39 +14,10 @@ source-compatible patch of 0.7.0. See the
    require the original `expectedWalletId`. Writes fail closed when identity
    cannot be verified or the active wallet changes. See the
    [local-auth migration guidance](../komodo_defi_local_auth/README.md#migrating-metadata-writes).
- - **FEAT**(security): add `SecurityManager.exportPrivateKeys`, exporting each
-   offline-supported asset independently with concurrency limited to two.
- - **FIX**(security): report TRON/TRC20 private-key export as
-   `unsupportedProtocol` until KDF supports `get_private_keys` for TRON.
-   Both structured and strict export reject these protocols before issuing an
-   RPC. Remove the active-key fallback, scalar/address derivation, HD metadata
-   searches and direct PointyCastle dependency.
- - **SECURITY**(security): bind export capabilities to a verified wallet
-   identity, the manager that issued them, and a source-owned authentication
-   generation that revokes synchronously before an authentication transition.
- - **SECURITY**(diagnostics): keep RPC and startup diagnostics metadata-only,
-   and redact secret-bearing diagnostic strings.
- - **FEAT**(diagnostics): version persisted diagnostic storage, clean up legacy
-   records, and serialize writes and disposal behind stable native and browser
-   snapshots.
- - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0`,
-   `komodo_defi_rpc_methods` `^0.7.0`, `komodo_defi_types` `^0.6.0`,
-   `komodo_defi_framework` `^0.6.0` and `komodo_coin_updates`
-   `^2.1.1`.
+ - **CHORE**(deps): require `komodo_defi_local_auth` `^0.6.0-rc.1`.
  - **TEST**(history): run wallet-race regressions in Chrome/WebAssembly in CI.
- - **TEST**(security): cover structured export, session invalidation and
-   TRON/TRC20 rejection without RPC calls while retaining successful exports
-   for supported assets in a mixed selection.
 
- - **FIX**(activation): bind completion and coordinator work to the originating
-   wallet session, rejecting delayed results after a wallet switch (#376).
- - **FIX**(gasfree): apply acceptance and reconciliation atomically and keep
-   browser recovery from discarding a live submission's journal record (#376).
- - **FIX**(gasfree): cancel local waits during disposal, drain journal writes
-   before releasing submission ownership, and suppress detached relay/trace
-   continuations while preserving unresolved outcomes for recovery (#377).
-
-## 0.7.0 — preparation history
+## 0.7.0
 
 > Note: This release has breaking GasFree activation and withdrawal behavior.
 
@@ -195,7 +94,7 @@ source-compatible patch of 0.7.0. See the
    `10.0.0-beta.4` pre-release to `^10.0.0`. It already resolved to a stable
    10.x, and pub warns when a stable release depends on a pre-release.
 
-## 0.6.0 — preparation history
+## 0.6.0
 
 > Note: This release has breaking changes.
 
@@ -207,7 +106,7 @@ source-compatible patch of 0.7.0. See the
  - **FEAT**(transaction-history): add a Tronscan strategy with address, cursor, and fixed-scale amount codecs (#339).
  - **BREAKING** **FEAT**(sia): route SIA activation and withdrawals through the hardened SIA strategy and RPC namespace (#343).
 
-## 0.5.0 — preparation history
+## 0.5.0
 
 > Note: This release has breaking changes.
 

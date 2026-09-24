@@ -17,14 +17,8 @@ class PersistedLogger extends LoggerInterface /*with LifecycleManagedMixin*/ {
   Duration get appRunDuration => DateTime.now().difference(_appStartTime);
 
   @override
-  Future<void> init({
-    String? storageNamespace,
-    bool purgeLegacy = false,
-  }) async {
-    await logStorage.init(
-      storageNamespace: storageNamespace,
-      purgeLegacy: purgeLegacy,
-    );
+  Future<void> init() async {
+    await logStorage.init();
 
     isInitialized = true;
   }
@@ -72,17 +66,6 @@ class PersistedLogger extends LoggerInterface /*with LifecycleManagedMixin*/ {
   @override
   Stream<String> exportLogsStream() {
     return logStorage.exportLogsStream();
-  }
-
-  Future<void> writeRecord(String record) =>
-      logStorage.appendLog(DateTime.now(), record);
-
-  Future<void> dispose() async {
-    try {
-      await logStorage.dispose();
-    } finally {
-      isInitialized = false;
-    }
   }
 
   // @override

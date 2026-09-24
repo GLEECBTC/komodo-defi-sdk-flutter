@@ -11,13 +11,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
-
 class _MockPubkeyManager extends Mock implements PubkeyManager {}
 
-class _MockLocalAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockLocalAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockHttpClient extends Mock implements http.Client {}
 

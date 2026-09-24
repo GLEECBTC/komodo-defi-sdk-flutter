@@ -255,9 +255,9 @@ class TrezorRepository {
       activeTaskIds.map((taskId) async {
         try {
           await cancelInitialization(taskId);
-        } catch (_) {
+        } catch (e) {
           // ignore: avoid_print
-          print('Trezor task cancellation failed');
+          print('Error cancelling Trezor task $taskId: $e');
         }
       }),
     );

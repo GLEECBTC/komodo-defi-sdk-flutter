@@ -68,9 +68,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
        _gaslessCapabilities = gaslessCapabilities,
        _assetHistoryStorage = assetHistoryStorage ?? AssetHistoryStorage() {
     // Subscribe to auth changes directly in constructor
-    _authSubscription = _auth.watchSessionContext().listen(
-      _handleSessionContextChanged,
-    );
+    _authSubscription = _auth.authStateChanges.listen(_handleAuthStateChanged);
   }
 
   final ApiClient _client;
@@ -116,8 +114,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   static const _maxEmptyPages = 10;
 
   bool _isDisposed = false;
-  StreamSubscription<AuthSessionContext?>? _authSubscription;
-  AuthSessionContext? _currentSession;
+  StreamSubscription<KdfUser?>? _authSubscription;
   WalletId? _currentWalletId;
   int _walletGeneration = 0;
 
@@ -129,30 +126,34 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   bool _supportsTxHistoryStreaming(Asset asset) =>
       asset.supportsTxHistoryStreaming;
 
-  void _handleSessionContextChanged(AuthSessionContext? session) {
+  void _handleAuthStateChanged(KdfUser? user) {
     if (_isDisposed) return;
-    final previous = _currentSession;
-    // A queued old event must not reset a newer context captured by a caller.
-    if (session != null && !_auth.isSessionContextCurrent(session)) return;
-    if (session == null &&
-        previous != null &&
-        _auth.isSessionContextCurrent(previous)) {
-      return;
-    }
-    if (previous == session) {
-      final currentWallet = _currentWalletId;
-      if (session != null &&
-          (currentWallet == null ||
-              isSameStableWallet(currentWallet, session.walletId))) {
-        _currentWalletId = session.walletId;
+    final nextWallet = user?.walletId;
+    final currentWalletId = _currentWalletId;
+    if (_sameOptionalWallet(currentWalletId, nextWallet)) {
+      if (currentWalletId != null && nextWallet != null) {
+        _currentWalletId = preferEnrichedWalletIdentity(
+          currentWalletId,
+          nextWallet,
+        );
       }
       return;
     }
-    // Revoke local work before any asynchronous cancellation. SDK session
-    // checks also reject old results before this stream event is delivered.
+
+    // Identity RPC outages emit a name-only user for the same live session.
+    // Preserve its verified cache namespace and subscriptions, just as the
+    // capture path does. A sign-out or a different wallet still invalidates
+    // every operation below.
+    if (currentWalletId != null &&
+        nextWallet != null &&
+        isDegradedWalletIdentity(currentWalletId, nextWallet)) {
+      return;
+    }
+
+    // Invalidate first: cancellation is best-effort and queued callbacks may
+    // still complete after a wallet switch.
     _walletGeneration++;
-    _currentSession = session;
-    _currentWalletId = session?.walletId;
+    _currentWalletId = nextWallet;
     _lastBalanceForPolling.clear();
     _lastCustodyBalanceForPolling.clear();
     _syncInProgress.clear();
@@ -160,12 +161,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     _stopAllStreaming();
   }
 
+  bool _sameOptionalWallet(WalletId? previous, WalletId? current) {
+    if (previous == null || current == null) return previous == current;
+    return isSameStableWallet(previous, current);
+  }
+
   Future<WalletOperationContext> _captureWalletContext() async {
-    final session = await _auth.captureSessionContext();
-    _auth.ensureSessionContextCurrent(session);
-    _handleSessionContextChanged(session);
     final user = await _auth.currentUser;
-    _auth.ensureSessionContextCurrent(session);
     if (user == null) throw StateError('User is not logged in');
 
     final currentWalletId = _currentWalletId;
@@ -186,7 +188,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // Without this branch a transient `get_public_key_hash` failure looks
       // like a wallet switch: the generation bumps, streaming stops, and the
       // history that follows is written under a name-only storage prefix. The
-      // rows under the enriched prefix would then be invisible to that read.
+      // rows under the enriched prefix are then orphaned and swept, so this is
+      // silent loss of persisted history rather than a re-walk.
       // [BalanceManager] and [PubkeyManager] both already have this branch.
       operationWalletId = currentWalletId;
     } else {
@@ -205,14 +208,12 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     return WalletOperationContext(
       walletId: operationWalletId,
       generation: _walletGeneration,
-      session: session,
     );
   }
 
   bool _isWalletContextCurrentSync(WalletOperationContext context) {
     final current = _currentWalletId;
     return !_isDisposed &&
-        _auth.isSessionContextCurrent(context.session) &&
         context.generation == _walletGeneration &&
         current != null &&
         isSameStableWallet(context.walletId, current);
@@ -336,9 +337,37 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         }
       }
 
-      // A retained cache can have holes after eviction and does not own the
-      // provider's cursor or totals. Paginated requests use the strategy;
-      // getTransactionsStreamed supplies the cache before its network refresh.
+      // First try to get from local storage. A TransactionBasedPagination
+      // cursor is not necessarily a stored internalId: a strategy may hand
+      // back its own opaque token as `nextPageId` (TronGrid's encoded
+      // per-address cursor), which storage rejects as an unknown starting
+      // transaction. That rejection means "not ours to serve", never a failed
+      // request - the strategy below owns the cursor and consumes it.
+      TransactionPage? localPage;
+      try {
+        localPage = await _storage.getTransactions(
+          asset.id,
+          walletContext.walletId,
+          fromId: pagination is TransactionBasedPagination
+              ? pagination.fromId
+              : null,
+          pageNumber: pagination is PagePagination
+              ? pagination.pageNumber
+              : null,
+          limit: pagination.limit ?? _maxBatchSize,
+        );
+      } on TransactionStorageException {
+        localPage = null;
+      }
+      await _requireWalletContextCurrent(walletContext);
+
+      // If we have enough local data and it's not a first page request, return it
+      if (localPage != null &&
+          localPage.transactions.isNotEmpty &&
+          (pagination is PagePagination && pagination.pageNumber > 1 ||
+              pagination is TransactionBasedPagination)) {
+        return localPage;
+      }
 
       // Skip the activation check only when this process already activated the
       // asset. That reduces RPC spam when the coin details page is reopened

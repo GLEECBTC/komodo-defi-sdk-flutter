@@ -25,13 +25,7 @@ export 'package:komodo_defi_framework/komodo_defi_framework.dart'
         SwapStatusEvent,
         TxHistoryEvent;
 export 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
-    show
-        AuthIdentityUnavailableException,
-        AuthSessionChangedException,
-        AuthSessionContext,
-        AuthenticationState,
-        AuthenticationStatus,
-        WalletDeletionReviewRequiredException;
+    show AuthenticationState, AuthenticationStatus;
 // ZHTLC sync parameters + GasFree custody account status
 export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
     show
@@ -46,9 +40,8 @@ export 'package:komodo_defi_sdk/src/balances/balance_manager.dart'
 export 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show MarketDataManager;
 export 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
-export 'package:komodo_defi_sdk/src/security/private_key_export_request.dart';
 export 'package:komodo_defi_sdk/src/security/security_manager.dart'
-    show PrivateKeyExportSession, SecurityManager;
+    show SecurityManager;
 export 'package:komodo_defi_sdk/src/trading/trading_manager.dart'
     show TradingManager;
 export 'package:komodo_defi_types/komodo_defi_types.dart'
@@ -61,18 +54,10 @@ export 'package:komodo_defi_types/komodo_defi_types.dart'
         GaslessTransferStage,
         GaslessTransferState,
         PendingGaslessTransfer,
-        PrivateKeyExportCoverage,
-        PrivateKeyExportCoverageKind,
-        PrivateKeyExportFailure,
-        PrivateKeyExportOutcome,
-        PrivateKeyExportResult,
         WithdrawalSubmission,
         WithdrawalSubmissionType;
 
-export 'src/activation/activation_policy.dart';
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
-export 'src/activation/shared_activation_coordinator.dart'
-    show ActivationResult;
 export 'src/activation_config/activation_config_service.dart'
     show
         ActivationConfigRepository,
@@ -97,20 +82,9 @@ export 'src/assets/asset_extensions.dart'
         AssetValidation;
 export 'src/assets/asset_pubkey_extensions.dart';
 export 'src/assets/legacy_asset_extensions.dart';
-export 'src/assets/wallet_asset_selection.dart';
-export 'src/auth/wallet_operation_context.dart'
-    show
-        isDegradedWalletIdentity,
-        isSameStableWallet,
-        preferEnrichedWalletIdentity,
-        walletIdentityContinuesSession;
 export 'src/komodo_defi_sdk.dart' show KomodoDefiSdk;
-export 'src/transaction_history/transaction_history_cache_policy.dart';
 export 'src/transaction_history/transaction_merge_utils.dart'
     show TransactionListReconciler, TransactionMergeUtils;
-export 'src/transaction_history/transaction_storage.dart'
-    show CachedTransactionPage;
-export 'src/wallets/wallet_deletion_manager.dart';
 export 'src/widgets/asset_balance_text.dart';
 export 'src/withdrawals/pending_gasless_transfer_repository.dart'
     show

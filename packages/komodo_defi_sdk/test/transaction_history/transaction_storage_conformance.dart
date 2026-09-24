@@ -47,7 +47,7 @@ void runTransactionStorageConformanceTests({
       test('storing an empty batch is a no-op', () async {
         await storage.storeTransactions([], wallet);
         final page = await storage.getTransactions(asset, wallet);
-        expect(page.cachedCount, 0);
+        expect(page.total, 0);
       });
     });
 
@@ -118,7 +118,7 @@ void runTransactionStorageConformanceTests({
         ], wallet);
 
         final page = await storage.getTransactions(asset, wallet);
-        expect(page.cachedCount, 3);
+        expect(page.total, 3);
         expect(page.transactions.map((tx) => tx.internalId), [
           'page1-a',
           'page1-b',
@@ -249,7 +249,7 @@ void runTransactionStorageConformanceTests({
         ], wallet);
 
         final page = await storage.getTransactions(asset, wallet);
-        expect(page.cachedCount, 1);
+        expect(page.total, 1);
         expect(page.transactions.single.balanceChanges.netChange, Decimal.zero);
       });
     });
@@ -267,8 +267,11 @@ void runTransactionStorageConformanceTests({
       test('reports totals and page counts', () async {
         await seed();
         final page = await storage.getTransactions(asset, wallet, limit: 2);
-        expect(page.cachedCount, 5);
+        expect(page.total, 5);
+        expect(page.totalPages, 3);
+        expect(page.currentPage, 1);
         expect(page.transactions.map((tx) => tx.internalId), ['tx-0', 'tx-1']);
+        expect(page.nextPageId, 'tx-1');
       });
 
       test('walks pages by number', () async {
@@ -283,6 +286,7 @@ void runTransactionStorageConformanceTests({
           'tx-2',
           'tx-3',
         ]);
+        expect(second.currentPage, 2);
       });
 
       test('a page past the end is empty but keeps the totals', () async {
@@ -294,7 +298,8 @@ void runTransactionStorageConformanceTests({
           limit: 2,
         );
         expect(page.transactions, isEmpty);
-        expect(page.cachedCount, 5);
+        expect(page.total, 5);
+        expect(page.totalPages, 3);
       });
 
       test('walks pages by fromId, exclusive of the cursor', () async {
@@ -333,7 +338,8 @@ void runTransactionStorageConformanceTests({
           wallet,
         );
         expect(page.transactions, isEmpty);
-        expect(page.cachedCount, 0);
+        expect(page.total, 0);
+        expect(page.totalPages, 0);
       });
     });
 
@@ -391,16 +397,13 @@ void runTransactionStorageConformanceTests({
 
         await storage.clearTransactions(asset, wallet);
 
-        expect((await storage.getTransactions(asset, wallet)).cachedCount, 0);
-        expect(
-          (await storage.getTransactions(otherAsset, wallet)).cachedCount,
-          1,
-        );
+        expect((await storage.getTransactions(asset, wallet)).total, 0);
+        expect((await storage.getTransactions(otherAsset, wallet)).total, 1);
       });
 
       test('clearing an empty asset is a no-op', () async {
         await storage.clearTransactions(asset, wallet);
-        expect((await storage.getTransactions(asset, wallet)).cachedCount, 0);
+        expect((await storage.getTransactions(asset, wallet)).total, 0);
       });
     });
 
@@ -598,10 +601,7 @@ void runTransactionStorageConformanceTests({
           await storage.clearTransactions(asset, wallet);
 
           final restored = await reopen();
-          expect(
-            (await restored.getTransactions(asset, wallet)).cachedCount,
-            0,
-          );
+          expect((await restored.getTransactions(asset, wallet)).total, 0);
         });
 
         test('merging continues across a reopen', () async {

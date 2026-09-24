@@ -12,11 +12,7 @@ import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 
-import '../helpers/runtime_auth_fixture.dart';
-
-class _MockAuth extends Mock
-    with RuntimeAuthFixture
-    implements KomodoDefiLocalAuth {}
+class _MockAuth extends Mock implements KomodoDefiLocalAuth {}
 
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
@@ -97,10 +93,13 @@ void main() {
 
     test('dispose swallows cancel/close errors and is idempotent', () async {
       // Arrange auth stream with throwing-cancel subscription
+      when(
+        () => auth.authStateChanges,
+      ).thenAnswer((_) => _StreamWithThrowingCancel<KdfUser?>());
 
       final manager = BalanceManager(
         assetLookup: assetLookup,
-        auth: _ThrowingSessionAuth(),
+        auth: auth,
         pubkeyManager: pubkeyManager,
         activationCoordinator: activation,
         eventStreamingManager: eventStreamingManager,
@@ -1447,11 +1446,6 @@ void main() {
       when(() => activation.isAssetActive(any())).thenAnswer((_) async => true);
     });
 
-    void emitUser(KdfUser user) {
-      when(() => auth.currentUser).thenAnswer((_) async => user);
-      authChanges.add(user);
-    }
-
     tearDown(() async {
       await manager.dispose();
       await authChanges.close();
@@ -1538,7 +1532,7 @@ void main() {
         // Act: Measure cleanup time
         final stopwatch = Stopwatch()..start();
 
-        emitUser(
+        authChanges.add(
           KdfUser(
             walletId: WalletId(
               name: 'balance-benchmark-wallet-$resourceCount',
@@ -1661,7 +1655,7 @@ void main() {
         // Act: Measure cleanup time
         final stopwatch = Stopwatch()..start();
 
-        emitUser(
+        authChanges.add(
           const KdfUser(
             walletId: WalletId(
               name: 'balance-typical-usage-wallet',
@@ -1771,7 +1765,7 @@ void main() {
           // Act: Measure cleanup time
           final stopwatch = Stopwatch()..start();
 
-          emitUser(
+          authChanges.add(
             KdfUser(
               walletId: WalletId(
                 name: 'balance-baseline-wallet-$run',
@@ -1904,7 +1898,7 @@ void main() {
       // Act: Measure concurrent cleanup time (current implementation)
       final concurrentStopwatch = Stopwatch()..start();
 
-      emitUser(
+      authChanges.add(
         const KdfUser(
           walletId: WalletId(
             name: 'balance-concurrent-test-wallet',
@@ -1990,10 +1984,4 @@ class _StreamWithThrowingCancel<T> extends Stream<T> {
   }) {
     return _ThrowingCancelSubscription<T>();
   }
-}
-
-class _ThrowingSessionAuth extends Mock implements KomodoDefiLocalAuth {
-  @override
-  Stream<AuthSessionContext?> watchSessionContext() =>
-      _StreamWithThrowingCancel<AuthSessionContext?>();
 }

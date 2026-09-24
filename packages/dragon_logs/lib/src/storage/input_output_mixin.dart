@@ -10,24 +10,15 @@ mixin CommonLogStorageOperations {
       throw Exception("Invalid file name: $fileName");
     }
 
-    // Read the date from the end: a valid prefix may itself contain dots.
-    final date = RegExp(
-      r'(\d{4})-(\d{1,2})-(\d{1,2})\.(log|txt)$',
-    ).firstMatch(fileName)!;
+    final date = fileName.split(".").first.split("_").last;
 
-    return DateTime(
-      int.parse(date[1]!),
-      int.parse(date[2]!),
-      int.parse(date[3]!),
-    );
-  }
+    final dateParts = date.split("-");
 
-  /// Orders valid log file names by their dates, oldest first.
-  ///
-  /// A name may carry any prefix, so lexical order is not chronological.
-  static int compareLogFileNames(String a, String b) {
-    final byDate = parseLogFileDate(a).compareTo(parseLogFileDate(b));
-    return byDate != 0 ? byDate : a.compareTo(b);
+    final year = int.parse(dateParts[0]);
+    final month = int.parse(dateParts[1]);
+    final day = int.parse(dateParts[2]);
+
+    return DateTime(year, month, day);
   }
 
   static DateTime? tryParseLogFileDate(String fileName) {

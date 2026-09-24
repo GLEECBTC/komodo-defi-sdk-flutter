@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:developer' show log;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 
@@ -109,13 +110,13 @@ class TendermintWithTokensActivationStrategy
       // Debug logging for Tendermint activation
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          'Activation started',
+          '[RPC] Activating Tendermint platform: ${asset.id.id}',
           name: 'TendermintWithTokensActivationStrategy',
         );
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          'Activation request prepared',
+          '[RPC] Activation parameters: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'chain_id': protocol.chainId, 'account_prefix': protocol.accountPrefix, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'rpc_nodes': nodes.map((n) => n.toJson()).toList(), 'priv_key_policy': privKeyPolicy.toJson()})}',
           name: 'TendermintWithTokensActivationStrategy',
         );
       }
@@ -128,7 +129,7 @@ class TendermintWithTokensActivationStrategy
 
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          'Activation task started',
+          '[RPC] Task initiated for ${asset.id.id}, task_id: ${taskResponse.taskId}',
           name: 'TendermintWithTokensActivationStrategy',
         );
       }

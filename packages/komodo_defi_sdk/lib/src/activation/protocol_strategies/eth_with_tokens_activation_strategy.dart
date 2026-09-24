@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:developer' show log;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 
@@ -34,7 +35,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
     CoinSubClass.grc20,
     CoinSubClass.bep20,
     CoinSubClass.ftm20,
-    CoinSubClass.polygon,
+    CoinSubClass.matic,
     CoinSubClass.avx20,
     CoinSubClass.hrc20,
     CoinSubClass.moonbeam,
@@ -147,11 +148,14 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       // Debug logging for ETH platform activation
       if (KdfLoggingConfig.verboseLogging) {
-        log('Activation started', name: 'EthWithTokensActivationStrategy');
+        log(
+          '[RPC] Activating platform asset: ${asset.id.id}',
+          name: 'EthWithTokensActivationStrategy',
+        );
       }
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          'Activation progress event',
+          '[RPC] Activation summary: ${jsonEncode({'ticker': asset.id.id, 'protocol': asset.protocol.subClass.formatted, 'token_count': children?.length ?? 0, 'tokens': children?.map((e) => e.id.id).toList() ?? [], 'gasless_provider_configured': tronGaslessProvider != null, 'priv_key_policy': privKeyPolicy.runtimeType.toString()})}',
           name: 'EthWithTokensActivationStrategy',
         );
       }
@@ -163,7 +167,7 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
 
       if (KdfLoggingConfig.verboseLogging) {
         log(
-          'Activation progress event',
+          '[RPC] Successfully activated platform asset: ${asset.id.id} with ${children?.length ?? 0} tokens',
           name: 'EthWithTokensActivationStrategy',
         );
       }

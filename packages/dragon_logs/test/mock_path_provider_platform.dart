@@ -13,9 +13,6 @@ const String kExternalStoragePath = 'externalStoragePath';
 class MockPathProviderPlatform
     with MockPlatformInterfaceMixin
     implements PathProviderPlatform {
-  MockPathProviderPlatform({this.documentsPath = kApplicationDocumentsPath});
-
-  final String documentsPath;
   @override
   Future<String?> getTemporaryPath() async {
     return kTemporaryPath;
@@ -33,7 +30,7 @@ class MockPathProviderPlatform
 
   @override
   Future<String?> getApplicationDocumentsPath() async {
-    return documentsPath;
+    return kApplicationDocumentsPath;
   }
 
   @override
