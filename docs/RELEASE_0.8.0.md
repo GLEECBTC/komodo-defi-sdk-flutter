@@ -207,8 +207,11 @@ isolate**, using canonical directory paths. It survives storage disposal.
 Disk locks serialize storage operations, but export retention is not a lease
 across isolates or processes: keep native export and export-cache cleanup in
 the same isolate. Browser writes and migration require Web Locks and fail
-closed when unavailable. Older clients can recreate legacy records; close them
-to complete migration. Files already downloaded or shared cannot be revoked.
+closed when unavailable. A browser export also holds a Web Lock on its
+snapshot, so a clear in any same-origin tab or worker skips it; the browser
+releases that lock if the owning context exits. Older clients can recreate
+legacy records; close them to complete migration. Files already downloaded or
+shared cannot be revoked.
 
 See [Dragon Logs migration guidance](../packages/dragon_logs/README.md#migrating-to-sanitized-diagnostic-records).
 

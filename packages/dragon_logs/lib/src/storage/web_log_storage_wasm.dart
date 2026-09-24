@@ -27,14 +27,14 @@ class WebLogStorageWasm
        _lockOverride = lock;
 
   static const _lockName = 'dragon-logs-storage';
+
+  /// Web Lock prefix an export holds on its `log_export` entry. Export bodies
+  /// deliberately run outside the storage lock, so a clear skips leased
+  /// entries rather than invalidate a snapshot still being read.
+  static const _exportLeasePrefix = '$_lockName:export:';
   final Future<FileSystemDirectoryHandle> Function()? _directoryProvider;
   final Future<void> Function(Future<void> Function())? _lockOverride;
   FileSystemDirectoryHandle? _logDirectory;
-
-  /// Entries under `log_export` that a running export still reads. Export
-  /// bodies deliberately run outside the storage queue, so a concurrent clear
-  /// has to skip these rather than invalidate a snapshot that is being read.
-  final Set<String> _retainedExports = {};
 
   @override
   Future<void> init({String? storageNamespace, bool purgeLegacy = false}) {
@@ -216,52 +216,61 @@ class WebLogStorageWasm
         final random = Random.secure();
         final name =
             'snapshot_${DateTime.now().microsecondsSinceEpoch}_${random.nextInt(0x100000000)}_${random.nextInt(0x100000000)}';
-        final directory = await cache
-            .getDirectoryHandle(
-              name,
-              FileSystemGetDirectoryOptions(create: true),
-            )
-            .toDart;
-        _retainedExports.add(name);
+        final lease = await _ExportLease.acquire('$_exportLeasePrefix$name');
         try {
-          final handle = await directory
-              .getFileHandle(
-                'records.txt',
-                FileSystemGetFileOptions(create: true),
+          final directory = await cache
+              .getDirectoryHandle(
+                name,
+                FileSystemGetDirectoryOptions(create: true),
               )
               .toDart;
-          final writer = await handle.createWritable().toDart;
           try {
-            for (final source in await _getLogFiles()) {
-              final file = await source.getFile().toDart;
-              await for (final bytes in _readFileChunks(file)) {
-                await writer.write(Uint8List.fromList(bytes).toJS).toDart;
-              }
-            }
-            await writer.close().toDart;
-          } catch (_) {
+            final handle = await directory
+                .getFileHandle(
+                  'records.txt',
+                  FileSystemGetFileOptions(create: true),
+                )
+                .toDart;
+            final writer = await handle.createWritable().toDart;
             try {
-              await writer.abort().toDart;
-            } catch (_) {}
+              for (final source in await _getLogFiles()) {
+                final file = await source.getFile().toDart;
+                await for (final bytes in _readFileChunks(file)) {
+                  await writer.write(Uint8List.fromList(bytes).toJS).toDart;
+                }
+              }
+              await writer.close().toDart;
+            } catch (_) {
+              try {
+                await writer.abort().toDart;
+              } catch (_) {}
+              rethrow;
+            }
+            // OPFS getFile() objects are invalidated by later commits to their
+            // source. Copy first: this private snapshot file is never appended.
+            return _WebLogSnapshot(
+              cache,
+              name,
+              await handle.getFile().toDart,
+              lease,
+            );
+          } catch (_) {
+            await cache
+                .removeEntry(name, FileSystemRemoveOptions(recursive: true))
+                .toDart;
             rethrow;
           }
-          // OPFS getFile() objects are invalidated by later commits to their
-          // source. Copy first: this private snapshot file is never appended.
-          return _WebLogSnapshot(cache, name, await handle.getFile().toDart);
         } catch (_) {
-          _retainedExports.remove(name);
-          await cache
-              .removeEntry(name, FileSystemRemoveOptions(recursive: true))
-              .toDart;
+          await lease.release();
           rethrow;
         }
       }),
     );
   }
 
-  Future<void> _deleteSnapshot(_WebLogSnapshot snapshot) =>
-      _withStorageLock(() async {
-        _retainedExports.remove(snapshot.name);
+  Future<void> _deleteSnapshot(_WebLogSnapshot snapshot) async {
+    try {
+      await _withStorageLock(() async {
         try {
           await snapshot.parent
               .removeEntry(
@@ -273,6 +282,19 @@ class WebLogStorageWasm
           if (error.name != 'NotFoundError') rethrow;
         }
       });
+    } finally {
+      await snapshot.lease.release();
+    }
+  }
+
+  static Future<Set<String>> _leasedExports() async {
+    final locks = await window.navigator.locks.query().toDart;
+    return {
+      for (final lock in locks.held.toDart)
+        if (lock.name.startsWith(_exportLeasePrefix))
+          lock.name.substring(_exportLeasePrefix.length),
+    };
+  }
 
   Stream<List<int>> _readFileChunks(File file) async* {
     for (var offset = 0; offset < file.size; offset += 64 * 1024) {
@@ -309,9 +331,10 @@ class WebLogStorageWasm
           final cache = await _logDirectory!
               .getDirectoryHandle('log_export')
               .toDart;
+          final leased = await _leasedExports();
           var retained = false;
           for (final name in await cache.keysStream().toList()) {
-            if (_retainedExports.contains(name)) {
+            if (leased.contains(name)) {
               retained = true;
               continue;
             }
@@ -378,8 +401,52 @@ class WebLogStorageWasm
 }
 
 class _WebLogSnapshot {
-  _WebLogSnapshot(this.parent, this.name, this.file);
+  _WebLogSnapshot(this.parent, this.name, this.file, this.lease);
   final FileSystemDirectoryHandle parent;
   final String name;
   final File file;
+  final _ExportLease lease;
+}
+
+/// A Web Lock held while an export owns its snapshot: visible to every
+/// same-origin context, and released automatically if the owning tab or
+/// worker exits.
+class _ExportLease {
+  _ExportLease._(this._release, this._finished);
+
+  final Completer<void> _release;
+  final Future<void> _finished;
+
+  static Future<_ExportLease> acquire(String name) async {
+    final acquired = Completer<bool>();
+    final release = Completer<void>();
+    final finished = window.navigator.locks
+        .request(
+          name,
+          LockOptions(ifAvailable: true),
+          ((Lock? lock) {
+            acquired.complete(lock != null);
+            return (lock == null ? Future<void>.value() : release.future)
+                .then<JSAny?>((_) => null)
+                .toJS;
+          }).toJS,
+        )
+        .toDart
+        .then<void>((_) {});
+    unawaited(
+      finished.catchError((Object error, StackTrace stack) {
+        if (!acquired.isCompleted) acquired.completeError(error, stack);
+      }),
+    );
+    if (!await acquired.future) {
+      await finished;
+      throw StateError('Log export lease is unavailable');
+    }
+    return _ExportLease._(release, finished);
+  }
+
+  Future<void> release() async {
+    if (!_release.isCompleted) _release.complete();
+    await _finished;
+  }
 }

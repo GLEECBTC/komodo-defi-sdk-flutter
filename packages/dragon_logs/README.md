@@ -37,7 +37,9 @@ before the new directory is created. The new directory is the durable migration
 marker; later starts preserve its records. Exports use only that namespace and
 flush pending records before taking a snapshot. Native snapshots use bounded
 copies and are removed after completion or cancellation. Browser snapshots are
-read in bounded slices without holding a Web Lock while the consumer waits.
+read in bounded slices without holding the storage lock while the consumer
+waits. Each holds only its own Web Lock lease, which stops a clear in any
+same-origin tab or worker from deleting it and is released if its tab exits.
 
 Native storage instances in one Dart isolate share ownership of active exports
 through canonical directory paths. Clearing cached exports preserves those

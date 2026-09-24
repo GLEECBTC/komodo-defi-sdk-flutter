@@ -209,35 +209,63 @@ void main() {
     await subscription.cancel();
   });
 
-  test('clearing exports spares a snapshot a running export still reads', () async {
+  test(
+    'clearing exports spares a snapshot a running export still reads',
+    () async {
+      await init();
+      await storage.appendLog(DateTime.now(), '{"event":"retained"}');
+      final chunks = <String>[];
+      final received = Completer<void>();
+      late StreamSubscription<String> subscription;
+      subscription = storage.exportLogsStream().listen((chunk) {
+        chunks.add(chunk);
+        subscription.pause();
+        received.complete();
+      });
+      await received.future;
+      final epoch = await root.getDirectoryHandle(_epoch).toDart;
+      final cache = await epoch.getDirectoryHandle('log_export').toDart;
+      await _write(cache, 'old-export.log', _sentinel);
+
+      await storage.deleteExportedFiles().timeout(const Duration(seconds: 3));
+
+      expect(await cache.keysStream().toList(), hasLength(1));
+      final done = subscription.asFuture<void>();
+      subscription.resume();
+      await done.timeout(const Duration(seconds: 3));
+      expect(chunks.join(), contains('retained'));
+
+      await storage.deleteExportedFiles().timeout(const Duration(seconds: 3));
+      await expectLater(
+        epoch.getDirectoryHandle('log_export').toDart,
+        throwsA(isA<DOMException>()),
+      );
+    },
+  );
+
+  test('a clear in another context spares a running export', () async {
     await init();
-    await storage.appendLog(DateTime.now(), '{"event":"retained"}');
-    final chunks = <String>[];
-    final received = Completer<void>();
-    late StreamSubscription<String> subscription;
-    subscription = storage.exportLogsStream().listen((chunk) {
-      chunks.add(chunk);
-      subscription.pause();
-      received.complete();
-    });
-    await received.future;
+    final record = 'é' * (128 * 1024);
+    await storage.appendLog(DateTime.now(), record);
+    final iterator = StreamIterator(storage.exportLogsStream());
+    expect(await iterator.moveNext(), isTrue);
+    final contents = StringBuffer(iterator.current);
+
+    final other = WebLogStorageWasm.forTesting(
+      directoryProvider: () async => root,
+    );
+    addTearDown(other.dispose);
+    await other.init(storageNamespace: _epoch, purgeLegacy: true);
+    await other.deleteExportedFiles().timeout(const Duration(seconds: 3));
     final epoch = await root.getDirectoryHandle(_epoch).toDart;
     final cache = await epoch.getDirectoryHandle('log_export').toDart;
-    await _write(cache, 'old-export.log', _sentinel);
-
-    await storage.deleteExportedFiles().timeout(const Duration(seconds: 3));
-
     expect(await cache.keysStream().toList(), hasLength(1));
-    final done = subscription.asFuture<void>();
-    subscription.resume();
-    await done.timeout(const Duration(seconds: 3));
-    expect(chunks.join(), contains('retained'));
 
-    await storage.deleteExportedFiles().timeout(const Duration(seconds: 3));
-    await expectLater(
-      epoch.getDirectoryHandle('log_export').toDart,
-      throwsA(isA<DOMException>()),
-    );
+    while (await iterator.moveNext()) {
+      contents.write(iterator.current);
+    }
+    expect(contents.toString(), '$record\n');
+    await iterator.cancel();
   });
 
   test('export and retention follow file dates, not names', () async {
