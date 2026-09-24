@@ -3,10 +3,11 @@ import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/data/coinpaprika_cex_provider.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_api_plan.dart';
+import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_ticker.dart';
 import 'package:komodo_cex_market_data/src/id_resolution_strategy.dart';
 import 'package:komodo_cex_market_data/src/models/_models_index.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
-import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart' hide Result;
 import 'package:logging/logging.dart';
 
 /// A repository class for interacting with the CoinPaprika API.
@@ -22,24 +23,46 @@ import 'package:logging/logging.dart';
 /// The provider layer handles validation and will throw appropriate errors
 /// for requests that exceed the current plan's limitations.
 /// For older historical data or higher limits, upgrade to a higher plan.
+///
+/// ## Current prices and 24h changes
+/// Every coin shares one [ICoinPaprikaProvider.fetchTickers] response, since a
+/// request per coin would exhaust the free plan's monthly call limit. On the
+/// free plan that response holds only the 2,000 highest-ranked coins, so
+/// [supports] reports any other coin as unsupported for these requests.
 class CoinPaprikaRepository implements CexRepository {
   /// Creates a new instance of [CoinPaprikaRepository].
   CoinPaprikaRepository({
     required this.coinPaprikaProvider,
     bool enableMemoization = true,
     bool ownsProvider = false,
+    DateTime Function() clock = DateTime.now,
   }) : _idResolutionStrategy = CoinPaprikaIdResolutionStrategy(),
        _enableMemoization = enableMemoization,
-       _ownsProvider = ownsProvider;
+       _ownsProvider = ownsProvider,
+       _clock = clock;
 
   /// The CoinPaprika provider to use for fetching data.
   final ICoinPaprikaProvider coinPaprikaProvider;
   final IdResolutionStrategy _idResolutionStrategy;
   final bool _enableMemoization;
   final bool _ownsProvider;
+  final DateTime Function() _clock;
 
   final AsyncMemoizer<List<CexCoin>> _coinListMemoizer = AsyncMemoizer();
   Set<String>? _cachedQuoteCurrencies;
+
+  final Map<QuoteCurrency, _TickersCache> _tickers = {};
+
+  /// The free plan updates bulk tickers about every five minutes.
+  static const _tickersMaxAge = Duration(minutes: 5);
+
+  /// [supports] runs for every coin on every refresh, even coins that other
+  /// repositories price, so it reuses tickers longer than [_tickersMaxAge].
+  static const _supportsTickersMaxAge = Duration(hours: 1);
+
+  /// A failed bulk fetch is not retried for this long; price lookups rethrow
+  /// its error meanwhile, so a rate-limited API is not asked again per coin.
+  static const _tickersFailureCooldown = Duration(minutes: 5);
 
   static final Logger _logger = Logger('CoinPaprikaRepository');
 
@@ -301,10 +324,7 @@ class CoinPaprikaRepository implements CexRepository {
     }
 
     // For current prices, use ticker endpoint
-    final ticker = await coinPaprikaProvider.fetchCoinTicker(
-      coinId: tradingSymbol,
-      quotes: [fiatCurrency],
-    );
+    final ticker = await _currentTicker(tradingSymbol, fiatCurrency);
 
     final quoteData = ticker.quotes[quoteCurrencyId];
     if (quoteData == null) {
@@ -375,10 +395,7 @@ class CoinPaprikaRepository implements CexRepository {
     final quoteCurrencyId = fiatCurrency.coinPaprikaId.toUpperCase();
 
     // Use ticker endpoint for 24hr price change
-    final ticker = await coinPaprikaProvider.fetchCoinTicker(
-      coinId: tradingSymbol,
-      quotes: [fiatCurrency],
-    );
+    final ticker = await _currentTicker(tradingSymbol, fiatCurrency);
 
     final quoteData = ticker.quotes[quoteCurrencyId];
     if (quoteData == null) {
@@ -425,20 +442,102 @@ class CoinPaprikaRepository implements CexRepository {
         return false;
       }
 
-      // Ensure coin list is loaded to verify coin existence
-      final coins = await getCoinList();
-      final tradingSymbol = resolveTradingSymbol(assetId);
+      final coinId = resolveTradingSymbol(assetId).toLowerCase();
+      if (requestType == PriceRequestType.priceHistory) {
+        final coins = await getCoinList();
+        return coins.any((coin) => coin.id.toLowerCase() == coinId);
+      }
 
-      final coinExists = coins.any(
-        (coin) => coin.id.toLowerCase() == tradingSymbol.toLowerCase(),
-      );
-
-      return coinExists;
+      return await _isListed(coinId, fiatCurrency);
     } catch (e) {
       // If we can't resolve or verify support, assume unsupported
       _logger.warning('Failed to check support for ${assetId.id}: $e');
       return false;
     }
+  }
+
+  Future<CoinPaprikaTicker> _currentTicker(
+    String coinId,
+    QuoteCurrency quote,
+  ) async {
+    final tickers = await _freshTickers(quote);
+    final ticker = tickers[coinId.toLowerCase()];
+    if (ticker == null) {
+      throw Exception('No CoinPaprika ticker for $coinId');
+    }
+    return ticker;
+  }
+
+  Future<Map<String, CoinPaprikaTicker>> _freshTickers(
+    QuoteCurrency quote,
+  ) async {
+    final cache = _tickers.putIfAbsent(quote, _TickersCache.new);
+    final success = cache.lastSuccess;
+    if (success != null && _isWithin(success.at, _tickersMaxAge)) {
+      return success.byId;
+    }
+    final failure = cache.lastFailure;
+    if (failure != null && _isWithin(failure.at, _tickersFailureCooldown)) {
+      return failure.error.asFuture;
+    }
+    return (await _refreshTickers(quote, cache)).asFuture;
+  }
+
+  /// Only the first fetch is waited for. Later ones refresh in the background,
+  /// so a slow CoinPaprika never holds up lookups that other repositories
+  /// answer.
+  Future<bool> _isListed(String coinId, QuoteCurrency quote) async {
+    final cache = _tickers.putIfAbsent(quote, _TickersCache.new);
+    final success = cache.lastSuccess;
+    final failure = cache.lastFailure;
+    final coolingDown =
+        failure != null && _isWithin(failure.at, _tickersFailureCooldown);
+    final stale =
+        success == null || !_isWithin(success.at, _supportsTickersMaxAge);
+    if (stale && !coolingDown) {
+      final refresh = _refreshTickers(quote, cache);
+      if (success == null && failure == null) await refresh;
+    }
+    return cache.lastSuccess?.byId.containsKey(coinId) ?? false;
+  }
+
+  // The shared fetch completes with a Result, never an error. Each lookup
+  // runs in its own error zone (RepositoryFallbackMixin wraps it in `retry`),
+  // and Dart does not deliver a future's error across error zones, so a
+  // caller that joined from another zone would never complete.
+  Future<Result<Map<String, CoinPaprikaTicker>>> _refreshTickers(
+    QuoteCurrency quote,
+    _TickersCache cache,
+  ) {
+    return cache.inFlight ??=
+        Result.capture(
+          Future.sync(
+            () => coinPaprikaProvider.fetchTickers(quotes: [quote]),
+          ).then((tickers) {
+            if (tickers.isEmpty) {
+              throw StateError('CoinPaprika returned no tickers');
+            }
+            return {for (final t in tickers) t.id.toLowerCase(): t};
+          }),
+        ).then((result) {
+          cache.inFlight = null;
+          final error = result.asError;
+          if (error == null) {
+            cache
+              ..lastSuccess = (byId: result.asValue!.value, at: _clock())
+              ..lastFailure = null;
+          } else {
+            cache.lastFailure = (error: error, at: _clock());
+            _logger.warning('CoinPaprika tickers fetch failed: ${error.error}');
+          }
+          return result;
+        });
+  }
+
+  /// A clock that moved backwards counts as expired rather than fresh.
+  bool _isWithin(DateTime at, Duration window) {
+    final age = _clock().difference(at);
+    return !age.isNegative && age < window;
   }
 
   @override
@@ -447,4 +546,11 @@ class CoinPaprikaRepository implements CexRepository {
       coinPaprikaProvider.dispose();
     }
   }
+}
+
+/// The bulk tickers for one quote currency, keyed by lower-case coin id.
+class _TickersCache {
+  ({Map<String, CoinPaprikaTicker> byId, DateTime at})? lastSuccess;
+  ({ErrorResult error, DateTime at})? lastFailure;
+  Future<Result<Map<String, CoinPaprikaTicker>>>? inFlight;
 }

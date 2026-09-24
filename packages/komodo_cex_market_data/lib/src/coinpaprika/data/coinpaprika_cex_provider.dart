@@ -66,6 +66,14 @@ abstract class ICoinPaprikaProvider {
     List<QuoteCurrency> quotes,
   });
 
+  /// Fetches ticker data for every active coin in one request.
+  ///
+  /// The free plan returns only the 2,000 highest-ranked coins. Entries that
+  /// fail to parse are skipped.
+  ///
+  /// [quotes]: List of quote currencies
+  Future<List<CoinPaprikaTicker>> fetchTickers({List<QuoteCurrency> quotes});
+
   /// The current API plan with its limitations and features.
   CoinPaprikaApiPlan get apiPlan;
 
@@ -251,6 +259,48 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     final ticker = jsonDecode(response.body) as Map<String, dynamic>;
     final result = CoinPaprikaTicker.fromJson(ticker);
     return result;
+  }
+
+  @override
+  Future<List<CoinPaprikaTicker>> fetchTickers({
+    List<QuoteCurrency> quotes = const [FiatCurrency.usd],
+  }) async {
+    // Map quote currencies: stablecoins -> underlying fiat
+    final mappedQuotes = quotes.map(_mapQuoteCurrencyForApi).toList();
+    final quotesParam = mappedQuotes
+        .map((q) => q.coinPaprikaId.toUpperCase())
+        .join(',');
+
+    final uri = Uri.https(baseUrl, '$apiVersion/tickers', {
+      'quotes': quotesParam,
+    });
+
+    final response = await _httpClient
+        .get(uri, headers: _createRequestHeaderMap())
+        .timeout(CoinPaprikaConfig.timeout);
+
+    if (response.statusCode != 200) {
+      _throwApiErrorOrException(response, 'ALL', 'tickers fetch');
+    }
+
+    final entries = jsonDecode(response.body) as List<dynamic>;
+    final tickers = <CoinPaprikaTicker>[];
+    for (final entry in entries) {
+      try {
+        tickers.add(CoinPaprikaTicker.fromJson(entry as Map<String, dynamic>));
+      } on Object catch (_) {
+        // Counted and logged below.
+      }
+    }
+
+    final skipped = entries.length - tickers.length;
+    if (skipped > 0) {
+      _logger.warning(
+        'Skipped $skipped of ${entries.length} CoinPaprika tickers that '
+        'failed to parse',
+      );
+    }
+    return tickers;
   }
 
   /// Validates if the requested date range is within the current API plan's

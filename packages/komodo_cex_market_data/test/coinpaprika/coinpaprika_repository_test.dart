@@ -115,9 +115,8 @@ void main() {
 
         // Assert
         expect(result, equals(TestData.bitcoinPriceDecimal));
-        VerificationHelpers.verifyFetchCoinTicker(
+        VerificationHelpers.verifyFetchTickers(
           mockProvider,
-          expectedCoinId: TestConstants.bitcoinCoinId,
           expectedQuotes: [Stablecoin.usdt],
         );
       });
@@ -310,10 +309,7 @@ void main() {
     group('supports', () {
       test('returns true for supported asset and quote currency', () async {
         // Arrange
-        MockHelpers.setupProviderCoinListResponse(
-          mockProvider,
-          coins: [TestData.bitcoinCoin],
-        );
+        MockHelpers.setupProviderTickerResponse(mockProvider);
 
         // Act
         final result = await repository.supports(
@@ -328,10 +324,7 @@ void main() {
 
       test('returns true for supported stablecoin quote currency', () async {
         // Arrange
-        MockHelpers.setupProviderCoinListResponse(
-          mockProvider,
-          coins: [TestData.bitcoinCoin],
-        );
+        MockHelpers.setupProviderTickerResponse(mockProvider);
 
         // Act - Using USDT stablecoin which should be supported via its underlying fiat (USD)
         // even though the provider only lists USD, not USDT, in supportedQuoteCurrencies
@@ -349,10 +342,7 @@ void main() {
         'returns true for EUR-based stablecoin when EUR is supported',
         () async {
           // Arrange
-          MockHelpers.setupProviderCoinListResponse(
-            mockProvider,
-            coins: [TestData.bitcoinCoin],
-          );
+          MockHelpers.setupProviderTickerResponse(mockProvider);
 
           // Act - Using EURS stablecoin which should be supported via its underlying fiat (EUR)
           final result = await repository.supports(
@@ -498,9 +488,8 @@ void main() {
         expect(result, equals(TestData.bitcoinPriceDecimal));
 
         // Verify that the provider was called with USDT stablecoin
-        VerificationHelpers.verifyFetchCoinTicker(
+        VerificationHelpers.verifyFetchTickers(
           mockProvider,
-          expectedCoinId: TestConstants.bitcoinCoinId,
           expectedQuotes: [Stablecoin.usdt],
         );
       });
@@ -526,9 +515,8 @@ void main() {
         expect(result, equals(Decimal.fromInt(42000)));
 
         // Verify that the provider was called with EURS stablecoin
-        VerificationHelpers.verifyFetchCoinTicker(
+        VerificationHelpers.verifyFetchTickers(
           mockProvider,
-          expectedCoinId: TestConstants.bitcoinCoinId,
           expectedQuotes: [Stablecoin.eurs],
         );
       });
@@ -595,9 +583,8 @@ void main() {
           expect(result, equals(Decimal.parse('3.2')));
 
           // Verify that the provider was called with USDC stablecoin
-          VerificationHelpers.verifyFetchCoinTicker(
+          VerificationHelpers.verifyFetchTickers(
             mockProvider,
-            expectedCoinId: TestConstants.bitcoinCoinId,
             expectedQuotes: [Stablecoin.usdc],
           );
         },
