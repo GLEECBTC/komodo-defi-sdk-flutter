@@ -56,7 +56,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
             partialReason: status.partialReason,
             amount: Decimal.parse(status.received.amount),
             assetId: _resolveAssetOf(status.received),
-            symbol: status.received.symbol,
+            symbol: status.received.symbol ?? status.received.coin,
           ),
           approvalTxHashes: approvalTxHashes,
           sourceTxHash: status.sourceTxHash,

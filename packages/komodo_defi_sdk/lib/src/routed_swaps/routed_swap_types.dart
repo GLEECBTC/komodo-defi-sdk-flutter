@@ -41,7 +41,8 @@ class RoutedSwapCost with RoutedSwapValue {
   /// The wallet asset this cost is denominated in, when it maps to one.
   final AssetId? assetId;
 
-  /// The provider's token symbol, when the token is not a wallet asset.
+  /// The token's symbol when it is not a wallet asset: the provider's, or
+  /// KDF's ticker when the wallet cannot resolve it.
   ///
   /// Display-only. Never resolve it against the coin registry: provider
   /// symbols collide with real tickers.

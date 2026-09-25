@@ -68,7 +68,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
       kind: kind,
       isDeductedFromReceive: false,
       assetId: gas.amount.coin == null ? null : _resolveAsset(gas.amount.coin!),
-      symbol: gas.amount.symbol,
+      symbol: gas.amount.symbol ?? gas.amount.coin,
       usdValue: _decimal(gas.amountUsd),
     );
 
@@ -82,7 +82,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
           assetId: fee.amount.coin == null
               ? null
               : _resolveAsset(fee.amount.coin!),
-          symbol: fee.amount.symbol,
+          symbol: fee.amount.symbol ?? fee.amount.coin,
           usdValue: _decimal(fee.amountUsd),
         ),
       for (final gas in route.gasCosts) gasCost(gas, RoutedSwapCostKind.gas),

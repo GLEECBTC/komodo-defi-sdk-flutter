@@ -57,7 +57,8 @@ class RoutedSwapReceipt with RoutedSwapValue {
   /// The received asset, when it maps to a wallet asset.
   final AssetId? assetId;
 
-  /// The provider's symbol, when it does not. Display-only.
+  /// The provider's symbol, or KDF's ticker the wallet cannot resolve, when
+  /// it does not. Display-only.
   final String? symbol;
 
   /// Whether this may be presented as a completed swap.
