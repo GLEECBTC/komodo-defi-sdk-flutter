@@ -158,16 +158,14 @@ class VerificationHelpers {
     }
   }
 
-  /// Verifies that fetchCoinTicker was called with expected parameters
-  static void verifyFetchCoinTicker(
+  /// Verifies that fetchTickers was called with expected parameters
+  static void verifyFetchTickers(
     MockCoinPaprikaProvider mockProvider, {
-    String? expectedCoinId,
     List<QuoteCurrency>? expectedQuotes,
     int? expectedCallCount,
   }) {
     final verification = verify(
-      () => mockProvider.fetchCoinTicker(
-        coinId: expectedCoinId ?? any(named: 'coinId'),
+      () => mockProvider.fetchTickers(
         quotes: expectedQuotes ?? any(named: 'quotes'),
       ),
     );

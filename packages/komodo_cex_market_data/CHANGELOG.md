@@ -1,5 +1,14 @@
 ## 0.1.0+2 (unreleased)
 
+ - **BREAKING** **PERF**(coinpaprika): read current prices and 24h changes
+   from one bulk `/v1/tickers` request reused for five minutes, instead of a
+   request per coin, to stay within the free plan's 20,000 monthly requests.
+   On the free plan that response holds only the 2,000 highest-ranked coins.
+   For other coins `supports()` now returns false for current prices and 24h
+   changes, and those calls throw. A failed bulk request is not retried for
+   five minutes. `ICoinPaprikaProvider` gains `fetchTickers`, which custom
+   implementations must add.
+
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 

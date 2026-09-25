@@ -1,3 +1,11 @@
+## Unreleased
+
+ - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
+   now pick repositories that support price history. They asked for current
+   prices, so the Komodo feed could answer a dated lookup with today's price,
+   and CoinPaprika skipped coins outside its bulk tickers although its
+   historical endpoint serves them.
+
 ## 0.8.0 (2026-09-24)
 
 Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export
