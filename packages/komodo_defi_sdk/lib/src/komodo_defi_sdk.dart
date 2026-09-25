@@ -372,6 +372,16 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   TradingManager get trading =>
       _assertSdkInitialized(_container<TradingManager>());
 
+  /// Routed (aggregator-executed) swaps, such as cross-chain bridges.
+  ///
+  /// A different liquidity source from [trading], which is the atomic-swap
+  /// orderbook. Routed swaps are executed by KDF against an external
+  /// aggregator and have their own lifecycle and history.
+  ///
+  /// Throws [StateError] if accessed before initialization.
+  RoutedSwapManager get routedSwaps =>
+      _assertSdkInitialized(_container<RoutedSwapManager>());
+
   /// Gets a reference to the balance manager for checking asset balances.
   ///
   /// Provides functionality for checking and monitoring asset balances.
@@ -717,6 +727,7 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
       _disposeIfRegistered<FeeManager>((m) => m.dispose()),
       _disposeIfRegistered<WithdrawalManager>((m) => m.dispose()),
       _disposeIfRegistered<SecurityManager>((m) => m.dispose()),
+      _disposeIfRegistered<RoutedSwapManager>((m) => m.dispose()),
     ]);
 
     // Reset scoped container

@@ -1,3 +1,36 @@
+## Unreleased
+
+ - **FEAT**(routed-swap): add the `routed_swap` method namespace - quote,
+   start, status, cancel and history requests with their typed models -
+   covering aggregator-executed swaps such as cross-chain bridges.
+ - **FEAT**(routed-swap): align the models with the contract at
+   `gleec-specs#2` `0b209b2`, as emitted by KDF `feat/lifi-integration`
+   `4872ef2`:
+   - the route carries `approval`, `total_gas_costs`, addresses and typed
+     `steps`;
+   - status carries `stage`, `executed_route`, `partial_reason`, and
+     `source_tx_hash` (with a fallback to `tx_hash`);
+   - a failed task carries a sealed error type for every row of the
+     contract's error table;
+   - history carries its filters, `total_pages`, and the entry envelope with
+     timestamps, the requested side, the accepted minimum and gas spent.
+
+   Requests parse their typed errors through `RoutedSwapRpcException`.
+   Errors that happen to share a name with another method's error no longer
+   decode as that method's class.
+ - **FIX**(routed-swap): read `routed_swap::supported_coins` entries one at a
+   time. An entry the SDK cannot read, such as one with a non-EVM chain id, is
+   logged, left out and counted in `skipped`, instead of failing the whole
+   response and emptying the list of routed-swap assets.
+ - **FIX**(trading): read the v2 `{swap_type, swap_data}` envelope that
+   `my_swap_status`, `my_recent_swaps` and `active_swaps` return. The swap
+   inside has no `type` of its own (it comes from `swap_type`), a legacy swap
+   may lack its order uuid and amounts, and a v2-protocol swap reports
+   `my_coin`/`other_coin` and volumes, so each of these used to fail to parse.
+   Report `SwapInfo.isSuccessful` from the swap's events: `error_events` is
+   KDF's list of every *possible* error, not the ones that occurred, so every
+   swap used to read as failed.
+
 ## 0.7.0 (2026-09-24)
 
  - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and

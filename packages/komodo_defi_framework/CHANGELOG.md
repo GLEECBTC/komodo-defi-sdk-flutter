@@ -1,3 +1,17 @@
+## Unreleased
+
+ - **FIX**(rpc): keep KDF's typed error body when a remote or local
+   executable answers with a non-200 status. It used to be replaced with a
+   generic HTTP error, so on desktop a missing route, a rate limit and a
+   vanished task were indistinguishable.
+ - **BUILD**(kdf): repin the bundled artefact from `main` `f3efd2ca` to
+   `feat/lifi-integration` `4872ef2e0bb07348673e1578aca4aca53f3d73b6` for all
+   seven targets, so the routed-swap RPC namespace is exercisable against a
+   real binary rather than only the scripted harness fixture. That branch forks
+   from `main` at `750be938` and does not carry the five later `main` merges;
+   it still lacks the websocket `.expect` fix, so `ws_url` expansion stays off
+   on web.
+
 ## 0.6.0 (2026-09-24)
 
  - **CHORE**(coins): pin the bundled coins configuration to the POL rename on

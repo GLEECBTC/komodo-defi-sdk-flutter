@@ -110,4 +110,37 @@ void main() {
     expect(response.toString(), isNot(contains('malformed-provider-secret')));
     expect(response['error'], 'InvalidKdfResponse');
   });
+
+  test('passes a typed KDF error envelope through on a non-200', () async {
+    // KDF reports MMRPC 2.0 errors with HTTP 4xx/5xx statuses; the typed
+    // error_type is what callers branch on, so it must survive the transport.
+    final envelope = <String, dynamic>{
+      'mmrpc': '2.0',
+      'error': 'Routed swap task has already broadcast: 3',
+      'error_path': 'swap_task',
+      'error_trace': 'swap_task:1',
+      'error_type': 'TaskAlreadyBroadcast',
+      'error_data': {'task_id': 3},
+    };
+    server.listen((httpRequest) async {
+      await utf8.decoder.bind(httpRequest).drain<void>();
+      httpRequest.response
+        ..statusCode = HttpStatus.conflict
+        ..write(jsonEncode(envelope));
+      await httpRequest.response.close();
+    });
+
+    final operations = KdfOperationsRemote.create(
+      logCallback: (_) {},
+      rpcUrl: Uri.parse('http://127.0.0.1:${server.port}'),
+      userpass: 'rpc-password-value',
+    );
+
+    final response = await operations.mm2Rpc(<String, dynamic>{
+      'method': 'task::routed_swap::cancel',
+    });
+
+    expect(response['error_type'], 'TaskAlreadyBroadcast');
+    expect(response['error_data'], {'task_id': 3});
+  });
 }

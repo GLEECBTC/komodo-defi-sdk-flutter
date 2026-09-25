@@ -10,8 +10,8 @@ const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
 
 /// Whether to send `ws_url` endpoints to KDF on web builds.
 ///
-/// **Off while the wallet ships KDF `main`.** The ws transport on `main` panics
-/// on an ordinary late response, and on wasm a panic takes the whole MM2
+/// **Off while the pinned KDF lacks the transport fix.** The ws transport
+/// panics on an ordinary late response, and on wasm a panic takes the whole MM2
 /// instance down with it:
 ///
 ///  * `eth_rpc.rs:23`/`:41` abandon a call at `TRY_RPC_NODE_TIMEOUT_S` = 10s,
@@ -24,13 +24,16 @@ const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
 ///  * `mm2_wasm_lib.rs:129` says outright that it cannot wrap the async entry
 ///    in `catch_unwind`, so nothing contains it.
 ///
-/// Verified in the shipped binary: `strings kdf_f3efd2c-mac-universal` carries
-/// six `receiver channel must be alive` and zero `web3_pool` symbols.
+/// Verified at source in the pinned artefact `4872ef2`
+/// (`feat/lifi-integration`): `websocket_transport.rs` still carries the
+/// `.expect("receiver channel must be alive")` at both :207 and :306.
 ///
-/// The fix is not ours to make app-side - it is KDF `d2c16fc29` (kdf-internal
-/// PR #18, `.expect` to `let _ =`) plus `7d4e1872c` (PR #20, generation-stamped
-/// `Close` and a spawn reservation). Both are unmerged. **Flip this back to
-/// `true` once the pinned KDF contains them**, i.e. once
+/// The fix is not ours to make app-side - it is KDF `d2c16fc29` (`.expect` to
+/// `let _ =`; its subject names the p2p panic, but `git log -S` on the string
+/// shows this is the commit that removes it) plus `7d4e1872c` (PR #20,
+/// generation-stamped `Close` and a spawn reservation). Both live on
+/// `perf/evm-rpc-429-backoff` and neither is in the pinned build. **Flip this
+/// back to `true` once the pinned KDF contains them**, i.e. once
 /// `build_config.json`'s `api_commit_hash` is a commit carrying `d2c16fc29`.
 /// Nothing else about the expansion needs to change: [_webUnusableWsEndpoints]
 /// and [_deadWsEndpoints] still hold, and [EvmNode.toRpcNodeList] stays

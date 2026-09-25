@@ -3,9 +3,9 @@
 # Reference mirror of build_config.json. The JSON file remains canonical.
 
 api:
-  api_commit_hash: "f3efd2ca10420f2982fa127dde84dcc17891f577"
+  api_commit_hash: "4872ef2e0bb07348673e1578aca4aca53f3d73b6"
 
-  branch: "main"
+  branch: "feat/lifi-integration"
 
   fetch_at_build_enabled: true
   concurrent_downloads_enabled: true
@@ -28,13 +28,13 @@ api:
     web:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$"
       valid_zip_sha256_checksums:
-        - "e21dee475c8d627b13b7acf2e7e8eb0edc31982868b46370991dd07472278103"
+        - "7ff633ec88282d25d06f07d0bedac2319c29eeaf518c0543d6cdc45aa9291ac1"
       path: "web/kdf/bin"
 
     ios:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "26011d626a687aa34c1bc430bbdfc753febcd074afdc9c0921863ca09cd44efb"
+        - "e1c5a228be71d1f0910c8936e1e76a312210a94d334d4f69a46b04d7fbbe5707"
       path: "ios"
 
     macos:
@@ -43,37 +43,37 @@ api:
         - "kdf-macos-universal2-"
         - "mac-universal"
       valid_zip_sha256_checksums:
-        - "07dca2c3d99812e45c8955e97e9c4485970170f2791b281273042af8d28bf789"
+        - "daa5560ce3f18b48e7f19116e76166e401c2965b981cb672bc6d45c78dba5e2b"
       path: "macos/bin"
 
     android-armv7:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "ffe017a1f93b4cf411717637a77c7ef83ea4f38686eb3a4c17e3861d4da71cee"
+        - "22e5aa17db02499243afb24356278f42e784c116fc2c9c7e9fc14b0d8a3d6c0d"
       path: "android/app/src/main/cpp/libs/armeabi-v7a"
 
     android-aarch64:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "048872d8cead82f9e1912a56ffba098d383b8042daa4cb0aaab6dc27eed0396e"
+        - "3c0191e61255f0693059c6b73e61e3384a8e94b1452911e7c20e196c8f16b50d"
       path: "android/app/src/main/cpp/libs/arm64-v8a"
 
     linux:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$"
       valid_zip_sha256_checksums:
-        - "9b400f8cc7bdd18a7557a237d0666fc7ea0db8966b0c6494e6b3e23bbeababe2"
+        - "c573074b452755846b0f318a6f066eaa51cba45c871eb2f2b8ed3cb8f058eca1"
       path: "linux/bin"
 
     windows:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$"
       valid_zip_sha256_checksums:
-        - "a61e70e3e16568d5c28619384157eacbca0514284183c233e584d14778dccfff"
+        - "4e15b76d7ba41e9fc709d933fdbb6636c2a46652ed1b6ba55db0bd1370b6dca9"
       path: "windows/bin"
 
 coins:
   fetch_at_build_enabled: true
   update_commit_on_build: true
-  bundled_coins_repo_commit: "0b46220b53cbd96d8ae712eafa6ff6145dc9a88c"
+  bundled_coins_repo_commit: "f766b261cd0f13be832034b86427dc9bb2669e0a"
   coins_repo_api_url: "https://api.github.com/repos/GLEECBTC/coins"
   coins_repo_content_url: "https://raw.githubusercontent.com/GLEECBTC/coins"
   coins_repo_branch: "master"

@@ -164,6 +164,13 @@ class KdfOperationsRemote implements IKdfOperations {
     }
 
     if (response.statusCode != 200) {
+      // KDF answers typed MMRPC 2.0 errors with a non-200 status (400, 404,
+      // 409, 429, 500, 502). The body is KDF's own error envelope, and its
+      // error_type is how callers tell a missing route from a rate limit, or
+      // a finished task from one already broadcast — the FFI and WASM
+      // transports already pass it through. Anything else stays opaque.
+      final typedError = _typedKdfError(response.body);
+      if (typedError != null) return typedError;
       return JsonRpcErrorResponse(
         code: response.statusCode,
         error: {
@@ -222,5 +229,20 @@ class KdfOperationsRemote implements IKdfOperations {
   @override
   void dispose() {
     // No-op for remote operations - HTTP client is managed externally
+  }
+
+  /// Returns [body] decoded when it is a typed KDF MMRPC 2.0 error envelope.
+  static Map<String, dynamic>? _typedKdfError(String body) {
+    try {
+      final decoded = json.decode(body);
+      if (decoded is Map<String, dynamic> &&
+          decoded['mmrpc'] == '2.0' &&
+          decoded['error_type'] is String) {
+        return decoded;
+      }
+    } catch (_) {
+      // Not an envelope; handled as an opaque HTTP error.
+    }
+    return null;
   }
 }
