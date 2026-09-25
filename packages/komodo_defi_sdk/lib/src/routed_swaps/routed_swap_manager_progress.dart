@@ -290,11 +290,8 @@ RoutedSwapFundsMovement _fundsMovementOf(
                   rpc.RoutedSwapApprovalFailureReason.approvalBroadcastFailed
           ? RoutedSwapFundsMovement.none
           : RoutedSwapFundsMovement.feesOnly;
-    case rpc.RoutedSwapSigningRejectedError(:final reason):
-      if (reason != rpc.RoutedSwapSigningRejectionReason.timeout) {
-        return untouched;
-      }
-      return watchedBeforeBroadcast
+    case rpc.RoutedSwapSigningRejectedError():
+      return error.isPreBroadcast || watchedBeforeBroadcast
           ? untouched
           : RoutedSwapFundsMovement.uncertain;
     case rpc.RoutedSwapInternalTaskError():

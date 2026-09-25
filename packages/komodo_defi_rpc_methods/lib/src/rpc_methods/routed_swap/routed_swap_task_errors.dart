@@ -179,9 +179,15 @@ final class RoutedSwapSigningRejectedError extends RoutedSwapTaskError {
   String get errorType => 'SigningRejected';
 
   // A timeout after Broadcasting began may have broadcast without KDF
-  // receiving a hash, so only an explicit decline proves nothing went out.
+  // receiving a hash, and a reason this build does not know proves nothing,
+  // so only a decline or a wallet that cannot sign at all is pre-broadcast.
   @override
-  bool get isPreBroadcast => reason != RoutedSwapSigningRejectionReason.timeout;
+  bool get isPreBroadcast => switch (reason) {
+    RoutedSwapSigningRejectionReason.userRejected ||
+    RoutedSwapSigningRejectionReason.unsupportedMethod => true,
+    RoutedSwapSigningRejectionReason.timeout ||
+    RoutedSwapSigningRejectionReason.unknown => false,
+  };
 
   @override
   List<Object?> get props => [reason];
