@@ -457,16 +457,8 @@ void main() {
           // Arrange
           final mockResponse = TestFixtures.createTickerResponse(
             quotes: TestFixtures.createMultipleQuotes(
-              currencies: [
-                TestConstants.usdQuote,
-                TestConstants.usdtQuote,
-                TestConstants.eurQuote,
-              ],
-              prices: [
-                TestConstants.bitcoinPrice,
-                TestConstants.bitcoinPrice + 10,
-                42000.0,
-              ],
+              currencies: [TestConstants.usdQuote, TestConstants.eurQuote],
+              prices: [TestConstants.bitcoinPrice, 42000.0],
             ),
           );
 
