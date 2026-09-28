@@ -38,6 +38,7 @@ class KdfStartupConfig {
     required this.iAmSeed,
     required this.isBootstrapNode,
     required this.eventStreamingConfiguration,
+    required this.lifiApiUrl,
   }) {
     SeedNodeValidator.validate(
       seedNodes: seedNodes,
@@ -45,6 +46,7 @@ class KdfStartupConfig {
       iAmSeed: iAmSeed,
       isBootstrapNode: isBootstrapNode,
     );
+    _validateLifiApiUrl(lifiApiUrl);
   }
 
   final String? walletName;
@@ -68,6 +70,11 @@ class KdfStartupConfig {
   final bool? iAmSeed;
   final bool? isBootstrapNode;
   final EventStreamingConfiguration? eventStreamingConfiguration;
+
+  /// LI.FI API base URL for routed swaps; null or empty keeps KDF on the
+  /// public API. There is deliberately no `lifi_api_key` counterpart: a LI.FI
+  /// key must never ship in a client, so point this at a proxy that adds one.
+  final String? lifiApiUrl;
 
   // Either a list of coin JSON objects or a string of the path to a file
   // containing a list of coin JSON objects.
@@ -96,6 +103,7 @@ class KdfStartupConfig {
     bool? iAmSeed,
     bool? isBootstrapNode,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    String? lifiApiUrl,
   }) async {
     assert(
       !kIsWeb || userHome == null && dbDir == null,
@@ -150,6 +158,7 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      lifiApiUrl: lifiApiUrl,
     );
   }
 
@@ -175,6 +184,7 @@ class KdfStartupConfig {
     String? rpcIp,
     int rpcPort = 7783,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    String? lifiApiUrl,
   }) async {
     final (String? home, String? dbDir) = await _getAndSetupUserHome();
 
@@ -206,7 +216,29 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      lifiApiUrl: lifiApiUrl,
     );
+  }
+
+  /// KDF reads `lifi_api` only when it calls LI.FI, so a bad value would
+  /// otherwise surface much later, as failed quotes. KDF appends `/` and then
+  /// `v1/<endpoint>`, so a query or fragment would swallow that slash and drop
+  /// the last path segment; a browser refuses a URL with credentials. The
+  /// value is not echoed in the error because it may hold those credentials.
+  static void _validateLifiApiUrl(String? url) {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !const {'http', 'https'}.contains(uri.scheme.toLowerCase()) ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw ArgumentError(
+        'Must be an http(s) URL without credentials, query or fragment',
+        'lifiApiUrl',
+      );
+    }
   }
 
   JsonMap encodeStartParams() {
@@ -237,6 +269,7 @@ class KdfStartupConfig {
       if (isBootstrapNode != null) 'is_bootstrap_node': isBootstrapNode,
       if (eventStreamingConfiguration != null)
         'event_streaming_configuration': eventStreamingConfiguration!.toJson(),
+      if (lifiApiUrl?.isNotEmpty ?? false) 'lifi_api': lifiApiUrl,
     };
   }
 

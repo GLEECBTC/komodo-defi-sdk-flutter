@@ -361,12 +361,14 @@ abstract interface class KomodoDefiAuth {
 }
 
 class KomodoDefiLocalAuth implements KomodoDefiAuth {
+  /// [lifiApiUrl] reaches every KDF start; see `KdfStartupConfig.lifiApiUrl`.
   KomodoDefiLocalAuth({
     required KomodoDefiFramework kdf,
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
+    String? lifiApiUrl,
   }) : _allowRegistrations = allowRegistrations,
-       _authService = KdfAuthService(kdf, hostConfig) {
+       _authService = KdfAuthService(kdf, hostConfig, lifiApiUrl: lifiApiUrl) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }
 

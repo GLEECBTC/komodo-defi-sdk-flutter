@@ -1,5 +1,9 @@
 ## Unreleased
 
+ - **FEAT**(config): `KdfStartupConfig.lifiApiUrl`, written to the conf as
+   `lifi_api` only when set; both `generateWithDefaults` and `noAuthStartup`
+   take it. A value KDF cannot request (not http(s), or carrying credentials,
+   a query or a fragment) throws `ArgumentError`.
  - **FIX**(rpc): keep KDF's typed error body when a remote or local
    executable answers with a non-200 status. It used to be replaced with a
    generic HTTP error, so on desktop a missing route, a rate limit and a
