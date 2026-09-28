@@ -95,7 +95,7 @@ class TestFixtures {
       'quotes':
           quotes ??
           {
-            TestConstants.usdtQuote: {
+            TestConstants.usdQuote: {
               'price': TestConstants.bitcoinPrice,
               'volume_24h': TestConstants.highVolume,
               'volume_24h_change_24h': 0.0,
@@ -160,12 +160,14 @@ class TestFixtures {
   }
 
   /// Creates a mock CoinPaprikaTicker with customizable parameters
+  ///
+  /// [quoteCurrency] is the response key, so a USDT request is keyed `USD`.
   static CoinPaprikaTicker createMockTicker({
     String? id,
     String? name,
     String? symbol,
     int? rank,
-    String quoteCurrency = TestConstants.usdtQuote,
+    String quoteCurrency = TestConstants.usdQuote,
     double price = TestConstants.bitcoinPrice,
     double percentChange24h = TestConstants.positiveChange,
     double volume24h = TestConstants.highVolume,
@@ -299,15 +301,8 @@ class TestFixtures {
     List<double>? prices,
   }) {
     final defaultCurrencies =
-        currencies ??
-        [
-          TestConstants.usdQuote,
-          TestConstants.usdtQuote,
-          TestConstants.eurQuote,
-        ];
-    final defaultPrices =
-        prices ??
-        [TestConstants.bitcoinPrice, TestConstants.bitcoinPrice + 10, 42000.0];
+        currencies ?? [TestConstants.usdQuote, TestConstants.eurQuote];
+    final defaultPrices = prices ?? [TestConstants.bitcoinPrice, 42000.0];
 
     final quotes = <String, Map<String, dynamic>>{};
 

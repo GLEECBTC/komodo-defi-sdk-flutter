@@ -278,7 +278,8 @@ class CoinPaprikaRepository implements CexRepository {
     QuoteCurrency fiatCurrency = Stablecoin.usdt,
   }) async {
     final tradingSymbol = resolveTradingSymbol(assetId);
-    final quoteCurrencyId = fiatCurrency.coinPaprikaId.toUpperCase();
+    final quoteCurrencyId = fiatCurrency.coinPaprikaQuoteCurrency.coinPaprikaId
+        .toUpperCase();
 
     if (priceDate != null) {
       // For historical prices, use OHLC data
@@ -372,7 +373,8 @@ class CoinPaprikaRepository implements CexRepository {
     QuoteCurrency fiatCurrency = Stablecoin.usdt,
   }) async {
     final tradingSymbol = resolveTradingSymbol(assetId);
-    final quoteCurrencyId = fiatCurrency.coinPaprikaId.toUpperCase();
+    final quoteCurrencyId = fiatCurrency.coinPaprikaQuoteCurrency.coinPaprikaId
+        .toUpperCase();
 
     // Use ticker endpoint for 24hr price change
     final ticker = await coinPaprikaProvider.fetchCoinTicker(
@@ -406,12 +408,7 @@ class CoinPaprikaRepository implements CexRepository {
       // For stablecoins, we need to check if their underlying fiat currency is
       // supported since CoinPaprika treats stablecoins as their underlying
       // fiat currencies
-      final currencyToCheck = fiatCurrency.when(
-        fiat: (_, __) => fiatCurrency,
-        stablecoin: (_, __, underlyingFiat) => underlyingFiat,
-        crypto: (_, __) => fiatCurrency, // Use as-is for crypto
-        commodity: (_, __) => fiatCurrency, // Use as-is for commodity
-      );
+      final currencyToCheck = fiatCurrency.coinPaprikaQuoteCurrency;
 
       final supportedQuotes =
           _cachedQuoteCurrencies ??
