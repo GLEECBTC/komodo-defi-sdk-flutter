@@ -1,4 +1,6 @@
-## Unreleased
+## 0.6.1 (2026-09-28)
+
+Patch release for SDK 0.8.1; no migration from 0.6.0.
 
  - **FIX**(macos): create the temporary directory before writing the KDF coins
    file. `path_provider_foundation` 2.6.0 names `Library/Caches/<bundle id>`

@@ -1,4 +1,6 @@
-## Unreleased
+## 0.6.1 (2026-09-28)
+
+Patch release for SDK 0.8.1; no migration from 0.6.0.
 
  - **FIX**(auth): stop reporting a KDF start that sent no wallet password as an
    incorrect password. KDF's `initError` now means `incorrectPassword` only
@@ -7,6 +9,8 @@
    Every `walletStartFailed` carries `details['kdf_error']`; `spawnError` used
    the misspelt key `kdf_errosr`.
  - **FIX**(auth): log the KDF startup result instead of `omitted`.
+ - **CHORE**(deps): require `komodo_defi_framework` `^0.6.1`, which reports a
+   KDF executable that could not be launched as `spawnError`.
 
 ## 0.6.0 (2026-09-24)
 
