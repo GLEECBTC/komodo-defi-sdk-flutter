@@ -181,9 +181,34 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       throw KdfException(
         'Failed to start KDF',
         type: KdfExceptionType.startupFailed,
+        details: _launchFailureCause(e),
         stackTrace: stackTrace,
       );
     }
+  }
+
+  /// Typed metadata only: these errors' messages and paths can name the user,
+  /// and [ProcessException.arguments] holds the start parameters.
+  static JsonMap _launchFailureCause(Object error) => switch (error) {
+    FileSystemException(:final osError) => {
+      'cause': 'file_system',
+      if (osError != null) 'os_error': osError.errorCode,
+    },
+    ProcessException(:final errorCode) => {
+      'cause': 'process',
+      'os_error': errorCode,
+    },
+    _ => {'cause': DiagnosticSanitizer.safeError(error)},
+  };
+
+  static String _describeLaunchFailure(Object error) {
+    final (type, details) = error is KdfException
+        ? (error.type, error.details)
+        : (KdfExceptionType.startupFailed, _launchFailureCause(error));
+    return [
+      'type=${type.name}',
+      for (final MapEntry(:key, :value) in details.entries) '$key=$value',
+    ].join(' ');
   }
 
   /// check if the executable has executable permissions on linux/macos
@@ -241,7 +266,17 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
 
     try {
       _process = await _startKdf(params);
+    } catch (e) {
+      if (e is ArgumentError) {
+        _logCallback('KDF process startup failed');
+        return KdfStartupResult.invalidParams;
+      }
+      // Nothing was spawned, so KDF cannot have rejected a wallet password.
+      _logCallback('KDF process launch failed ${_describeLaunchFailure(e)}');
+      return KdfStartupResult.spawnError;
+    }
 
+    try {
       final timer = Stopwatch()..start();
 
       int? exitCode;
