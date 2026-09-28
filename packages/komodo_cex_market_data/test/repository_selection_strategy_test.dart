@@ -489,12 +489,7 @@ class MockPaprikaStyleRepository implements CexRepository {
     PriceRequestType requestType,
   ) async {
     // Simulate CoinPaprika behavior: a stablecoin is checked as its fiat
-    final mappedQuote = fiatCurrency
-        .maybeWhen(
-          stablecoin: (_, __, underlyingFiat) => underlyingFiat,
-          orElse: () => fiatCurrency,
-        )
-        .coinPaprikaId;
+    final mappedQuote = fiatCurrency.coinPaprikaQuoteCurrency.coinPaprikaId;
 
     // Support common assets and direct quote currencies
     final supportedAssets = {'BTC', 'ETH'};
