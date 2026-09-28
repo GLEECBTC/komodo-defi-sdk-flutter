@@ -98,6 +98,7 @@ void main() {
         final result = await operations(() async => kdf).kdfMain(_params);
 
         expect(result, KdfStartupResult.initError);
+        await exitCleanup();
       });
 
       test('reports a start without a coins list as invalid params', () async {
