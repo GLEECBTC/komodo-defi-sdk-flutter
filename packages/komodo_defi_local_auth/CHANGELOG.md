@@ -1,3 +1,13 @@
+## Unreleased
+
+ - **FIX**(auth): stop reporting a KDF start that sent no wallet password as an
+   incorrect password. KDF's `initError` now means `incorrectPassword` only
+   when a password was sent; otherwise it fails with `walletStartFailed`, as
+   does an unrecognised startup result that used to throw `ArgumentError`.
+   Every `walletStartFailed` carries `details['kdf_error']`; `spawnError` used
+   the misspelt key `kdf_errosr`.
+ - **FIX**(auth): log the KDF startup result instead of `omitted`.
+
 ## 0.6.0 (2026-09-24)
 
 Prepared for SDK 0.8.0 with verified metadata writes, session contexts, atomic
