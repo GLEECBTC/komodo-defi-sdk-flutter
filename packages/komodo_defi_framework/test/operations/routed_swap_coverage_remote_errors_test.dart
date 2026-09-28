@@ -47,11 +47,21 @@ void main() {
     }
   });
 
+  test('a legacy KDF error passes its text through', () async {
+    for (final status in [404, 500]) {
+      final response = await _answer(status, '{"error": "No such swap"}');
+
+      expect(response, isNot(isA<JsonRpcErrorResponse>()), reason: '$status');
+      expect(response, {'error': 'No such swap'}, reason: '$status');
+    }
+  });
+
   test(
-    'a non-200 without a typed envelope stays an opaque HTTP error',
+    'a non-200 that is not a KDF error envelope stays an opaque HTTP error',
     () async {
       const bodies = [
-        '{"error": "legacy failure detail"}',
+        '{"error": "legacy failure detail", "status": 502}',
+        '{"error": ["legacy list detail"]}',
         '{"mmrpc": "2.0", "error": "untyped failure detail"}',
         '{"mmrpc": "2.0", "error_type": 7, "error": "numeric type detail"}',
         '{"mmrpc": "1.0", "error_type": "X", "error": "old version detail"}',

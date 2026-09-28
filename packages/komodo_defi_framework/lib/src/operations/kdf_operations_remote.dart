@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
+import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 class KdfOperationsRemote implements IKdfOperations {
@@ -163,14 +164,16 @@ class KdfOperationsRemote implements IKdfOperations {
       return ConnectionError('Remote KDF request failed');
     }
 
+    final body = kdfResponseBody(response);
+
     if (response.statusCode != 200) {
-      // KDF answers typed MMRPC 2.0 errors with a non-200 status (400, 404,
-      // 409, 429, 500, 502). The body is KDF's own error envelope, and its
-      // error_type is how callers tell a missing route from a rate limit, or
-      // a finished task from one already broadcast — the FFI and WASM
-      // transports already pass it through. Anything else stays opaque.
-      final typedError = _typedKdfError(response.body);
-      if (typedError != null) return typedError;
+      // KDF answers errors with a non-200 status: typed MMRPC 2.0 errors
+      // (400-502) and legacy methods' `{"error": ...}` (404, 500). Callers
+      // branch on the error_type or match the legacy text (`No swap with
+      // uuid`), and the FFI and WASM transports already pass both through.
+      // Anything else stays opaque.
+      final kdfError = _kdfError(body);
+      if (kdfError != null) return kdfError;
       return JsonRpcErrorResponse(
         code: response.statusCode,
         error: {
@@ -182,7 +185,7 @@ class KdfOperationsRemote implements IKdfOperations {
     }
 
     try {
-      final decoded = json.decode(response.body);
+      final decoded = json.decode(body);
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {
       // Do not surface FormatException.source: it contains the upstream body.
@@ -231,15 +234,16 @@ class KdfOperationsRemote implements IKdfOperations {
     // No-op for remote operations - HTTP client is managed externally
   }
 
-  /// Returns [body] decoded when it is a typed KDF MMRPC 2.0 error envelope.
-  static Map<String, dynamic>? _typedKdfError(String body) {
+  /// Returns [body] decoded when it is one of KDF's error envelopes: a typed
+  /// MMRPC 2.0 error, or a legacy method's `{"error": "..."}`.
+  static Map<String, dynamic>? _kdfError(String body) {
     try {
       final decoded = json.decode(body);
-      if (decoded is Map<String, dynamic> &&
-          decoded['mmrpc'] == '2.0' &&
-          decoded['error_type'] is String) {
-        return decoded;
-      }
+      if (decoded is! Map<String, dynamic>) return null;
+      final typed =
+          decoded['mmrpc'] == '2.0' && decoded['error_type'] is String;
+      final legacy = decoded.length == 1 && decoded['error'] is String;
+      if (typed || legacy) return decoded;
     } catch (_) {
       // Not an envelope; handled as an opaque HTTP error.
     }

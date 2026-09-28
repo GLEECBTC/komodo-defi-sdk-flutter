@@ -8,10 +8,16 @@
    `lifi_api` only when set; both `generateWithDefaults` and `noAuthStartup`
    take it. A value KDF cannot request (not http(s), or carrying credentials,
    a query or a fragment) throws `ArgumentError`.
- - **FIX**(rpc): keep KDF's typed error body when a remote or local
-   executable answers with a non-200 status. It used to be replaced with a
-   generic HTTP error, so on desktop a missing route, a rate limit and a
-   vanished task were indistinguishable.
+ - **FIX**(rpc): keep KDF's error body when a remote or local executable
+   answers with a non-200 status: a typed MMRPC 2.0 error, or a legacy
+   method's `{"error": "..."}`, as the FFI and WASM transports already did.
+   It used to be replaced with a generic HTTP error, so on desktop a missing
+   route, a rate limit and a vanished task were indistinguishable, and a
+   legacy error's text (`No swap with uuid …`) never arrived.
+ - **FIX**(rpc): decode KDF's HTTP responses as UTF-8 on the desktop
+   transport: the local executable and a remote KDF. KDF labels almost none
+   of them, so non-ASCII text in errors and results arrived garbled (`ü` as
+   `Ã¼`), a wallet name from `get_wallet_names` included.
  - **BUILD**(kdf): repin the bundled artefact from `main` `f3efd2ca` to
    `feat/lifi-integration` `4872ef2e0bb07348673e1578aca4aca53f3d73b6` for all
    seven targets, so the routed-swap RPC namespace is exercisable against a
