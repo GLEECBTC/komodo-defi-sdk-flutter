@@ -1,3 +1,10 @@
+## Unreleased
+
+ - **FIX**(macos): create the temporary directory before writing the KDF coins
+   file. `path_provider_foundation` 2.6.0 names `Library/Caches/<bundle id>`
+   inside the macOS sandbox without creating it, so a fresh install could not
+   start KDF and reported "Incorrect password or invalid seed" at launch.
+
 ## 0.6.0 (2026-09-24)
 
  - **CHORE**(coins): pin the bundled coins configuration to the POL rename on
