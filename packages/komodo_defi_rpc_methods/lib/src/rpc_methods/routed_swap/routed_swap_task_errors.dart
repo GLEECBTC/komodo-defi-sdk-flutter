@@ -82,6 +82,56 @@ sealed class RoutedSwapTaskError extends Equatable {
   /// Conservative: an error the contract does not pin as pre-broadcast
   /// answers false.
   bool get isPreBroadcast => false;
+
+  /// Serialises back to the `error_data` wire shape, which
+  /// [RoutedSwapTaskError.parse] reads back into an equal value.
+  JsonMap toJson() => switch (this) {
+    RoutedSwapQuoteWorsenedError(:final freshRoute) => {
+      if (freshRoute != null) 'fresh_route': freshRoute.toJson(),
+    },
+    final RoutedSwapInsufficientBalanceError e => {
+      'coin': e.coin,
+      'available': e.available,
+      'required': e.required,
+    },
+    RoutedSwapApprovalFailedError(:final reason) => {'reason': reason.wire},
+    RoutedSwapTxFailedError(:final sourceTxHash, :final reason) => {
+      if (sourceTxHash != null) 'source_tx_hash': sourceTxHash,
+      'reason': reason.wire,
+    },
+    RoutedSwapSigningRejectedError(:final reason) => {'reason': reason.wire},
+    final RoutedSwapBridgeFailedError e => {
+      if (e.sourceTxHash != null) 'source_tx_hash': e.sourceTxHash,
+      if (e.substatus != null) 'substatus': e.substatus,
+      if (e.substatusMessage != null) 'substatus_message': e.substatusMessage,
+      if (e.providerExplorerUrl != null)
+        'provider_explorer_url': e.providerExplorerUrl,
+      if (e.providerRequestId != null)
+        'provider_request_id': e.providerRequestId,
+    },
+    RoutedSwapPreflightRejectedError(:final check) => {'check': check.wire},
+    RoutedSwapNoRouteTaskError(:final reasons, :final providerRequestId) => {
+      'reasons': [...reasons],
+      if (providerRequestId != null) 'provider_request_id': providerRequestId,
+    },
+    RoutedSwapRateLimitedTaskError(:final providerRequestId) => {
+      if (providerRequestId != null) 'provider_request_id': providerRequestId,
+    },
+    RoutedSwapProviderTaskError(:final message, :final providerRequestId) => {
+      'message': message,
+      if (providerRequestId != null) 'provider_request_id': providerRequestId,
+    },
+    final RoutedSwapAmountOutOfBoundsTaskError e => {
+      'param': e.param,
+      'value': e.value,
+      'min': e.min,
+      'max': e.max,
+    },
+    RoutedSwapAbortedOnRestartError() || RoutedSwapTaskCancelledError() => {},
+    RoutedSwapInternalTaskError(:final message) ||
+    RoutedSwapTransportTaskError(:final message) => {'message': message},
+    RoutedSwapUnknownTaskError(:final data) => {...data},
+  };
 }
 
 /// The fresh route came in below the accepted minimum. Nothing was sent.

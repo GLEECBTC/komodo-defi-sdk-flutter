@@ -1,9 +1,14 @@
+import 'dart:convert';
+
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:test/test.dart';
 
 RoutedSwapTaskError _parse(String type, [JsonMap data = const {}]) =>
     RoutedSwapTaskError.parse(type, data);
+
+/// [json] after a trip through JSON text, as a stored or exported copy.
+JsonMap _wire(JsonMap json) => jsonDecode(jsonEncode(json)) as JsonMap;
 
 const JsonMap _freshRoute = {
   'from': {'coin': 'USDT-ETH', 'amount': '1'},
@@ -317,6 +322,87 @@ void main() {
         expect(_parse(type).hashCode, _parse(type).hashCode, reason: type);
         expect(_parse(type).props, isEmpty);
       }
+    });
+  });
+
+  group('toJson', () {
+    test('every variant reads back equal from its own error_data', () {
+      const payloads = <(String, JsonMap)>[
+        ('QuoteWorsened', {'fresh_route': _freshRoute}),
+        ('QuoteWorsened', {}),
+        (
+          'InsufficientBalance',
+          {'coin': 'ETH', 'available': '0.001', 'required': '0.0129'},
+        ),
+        ('ApprovalFailed', {'reason': 'allowance_reset_not_confirmed'}),
+        ('ApprovalFailed', {'reason': 'gas_spike'}),
+        (
+          'SwapTxFailed',
+          {'tx_hash': '0xlegacy', 'reason': 'source_transaction_not_confirmed'},
+        ),
+        ('SwapTxFailed', {}),
+        ('SigningRejected', {'reason': 'unsupported_method'}),
+        (
+          'BridgeFailed',
+          {
+            'source_tx_hash': '0xsource',
+            'substatus': 'REFUND_FAILED',
+            'substatus_message': 'Manual support is required',
+            'provider_explorer_url': 'https://scan.li.fi/tx/1',
+            'provider_request_id': 'req-1',
+          },
+        ),
+        ('BridgeFailed', {}),
+        ('PreflightRejected', {'check': 'spender_allowlist'}),
+        (
+          'NoRouteFound',
+          {
+            'reasons': ['no liquidity', 7],
+            'provider_request_id': 'req-2',
+          },
+        ),
+        ('NoRouteFound', {}),
+        ('RateLimited', {'provider_request_id': 'req-3'}),
+        ('RateLimited', {}),
+        ('ProviderApiError', {'message': 'upstream'}),
+        (
+          'AmountOutOfBounds',
+          {'param': 'amount', 'value': '0.1', 'min': '1', 'max': '9'},
+        ),
+        ('AbortedOnRestart', {}),
+        ('TaskCancelled', {}),
+        ('InternalError', {'message': 'handoff lost'}),
+        ('TransportError', {'message': 'unreachable'}),
+        (
+          'LiquidityVanished',
+          {
+            'provider_request_id': 'req-9',
+            'extra': {
+              'nested': [1],
+            },
+          },
+        ),
+      ];
+      for (final (type, data) in payloads) {
+        final error = _parse(type, data);
+        expect(
+          _parse(error.errorType, _wire(error.toJson())),
+          error,
+          reason: '$type $data',
+        );
+      }
+    });
+
+    test('writes only the fields a payload has, under their wire names', () {
+      expect(_parse('BridgeFailed', {'tx_hash': '0xlegacy'}).toJson(), {
+        'source_tx_hash': '0xlegacy',
+      });
+      expect(_parse('TaskCancelled').toJson(), isEmpty);
+      expect(_parse('RateLimited').toJson(), isEmpty);
+
+      final unknown = _parse('LiquidityVanished', {'extra': 1});
+      unknown.toJson()['extra'] = 2;
+      expect((unknown as RoutedSwapUnknownTaskError).data, {'extra': 1});
     });
   });
 

@@ -102,6 +102,18 @@ sealed class RoutedSwapStatus extends Equatable {
   /// Whether the task has reached a terminal state.
   bool get isTerminal => this is! RoutedSwapInProgress;
 
+  /// The task `status` this payload is reported under — `InProgress`, `Ok` or
+  /// `Error` — which [RoutedSwapStatus.parse] picks the variant by.
+  String get taskStatus;
+
+  /// Serialises back to the `details` wire shape, which
+  /// [RoutedSwapStatus.parse] reads back into an equal value.
+  JsonMap toJson() => {
+    'uuid': uuid,
+    'provider': provider,
+    if (executedRoute != null) 'executed_route': executedRoute!.toJson(),
+  };
+
   @override
   List<Object?> get props => [uuid, provider, executedRoute];
 }
@@ -163,6 +175,24 @@ final class RoutedSwapInProgress extends RoutedSwapStatus {
   final String? actionUrl;
 
   @override
+  String get taskStatus => 'InProgress';
+
+  @override
+  JsonMap toJson() => {
+    ...super.toJson(),
+    'state': rawState,
+    if (approveTxHash != null) 'approve_tx_hash': approveTxHash,
+    if (sourceTxHash != null) 'source_tx_hash': sourceTxHash,
+    if (rawStage != null) 'stage': rawStage,
+    if (substatus != null) 'substatus': substatus,
+    if (substatusMessage != null) 'substatus_message': substatusMessage,
+    if (providerExplorerUrl != null)
+      'provider_explorer_url': providerExplorerUrl,
+    if (executionDurationS != null) 'execution_duration_s': executionDurationS,
+    if (actionUrl != null) 'action_url': actionUrl,
+  };
+
+  @override
   List<Object?> get props => [
     ...super.props,
     state,
@@ -216,6 +246,21 @@ final class RoutedSwapFinished extends RoutedSwapStatus {
   final String? providerExplorerUrl;
 
   @override
+  String get taskStatus => 'Ok';
+
+  @override
+  JsonMap toJson() => {
+    ...super.toJson(),
+    'outcome': outcome.wire,
+    if (partialReason != null) 'partial_reason': partialReason!.wire,
+    'received': received.toJson(),
+    if (sourceTxHash != null) 'source_tx_hash': sourceTxHash,
+    if (destTxHash != null) 'dest_tx_hash': destTxHash,
+    if (providerExplorerUrl != null)
+      'provider_explorer_url': providerExplorerUrl,
+  };
+
+  @override
   List<Object?> get props => [
     ...super.props,
     outcome,
@@ -247,6 +292,17 @@ final class RoutedSwapErrored extends RoutedSwapStatus {
 
   /// The typed payload.
   final RoutedSwapTaskError error;
+
+  @override
+  String get taskStatus => 'Error';
+
+  @override
+  JsonMap toJson() => {
+    ...super.toJson(),
+    'error_type': errorType,
+    'error': message,
+    'error_data': error.toJson(),
+  };
 
   @override
   List<Object?> get props => [...super.props, errorType, message, error];

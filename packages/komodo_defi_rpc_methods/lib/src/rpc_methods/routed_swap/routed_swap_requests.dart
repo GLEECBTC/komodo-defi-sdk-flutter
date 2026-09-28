@@ -338,7 +338,7 @@ class RoutedSwapStatusResponse extends BaseResponse {
   @override
   JsonMap toJson() => {
     'mmrpc': mmrpc,
-    'result': {'status': status, 'details': details.uuid},
+    'result': {'status': status, 'details': details.toJson()},
   };
 }
 

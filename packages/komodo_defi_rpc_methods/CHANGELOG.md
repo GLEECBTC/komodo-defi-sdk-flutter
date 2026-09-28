@@ -18,6 +18,13 @@
    Requests parse their typed errors through `RoutedSwapRpcException`.
    Errors that happen to share a name with another method's error no longer
    decode as that method's class.
+ - **FIX**(routed-swap): `RoutedSwapStatusResponse.toJson` and
+   `RoutedSwapHistoryResponse.toJson` write the whole wire shape, and `parse`
+   reads it back into an equal value. They wrote the swap's uuid in place of
+   its details, and an entry count in place of the entries.
+   `RoutedSwapStatus`, `RoutedSwapTaskError`, `RoutedSwapHistoryEntry` and its
+   parts gain `toJson`, and `RoutedSwapStatus.taskStatus` names the status a
+   payload is reported under.
  - **FIX**(routed-swap): read `routed_swap::supported_coins` entries one at a
    time. An entry the SDK cannot read, such as one with a non-EVM chain id, is
    logged, left out and counted in `skipped`, instead of failing the whole

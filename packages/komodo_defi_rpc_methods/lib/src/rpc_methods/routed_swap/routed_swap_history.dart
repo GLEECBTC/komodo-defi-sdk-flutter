@@ -145,7 +145,7 @@ class RoutedSwapHistoryResponse extends BaseResponse {
   JsonMap toJson() => {
     'mmrpc': mmrpc,
     'result': {
-      'entries': entries.length,
+      'entries': [for (final entry in entries) entry.toJson()],
       'total': total,
       'limit': limit,
       'page_number': pageNumber,
@@ -183,6 +183,9 @@ class RoutedSwapRequested extends Equatable {
   /// Requested sell amount, in coin units.
   final String amount;
 
+  /// Serialises back to the wire shape.
+  JsonMap toJson() => {'from': from, 'to': to, 'amount': amount};
+
   @override
   List<Object?> get props => [from, to, amount];
 }
@@ -211,6 +214,9 @@ class RoutedSwapGasSpent extends Equatable {
   /// How much, in coin units.
   final String amount;
 
+  /// Serialises back to the wire shape.
+  JsonMap toJson() => {'tx_hash': txHash, 'coin': coin, 'amount': amount};
+
   @override
   List<Object?> get props => [txHash, coin, amount];
 }
@@ -230,6 +236,9 @@ class RoutedSwapGasTotal extends Equatable {
 
   /// How much, in coin units.
   final String amount;
+
+  /// Serialises back to the wire shape.
+  JsonMap toJson() => {'coin': coin, 'amount': amount};
 
   @override
   List<Object?> get props => [coin, amount];
@@ -322,6 +331,20 @@ class RoutedSwapHistoryEntry extends Equatable {
 
   /// Whether the swap is still running and should be resumed.
   bool get isInFlight => swap is RoutedSwapInProgress;
+
+  /// Serialises back to the wire shape, which
+  /// [RoutedSwapHistoryEntry.fromJson] reads back into an equal value.
+  JsonMap toJson() => {
+    'created_at': createdAt,
+    'updated_at': updatedAt,
+    if (finishedAt != null) 'finished_at': finishedAt,
+    'requested': requested.toJson(),
+    'min_to_amount_accepted': minToAmountAccepted,
+    'approval_tx_hashes': [...approvalTxHashes],
+    'gas_spent': [for (final gas in gasSpent) gas.toJson()],
+    'total_gas_spent': [for (final gas in totalGasSpent) gas.toJson()],
+    'swap': {'status': swap.taskStatus, 'details': swap.toJson()},
+  };
 
   @override
   List<Object?> get props => [

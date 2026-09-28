@@ -1,8 +1,28 @@
+import 'dart:convert';
+
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:test/test.dart';
 
 const String _uuid = '0d4dbd0c-5a4e-4b7f-9c1d-2e3f4a5b6c7d';
+
+/// [json] after a trip through JSON text, as a stored or exported copy.
+JsonMap _wire(JsonMap json) => jsonDecode(jsonEncode(json)) as JsonMap;
+
+const JsonMap _trackingDetails = {
+  'uuid': _uuid,
+  'provider': 'lifi',
+  'state': 'TrackingBridge',
+  'executed_route': _route,
+  'approve_tx_hash': '0xapprove',
+  'source_tx_hash': '0xsource',
+  'stage': 'refund_pending',
+  'substatus': 'WAIT_SOURCE_REFUND',
+  'substatus_message': 'Refund in progress',
+  'provider_explorer_url': 'https://scan.li.fi/tx/1',
+  'execution_duration_s': 31,
+  'action_url': 'https://li.fi/act',
+};
 
 const JsonMap _route = {
   'provider': 'lifi',
@@ -34,21 +54,7 @@ void main() {
   group('an in-progress snapshot', () {
     test('reads every field while tracking the bridge', () {
       final status =
-          _parse('InProgress', {
-                'uuid': _uuid,
-                'provider': 'lifi',
-                'state': 'TrackingBridge',
-                'executed_route': _route,
-                'approve_tx_hash': '0xapprove',
-                'source_tx_hash': '0xsource',
-                'stage': 'refund_pending',
-                'substatus': 'WAIT_SOURCE_REFUND',
-                'substatus_message': 'Refund in progress',
-                'provider_explorer_url': 'https://scan.li.fi/tx/1',
-                'execution_duration_s': 31,
-                'action_url': 'https://li.fi/act',
-              })
-              as RoutedSwapInProgress;
+          _parse('InProgress', _trackingDetails) as RoutedSwapInProgress;
 
       expect(status.uuid, _uuid);
       expect(status.provider, 'lifi');
@@ -332,7 +338,7 @@ void main() {
       );
     });
 
-    test('the response summarises its snapshot by uuid', () {
+    test('the response writes its snapshot back in full', () {
       final response = RoutedSwapStatusResponse.parse({
         'result': {
           'status': 'InProgress',
@@ -343,8 +349,107 @@ void main() {
       expect(response.status, 'InProgress');
       expect(response.toJson(), {
         'mmrpc': '2.0',
-        'result': {'status': 'InProgress', 'details': _uuid},
+        'result': {
+          'status': 'InProgress',
+          'details': {'uuid': _uuid, 'provider': 'lifi', 'state': 'Signing'},
+        },
       });
+    });
+
+    test('the response reads back equal, raw status included', () {
+      final cases = <(String, JsonMap)>[
+        ('InProgress', _trackingDetails),
+        ('UserActionRequired', {'uuid': _uuid, 'state': 'Signing'}),
+        ('Ok', _okDetails()),
+        ('Error', {'uuid': _uuid, 'error_type': 'TaskCancelled'}),
+      ];
+      for (final (status, details) in cases) {
+        final response = RoutedSwapStatusResponse.parse({
+          'mmrpc': '2.0',
+          'result': {'status': status, 'details': details},
+        });
+
+        final again = RoutedSwapStatusResponse.parse(_wire(response.toJson()));
+
+        expect(again.mmrpc, response.mmrpc, reason: status);
+        expect(again.status, status);
+        expect(again.details, response.details, reason: status);
+      }
+    });
+  });
+
+  group('toJson', () {
+    test('every snapshot reads back equal under its task status', () {
+      final snapshots = [
+        _parse('InProgress', _trackingDetails),
+        _parse('InProgress', {
+          'uuid': _uuid,
+          'state': 'Rebalancing',
+          'tx_hash': '0xlegacy',
+          'stage': 'teleporting',
+        }),
+        _parse('UserActionRequired', {'uuid': _uuid, 'state': 'Signing'}),
+        _parse('Ok', _okDetails()),
+        _parse('Ok', _okDetails(outcome: 'teleported', destTxHash: null)),
+        _parse('Ok', _okDetails(outcome: 'partial', partialReason: 'rounding')),
+        _parse('Ok', {
+          ..._okDetails(outcome: 'partial', partialReason: 'below_minimum'),
+          'received': {'symbol': 'axlUSDC', 'amount': '1.9'},
+        }),
+        _parse('Error', {
+          'uuid': _uuid,
+          'executed_route': _route,
+          'error_type': 'SwapTxFailed',
+          'error': 'Source transaction reverted',
+          'error_data': {
+            'tx_hash': '0xlegacy',
+            'reason': 'source_transaction_reverted',
+          },
+        }),
+        _parse('Error', {
+          'uuid': _uuid,
+          'error_type': 'InternalError',
+          'error_data': 'handoff lost',
+        }),
+        _parse('Error', {'uuid': _uuid}),
+      ];
+
+      for (final snapshot in snapshots) {
+        expect(
+          _parse(snapshot.taskStatus, _wire(snapshot.toJson())),
+          snapshot,
+          reason: '${snapshot.toJson()}',
+        );
+      }
+      expect(snapshots.map((s) => s.taskStatus).toSet(), {
+        'InProgress',
+        'Ok',
+        'Error',
+      });
+    });
+
+    test('each snapshot writes the engine field names back', () {
+      final route = RoutedSwapRoute.fromJson(_route).toJson();
+      expect(_parse('InProgress', _trackingDetails).toJson(), {
+        ..._trackingDetails,
+        'executed_route': route,
+      });
+      expect(_parse('Ok', _okDetails()).toJson(), {
+        ..._okDetails(),
+        'provider': 'lifi',
+        'executed_route': route,
+      });
+      const failed = {
+        'uuid': _uuid,
+        'provider': 'lifi',
+        'error_type': 'SwapTxFailed',
+        'error': 'Source transaction reverted',
+        'error_data': {
+          'source_tx_hash': '0xsource',
+          'reason': 'source_transaction_reverted',
+        },
+      };
+      expect(_parse('Error', failed).toJson(), failed);
     });
   });
 }

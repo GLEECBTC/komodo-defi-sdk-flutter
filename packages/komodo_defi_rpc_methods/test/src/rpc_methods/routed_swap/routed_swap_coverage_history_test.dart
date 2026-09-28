@@ -1,8 +1,13 @@
+import 'dart:convert';
+
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:test/test.dart';
 
 const String _uuid = '00000000-0000-4000-8000-000000000001';
+
+/// [json] after a trip through JSON text, as a stored or exported copy.
+JsonMap _wire(JsonMap json) => jsonDecode(jsonEncode(json)) as JsonMap;
 
 JsonMap _tracking(String uuid) => {
   'status': 'InProgress',
@@ -117,27 +122,59 @@ void main() {
       expect(empty.total, 0);
     });
 
-    test('toJson summarises the page with an entry count', () {
+    test('toJson writes the page back and it reads back equal', () {
       final response = RoutedSwapHistoryResponse.parse({
         'mmrpc': '2.0',
         'result': {
-          'entries': [_entry(), _entry(uuid: 'second')],
+          'entries': [
+            _entry(),
+            _entry(
+              uuid: 'second',
+              finishedAt: 30,
+              swap: {
+                'status': 'Ok',
+                'details': {
+                  'uuid': 'second',
+                  'outcome': 'refunded',
+                  'received': {'coin': 'USDT-ETH', 'amount': '1'},
+                },
+              },
+            ),
+            _entry(
+              uuid: 'third',
+              finishedAt: 31,
+              approvals: const [],
+              swap: {
+                'status': 'Error',
+                'details': {'uuid': 'third', 'error_type': 'AbortedOnRestart'},
+              },
+            ),
+          ],
           'total': 9,
           'limit': 4,
           'page_number': 2,
           'total_pages': 3,
         },
       });
-      expect(response.toJson(), {
-        'mmrpc': '2.0',
-        'result': {
-          'entries': 2,
-          'total': 9,
-          'limit': 4,
-          'page_number': 2,
-          'total_pages': 3,
-        },
-      });
+
+      final json = response.toJson();
+      final again = RoutedSwapHistoryResponse.parse(_wire(json));
+
+      expect(json['mmrpc'], '2.0');
+      expect((json['result'] as JsonMap)['entries'], [
+        for (final entry in response.entries) entry.toJson(),
+      ]);
+      expect(again.mmrpc, response.mmrpc);
+      expect(again.entries, response.entries);
+      expect(again.entries.map((e) => e.swap.taskStatus), [
+        'InProgress',
+        'Ok',
+        'Error',
+      ]);
+      expect(
+        [again.total, again.limit, again.pageNumber, again.totalPages],
+        [9, 4, 2, 3],
+      );
     });
   });
 
@@ -209,6 +246,28 @@ void main() {
       expect(entry.isInFlight, isFalse);
       expect(entry.finishedAt, 30);
       expect(entry.provider, 'other');
+    });
+
+    test('toJson writes the wire shape back, less unreadable rows', () {
+      final entry = RoutedSwapHistoryEntry.fromJson(_entry(finishedAt: 30));
+
+      expect(entry.toJson(), {
+        'created_at': 20,
+        'updated_at': 24,
+        'finished_at': 30,
+        'requested': {'from': 'USDT-ETH', 'to': 'USDC-POLYGON', 'amount': '1'},
+        'min_to_amount_accepted': '1.9',
+        'approval_tx_hashes': ['0xapprove'],
+        'gas_spent': [
+          {'tx_hash': '0xapprove', 'coin': 'ETH', 'amount': '0.002'},
+          {'tx_hash': '', 'coin': 'ETH', 'amount': '0.001'},
+        ],
+        'total_gas_spent': [
+          {'coin': 'ETH', 'amount': '0.003'},
+        ],
+        'swap': _tracking(_uuid),
+      });
+      expect(RoutedSwapHistoryEntry.fromJson(_wire(entry.toJson())), entry);
     });
 
     test('equal records are equal; any changed field is not', () {

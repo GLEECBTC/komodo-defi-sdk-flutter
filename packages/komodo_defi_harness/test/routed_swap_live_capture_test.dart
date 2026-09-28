@@ -162,7 +162,129 @@ void main() {
       expect((error! as rpc.RoutedSwapNoSuchTaskException).taskId, 987654);
     });
   });
+
+  group('live capture: round trips', () {
+    test('every captured success response writes itself back', () {
+      final history = rpc.RoutedSwapHistoryResponse.parse(_json(_historyEmpty));
+      expect(history.toJson(), _json(_historyEmpty)..remove('id'));
+      final page = rpc.RoutedSwapHistoryResponse.parse(_wire(history.toJson()));
+      expect(page.mmrpc, history.mmrpc);
+      expect(page.entries, history.entries);
+      expect(
+        [page.total, page.limit, page.pageNumber, page.totalPages],
+        [0, 10, 1, 0],
+      );
+
+      for (final raw in [_quoteSameChain, _quoteCrossChain]) {
+        final quote = rpc.RoutedSwapQuoteResponse.parse(_json(raw));
+        expect(quote.toJson(), _json(raw)..remove('id'));
+        expect(
+          rpc.RoutedSwapQuoteResponse.parse(_wire(quote.toJson())).routes,
+          quote.routes,
+        );
+      }
+
+      final coins = rpc.RoutedSwapSupportedCoinsResponse.parse(
+        _json(_supportedCoins),
+      );
+      expect(coins.toJson(), _json(_supportedCoins)..remove('id'));
+    });
+
+    // No status or non-empty history was captured: the capture wallet held no
+    // funds, so no swap ever ran. The envelopes below are the contract's; the
+    // routes inside them are the engine's own.
+    test('status and history around a captured route read back equal', () {
+      for (final raw in [_quoteSameChain, _quoteCrossChain]) {
+        final route = _capturedRoute(raw);
+        final from = route['from'] as JsonMap;
+        final to = route['to'] as JsonMap;
+        final swaps = <String, JsonMap>{
+          'InProgress': {
+            'uuid': _swapUuid,
+            'provider': 'lifi',
+            'executed_route': route,
+            'state': 'WaitingSourceConfirmation',
+            'source_tx_hash': _sourceHash,
+          },
+          'Ok': {
+            'uuid': _swapUuid,
+            'provider': 'lifi',
+            'executed_route': route,
+            'outcome': 'completed',
+            'received': {'coin': to['coin'], 'amount': to['amount']},
+            'source_tx_hash': _sourceHash,
+          },
+          'Error': {
+            'uuid': _swapUuid,
+            'provider': 'lifi',
+            'error_type': 'QuoteWorsened',
+            'error': 'Fresh route is below the accepted minimum',
+            'error_data': {'fresh_route': route},
+          },
+        };
+
+        for (final MapEntry(key: status, value: details) in swaps.entries) {
+          final response = rpc.RoutedSwapStatusResponse.parse({
+            'mmrpc': '2.0',
+            'result': {'status': status, 'details': details},
+            'id': null,
+          });
+          final json = response.toJson();
+          expect((json['result'] as JsonMap)['details'], details);
+          final again = rpc.RoutedSwapStatusResponse.parse(_wire(json));
+          expect(again.status, status);
+          expect(again.details, response.details);
+        }
+
+        final result = <String, dynamic>{
+          'entries': [
+            for (final MapEntry(key: status, value: details) in swaps.entries)
+              {
+                'created_at': 1790600000,
+                'updated_at': 1790600060,
+                if (status != 'InProgress') 'finished_at': 1790600060,
+                'requested': {
+                  'from': from['coin'],
+                  'to': to['coin'],
+                  'amount': from['amount'],
+                },
+                'min_to_amount_accepted': to['amount_min'],
+                'approval_tx_hashes': <String>[],
+                'gas_spent': <JsonMap>[],
+                'total_gas_spent': <JsonMap>[],
+                'swap': {'status': status, 'details': details},
+              },
+          ],
+          'total': 3,
+          'limit': 10,
+          'page_number': 1,
+          'total_pages': 1,
+        };
+        final history = rpc.RoutedSwapHistoryResponse.parse({
+          'mmrpc': '2.0',
+          'result': result,
+          'id': null,
+        });
+        expect(history.toJson(), {'mmrpc': '2.0', 'result': result});
+        expect(
+          rpc.RoutedSwapHistoryResponse.parse(_wire(history.toJson())).entries,
+          history.entries,
+        );
+      }
+    });
+  });
 }
+
+const String _swapUuid = '6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
+const String _sourceHash =
+    '0x1111111111111111111111111111111111111111111111111111111111111111';
+
+/// A captured quote's route: the shape of `executed_route` and `fresh_route`.
+JsonMap _capturedRoute(String quote) =>
+    ((_json(quote)['result'] as JsonMap)['routes'] as List).single as JsonMap;
+
+/// [json] after a trip through JSON text, as a stored or exported copy.
+JsonMap _wire(JsonMap json) => jsonDecode(jsonEncode(json)) as JsonMap;
 
 final eth = _asset('ETH', chainId: 1, decimals: 18);
 final usdc = _asset('USDC-ERC20', chainId: 1, decimals: 6, parent: eth);
