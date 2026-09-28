@@ -1,3 +1,22 @@
+## 0.8.1 (2026-09-28)
+
+Patch release of SDK 0.8.0; no migration is needed. See the
+[release overview](../../CHANGELOG.md#sdk-081-overview).
+
+ - **FIX**(macos): pick up `komodo_defi_framework` 0.6.1 and
+   `komodo_defi_local_auth` 0.6.1, so the sandboxed macOS app starts KDF on a
+   fresh install and a failed KDF start is no longer reported as an incorrect
+   password.
+ - **FIX**(streaming): stop a sign-out or a dropped event connection from
+   raising an uncaught `KDF event connection was disconnected` error. Callers
+   of the async `subscribeTo…` methods set their handlers after the `await`,
+   and an invalidation in that gap reached a subscription with no error
+   handler. It is now held until the caller sets an error or done handler, so
+   those callers get the error and `onDone` as usual, and an error that finds
+   no error handler is logged instead of reported as uncaught.
+ - **CHORE**(deps): require `komodo_defi_framework` `^0.6.1` and
+   `komodo_defi_local_auth` `^0.6.1`.
+
 ## 0.8.0 (2026-09-24)
 
 Prepared for SDK 0.8.0: wallet-identity, diagnostics and private-key export

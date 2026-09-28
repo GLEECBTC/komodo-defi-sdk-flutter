@@ -6,7 +6,7 @@ Authentication and wallet management on top of the Komodo DeFi Framework. This p
 
 ## Install
 
-This checkout prepares `komodo_defi_local_auth` `0.6.0` for SDK 0.8.0. Use the
+This checkout prepares `komodo_defi_local_auth` `0.6.1` for SDK 0.8.1. Use the
 [pinned checkout/submodule instructions](../../docs/RELEASE_0.8.0.md#pin-the-complete-checkout)
 and resolve all SDK dependencies from the same reviewed commit. Stable version
 metadata here does not imply pub.dev publication. Review the
