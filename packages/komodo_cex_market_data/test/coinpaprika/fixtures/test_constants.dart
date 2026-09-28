@@ -80,9 +80,6 @@ class TestConstants {
   static const String usdQuote = 'USD';
   static const String eurQuote = 'EUR';
   static const String gbpQuote = 'GBP';
-  static const String usdtQuote = 'USDT';
-  static const String usdcQuote = 'USDC';
-  static const String eursQuote = 'EURS';
   static const String btcQuote = 'BTC';
   static const String ethQuote = 'ETH';
 

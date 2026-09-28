@@ -1,5 +1,13 @@
 ## Unreleased
 
+ - **FIX**(streaming): stop a sign-out or a dropped event connection from
+   raising an uncaught `KDF event connection was disconnected` error. Callers
+   of the async `subscribeTo…` methods set their handlers after the `await`,
+   and an invalidation in that gap reached a subscription with no error
+   handler. It is now held until the caller sets an error or done handler, so
+   those callers get the error and `onDone` as usual, and an error that finds
+   no error handler is logged instead of reported as uncaught.
+
  - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
    now pick repositories that support price history. They asked for current
    prices, so the Komodo feed could answer a dated lookup with today's price,

@@ -288,6 +288,24 @@ class VerificationHelpers {
     }
   }
 
+  /// Verifies URL format for the bulk tickers endpoint
+  static void verifyTickersUrl(
+    MockHttpClient mockHttpClient, {
+    String? expectedQuotes,
+  }) {
+    final capturedUri =
+        verify(() => mockHttpClient.get(captureAny())).captured.single as Uri;
+
+    // Verify URL structure
+    expect(capturedUri.host, equals(TestConstants.baseUrl));
+    expect(capturedUri.path, equals('${TestConstants.apiVersion}/tickers'));
+
+    // Verify quotes parameter
+    if (expectedQuotes != null) {
+      expect(capturedUri.queryParameters['quotes'], equals(expectedQuotes));
+    }
+  }
+
   /// Verifies URL format for markets endpoint
   static void verifyMarketsUrl(
     MockHttpClient mockHttpClient,

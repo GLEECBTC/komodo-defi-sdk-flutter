@@ -143,7 +143,12 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       // Store the coins list in a temp file to avoid command line argument and
       // environment variable value size limits (varies from 4-128 KB).
       // Pass the config directly to the executable as an argument.
-      final tempDir = await _temporaryDirectory();
+      // path_provider only returns the temporary directory path; on sandboxed
+      // macOS it is `Library/Caches/<bundle id>` inside the container, which
+      // does not exist on a fresh install, and `createTemp` fails without it.
+      final tempDir = await (await _temporaryDirectory()).create(
+        recursive: true,
+      );
       coinsTempDir = await tempDir.createTemp('mm_coins_');
       final coinsConfigFile = File(p.join(coinsTempDir.path, 'kdf_coins.json'));
       await coinsConfigFile.writeAsString(

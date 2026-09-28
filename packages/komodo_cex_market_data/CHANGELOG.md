@@ -1,5 +1,16 @@
 ## 0.1.0+2 (unreleased)
 
+ - **FIX**(coinpaprika): return current prices and 24h changes for stablecoin
+   quotes such as the default USDT. CoinPaprika rejects stablecoin quotes, so
+   the provider requests the underlying fiat and the response is keyed `USD`.
+   The repository looked the quote up as `USDT`, so every lookup threw and fell
+   through to the next repository. Both sides now use the new
+   `coinPaprikaQuoteCurrency` getter on `QuoteCurrency`.
+
+ - **FIX**(coinpaprika): parse ticker quote fields with a number in their
+   name, such as `percent_change_24h` and `volume_24h`. They were read as
+   `percent_change24h` and `volume24h`, so they always came back as 0.
+
  - **BREAKING** **PERF**(coinpaprika): read current prices and 24h changes
    from one bulk `/v1/tickers` request reused for five minutes, instead of a
    request per coin, to stay within the free plan's 20,000 monthly requests.
@@ -15,6 +26,11 @@
  - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
    imports. It resolved only through the workspace, so `dart pub publish`
    rejected the package.
+
+ - **FIX**(komodo-prices): request feed tickers updated within the last 1800
+   seconds instead of 600. KMD's entry is sometimes over ten minutes old before
+   the feed replaces it, so the old window dropped it for minutes at a time and
+   its price lookups fell through to the fallback repositories.
 
 ## 0.1.0+1
 

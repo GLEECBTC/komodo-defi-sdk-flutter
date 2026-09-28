@@ -61,6 +61,9 @@ abstract class ICoinPaprikaProvider {
   ///
   /// [coinId]: The CoinPaprika coin identifier (e.g., "btc-bitcoin")
   /// [quotes]: List of quote currencies
+  ///
+  /// The ticker's quotes are keyed by each quote's `coinPaprikaQuoteCurrency`
+  /// symbol in upper case, so a USDT quote is keyed `USD`.
   Future<CoinPaprikaTicker> fetchCoinTicker({
     required String coinId,
     List<QuoteCurrency> quotes,
@@ -160,7 +163,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     final apiInterval = _convertIntervalForApi(interval);
 
     // Map quote currency: stablecoins -> underlying fiat (e.g., USDT -> USD)
-    final mappedQuote = _mapQuoteCurrencyForApi(quote);
+    final mappedQuote = quote.coinPaprikaQuoteCurrency;
 
     // CoinPaprika API only requires start date and interval for historical data
     final queryParams = <String, String>{
@@ -200,7 +203,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     List<QuoteCurrency> quotes = const [FiatCurrency.usd],
   }) async {
     // Map quote currencies: stablecoins -> underlying fiat
-    final mappedQuotes = quotes.map(_mapQuoteCurrencyForApi).toList();
+    final mappedQuotes = quotes.map((q) => q.coinPaprikaQuoteCurrency).toList();
     final quotesParam = mappedQuotes
         .map((q) => q.coinPaprikaId.toUpperCase())
         .join(',');
@@ -240,7 +243,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     List<QuoteCurrency> quotes = const [FiatCurrency.usd],
   }) async {
     // Map quote currencies: stablecoins -> underlying fiat
-    final mappedQuotes = quotes.map(_mapQuoteCurrencyForApi).toList();
+    final mappedQuotes = quotes.map((q) => q.coinPaprikaQuoteCurrency).toList();
     final quotesParam = mappedQuotes
         .map((q) => q.coinPaprikaId.toUpperCase())
         .join(',');
@@ -266,7 +269,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     List<QuoteCurrency> quotes = const [FiatCurrency.usd],
   }) async {
     // Map quote currencies: stablecoins -> underlying fiat
-    final mappedQuotes = quotes.map(_mapQuoteCurrencyForApi).toList();
+    final mappedQuotes = quotes.map((q) => q.coinPaprikaQuoteCurrency).toList();
     final quotesParam = mappedQuotes
         .map((q) => q.coinPaprikaId.toUpperCase())
         .join(',');
@@ -407,21 +410,6 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     return '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
         '${date.day.toString().padLeft(2, '0')}';
-  }
-
-  /// Maps quote currencies for CoinPaprika API compatibility.
-  ///
-  /// CoinPaprika treats stablecoins as their underlying fiat currencies.
-  /// For example, USDT should be mapped to USD before sending API requests.
-  ///
-  /// This ensures consistency with the repository layer and proper API behavior.
-  QuoteCurrency _mapQuoteCurrencyForApi(QuoteCurrency quote) {
-    return quote.when(
-      fiat: (_, __) => quote,
-      stablecoin: (_, __, underlyingFiat) => underlyingFiat,
-      crypto: (_, __) => quote, // Use as-is for crypto
-      commodity: (_, __) => quote, // Use as-is for commodity
-    );
   }
 
   /// Converts internal interval format to CoinPaprika API format.
