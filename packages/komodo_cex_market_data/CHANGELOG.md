@@ -7,6 +7,11 @@
    imports. It resolved only through the workspace, so `dart pub publish`
    rejected the package.
 
+ - **FIX**(komodo-prices): request feed tickers updated within the last 1800
+   seconds instead of 600. KMD's entry is sometimes over ten minutes old before
+   the feed replaces it, so the old window dropped it for minutes at a time and
+   its price lookups fell through to the fallback repositories.
+
 ## 0.1.0+1
 
  - **FIX**(coingecko): add a failure cooldown to avoid repeated failing requests (#346).
