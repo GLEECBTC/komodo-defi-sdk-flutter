@@ -1,5 +1,9 @@
 ## Unreleased
 
+ - **CHORE**(coins): roll the bundled coins configuration from `f766b261` to
+   the coins repository's `master` `2b0aefb7` (79 commits, mostly icons).
+   The same 770 coins; in the bundled config only GLMR and MOVR (nodes) and
+   WAM (links) change.
  - **FEAT**(config): `KdfStartupConfig.lifiApiUrl`, written to the conf as
    `lifi_api` only when set; both `generateWithDefaults` and `noAuthStartup`
    take it. A value KDF cannot request (not http(s), or carrying credentials,

@@ -71,7 +71,7 @@
   "coins": {
     "fetch_at_build_enabled": true,
     "update_commit_on_build": true,
-    "bundled_coins_repo_commit": "f766b261cd0f13be832034b86427dc9bb2669e0a",
+    "bundled_coins_repo_commit": "2b0aefb78b184091ab086c66e513d8b03f5d5a01",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",
     "coins_repo_branch": "master",
