@@ -269,15 +269,19 @@ extension KdfExtensions on KdfAuthService {
 
   Future<void> _startNoAuthKdfWithinTransition() async {
     final startStopwatch = Stopwatch()..start();
-    final kdfResult = await _kdfFramework.startKdf(await _noAuthConfig);
+    final config = await _noAuthConfig;
+    final kdfResult = await _kdfFramework.startKdf(config);
     startStopwatch.stop();
     _logger.info(
-      '_ensureKdfRunning: startKdf(no-auth) returned omitted in '
+      '_ensureKdfRunning: startKdf(no-auth) returned ${kdfResult.name} in '
       '${startStopwatch.elapsedMilliseconds}ms',
     );
 
     if (!kdfResult.isStartingOrAlreadyRunning()) {
-      throw _mapStartupErrorToAuthException(kdfResult);
+      throw authExceptionForKdfStartup(
+        kdfResult,
+        walletPasswordSent: sendsWalletPassword(config),
+      );
     }
 
     _kdfFramework.resetHttpClient();
@@ -299,12 +303,15 @@ extension KdfExtensions on KdfAuthService {
     final kdfResult = await _kdfFramework.startKdf(config);
     startStopwatch.stop();
     _logger.info(
-      '_restartKdf: auth start returned omitted in '
+      '_restartKdf: auth start returned ${kdfResult.name} in '
       '${startStopwatch.elapsedMilliseconds}ms',
     );
 
     if (!kdfResult.isStartingOrAlreadyRunning()) {
-      throw _mapStartupErrorToAuthException(kdfResult);
+      throw authExceptionForKdfStartup(
+        kdfResult,
+        walletPasswordSent: sendsWalletPassword(config),
+      );
     }
 
     _kdfFramework.resetHttpClient();
@@ -316,60 +323,6 @@ extension KdfExtensions on KdfAuthService {
       '_restartKdf: readiness verify completed in '
       '${readyStopwatch.elapsedMilliseconds}ms',
     );
-  }
-
-  static AuthException _mapStartupErrorToAuthException(
-    KdfStartupResult result,
-  ) {
-    switch (result) {
-      // TODO! NB: The only user-caused reason for this is if the user
-      // enters the wrong password. However (!!) we must migrate soon to a
-      // more robust error handling system. Either log scanning, or a more
-      // reliable solution as detailed in:
-      // https://github.com/GLEECBTC/komodo-defi-framework/issues/2383
-      // TODO(takenagain): Integrate the log scanning if KDF team does not
-      // implement the proposal in the GH Issue above.
-      case KdfStartupResult.initError:
-        // This is typically caused by an incorrect password. As a temporary
-        // solution, this can be narrowed down to incorrect password by
-        // validating the mnemonic. See the note above.
-        throw AuthException(
-          'Incorrect password or invalid seed',
-          type: AuthExceptionType.incorrectPassword,
-        );
-
-      case KdfStartupResult.alreadyRunning:
-        // This should not be reached due to isStartingOrAlreadyRunning check
-        throw AuthException(
-          'Wallet is already running',
-          type: AuthExceptionType.walletAlreadyRunning,
-        );
-
-      case KdfStartupResult.configError:
-        throw AuthException(
-          'Invalid wallet configuration',
-          type: AuthExceptionType.walletStartFailed,
-          details: {'kdf_error': result.name},
-        );
-
-      case KdfStartupResult.invalidParams:
-        throw AuthException(
-          'Invalid parameters provided to wallet',
-          type: AuthExceptionType.walletStartFailed,
-          details: {'kdf_error': result.name},
-        );
-
-      case KdfStartupResult.spawnError:
-        throw AuthException(
-          'Failed to start wallet process',
-          type: AuthExceptionType.walletStartFailed,
-          details: {'kdf_errosr': result.name},
-        );
-
-      case KdfStartupResult.unknownError:
-      case KdfStartupResult.ok:
-        throw ArgumentError('Unexpected startup result: $result');
-    }
   }
 
   Future<void> _waitUntilKdfRpcReady({

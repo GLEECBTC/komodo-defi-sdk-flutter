@@ -386,19 +386,11 @@ class EventStreamingManager {
       onError: controller.addError,
       onDone: controller.close,
     );
-    final invalidationSubscription = serverSubscription.invalidations.listen((
-      error,
-    ) {
-      if (!controller.isClosed) {
-        controller.addError(error);
-        unawaited(controller.close());
-      }
-      unawaited(innerSubscription.cancel());
-    });
+    late final StreamSubscription<Object> invalidationSubscription;
 
     // Wrap the subscription to handle cleanup on cancel
-    return _ManagedStreamSubscription<T>(
-      controller.stream.listen(null),
+    final subscription = _ManagedStreamSubscription<T>(
+      controller,
       onCancel: () async {
         // Detach this exact server-generation reference before the first
         // await. A replacement registration with the same key must never be
@@ -410,6 +402,11 @@ class EventStreamingManager {
         await serverCleanup;
       },
     );
+    invalidationSubscription = serverSubscription.invalidations.listen((error) {
+      subscription.invalidate(error);
+      unawaited(innerSubscription.cancel());
+    });
+    return subscription;
   }
 
   void _handleServiceDisconnected(KdfEventDisconnection event) {
@@ -630,12 +627,45 @@ class _StreamSubscription {
 }
 
 /// Wrapper around StreamSubscription that handles cleanup.
+///
+/// Callers receive it from an async `subscribeTo…` method, so they can only
+/// set handlers once their `await` resumes. An invalidation that lands before
+/// the caller sets an error or done handler is held until then, and an error
+/// that finds no error handler is logged instead of being reported as uncaught.
 class _ManagedStreamSubscription<T> implements StreamSubscription<T> {
-  _ManagedStreamSubscription(this._inner, {required this.onCancel});
+  _ManagedStreamSubscription(this._controller, {required this.onCancel})
+    : _inner = _controller.stream.listen(null, onError: _dropUnhandledError);
 
+  final StreamController<T> _controller;
   final StreamSubscription<T> _inner;
   final Future<void> Function() onCancel;
   Future<void>? _cancelFuture;
+  bool _hasEndHandler = false;
+  Object? _heldInvalidation;
+
+  /// Ends the stream with [error] once an error or done handler is set.
+  void invalidate(Object error) {
+    if (!_hasEndHandler) {
+      _heldInvalidation = error;
+    } else if (!_controller.isClosed) {
+      _controller.addError(error);
+      unawaited(_controller.close());
+    }
+  }
+
+  void _onEndHandlerSet() {
+    if (_hasEndHandler) return;
+    _hasEndHandler = true;
+    final held = _heldInvalidation;
+    _heldInvalidation = null;
+    if (held != null) invalidate(held);
+  }
+
+  static void _dropUnhandledError(Object error, StackTrace stackTrace) {
+    _log(
+      'Stream error dropped: no error handler is set (${error.runtimeType})',
+    );
+  }
 
   @override
   Future<void> cancel() => _cancelFuture ??= _cancel();
@@ -655,17 +685,21 @@ class _ManagedStreamSubscription<T> implements StreamSubscription<T> {
 
   @override
   void onError(Function? handleError) {
-    _inner.onError(handleError);
+    _inner.onError(handleError ?? _dropUnhandledError);
+    _onEndHandlerSet();
   }
 
   @override
   void onDone(void Function()? handleDone) {
     _inner.onDone(handleDone);
+    _onEndHandlerSet();
   }
 
   @override
   Future<E> asFuture<E>([E? futureValue]) {
-    return _inner.asFuture(futureValue);
+    final future = _inner.asFuture(futureValue);
+    _onEndHandlerSet();
+    return future;
   }
 
   @override

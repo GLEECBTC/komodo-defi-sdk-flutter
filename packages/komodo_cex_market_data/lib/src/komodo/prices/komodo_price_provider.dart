@@ -14,10 +14,14 @@ class KomodoPriceProvider implements IKomodoPriceProvider {
   /// Creates a new instance of [KomodoPriceProvider].
   KomodoPriceProvider({
     this.mainTickersUrl =
-        'https://defistats.gleec.com/api/v3/prices/tickers_v2?expire_at=600',
+        'https://defistats.gleec.com/api/v3/prices/tickers_v2?expire_at=1800',
   });
 
   /// The URL to fetch the main tickers from.
+  ///
+  /// The feed omits tickers last updated more than `expire_at` seconds ago.
+  /// KMD's entry is sometimes over ten minutes old before it is replaced, so
+  /// a 600-second window drops it; 1800 still excludes dead tickers.
   final String mainTickersUrl;
 
   /// Fetches prices from Komodo API.

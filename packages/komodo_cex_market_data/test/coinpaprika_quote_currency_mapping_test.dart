@@ -97,40 +97,35 @@ void main() {
       }
     });
 
-    test('provider mapping logic simulation', () {
-      // Simulate what the provider's _mapQuoteCurrencyForApi method should do
-      QuoteCurrency mapQuoteCurrencyForApi(QuoteCurrency quote) {
-        return quote.when(
-          fiat: (_, __) => quote,
-          stablecoin: (_, __, underlyingFiat) => underlyingFiat,
-          crypto: (_, __) => quote,
-          commodity: (_, __) => quote,
-        );
-      }
-
-      // Test the mapping logic
+    test('coinPaprikaQuoteCurrency maps stablecoins to their fiat', () {
       expect(
-        mapQuoteCurrencyForApi(Stablecoin.usdt).coinPaprikaId,
+        Stablecoin.usdt.coinPaprikaQuoteCurrency.coinPaprikaId,
         equals('usd'),
         reason: 'USDT should map to USD',
       );
 
       expect(
-        mapQuoteCurrencyForApi(Stablecoin.eurs).coinPaprikaId,
+        Stablecoin.eurs.coinPaprikaQuoteCurrency.coinPaprikaId,
         equals('eur'),
         reason: 'EURS should map to EUR',
       );
 
       expect(
-        mapQuoteCurrencyForApi(FiatCurrency.usd).coinPaprikaId,
+        FiatCurrency.usd.coinPaprikaQuoteCurrency.coinPaprikaId,
         equals('usd'),
         reason: 'USD should remain USD',
       );
 
       expect(
-        mapQuoteCurrencyForApi(Cryptocurrency.btc).coinPaprikaId,
+        Cryptocurrency.btc.coinPaprikaQuoteCurrency.coinPaprikaId,
         equals('btc'),
         reason: 'BTC should remain BTC',
+      );
+
+      expect(
+        Commodity.xau.coinPaprikaQuoteCurrency.coinPaprikaId,
+        equals('xau'),
+        reason: 'XAU should remain XAU',
       );
     });
   });

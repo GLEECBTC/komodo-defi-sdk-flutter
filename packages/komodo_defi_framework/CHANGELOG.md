@@ -20,6 +20,19 @@
    it still lacks the websocket `.expect` fix, so `ws_url` expansion stays off
    on web.
 
+## 0.6.1 (2026-09-28)
+
+Patch release for SDK 0.8.1; no migration from 0.6.0.
+
+ - **FIX**(macos): create the temporary directory before writing the KDF coins
+   file. `path_provider_foundation` 2.6.0 names `Library/Caches/<bundle id>`
+   inside the macOS sandbox without creating it, so a fresh install could not
+   start KDF and reported "Incorrect password or invalid seed" at launch.
+ - **FIX**(startup): report a KDF executable that could not be launched as
+   `spawnError` instead of `initError`, which callers read as a rejected
+   wallet password. The failure is logged with its type, cause and OS error
+   code, never its message or a path.
+
 ## 0.6.0 (2026-09-24)
 
  - **CHORE**(coins): pin the bundled coins configuration to the POL rename on

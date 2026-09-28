@@ -508,7 +508,7 @@ void main() {
       test('correctly maps EUR-pegged stablecoin for price requests', () async {
         // Arrange
         final mockTicker = TestFixtures.createMockTicker(
-          quoteCurrency: TestConstants.eursQuote,
+          quoteCurrency: TestConstants.eurQuote,
           price: 42000,
         );
         MockHelpers.setupProviderTickerResponse(
@@ -577,7 +577,7 @@ void main() {
         () async {
           // Arrange
           final mockTicker = TestFixtures.createMockTicker(
-            quoteCurrency: TestConstants.usdcQuote,
+            quoteCurrency: TestConstants.usdQuote,
             percentChange24h: 3.2,
           );
           MockHelpers.setupProviderTickerResponse(

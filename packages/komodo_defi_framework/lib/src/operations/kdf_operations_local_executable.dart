@@ -143,7 +143,12 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       // Store the coins list in a temp file to avoid command line argument and
       // environment variable value size limits (varies from 4-128 KB).
       // Pass the config directly to the executable as an argument.
-      final tempDir = await _temporaryDirectory();
+      // path_provider only returns the temporary directory path; on sandboxed
+      // macOS it is `Library/Caches/<bundle id>` inside the container, which
+      // does not exist on a fresh install, and `createTemp` fails without it.
+      final tempDir = await (await _temporaryDirectory()).create(
+        recursive: true,
+      );
       coinsTempDir = await tempDir.createTemp('mm_coins_');
       final coinsConfigFile = File(p.join(coinsTempDir.path, 'kdf_coins.json'));
       await coinsConfigFile.writeAsString(
@@ -173,12 +178,36 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       if (e is KdfException) {
         rethrow;
       }
-      throw KdfException(
-        'Failed to start KDF',
-        type: KdfExceptionType.startupFailed,
-        stackTrace: stackTrace,
-      );
+      throw _LaunchFailure(e, stackTrace);
     }
+  }
+
+  /// Typed metadata only: these errors' messages and paths can name the user,
+  /// and [ProcessException.arguments] holds the start parameters.
+  static JsonMap _launchFailureCause(Object error) => switch (error) {
+    FileSystemException(:final osError) => {
+      'cause': 'file_system',
+      if (osError != null) 'os_error': osError.errorCode,
+    },
+    ProcessException(:final errorCode) => {
+      'cause': 'process',
+      'os_error': errorCode,
+    },
+    _ => {'cause': DiagnosticSanitizer.safeError(error)},
+  };
+
+  static String _describeLaunchFailure(Object error) {
+    final (type, details) = switch (error) {
+      _LaunchFailure(:final type, :final details) => (type, details),
+      // Any other KdfException's details are free-form, e.g. from an injected
+      // finder or startParamsTransform, so only its type is logged.
+      KdfException(:final type) => (type, const <String, dynamic>{}),
+      _ => (KdfExceptionType.startupFailed, _launchFailureCause(error)),
+    };
+    return [
+      'type=${type.name}',
+      for (final MapEntry(:key, :value) in details.entries) '$key=$value',
+    ].join(' ');
   }
 
   /// check if the executable has executable permissions on linux/macos
@@ -236,7 +265,17 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
 
     try {
       _process = await _startKdf(params);
+    } catch (e) {
+      if (e is ArgumentError) {
+        _logCallback('KDF process startup failed');
+        return KdfStartupResult.invalidParams;
+      }
+      // Nothing was spawned, so KDF cannot have rejected a wallet password.
+      _logCallback('KDF process launch failed ${_describeLaunchFailure(e)}');
+      return KdfStartupResult.spawnError;
+    }
 
+    try {
       final timer = Stopwatch()..start();
 
       int? exitCode;
@@ -376,4 +415,15 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       }
     }
   }
+}
+
+/// A launch failure whose [details] hold only typed metadata about its cause.
+class _LaunchFailure extends KdfException {
+  _LaunchFailure(Object cause, StackTrace stackTrace)
+    : super(
+        'Failed to start KDF',
+        type: KdfExceptionType.startupFailed,
+        details: KdfOperationsLocalExecutable._launchFailureCause(cause),
+        stackTrace: stackTrace,
+      );
 }

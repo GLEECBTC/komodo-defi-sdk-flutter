@@ -16,6 +16,79 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
    implements the routed-swap contract; see the
    [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
 
+## 2026-09-28 — SDK 0.8.1
+
+### SDK 0.8.1 overview
+
+A patch release of SDK 0.8.0. Its main fix is for the sandboxed macOS app,
+which could not start KDF on a fresh install. `path_provider_foundation` 2.6.0
+names `Library/Caches/<bundle id>` as the macOS temporary directory without
+creating it, and the SDK wrote the KDF coins file there without creating it
+either. The failure then reached the app as "Incorrect password or invalid
+seed", because the no-auth start reported every KDF startup error as a
+rejected wallet password.
+
+It also stops early event-stream disconnects from escaping as uncaught errors,
+and fixes Komodo price-feed and CoinPaprika price lookups.
+
+There are no API changes and no migration from 0.8.0. The KDF binary pin, the
+bundled coins configuration and the supported Dart/Flutter constraints are
+unchanged.
+
+### Package versions
+
+| Package | Version |
+| --- | --- |
+| `komodo_defi_sdk` | `0.8.1` |
+| `komodo_defi_local_auth` | `0.6.1` |
+| `komodo_defi_framework` | `0.6.1` |
+
+Other packages keep their SDK 0.8.0 versions. `komodo_cex_market_data` stays at
+the unreleased `0.1.0+2`, whose section its entries below extend in place.
+
+### Changes
+
+#### `komodo_defi_sdk` - `v0.8.1`
+
+ - **FIX**(streaming): stop a sign-out or a dropped event connection from
+   raising an uncaught `KDF event connection was disconnected` error. The
+   invalidation is now held until the caller sets an error or done handler,
+   so watchers that subscribed late still fall back to polling
+   ([#394](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/394)).
+ - **CHORE**(deps): require `komodo_defi_framework` `^0.6.1` and
+   `komodo_defi_local_auth` `^0.6.1`.
+
+#### `komodo_defi_local_auth` - `v0.6.1`
+
+ - **FIX**(auth): stop reporting a KDF start that sent no wallet password as an
+   incorrect password. KDF's `initError` now means `incorrectPassword` only
+   when a password was sent; otherwise it fails with `walletStartFailed`, as
+   does an unrecognised startup result that used to throw `ArgumentError`.
+   Every `walletStartFailed` carries `details['kdf_error']`; `spawnError` used
+   the misspelt key `kdf_errosr`
+   ([#396](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/396)).
+ - **FIX**(auth): log the KDF startup result instead of `omitted`.
+
+#### `komodo_defi_framework` - `v0.6.1`
+
+ - **FIX**(macos): create the temporary directory before writing the KDF coins
+   file ([#395](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/395)).
+ - **FIX**(startup): report a KDF executable that could not be launched as
+   `spawnError` instead of `initError`, and log the failure's type, cause and
+   OS error code, never its message or a path
+   ([#396](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/396)).
+
+#### `komodo_cex_market_data` - `v0.1.0+2` (unreleased)
+
+ - **FIX**(komodo-prices): request price-feed tickers updated within the last
+   30 minutes instead of 10, so KMD stays in the response until the feed
+   replaces it rather than falling through to the fallback providers
+   ([#390](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/390)).
+ - **FIX**(coinpaprika): return current prices and 24h changes for stablecoin
+   quotes such as the default USDT, and parse ticker fields with a number in
+   their name, such as `percent_change_24h`, which always came back as 0
+   ([#391](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/391)).
+
 ## 2026-09-24 — SDK 0.8.0
 
 ### SDK 0.8.0 overview

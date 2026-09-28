@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' show ClientException;
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
 import 'package:komodo_defi_local_auth/src/auth/auth_session.dart';
+import 'package:komodo_defi_local_auth/src/auth/kdf_startup_failure.dart';
 import 'package:komodo_defi_local_auth/src/auth/storage/secure_storage.dart';
 import 'package:komodo_defi_local_auth/src/auth/wallet_catalog_lock.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
@@ -1483,16 +1484,20 @@ class KdfAuthService implements IAuthService {
   Future<void> _forceStartKdfWithinWriteLock() async {
     _logger.info('_forceStartKdf: Starting KDF (bypassing isRunning check)');
     final startStopwatch = Stopwatch()..start();
-    final result = await _kdfFramework.startKdf(await _noAuthConfig);
+    final config = await _noAuthConfig;
+    final result = await _kdfFramework.startKdf(config);
     startStopwatch.stop();
     _logger.info(
-      '_forceStartKdf: startKdf() returned omitted in '
+      '_forceStartKdf: startKdf() returned ${result.name} in '
       '${startStopwatch.elapsedMilliseconds}ms',
     );
 
     if (!result.isStartingOrAlreadyRunning()) {
-      _logger.severe('_forceStartKdf: Failed to start KDF: omitted');
-      throw KdfExtensions._mapStartupErrorToAuthException(result);
+      _logger.severe('_forceStartKdf: Failed to start KDF: ${result.name}');
+      throw authExceptionForKdfStartup(
+        result,
+        walletPasswordSent: sendsWalletPassword(config),
+      );
     }
 
     _kdfFramework.resetHttpClient();
