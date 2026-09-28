@@ -178,12 +178,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       if (e is KdfException) {
         rethrow;
       }
-      throw KdfException(
-        'Failed to start KDF',
-        type: KdfExceptionType.startupFailed,
-        details: _launchFailureCause(e),
-        stackTrace: stackTrace,
-      );
+      throw _LaunchFailure(e, stackTrace);
     }
   }
 
@@ -202,9 +197,13 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
   };
 
   static String _describeLaunchFailure(Object error) {
-    final (type, details) = error is KdfException
-        ? (error.type, error.details)
-        : (KdfExceptionType.startupFailed, _launchFailureCause(error));
+    final (type, details) = switch (error) {
+      _LaunchFailure(:final type, :final details) => (type, details),
+      // Any other KdfException's details are free-form, e.g. from an injected
+      // finder or startParamsTransform, so only its type is logged.
+      KdfException(:final type) => (type, const <String, dynamic>{}),
+      _ => (KdfExceptionType.startupFailed, _launchFailureCause(error)),
+    };
     return [
       'type=${type.name}',
       for (final MapEntry(:key, :value) in details.entries) '$key=$value',
@@ -416,4 +415,15 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       }
     }
   }
+}
+
+/// A launch failure whose [details] hold only typed metadata about its cause.
+class _LaunchFailure extends KdfException {
+  _LaunchFailure(Object cause, StackTrace stackTrace)
+    : super(
+        'Failed to start KDF',
+        type: KdfExceptionType.startupFailed,
+        details: KdfOperationsLocalExecutable._launchFailureCause(cause),
+        stackTrace: stackTrace,
+      );
 }

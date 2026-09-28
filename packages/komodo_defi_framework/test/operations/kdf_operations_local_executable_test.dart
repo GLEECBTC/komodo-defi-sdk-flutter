@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
+import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 void main() {
@@ -197,6 +198,21 @@ void main() {
           equals(
             'KDF process launch failed type=startupFailed cause=file_system',
           ),
+        );
+      });
+
+      test('logs only the type of an injected KdfException', () async {
+        final result = await operations(
+          () async => throw KdfException(
+            'lookup failed',
+            type: KdfExceptionType.configurationError,
+            details: {'reason': sandbox.path},
+          ),
+        ).kdfMain(_params);
+
+        expect(result, KdfStartupResult.spawnError);
+        expectLaunchFailureLog(
+          equals('KDF process launch failed type=configurationError'),
         );
       });
     },
