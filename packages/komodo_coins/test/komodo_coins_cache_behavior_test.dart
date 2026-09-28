@@ -280,6 +280,49 @@ void main() {
     );
 
     test(
+      'startup preflight refreshes persisted assets before KDF reads them',
+      () async {
+        final startupList = await StartupCoinsProvider.fetchRawCoinsForStartup(
+          configRepository: mockConfigRepository,
+          transformer: mockTransformer,
+          dataFactory: mockDataFactory,
+          appName: 'test_app',
+          appStoragePath: '/tmp',
+          refreshBeforeStartup: true,
+        );
+
+        verify(() => mockRepo.updateCoinConfig()).called(1);
+        expect(startupList, hasLength(2));
+        expect(
+          startupList.map((config) => config['coin']),
+          containsAll(<String>['KMD', 'LTC']),
+        );
+      },
+    );
+
+    test(
+      'startup preflight falls back to bundled assets when update fails',
+      () async {
+        when(
+          () => mockRepo.updateCoinConfig(),
+        ).thenThrow(Exception('offline'));
+
+        final startupList =
+            await StartupCoinsProvider.fetchRawCoinsForStartup(
+              configRepository: mockConfigRepository,
+              transformer: mockTransformer,
+              dataFactory: mockDataFactory,
+              appName: 'test_app',
+              appStoragePath: '/tmp',
+              refreshBeforeStartup: true,
+            );
+
+        expect(startupList, hasLength(1));
+        expect(startupList.single['coin'], 'KMD');
+      },
+    );
+
+    test(
       'filteredAssets caching: stable before refresh, updates after refresh',
       () async {
         final coins = KomodoAssetsUpdateManager(
