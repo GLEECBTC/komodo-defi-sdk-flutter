@@ -29,6 +29,11 @@
      fee: KDF checks the balance at start against the route's gas limit at
      its own maximum fee per gas, which runs well above the provider's
      estimate.
+ - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
+   now pick repositories that support price history. They asked for current
+   prices, so the Komodo feed could answer a dated lookup with today's price,
+   and CoinPaprika skipped coins outside its bulk tickers although its
+   historical endpoint serves them.
 
 ## 0.8.1 (2026-09-28)
 

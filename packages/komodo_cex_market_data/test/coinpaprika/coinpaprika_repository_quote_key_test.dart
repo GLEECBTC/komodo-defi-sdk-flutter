@@ -1,3 +1,4 @@
+import 'package:http/http.dart' as http;
 import 'package:komodo_cex_market_data/src/_core_index.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
@@ -23,12 +24,14 @@ void main() {
         final uri = invocation.positionalArguments.first as Uri;
         final quotes = uri.queryParameters['quotes']!.toUpperCase();
         final requested = quotes.split(',');
-        return TestFixtures.createTickerResponse(
+        final ticker = TestFixtures.createTickerResponse(
           quotes: TestFixtures.createMultipleQuotes(
             currencies: requested,
             prices: [for (final _ in requested) TestConstants.bitcoinPrice],
           ),
         );
+        // Current prices and 24h changes come from the bulk tickers list.
+        return http.Response('[${ticker.body}]', ticker.statusCode);
       });
       repository = CoinPaprikaRepository(
         coinPaprikaProvider: CoinPaprikaProvider(httpClient: httpClient),
@@ -40,9 +43,8 @@ void main() {
       final price = await repository.getCoinFiatPrice(TestData.bitcoinAsset);
 
       expect(price, equals(TestData.bitcoinPriceDecimal));
-      VerificationHelpers.verifyTickerUrl(
+      VerificationHelpers.verifyTickersUrl(
         httpClient,
-        TestConstants.bitcoinCoinId,
         expectedQuotes: TestConstants.usdQuote,
       );
     });
@@ -55,9 +57,8 @@ void main() {
         );
 
         expect(change, equals(TestData.positiveChangeDecimal));
-        VerificationHelpers.verifyTickerUrl(
+        VerificationHelpers.verifyTickersUrl(
           httpClient,
-          TestConstants.bitcoinCoinId,
           expectedQuotes: TestConstants.usdQuote,
         );
       },

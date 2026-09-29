@@ -15,11 +15,11 @@ _CoinPaprikaMarket _$CoinPaprikaMarketFromJson(Map<String, dynamic> json) =>
       baseCurrencyName: json['base_currency_name'] as String,
       quoteCurrencyId: json['quote_currency_id'] as String,
       quoteCurrencyName: json['quote_currency_name'] as String,
-      marketUrl: json['market_url'] as String,
+      marketUrl: json['market_url'] as String?,
       category: json['category'] as String,
       feeType: json['fee_type'] as String,
       outlier: json['outlier'] as bool,
-      adjustedVolume24hShare: (json['adjusted_volume24h_share'] as num)
+      adjustedVolume24hShare: (json['adjusted_volume_24h_share'] as num)
           .toDouble(),
       quotes: (json['quotes'] as Map<String, dynamic>).map(
         (k, e) =>
@@ -41,19 +41,22 @@ Map<String, dynamic> _$CoinPaprikaMarketToJson(_CoinPaprikaMarket instance) =>
       'category': instance.category,
       'fee_type': instance.feeType,
       'outlier': instance.outlier,
-      'adjusted_volume24h_share': instance.adjustedVolume24hShare,
+      'adjusted_volume_24h_share': instance.adjustedVolume24hShare,
       'quotes': instance.quotes,
       'last_updated': instance.lastUpdated,
     };
 
 _CoinPaprikaQuote _$CoinPaprikaQuoteFromJson(Map<String, dynamic> json) =>
     _CoinPaprikaQuote(
-      price: Decimal.fromJson(json['price'] as String),
-      volume24h: Decimal.fromJson(json['volume_24h'] as String),
+      price: const NonNullableDecimalConverter().fromJson(json['price']),
+      volume24h: const NonNullableDecimalConverter().fromJson(
+        json['volume_24h'],
+      ),
     );
 
-Map<String, dynamic> _$CoinPaprikaQuoteToJson(_CoinPaprikaQuote instance) =>
-    <String, dynamic>{
-      'price': instance.price,
-      'volume_24h': instance.volume24h,
-    };
+Map<String, dynamic> _$CoinPaprikaQuoteToJson(
+  _CoinPaprikaQuote instance,
+) => <String, dynamic>{
+  'price': const NonNullableDecimalConverter().toJson(instance.price),
+  'volume_24h': const NonNullableDecimalConverter().toJson(instance.volume24h),
+};

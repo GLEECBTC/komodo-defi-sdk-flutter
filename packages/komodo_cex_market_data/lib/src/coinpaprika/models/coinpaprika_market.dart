@@ -9,6 +9,8 @@ part 'coinpaprika_market.g.dart';
 @freezed
 abstract class CoinPaprikaMarket with _$CoinPaprikaMarket {
   /// Creates a CoinPaprika market instance.
+  // FieldRename.snake would read `adjusted_volume24h_share`, but CoinPaprika
+  // sends `adjusted_volume_24h_share`, so that key is set explicitly.
   @JsonSerializable(fieldRename: FieldRename.snake)
   const factory CoinPaprikaMarket({
     /// Exchange identifier (e.g., "binance")
@@ -33,7 +35,7 @@ abstract class CoinPaprikaMarket with _$CoinPaprikaMarket {
     required String quoteCurrencyName,
 
     /// Direct URL to the market on the exchange
-    required String marketUrl,
+    String? marketUrl,
 
     /// Market category (e.g., "Spot")
     required String category,
@@ -45,6 +47,7 @@ abstract class CoinPaprikaMarket with _$CoinPaprikaMarket {
     required bool outlier,
 
     /// Adjusted 24h volume share percentage
+    @JsonKey(name: 'adjusted_volume_24h_share')
     required double adjustedVolume24hShare,
 
     /// Quote data for different currencies
@@ -65,10 +68,12 @@ abstract class CoinPaprikaQuote with _$CoinPaprikaQuote {
   /// Creates a CoinPaprika quote instance.
   const factory CoinPaprikaQuote({
     /// Current price as a [Decimal] for precision
-    @DecimalConverter() required Decimal price,
+    @NonNullableDecimalConverter() required Decimal price,
 
     /// 24-hour trading volume as a [Decimal]
-    @JsonKey(name: 'volume_24h') @DecimalConverter() required Decimal volume24h,
+    @JsonKey(name: 'volume_24h')
+    @NonNullableDecimalConverter()
+    required Decimal volume24h,
   }) = _CoinPaprikaQuote;
 
   /// Creates a CoinPaprika quote instance from JSON.
