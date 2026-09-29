@@ -37,6 +37,12 @@
    Report `SwapInfo.isSuccessful` from the swap's events: `error_events` is
    KDF's list of every *possible* error, not the ones that occurred, so every
    swap used to read as failed.
+ - **FIX**(trading): send `min_trading_vol`, `max_taker_vol` and
+   `orderbook_depth` without `mmrpc`. KDF serves them only on its legacy
+   dispatcher, so every call used to fail with `NoSuchMethod`. Their answers
+   are read in the legacy shapes KDF returns. **BREAKING:**
+   `OrderbookDepthResponse.depth` is now a list of `OrderbookPairDepth` (ask
+   and bid counts per pair); the old map of orderbook snapshots never parsed.
 
 ## 0.7.0 (2026-09-24)
 
