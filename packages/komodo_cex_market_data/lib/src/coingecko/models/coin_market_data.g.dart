@@ -19,19 +19,19 @@ _CoinMarketData _$CoinMarketDataFromJson(Map<String, dynamic> json) =>
         json['fully_diluted_valuation'],
       ),
       totalVolume: const DecimalConverter().fromJson(json['total_volume']),
-      high24h: const DecimalConverter().fromJson(json['high24h']),
-      low24h: const DecimalConverter().fromJson(json['low24h']),
+      high24h: const DecimalConverter().fromJson(json['high_24h']),
+      low24h: const DecimalConverter().fromJson(json['low_24h']),
       priceChange24h: const DecimalConverter().fromJson(
-        json['price_change24h'],
+        json['price_change_24h'],
       ),
       priceChangePercentage24h: const DecimalConverter().fromJson(
-        json['price_change_percentage24h'],
+        json['price_change_percentage_24h'],
       ),
       marketCapChange24h: const DecimalConverter().fromJson(
-        json['market_cap_change24h'],
+        json['market_cap_change_24h'],
       ),
       marketCapChangePercentage24h: const DecimalConverter().fromJson(
-        json['market_cap_change_percentage24h'],
+        json['market_cap_change_percentage_24h'],
       ),
       circulatingSupply: const DecimalConverter().fromJson(
         json['circulating_supply'],
@@ -72,16 +72,16 @@ Map<String, dynamic> _$CoinMarketDataToJson(
     instance.fullyDilutedValuation,
   ),
   'total_volume': const DecimalConverter().toJson(instance.totalVolume),
-  'high24h': const DecimalConverter().toJson(instance.high24h),
-  'low24h': const DecimalConverter().toJson(instance.low24h),
-  'price_change24h': const DecimalConverter().toJson(instance.priceChange24h),
-  'price_change_percentage24h': const DecimalConverter().toJson(
+  'high_24h': const DecimalConverter().toJson(instance.high24h),
+  'low_24h': const DecimalConverter().toJson(instance.low24h),
+  'price_change_24h': const DecimalConverter().toJson(instance.priceChange24h),
+  'price_change_percentage_24h': const DecimalConverter().toJson(
     instance.priceChangePercentage24h,
   ),
-  'market_cap_change24h': const DecimalConverter().toJson(
+  'market_cap_change_24h': const DecimalConverter().toJson(
     instance.marketCapChange24h,
   ),
-  'market_cap_change_percentage24h': const DecimalConverter().toJson(
+  'market_cap_change_percentage_24h': const DecimalConverter().toJson(
     instance.marketCapChangePercentage24h,
   ),
   'circulating_supply': const DecimalConverter().toJson(
