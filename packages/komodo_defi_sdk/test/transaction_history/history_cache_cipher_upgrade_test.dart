@@ -29,10 +29,6 @@ void main() {
   final wallet = testWallet();
   final asset = testAssetId();
 
-  // Its own box per test. The storage is a reference-counted singleton keyed by
-  // box name and takes an exclusive lease on it, so sharing the default name
-  // with the other files in this suite makes whichever runs second degrade to
-  // its memory-only fallback - which reads as this test failing.
   HiveTransactionStorage open() {
     final store = HiveTransactionStorage(
       boxName: boxName,
@@ -56,12 +52,23 @@ void main() {
     }
     handles.clear();
     await Hive.close();
-    // Tolerant: a test that reopens Hive against this path can leave it
-    // already gone, and losing a temp directory is not a result.
-    if (directory.existsSync()) {
+    try {
       await directory.delete(recursive: true);
+    } on PathNotFoundException {
+      // Also raised, naming the directory, when an entry inside it vanishes
+      // mid-walk. A leftover temp directory changes no result.
     }
   });
+
+  /// Waits for Hive to delete [name]'s lock file, the last step of closing it.
+  /// Gives up without failing, since this only keeps tearDown out of a race.
+  Future<void> lockReleased(String name) async {
+    final lock = File('${directory.path}/$name.lock');
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (lock.existsSync() && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+  }
 
   /// Writes a box exactly as the previous release would have: Hive's CBC
   /// cipher, over the key the old label derived.
@@ -74,7 +81,7 @@ void main() {
       master.convert(utf8.encode('history-encryption-v2')).bytes,
     );
     final box = await Hive.openLazyBox<String>(
-      HiveTransactionStorage.defaultBoxName,
+      boxName,
       encryptionCipher: legacy,
     );
     await box.put('a' * 64, 'an envelope only the old cipher can read');
@@ -90,6 +97,7 @@ void main() {
       // Reads fine because the box was rebuilt empty - the old rows are gone
       // rather than decrypted.
       expect((await store.getTransactions(asset, wallet)).cachedCount, 0);
+      expect(store.isDegraded, isFalse);
 
       await store.storeTransaction(
         testTransaction(internalId: 'after-upgrade'),
@@ -105,6 +113,23 @@ void main() {
       expect((await reopened.getTransactions(asset, wallet)).cachedCount, 1);
     },
   );
+
+  // How often the rebuild loses its race with Hive's close depends on
+  // timing, so one upgrade is not enough.
+  test('the rebuild survives Hive still closing the refused box', () async {
+    final base = boxName;
+    for (var upgrade = 0; upgrade < 50; upgrade++) {
+      boxName = '${base}_$upgrade';
+      await writeLegacyCache();
+      final store = open();
+      await store.storeTransaction(
+        testTransaction(internalId: 'after-upgrade'),
+        wallet,
+      );
+      expect(store.isDegraded, isFalse, reason: 'upgrade $upgrade');
+      await store.close();
+    }
+  });
 
   test('post-upgrade records are unreadable with the old key', () async {
     await writeLegacyCache();
@@ -147,7 +172,9 @@ void main() {
       }
       await box.close();
     } on Object {
-      // Refusing the whole box is equally acceptable.
+      // Refusing the whole box is equally acceptable. Hive then closes it
+      // unawaited; let that finish before tearDown deletes the directory.
+      await lockReleased(boxName);
     }
 
     expect(recovered, 0);
