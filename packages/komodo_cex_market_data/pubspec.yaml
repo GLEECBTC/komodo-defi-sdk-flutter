@@ -28,7 +28,7 @@ dependencies:
   komodo_defi_types: ^0.6.0
 
   # Approved via https://github.com/GLEECBTC/gleec-wallet/pull/1106
-  hive_ce: ^2.2.3+ce # Changed from hive to hive_ce for Hive CE compatibility
+  hive_ce: ^2.14.0 # Changed from hive to hive_ce for Hive CE compatibility
   logging: ^1.3.0
   async: ^2.13.0 # same as transitive version in build_transformer package
   get_it: ^8.0.3

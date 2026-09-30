@@ -1,3 +1,11 @@
+## Unreleased
+
+ - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
+   that fails to open as an uncaught async error even when the caller handles
+   the failure, and the transaction history cache handles one by design: on a
+   native install's first open after upgrading past the AES-CBC cache, and
+   after a lost key or a corrupt box.
+
 ## 0.8.1 (2026-09-28)
 
 Patch release of SDK 0.8.0; no migration is needed. See the
