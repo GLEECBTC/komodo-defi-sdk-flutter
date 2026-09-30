@@ -1,3 +1,12 @@
+## Unreleased
+
+ - **FIX**(history): stop the transaction cache falling back to memory when it
+   rebuilds a box Hive refused to open, which a native install does once when
+   it upgrades past the AES-CBC cache, and again after a lost key or a corrupt
+   box. Hive closes the refused box without awaiting the close, and the
+   rebuild's delete could lose a race with it and fail, leaving that session's
+   history unpersisted. The delete is now retried after a short pause.
+
 ## 0.8.1 (2026-09-28)
 
 Patch release of SDK 0.8.0; no migration is needed. See the
