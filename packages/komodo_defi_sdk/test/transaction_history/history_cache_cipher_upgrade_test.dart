@@ -56,12 +56,23 @@ void main() {
     }
     handles.clear();
     await Hive.close();
-    // Tolerant: a test that reopens Hive against this path can leave it
-    // already gone, and losing a temp directory is not a result.
-    if (directory.existsSync()) {
+    try {
       await directory.delete(recursive: true);
+    } on PathNotFoundException {
+      // Also raised, naming the directory, when an entry inside it vanishes
+      // mid-walk. A leftover temp directory changes no result.
     }
   });
+
+  /// Waits for Hive to delete [name]'s lock file, the last step of closing it.
+  /// Gives up without failing, since this only keeps tearDown out of a race.
+  Future<void> lockReleased(String name) async {
+    final lock = File('${directory.path}/$name.lock');
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (lock.existsSync() && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+  }
 
   /// Writes a box exactly as the previous release would have: Hive's CBC
   /// cipher, over the key the old label derived.
@@ -147,7 +158,9 @@ void main() {
       }
       await box.close();
     } on Object {
-      // Refusing the whole box is equally acceptable.
+      // Refusing the whole box is equally acceptable. Hive then closes it
+      // unawaited; let that finish before tearDown deletes the directory.
+      await lockReleased(boxName);
     }
 
     expect(recovered, 0);
