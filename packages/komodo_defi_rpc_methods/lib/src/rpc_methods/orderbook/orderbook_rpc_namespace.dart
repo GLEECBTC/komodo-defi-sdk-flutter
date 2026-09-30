@@ -108,16 +108,12 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   ///
   /// - [coin]: The coin to trade
   /// - [action]: Whether to buy or sell
-  /// - [volume]: The desired trade volume
+  /// - [requestBy]: The volume in [coin], or number of orders, per coin
   /// - [rpcPass]: Optional RPC password override
   ///
   /// Returns a [Future] that completes with a [BestOrdersResponse]
-  /// containing the best available orders.
-  ///
-  /// The response includes:
-  /// - Orders sorted by best price
-  /// - Cumulative volume information
-  /// - Average execution price for the volume
+  /// containing the best available orders for each coin that trades
+  /// against [coin].
   Future<BestOrdersResponse> bestOrders({
     required String coin,
     required OrderType action,

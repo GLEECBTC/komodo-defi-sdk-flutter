@@ -43,6 +43,12 @@
    are read in the legacy shapes KDF returns. **BREAKING:**
    `OrderbookDepthResponse.depth` is now a list of `OrderbookPairDepth` (ask
    and bid counts per pair); the old map of orderbook snapshots never parsed.
+ - **FIX**(trading): read `best_orders` in the shape KDF returns, where
+   `result.orders` maps each ticker to its orders. The SDK read a list, so
+   every call failed to parse. **BREAKING:** `BestOrdersResponse.orders` is
+   now a `Map<String, List<OrderInfo>>`, and the constructor requires
+   `originalTickers`, the tickers each orderbook ticker's orders are repeated
+   under (BTC-segwit under BTC).
 
 ## 0.7.0 (2026-09-24)
 
