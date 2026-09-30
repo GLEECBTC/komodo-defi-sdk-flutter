@@ -29,7 +29,7 @@ dependencies:
   flutter_secure_storage: ^10.0.0
   freezed_annotation: ^3.0.0
   get_it: ^8.0.3
-  hive_ce: ^2.11.3
+  hive_ce: ^2.14.0
   hive_ce_flutter: ^2.3.2
   http: ^1.4.0
   json_annotation: ^4.9.0

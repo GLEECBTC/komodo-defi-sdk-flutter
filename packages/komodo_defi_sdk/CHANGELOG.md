@@ -44,6 +44,11 @@
    box. Hive closes the refused box without awaiting the close, and the
    rebuild's delete could lose a race with it and fail, leaving that session's
    history unpersisted. The delete is now retried after a short pause.
+ - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
+   that fails to open as an uncaught async error even when the caller handles
+   the failure, and the transaction history cache handles one by design: on a
+   native install's first open after upgrading past the AES-CBC cache, and
+   after a lost key or a corrupt box.
 
 ## 0.8.1 (2026-09-28)
 

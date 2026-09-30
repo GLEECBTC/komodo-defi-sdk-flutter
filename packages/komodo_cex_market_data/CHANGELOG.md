@@ -34,6 +34,10 @@
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 
+ - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
+   that fails to open as an uncaught async error even though
+   `SparklineRepository` recovers from it by deleting and reopening the box.
+
  - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
    imports. It resolved only through the workspace, so `dart pub publish`
    rejected the package.
