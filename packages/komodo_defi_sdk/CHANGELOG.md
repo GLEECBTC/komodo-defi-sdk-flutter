@@ -1,5 +1,11 @@
 ## Unreleased
 
+ - **FIX**(history): stop the transaction cache falling back to memory when it
+   rebuilds a box Hive refused to open, which a native install does once when
+   it upgrades past the AES-CBC cache, and again after a lost key or a corrupt
+   box. Hive closes the refused box without awaiting the close, and the
+   rebuild's delete could lose a race with it and fail, leaving that session's
+   history unpersisted. The delete is now retried after a short pause.
  - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
    that fails to open as an uncaught async error even when the caller handles
    the failure, and the transaction history cache handles one by design: on a
