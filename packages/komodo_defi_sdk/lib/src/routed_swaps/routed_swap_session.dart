@@ -18,6 +18,12 @@ class _RoutedSwapHandle implements RoutedSwapHandle {
   Future<RoutedSwapProgress> get result => _session.result;
 
   @override
+  DateTime? get checkedAt => _session.checkedAt;
+
+  @override
+  Stream<DateTime> get checks => _session.checks;
+
+  @override
   Future<void> cancel() => _session.cancel();
 }
 
@@ -35,7 +41,9 @@ class _RoutedSwapSession {
     this.offer,
   }) : _manager = manager,
        _taskId = taskId,
-       _latest = seed;
+       _latest = seed,
+       // Every session starts from a read KDF has just answered.
+       _checkedAt = manager._now();
 
   final RoutedSwapManager _manager;
   final String uuid;
@@ -51,7 +59,10 @@ class _RoutedSwapSession {
   RoutedSwapPhase? _lastLivePhase;
   final StreamController<RoutedSwapProgress> _updates =
       StreamController<RoutedSwapProgress>.broadcast();
+  final StreamController<DateTime> _checks =
+      StreamController<DateTime>.broadcast();
   final Completer<RoutedSwapProgress> _result = Completer<RoutedSwapProgress>();
+  DateTime? _checkedAt;
 
   Timer? _timer;
   StreamSubscription<void>? _nudges;
@@ -66,6 +77,10 @@ class _RoutedSwapSession {
   bool get isDisposed => _disposed;
 
   Future<RoutedSwapProgress> get result => _result.future;
+
+  DateTime? get checkedAt => _checkedAt;
+
+  Stream<DateTime> get checks => _checks.stream;
 
   Stream<RoutedSwapProgress> get stream => Stream.multi((out) {
     out.add(_latest);
@@ -130,6 +145,8 @@ class _RoutedSwapSession {
         await _refreshFromHistory();
       }
       _failures = 0;
+      final checkedAt = _checkedAt = _manager._now();
+      if (!_checks.isClosed) _checks.add(checkedAt);
       if (_latest.delayedSince != null && !_latest.isTerminal) {
         _emit(_latest.copyWith(clearDelayedSince: true));
       }
@@ -256,6 +273,7 @@ class _RoutedSwapSession {
     _nudges = null;
     if (!_result.isCompleted) _result.complete(_latest);
     if (!_updates.isClosed) unawaited(_updates.close());
+    if (!_checks.isClosed) unawaited(_checks.close());
   }
 
   Future<void> cancel() async {
@@ -328,5 +346,6 @@ class _RoutedSwapSession {
     await _nudges?.cancel();
     _nudges = null;
     if (!_updates.isClosed) await _updates.close();
+    if (!_checks.isClosed) await _checks.close();
   }
 }

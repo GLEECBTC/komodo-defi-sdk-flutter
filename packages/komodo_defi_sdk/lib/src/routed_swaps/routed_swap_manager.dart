@@ -45,6 +45,14 @@ abstract interface class RoutedSwapHandle {
   /// Resolves with the terminal snapshot.
   Future<RoutedSwapProgress> get result;
 
+  /// When KDF last answered for this swap, whether or not anything changed;
+  /// null until it has. [progress] carries only changes, so this is what
+  /// tells a quiet swap from one KDF has stopped answering for.
+  DateTime? get checkedAt;
+
+  /// [checkedAt], as each answer arrives, until the swap is terminal.
+  Stream<DateTime> get checks;
+
   /// Stops the swap, if it has not been broadcast.
   ///
   /// Throws [RoutedSwapNotCancellableException] once the transaction has been
@@ -77,6 +85,7 @@ class RoutedSwapManager {
     int delayedAfterFailures = 3,
     Duration firstReadRetryDelay = const Duration(milliseconds: 500),
     int firstReadAttempts = 3,
+    DateTime Function()? now,
   }) : _client = client,
        _resolveAsset = resolveAsset,
        _taskNudges = taskNudges,
@@ -85,7 +94,8 @@ class RoutedSwapManager {
        _maxBackoff = maxBackoff,
        _delayedAfterFailures = delayedAfterFailures,
        _firstReadRetryDelay = firstReadRetryDelay,
-       _firstReadAttempts = firstReadAttempts;
+       _firstReadAttempts = firstReadAttempts,
+       _now = now ?? DateTime.now;
 
   final ApiClient _client;
   final RoutedSwapAssetResolver _resolveAsset;
@@ -96,6 +106,7 @@ class RoutedSwapManager {
   final int _delayedAfterFailures;
   final Duration _firstReadRetryDelay;
   final int _firstReadAttempts;
+  final DateTime Function() _now;
 
   final Map<String, _RoutedSwapSession> _sessions = {};
 
