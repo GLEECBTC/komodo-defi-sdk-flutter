@@ -565,10 +565,17 @@ class CoinGeckoCexProvider implements ICoinGeckoProvider {
         'Requested: $days days. Maximum allowed: 365 days.',
       );
     }
+    // Snap to CoinGecko OHLC-supported day buckets
+    final int snappedDays = _normalizeOhlcDaysParam(days);
+    if (snappedDays != days) {
+      _logger.fine(
+        'Snapped OHLC days from $days to $snappedDays to satisfy CoinGecko constraints',
+      );
+    }
     final queryParameters = <String, String>{
       'id': id,
       'vs_currency': vsCurrency,
-      'days': days.toString(),
+      'days': snappedDays.toString(),
       if (precision != null) 'precision': precision.toString(),
     };
 
@@ -586,6 +593,21 @@ class CoinGeckoCexProvider implements ICoinGeckoProvider {
       final data = jsonDecode(response.body) as List<dynamic>;
       return CoinOhlc.fromJson(data, source: OhlcSource.coingecko);
     });
+  }
+
+  /// Normalizes the OHLC `days` parameter to the nearest allowed bucket for CoinGecko:
+  /// 1, 7, 14, 30, 90, 180, 365.
+  /// Strategy: round up to the next allowed bucket to avoid under-fetching.
+  int _normalizeOhlcDaysParam(int requestedDays) {
+    if (requestedDays <= 1) return 1;
+    const List<int> allowed = <int>[1, 7, 14, 30, 90, 180, 365];
+    for (final int value in allowed) {
+      if (requestedDays <= value) {
+        return value;
+      }
+    }
+    // Fallback safeguard (should be capped earlier)
+    return 365;
   }
 
   /// Throws an [Exception] with a properly formatted error message.
