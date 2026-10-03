@@ -248,6 +248,7 @@ void main() {
         final uuid = uuidOf(6);
         final gate = Completer<JsonMap>();
         final kdf = ScriptedKdf()
+          ..always(_status, (_) => ok(inProgress(uuid, 'CheckingAllowance')))
           ..always('task::routed_swap::cancel', (_) => ok('success'))
           ..always(
             'routed_swap::history',
@@ -279,7 +280,7 @@ void main() {
         async.elapse(const Duration(milliseconds: 40));
         expect(cancelled, isTrue);
         expect(handle.latest.failure!.kind, RoutedSwapFailureKind.cancelled);
-        expect(kdf.calls(_status), 2);
+        expect(kdf.calls(_status), 3);
         unawaited(manager.dispose());
         async.flushMicrotasks();
       });
@@ -292,6 +293,7 @@ void main() {
     ) {
       final uuid = uuidOf(7);
       final kdf = ScriptedKdf()
+        ..always(_status, (_) => ok(inProgress(uuid, 'Signing')))
         ..always(
           'task::routed_swap::cancel',
           (_) => rpcError('NoSuchTask', {'task_id': 1}),

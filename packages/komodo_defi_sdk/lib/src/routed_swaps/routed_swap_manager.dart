@@ -287,7 +287,7 @@ class RoutedSwapManager {
           taskId: init.taskId,
           offer: offer,
           seed: seed,
-        ).._lastLivePhase = seed.isTerminal ? null : seed.phase;
+        );
         return _register(session);
       } on Object catch (error) {
         lastError = error;
@@ -381,7 +381,6 @@ class RoutedSwapManager {
             entry,
             accepted: _sessions[entry.uuid]?.offer,
             previous: _sessions[entry.uuid]?.latest,
-            lastLivePhase: _sessions[entry.uuid]?.lastLivePhase,
           ),
       ],
       total: page.total,

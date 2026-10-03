@@ -318,7 +318,7 @@ void main() {
   });
 
   group('history', () {
-    test('a page read while a swap is followed uses what was seen live', () {
+    test('a live observation cannot rule out broadcast in history', () {
       fakeAsync((async) {
         final uuid = uuidOf(4);
         final timedOut = failedWith(
@@ -346,10 +346,10 @@ void main() {
 
         final mine = awaited(async, manager.history()).entries.single;
         expect(mine.acceptedOffer, offer);
-        expect(mine.failure!.fundsMovement, RoutedSwapFundsMovement.none);
-        expect(mine.failure!.retryPolicy, RoutedSwapRetryPolicy.retry);
+        expect(mine.failure!.fundsMovement, RoutedSwapFundsMovement.uncertain);
+        expect(mine.failure!.retryPolicy, RoutedSwapRetryPolicy.wait);
 
-        // Without the live observation a timeout may have broadcast.
+        // Cold and live sessions must agree about an uncertain handoff.
         final cold = awaited(async, managerFor(kdf).history()).entries.single;
         expect(cold.acceptedOffer, isNull);
         expect(cold.failure!.fundsMovement, RoutedSwapFundsMovement.uncertain);

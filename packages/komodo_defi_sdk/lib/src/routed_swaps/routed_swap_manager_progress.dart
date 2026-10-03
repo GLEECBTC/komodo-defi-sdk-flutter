@@ -7,7 +7,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
     RoutedSwapOffer? accepted,
     RoutedSwapOffer? previousExecuted,
     List<String> approvalTxHashes = const [],
-    RoutedSwapPhase? lastLivePhase,
     bool fromHistory = false,
   }) {
     final executed = _offerFromExecuted(
@@ -68,7 +67,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           status,
           accepted: accepted ?? executed,
           approvalTxHashes: approvalTxHashes,
-          lastLivePhase: lastLivePhase,
         );
         return RoutedSwapProgress(
           uuid: status.uuid,
@@ -89,7 +87,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
     rpc.RoutedSwapHistoryEntry entry, {
     RoutedSwapOffer? accepted,
     RoutedSwapProgress? previous,
-    RoutedSwapPhase? lastLivePhase,
   }) {
     final hashes = entry.approvalTxHashes.isNotEmpty
         ? entry.approvalTxHashes
@@ -99,9 +96,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
       accepted: accepted,
       previousExecuted: previous?.executedOffer,
       approvalTxHashes: hashes,
-      // Only a phase this process watched live can prove a failure happened
-      // before broadcast.
-      lastLivePhase: lastLivePhase,
       fromHistory: true,
     );
     final requested = entry.requested;
@@ -142,7 +136,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
     rpc.RoutedSwapErrored status, {
     required List<String> approvalTxHashes,
     RoutedSwapOffer? accepted,
-    RoutedSwapPhase? lastLivePhase,
   }) {
     final error = status.error;
     final kind = switch (error) {
@@ -174,7 +167,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
     final movement = _fundsMovementOf(
       error,
       approved: approvalTxHashes.isNotEmpty,
-      lastLivePhase: lastLivePhase,
     );
 
     RoutedSwapOffer? freshOffer;
@@ -267,13 +259,10 @@ DateTime? _fromUnix(int? seconds) => seconds == null || seconds == 0
 RoutedSwapFundsMovement _fundsMovementOf(
   rpc.RoutedSwapTaskError error, {
   required bool approved,
-  RoutedSwapPhase? lastLivePhase,
 }) {
   final untouched = approved
       ? RoutedSwapFundsMovement.feesOnly
       : RoutedSwapFundsMovement.none;
-  final watchedBeforeBroadcast =
-      lastLivePhase != null && _isPreBroadcast(lastLivePhase);
 
   switch (error) {
     case rpc.RoutedSwapTxFailedError(:final reason):
@@ -291,16 +280,13 @@ RoutedSwapFundsMovement _fundsMovementOf(
           ? RoutedSwapFundsMovement.none
           : RoutedSwapFundsMovement.feesOnly;
     case rpc.RoutedSwapSigningRejectedError():
-      return error.isPreBroadcast || watchedBeforeBroadcast
+      return error.isPreBroadcast
           ? untouched
           : RoutedSwapFundsMovement.uncertain;
     case rpc.RoutedSwapInternalTaskError():
-      // Rare, but it can follow an uncertain wallet handoff after
-      // Broadcasting; only a live observation before broadcast rules that
-      // out.
-      return watchedBeforeBroadcast
-          ? untouched
-          : RoutedSwapFundsMovement.uncertain;
+      // Polls may skip Broadcasting, so an earlier phase cannot rule out an
+      // uncertain wallet handoff.
+      return RoutedSwapFundsMovement.uncertain;
     case rpc.RoutedSwapUnknownTaskError():
       return RoutedSwapFundsMovement.uncertain;
     default:
@@ -309,11 +295,6 @@ RoutedSwapFundsMovement _fundsMovementOf(
           : RoutedSwapFundsMovement.uncertain;
   }
 }
-
-bool _isPreBroadcast(RoutedSwapPhase phase) =>
-    phase == RoutedSwapPhase.preparing ||
-    phase == RoutedSwapPhase.approving ||
-    phase == RoutedSwapPhase.signing;
 
 RoutedSwapRetryPolicy _retryPolicyOf(
   rpc.RoutedSwapTaskError error,

@@ -273,7 +273,8 @@ void _cases3() {
         RoutedSwapRunError.signingRejected('timeout'),
         ladder: signingTimeout,
       )).failure!;
-      expect(beforeHandoff.fundsMovement, RoutedSwapFundsMovement.none);
+      expect(beforeHandoff.fundsMovement, RoutedSwapFundsMovement.uncertain);
+      expect(beforeHandoff.retryPolicy, RoutedSwapRetryPolicy.wait);
 
       final afterHandoff = (await failedWith(
         RoutedSwapRunError.signingRejected('timeout'),
@@ -364,26 +365,29 @@ void _cases3() {
       }
     });
 
-    test('InternalError: pre-broadcast only when watched there', () async {
-      final early = (await failedWith(
-        RoutedSwapRunError.internalError('Source wallet address changed'),
-      )).failure!;
-      expect(early.kind, RoutedSwapFailureKind.internalError);
-      expect(early.fundsMovement, RoutedSwapFundsMovement.none);
-      expect(early.retryPolicy, RoutedSwapRetryPolicy.retry);
+    test(
+      'InternalError: earlier observations cannot rule out broadcast',
+      () async {
+        final early = (await failedWith(
+          RoutedSwapRunError.internalError('Source wallet address changed'),
+        )).failure!;
+        expect(early.kind, RoutedSwapFailureKind.internalError);
+        expect(early.fundsMovement, RoutedSwapFundsMovement.uncertain);
+        expect(early.retryPolicy, RoutedSwapRetryPolicy.contactSupport);
 
-      final handoff = (await failedWith(
-        RoutedSwapRunError.internalError(
-          'Broadcast handoff did not return a transaction hash',
-        ),
-        ladder: [
-          ...signingTimeout,
-          const RoutedSwapTick.broadcasting(withSourceTxHash: false),
-        ],
-      )).failure!;
-      expect(handoff.fundsMovement, RoutedSwapFundsMovement.uncertain);
-      expect(handoff.retryPolicy, RoutedSwapRetryPolicy.contactSupport);
-    });
+        final handoff = (await failedWith(
+          RoutedSwapRunError.internalError(
+            'Broadcast handoff did not return a transaction hash',
+          ),
+          ladder: [
+            ...signingTimeout,
+            const RoutedSwapTick.broadcasting(withSourceTxHash: false),
+          ],
+        )).failure!;
+        expect(handoff.fundsMovement, RoutedSwapFundsMovement.uncertain);
+        expect(handoff.retryPolicy, RoutedSwapRetryPolicy.contactSupport);
+      },
+    );
 
     test('TransportError before broadcast is retryable', () async {
       final failure = (await failedWith(

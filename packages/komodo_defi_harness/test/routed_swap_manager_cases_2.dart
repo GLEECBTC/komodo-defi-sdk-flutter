@@ -206,6 +206,37 @@ void _cases2() {
   });
 
   group('cancel', () {
+    test('after a restart it never cancels a reused task id', () async {
+      final fixture = RoutedSwapFixture()
+        ..quote(route())
+        ..run(RoutedSwapRun(autoAdvance: false))
+        ..run(RoutedSwapRun(autoAdvance: false));
+      final script = fixture.build();
+      final client = _Client(script);
+      final manager = _managerFor(
+        client,
+        pollInterval: const Duration(minutes: 1),
+      );
+      final original = await manager.start(await offerFrom(manager));
+      fixture.restartKdf();
+      final replacement = await manager.start(await offerFrom(manager));
+
+      await expectLater(
+        original.cancel(),
+        throwsA(isA<RoutedSwapNotCancellableException>()),
+      );
+      expect(client.requestsFor('task::routed_swap::cancel'), isEmpty);
+      expect(original.latest.uuid, original.uuid);
+      expect(
+        original.latest.failure!.kind,
+        RoutedSwapFailureKind.abortedOnRestart,
+      );
+      expect(fixture.hasTask(1), isTrue);
+      expect(replacement.latest.isTerminal, isFalse);
+      await replacement.cancel();
+      expect(replacement.latest.failure!.kind, RoutedSwapFailureKind.cancelled);
+    });
+
     test('accepted before broadcast: cancelled, funds untouched', () async {
       final (handle, fixture, _) = await started(
         RoutedSwapRun(autoAdvance: false),

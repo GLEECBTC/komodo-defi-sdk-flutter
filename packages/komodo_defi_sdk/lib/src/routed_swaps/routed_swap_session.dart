@@ -54,9 +54,6 @@ class _RoutedSwapSession {
   int? _taskId;
   RoutedSwapProgress _latest;
 
-  /// The last phase read from the live task — the only kind of observation
-  /// that can prove a later failure happened before broadcast.
-  RoutedSwapPhase? _lastLivePhase;
   final StreamController<RoutedSwapProgress> _updates =
       StreamController<RoutedSwapProgress>.broadcast();
   final StreamController<DateTime> _checks =
@@ -71,8 +68,6 @@ class _RoutedSwapSession {
   var _disposed = false;
 
   RoutedSwapProgress get latest => _latest;
-
-  RoutedSwapPhase? get lastLivePhase => _lastLivePhase;
 
   bool get isDisposed => _disposed;
 
@@ -193,10 +188,8 @@ class _RoutedSwapSession {
       accepted: offer,
       previousExecuted: _latest.executedOffer,
       approvalTxHashes: _latest.approvalTxHashes,
-      lastLivePhase: _lastLivePhase,
     );
     if (!progress.isTerminal) {
-      _lastLivePhase = progress.phase;
       _emit(progress);
       return;
     }
@@ -214,7 +207,6 @@ class _RoutedSwapSession {
           entry,
           accepted: offer,
           previous: terminal,
-          lastLivePhase: _lastLivePhase,
         );
       }
     } on Object {
@@ -235,12 +227,7 @@ class _RoutedSwapSession {
     final entry = await _manager._entryFor(uuid);
     if (entry == null) throw RoutedSwapNotFoundException(uuid);
     _emit(
-      _manager._progressFromEntry(
-        entry,
-        accepted: offer,
-        previous: _latest,
-        lastLivePhase: _lastLivePhase,
-      ),
+      _manager._progressFromEntry(entry, accepted: offer, previous: _latest),
     );
   }
 
@@ -297,7 +284,23 @@ class _RoutedSwapSession {
     }
 
     try {
+      // A restart can reuse this id between polls. Re-read and verify the
+      // UUID before addressing a cancellation to it.
+      await _refreshFromTask(taskId);
+      if (_latest.isTerminal || !_latest.canCancel || _taskId != taskId) {
+        throw RoutedSwapNotCancellableException(
+          uuid,
+          _latest.phase,
+          refusal: _latest.isTerminal
+              ? RoutedSwapCancelRefusal.alreadyFinished
+              : _taskId != taskId
+              ? RoutedSwapCancelRefusal.notAddressable
+              : RoutedSwapCancelRefusal.alreadyBroadcast,
+        );
+      }
       await _manager._client.rpc.routedSwap.cancel(taskId);
+    } on RoutedSwapNotCancellableException {
+      rethrow;
     } on rpc.RoutedSwapTaskAlreadyBroadcastException {
       _refreshSoon();
       throw RoutedSwapNotCancellableException(uuid, RoutedSwapPhase.sending);
