@@ -1,3 +1,8 @@
+## Unreleased
+
+ - **FEAT**(auth): `KomodoDefiLocalAuth` and `KdfAuthService` take
+   `lifiApiUrl` and write it to the signed-out and wallet startup confs.
+
 ## 0.6.1 (2026-09-28)
 
 Patch release for SDK 0.8.1; no migration from 0.6.0.

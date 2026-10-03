@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
+import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 class KdfOperationsRemote implements IKdfOperations {
@@ -163,7 +164,16 @@ class KdfOperationsRemote implements IKdfOperations {
       return ConnectionError('Remote KDF request failed');
     }
 
+    final body = kdfResponseBody(response);
+
     if (response.statusCode != 200) {
+      // KDF answers errors with a non-200 status: typed MMRPC 2.0 errors
+      // (400-502) and legacy methods' `{"error": ...}` (404, 500). Callers
+      // branch on the error_type or match the legacy text (`No swap with
+      // uuid`), and the FFI and WASM transports already pass both through.
+      // Anything else stays opaque.
+      final kdfError = _kdfError(body);
+      if (kdfError != null) return kdfError;
       return JsonRpcErrorResponse(
         code: response.statusCode,
         error: {
@@ -175,7 +185,7 @@ class KdfOperationsRemote implements IKdfOperations {
     }
 
     try {
-      final decoded = json.decode(response.body);
+      final decoded = json.decode(body);
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {
       // Do not surface FormatException.source: it contains the upstream body.
@@ -222,5 +232,21 @@ class KdfOperationsRemote implements IKdfOperations {
   @override
   void dispose() {
     // No-op for remote operations - HTTP client is managed externally
+  }
+
+  /// Returns [body] decoded when it is one of KDF's error envelopes: a typed
+  /// MMRPC 2.0 error, or a legacy method's `{"error": "..."}`.
+  static Map<String, dynamic>? _kdfError(String body) {
+    try {
+      final decoded = json.decode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final typed =
+          decoded['mmrpc'] == '2.0' && decoded['error_type'] is String;
+      final legacy = decoded.length == 1 && decoded['error'] is String;
+      if (typed || legacy) return decoded;
+    } catch (_) {
+      // Not an envelope; handled as an opaque HTTP error.
+    }
+    return null;
   }
 }

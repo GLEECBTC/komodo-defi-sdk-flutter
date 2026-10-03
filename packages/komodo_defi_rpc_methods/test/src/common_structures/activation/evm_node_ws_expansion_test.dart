@@ -17,7 +17,8 @@ import 'package:test/test.dart';
 /// The shipping policy is a pair of compile-time `const`s, so these tests
 /// assert the behaviour of the build that runs them. Both are currently off:
 /// `_kSendWsNodesOnNative` because the native rollout is unmeasured, and
-/// `_kSendWsNodesOnWeb` because the pinned KDF (`main`, `f3efd2c`) still panics
+/// `_kSendWsNodesOnWeb` because the pinned KDF (`feat/lifi-integration`,
+/// `4872ef2`) still panics
 /// at `websocket_transport.rs:207` on a response that lands after the caller's
 /// 10s timeout but inside the 30s notifier window - and a wasm panic takes the
 /// whole instance down. See `docs/WALLET_LOAD_MEASUREMENT.md`.
