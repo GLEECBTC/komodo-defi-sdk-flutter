@@ -248,8 +248,10 @@ void main() {
     final pending = manager.getTransactionHistory(asset);
     await Future<void>.delayed(Duration.zero);
     currentUser = walletB;
-    // Deliberately delay the auth-stream event. The stable-wallet check must
-    // still reject the stale result by consulting currentUser at commit time.
+    // Deliberately delay the auth-stream event. The service revokes the
+    // session as soon as it observes wallet B, and the commit-time session
+    // check must reject the stale result on that alone.
+    auth.runtimeSessions.observe(walletB);
     strategyResponse.complete(_historyResponse());
 
     await expectLater(
@@ -395,7 +397,7 @@ void main() {
     },
   );
 
-  for (final microtaskDepth in [1, 2]) {
+  for (final microtaskDepth in [1, 2, 3, 4]) {
     test(
       'wallet switch after activation validation cannot skip next activation '
       '($microtaskDepth microtasks)',
@@ -413,7 +415,6 @@ void main() {
         final strategyResponse = Completer<MyTxHistoryResponse>()
           ..complete(_historyResponse());
         KdfUser? currentUser = walletA;
-        var activationCompleted = false;
         var switchScheduled = false;
         final asset = _asset();
 
@@ -423,6 +424,9 @@ void main() {
               switchAfterMicrotasks(remaining - 1);
             } else {
               currentUser = walletB;
+              // The service revokes the session as soon as it observes
+              // another wallet, before the auth-stream event is delivered.
+              auth.runtimeSessions.observe(walletB);
               authChanges.add(walletB);
               switched.complete();
             }
@@ -430,19 +434,7 @@ void main() {
         }
 
         when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
-        when(() => auth.currentUser).thenAnswer((_) async {
-          final user = currentUser;
-          if (activationCompleted && !switchScheduled) {
-            switchScheduled = true;
-            // Wasm queues async-return completions. These timings deliver the
-            // auth event after the final identity comparison, while its
-            // successful result is still reaching the activation continuation.
-            // Native scheduling instead adds then clears the old marker; both
-            // runtimes must activate the asset again for wallet B.
-            switchAfterMicrotasks(microtaskDepth);
-          }
-          return user;
-        });
+        when(() => auth.currentUser).thenAnswer((_) async => currentUser);
         when(() => assetProvider.fromId(asset.id)).thenReturn(asset);
         for (final wallet in [walletA, walletB]) {
           when(
@@ -450,7 +442,15 @@ void main() {
           ).thenAnswer((_) async => {'ATOM'});
         }
         when(() => activation.activateAsset(asset)).thenAnswer((_) {
-          activationCompleted = true;
+          if (!switchScheduled) {
+            switchScheduled = true;
+            // Wasm queues async-return completions. These timings deliver the
+            // switch while the successful result is still reaching the
+            // activation continuation and before the history is written.
+            // Native scheduling instead adds then clears the old marker; both
+            // runtimes must activate the asset again for wallet B.
+            switchAfterMicrotasks(microtaskDepth);
+          }
           return Future.value(ActivationResult.success(asset.id));
         });
 

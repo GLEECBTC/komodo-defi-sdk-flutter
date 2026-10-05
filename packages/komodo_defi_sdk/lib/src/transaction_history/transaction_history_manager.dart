@@ -6,6 +6,7 @@ import 'package:komodo_defi_framework/komodo_defi_framework.dart'
     show BalanceEvent;
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/auth/session_user_reader.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/gasless/gasless_capability_registry.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
@@ -75,6 +76,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
+  late final SessionUserReader _sessionUser = SessionUserReader(_auth);
   final PubkeyManager _pubkeyManager;
   final IAssetProvider _assetProvider;
   final SharedActivationCoordinator _activationCoordinator;
@@ -164,22 +166,22 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     final session = await _auth.captureSessionContext();
     _auth.ensureSessionContextCurrent(session);
     _handleSessionContextChanged(session);
-    final user = await _auth.currentUser;
-    _auth.ensureSessionContextCurrent(session);
-    if (user == null) throw StateError('User is not logged in');
+    // The identity the session last verified, not a fresh `currentUser` read:
+    // that cost two RPCs per operation. See [_requireWalletContextCurrent].
+    final observed = session.walletId;
 
     final currentWalletId = _currentWalletId;
     late final WalletId operationWalletId;
     if (currentWalletId == null) {
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
-    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      _currentWalletId = observed;
+      operationWalletId = observed;
+    } else if (isSameStableWallet(currentWalletId, observed)) {
       operationWalletId = preferEnrichedWalletIdentity(
         currentWalletId,
-        user.walletId,
+        observed,
       );
       _currentWalletId = operationWalletId;
-    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+    } else if (isDegradedWalletIdentity(currentWalletId, observed)) {
       // Same wallet, identity RPC temporarily unavailable. Keep operating - and
       // keep keying storage - under the enriched identity already held.
       //
@@ -193,8 +195,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       // Do not wait for the auth stream to deliver before isolating the old
       // wallet's subscriptions and in-flight operations.
       _walletGeneration++;
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
+      _currentWalletId = observed;
+      operationWalletId = observed;
       _lastBalanceForPolling.clear();
       _lastCustodyBalanceForPolling.clear();
       _syncInProgress.clear();
@@ -218,22 +220,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         isSameStableWallet(context.walletId, current);
   }
 
-  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
-    if (!_isWalletContextCurrentSync(context)) return false;
-    final user = await _auth.currentUser;
-    // Continues-session, not same-stable: the fresh read can observe the same
-    // wallet degraded to name-only while the identity RPC is down, which the
-    // capture path deliberately admits - rejecting it here would fail the
-    // operation during the exact blip that branch tolerates.
-    return user != null &&
-        _isWalletContextCurrentSync(context) &&
-        walletIdentityContinuesSession(context.walletId, user.walletId);
-  }
-
+  /// Session-scoped, not a fresh identity read: every sign-in, sign-out and
+  /// KDF restart revokes the session synchronously. Re-reading `currentUser`
+  /// here cost two RPCs per checkpoint on every history poll.
   Future<void> _requireWalletContextCurrent(
     WalletOperationContext context,
   ) async {
-    if (await _isWalletContextCurrent(context)) return;
+    if (_isWalletContextCurrentSync(context)) return;
     throw const WalletChangedDisconnectException(
       'Wallet changed while fetching transaction history',
     );
@@ -291,11 +284,8 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       );
 
       // Optimization: Check if this is a newly created wallet (not imported)
-      final user = await _auth.currentUser;
-      if (user != null &&
-          isSameStableWallet(walletContext.walletId, user.walletId) &&
-          pagination is PagePagination &&
-          pagination.pageNumber == 1) {
+      final user = await _sessionUser.read(walletContext);
+      if (pagination is PagePagination && pagination.pageNumber == 1) {
         final previouslyEnabledAssets = await _assetHistoryStorage
             .getWalletAssets(walletContext.walletId);
         await _requireWalletContextCurrent(walletContext);
@@ -525,13 +515,13 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
     }
 
     if (!emittedInitial) {
-      if (!await _isWalletContextCurrent(walletContext)) return;
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       yield const <Transaction>[];
     }
 
     // Historical fetching may finish because its wallet changed. Never
     // attach the retained rows to a live stream from the next wallet.
-    if (!await _isWalletContextCurrent(walletContext)) return;
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     await for (final transaction in watchTransactions(asset)) {
       if (!_isWalletContextCurrentSync(walletContext)) return;
       final normalized = transform?.call(transaction) ?? transaction;
@@ -811,7 +801,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       }
       final txHistoryStreamSubscription = await _eventStreamingManager
           .subscribeToTxHistory(coin: asset.id.id);
-      if (!await _isWalletContextCurrent(walletContext)) {
+      if (!_isWalletContextCurrentSync(walletContext)) {
         await txHistoryStreamSubscription.cancel();
         return;
       }
@@ -973,7 +963,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       final pubkeys =
           _pubkeyManager.lastKnownForWallet(asset.id, walletContext.walletId) ??
           await _pubkeyManager.getPubkeys(asset);
-      if (!await _isWalletContextCurrent(walletContext)) return false;
+      if (!_isWalletContextCurrentSync(walletContext)) return false;
       return pubkeys.keys.any((key) => (key.gasfreeAddress ?? '').isNotEmpty);
     } catch (_) {
       return false;
@@ -1010,7 +1000,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       final status = await _client.rpc.withdraw.gaslessAccountStatus(
         coin: asset.id.id,
       );
-      if (!await _isWalletContextCurrent(walletContext) ||
+      if (!_isWalletContextCurrentSync(walletContext) ||
           capabilities.sessionGeneration != capabilitySession) {
         return false;
       }
@@ -1130,7 +1120,7 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
 
       final balanceSubscription = await _eventStreamingManager
           .subscribeToBalance(coin: asset.id.id);
-      if (!await _isWalletContextCurrent(walletContext)) {
+      if (!_isWalletContextCurrentSync(walletContext)) {
         await balanceSubscription.cancel();
         return;
       }

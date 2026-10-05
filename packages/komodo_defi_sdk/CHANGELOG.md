@@ -58,6 +58,14 @@
    box. Hive closes the refused box without awaiting the close, and the
    rebuild's delete could lose a race with it and fail, leaving that session's
    history unpersisted. The delete is now retried after a short pause.
+ - **FIX**(auth): stop the balance, pubkey and transaction history managers
+   re-verifying the wallet identity at every step of every poll. Each
+   `currentUser` read is a `get_wallet_names` and a `get_public_key_hash`
+   round trip under the auth write lock, and each poll read it up to eleven
+   times per watched asset, so an idle wallet sent both about eight times a
+   second. The managers now check the SDK session, which every sign-in,
+   sign-out and KDF restart revokes, and read the signed-in user once per
+   session.
  - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
    that fails to open as an uncaught async error even when the caller handles
    the failure, and the transaction history cache handles one by design: on a

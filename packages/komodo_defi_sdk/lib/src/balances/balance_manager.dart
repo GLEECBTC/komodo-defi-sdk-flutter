@@ -7,6 +7,7 @@ import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/shared_activation_coordinator.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_history_storage.dart';
 import 'package:komodo_defi_sdk/src/assets/asset_lookup.dart';
+import 'package:komodo_defi_sdk/src/auth/session_user_reader.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
@@ -119,6 +120,7 @@ class BalanceManager implements IBalanceManager {
   PubkeyManager? _pubkeyManager;
   final IAssetLookup _assetLookup;
   final KomodoDefiLocalAuth _auth;
+  late final SessionUserReader _sessionUser = SessionUserReader(_auth);
   final EventStreamingManager _eventStreamingManager;
   final AssetHistoryStorage _assetHistoryStorage;
 
@@ -388,22 +390,23 @@ class BalanceManager implements IBalanceManager {
     final session = await _auth.captureSessionContext();
     _auth.ensureSessionContextCurrent(session);
     await _handleSessionContextChanged(session);
-    final user = await _auth.currentUser;
     _auth.ensureSessionContextCurrent(session);
-    if (user == null) throw AuthException.notSignedIn();
+    // The identity the session last verified, not a fresh `currentUser` read:
+    // that cost two RPCs per operation. See [_requireWalletContextCurrent].
+    final observed = session.walletId;
 
     final currentWalletId = _currentWalletId;
     late final WalletId operationWalletId;
     if (currentWalletId == null) {
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
-    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      _currentWalletId = observed;
+      operationWalletId = observed;
+    } else if (isSameStableWallet(currentWalletId, observed)) {
       operationWalletId = preferEnrichedWalletIdentity(
         currentWalletId,
-        user.walletId,
+        observed,
       );
       _currentWalletId = operationWalletId;
-    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+    } else if (isDegradedWalletIdentity(currentWalletId, observed)) {
       // Same wallet, identity RPC temporarily unavailable. See the matching
       // branch in [_handleSessionContextChanged] - operate under the enriched
       // identity we already hold rather than resetting every balance watcher.
@@ -412,8 +415,8 @@ class BalanceManager implements IBalanceManager {
       // Auth streams are asynchronous. Proactively invalidate here too so a
       // caller cannot observe the prior wallet's cache before the event lands.
       _walletGeneration++;
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
+      _currentWalletId = observed;
+      operationWalletId = observed;
       await _resetState();
     }
 
@@ -433,22 +436,13 @@ class BalanceManager implements IBalanceManager {
         isSameStableWallet(context.walletId, current);
   }
 
-  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
-    if (!_isWalletContextCurrentSync(context)) return false;
-    final currentUser = await _auth.currentUser;
-    // Continues-session, not same-stable: the fresh read can observe the same
-    // wallet degraded to name-only while the identity RPC is down, which the
-    // capture path deliberately admits - rejecting it here would fail the
-    // operation during the exact blip that branch tolerates.
-    return currentUser != null &&
-        _isWalletContextCurrentSync(context) &&
-        walletIdentityContinuesSession(context.walletId, currentUser.walletId);
-  }
-
+  /// Session-scoped, not a fresh identity read: every sign-in, sign-out and
+  /// KDF restart revokes the session synchronously. Re-reading `currentUser`
+  /// here cost two RPCs per checkpoint on every balance poll.
   Future<void> _requireWalletContextCurrent(
     WalletOperationContext context,
   ) async {
-    if (await _isWalletContextCurrent(context)) return;
+    if (_isWalletContextCurrentSync(context)) return;
     throw const WalletChangedDisconnectException(
       'Wallet changed while fetching balance',
     );
@@ -874,19 +868,10 @@ class BalanceManager implements IBalanceManager {
         !_isWalletContextCurrentSync(walletContext)) {
       return;
     }
-    final user = await _auth.currentUser;
-    // Continues-session, not same-stable. [_captureWalletContext] deliberately
-    // admits a degraded (name-only) observation of this wallet and keeps the
-    // enriched identity it already holds, so this immediate re-read disagrees
-    // for as long as `get_public_key_hash` is unavailable. Returning here
-    // leaves a subscribed controller with no producer, and because the start
-    // only gets a fixed retry budget the row stays "loading" for the rest of
-    // the session over a blip the capture path exists to tolerate.
-    if (user == null ||
-        !walletIdentityContinuesSession(
-          walletContext.walletId,
-          user.walletId,
-        )) {
+    final KdfUser user;
+    try {
+      user = await _sessionUser.read(walletContext);
+    } on WalletChangedDisconnectException {
       return;
     }
     _logger.fine('Starting balance watcher for asset');
@@ -895,7 +880,7 @@ class BalanceManager implements IBalanceManager {
     final previouslyEnabledAssets = await _assetHistoryStorage.getWalletAssets(
       walletContext.walletId,
     );
-    if (!await _isWalletContextCurrent(walletContext)) return;
+    if (!_isWalletContextCurrentSync(walletContext)) return;
     final isFirstTimeEnabling = !previouslyEnabledAssets.contains(assetId.id);
 
     // Check metadata to determine if this was an imported wallet
@@ -905,7 +890,7 @@ class BalanceManager implements IBalanceManager {
     if (isNewWallet) {
       final hasAmbiguousLegacyHistory = await _assetHistoryStorage
           .hasAmbiguousLegacyHistory(walletContext.walletId);
-      if (!await _isWalletContextCurrent(walletContext)) return;
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       isNewWallet = !hasAmbiguousLegacyHistory;
     }
 
@@ -949,7 +934,7 @@ class BalanceManager implements IBalanceManager {
     try {
       // Ensure asset is activated if needed
       final isActive = await _ensureAssetActivated(asset, activateIfNeeded);
-      if (!await _isWalletContextCurrent(walletContext)) return;
+      if (!_isWalletContextCurrentSync(walletContext)) return;
 
       // If activation was requested but failed, emit error
       if (activateIfNeeded && !isActive) {
@@ -988,8 +973,11 @@ class BalanceManager implements IBalanceManager {
 
       // Mark asset as seen after successful activation
       if (isActive && isFirstTimeEnabling) {
-        await _assetHistoryStorage.addAssetToWallet(user.walletId, assetId.id);
-        if (!await _isWalletContextCurrent(walletContext)) return;
+        await _assetHistoryStorage.addAssetToWallet(
+          walletContext.walletId,
+          assetId.id,
+        );
+        if (!_isWalletContextCurrentSync(walletContext)) return;
 
         // Fetch real balance (will update from zero for new wallets)
         final balance = await getBalance(assetId);
@@ -1052,7 +1040,7 @@ class BalanceManager implements IBalanceManager {
       // still disables it.
       final balanceStreamSubscription = await _eventStreamingManager
           .subscribeToBalance(coin: assetId.id, streamerCoin: streamerHost?.id);
-      if (!await _isWalletContextCurrent(walletContext)) {
+      if (!_isWalletContextCurrentSync(walletContext)) {
         await balanceStreamSubscription.cancel();
         return;
       }
@@ -1178,7 +1166,7 @@ class BalanceManager implements IBalanceManager {
         return null;
       }
 
-      if (!await _isWalletContextCurrent(walletContext)) {
+      if (!_isWalletContextCurrentSync(walletContext)) {
         return null;
       }
 
@@ -1199,7 +1187,7 @@ class BalanceManager implements IBalanceManager {
           // without it the "fallback" reports the frozen last-known balance
           // every tick, indefinitely, and looks healthy doing it.
           final balance = await getBalance(assetId, forceRefresh: true);
-          if (!await _isWalletContextCurrent(walletContext)) return null;
+          if (!_isWalletContextCurrentSync(walletContext)) return null;
           if (enableDebugLogging) {
             _logger.info('Balance polling request completed');
           }
@@ -1312,7 +1300,7 @@ class BalanceManager implements IBalanceManager {
         // fresh value with itself and the guard can never emit.
         final previous = _balanceCache[assetId];
         final latest = await getBalance(assetId, forceRefresh: true);
-        if (!await _isWalletContextCurrent(walletContext)) return;
+        if (!_isWalletContextCurrentSync(walletContext)) return;
         final changed =
             previous == null ||
             previous.total != latest.total ||
@@ -1334,7 +1322,7 @@ class BalanceManager implements IBalanceManager {
         // Pre-fetch capture, same reason as the periodic tick above.
         final previous = _balanceCache[assetId];
         final latest = await getBalance(assetId, forceRefresh: true);
-        if (!await _isWalletContextCurrent(walletContext)) return;
+        if (!_isWalletContextCurrentSync(walletContext)) return;
         final changed =
             previous == null ||
             previous.total != latest.total ||
@@ -1447,7 +1435,7 @@ class BalanceManager implements IBalanceManager {
 
     try {
       final refreshed = await getBalance(assetId, forceRefresh: true);
-      if (!await _isWalletContextCurrent(walletContext)) return;
+      if (!_isWalletContextCurrentSync(walletContext)) return;
       _balanceCache[assetId] = refreshed;
       if (!controller.isClosed) {
         controller.add(refreshed);
@@ -1621,7 +1609,7 @@ class BalanceManager implements IBalanceManager {
         final balance = await _pubkeyManager!
             .getPubkeys(asset)
             .then<BalanceInfo>((pubkeys) => pubkeys.balance);
-        if (!await _isWalletContextCurrent(walletContext)) return;
+        if (!_isWalletContextCurrentSync(walletContext)) return;
         _balanceCache[asset.id] = balance;
 
         // If there's an active stream controller for this asset, emit the balance
@@ -1644,7 +1632,7 @@ class BalanceManager implements IBalanceManager {
             'Balance pre-cache retry ${attempt + 1}: asset not yet available',
           );
           await Future<void>.delayed(baseDelay * (attempt + 1));
-          if (!await _isWalletContextCurrent(walletContext)) return;
+          if (!_isWalletContextCurrentSync(walletContext)) return;
           continue;
         }
 
