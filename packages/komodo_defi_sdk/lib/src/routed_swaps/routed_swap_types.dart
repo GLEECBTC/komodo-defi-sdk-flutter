@@ -298,30 +298,47 @@ class RoutedSwapOffer with RoutedSwapValue {
     return totals;
   }
 
+  /// This offer guarding [minimum], one the user was already shown, when its
+  /// route still promises at least that much; otherwise null.
+  ///
+  /// Quotes seconds apart differ slightly. Keeping the minimum someone saw
+  /// while the provider's own clears it lets a small move start without
+  /// asking them again, still against a number they saw. A [minimum] at or
+  /// below this offer's own keeps this offer: the guard never loosens.
+  RoutedSwapOffer? keepingMinimum(Decimal minimum) {
+    if (minimum <= guaranteedReceive) return this;
+    final providerMinimum = Decimal.tryParse(route.toMinimum.amount);
+    if (providerMinimum == null || minimum > providerMinimum) return null;
+    return _copy(guaranteedReceive: minimum);
+  }
+
   /// A copy re-stamped with [quotedAt].
-  RoutedSwapOffer copyWith({DateTime? quotedAt}) => RoutedSwapOffer(
-    from: from,
-    to: to,
-    sellAmount: sellAmount,
-    expectedReceive: expectedReceive,
-    guaranteedReceive: guaranteedReceive,
-    kind: kind,
-    costs: costs,
-    networkFees: networkFees,
-    legs: legs,
-    quotedAt: quotedAt ?? this.quotedAt,
-    provider: provider,
-    toolKey: toolKey,
-    toolName: toolName,
-    toolLogoUrl: toolLogoUrl,
-    route: route,
-    order: order,
-    fromAddress: fromAddress,
-    toAddress: toAddress,
-    approval: approval,
-    estimatedDuration: estimatedDuration,
-    slippage: slippage,
-  );
+  RoutedSwapOffer copyWith({DateTime? quotedAt}) => _copy(quotedAt: quotedAt);
+
+  RoutedSwapOffer _copy({DateTime? quotedAt, Decimal? guaranteedReceive}) =>
+      RoutedSwapOffer(
+        from: from,
+        to: to,
+        sellAmount: sellAmount,
+        expectedReceive: expectedReceive,
+        guaranteedReceive: guaranteedReceive ?? this.guaranteedReceive,
+        kind: kind,
+        costs: costs,
+        networkFees: networkFees,
+        legs: legs,
+        quotedAt: quotedAt ?? this.quotedAt,
+        provider: provider,
+        toolKey: toolKey,
+        toolName: toolName,
+        toolLogoUrl: toolLogoUrl,
+        route: route,
+        order: order,
+        fromAddress: fromAddress,
+        toAddress: toAddress,
+        approval: approval,
+        estimatedDuration: estimatedDuration,
+        slippage: slippage,
+      );
 
   @override
   List<Object?> get props => [

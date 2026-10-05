@@ -9,6 +9,11 @@
    offer a `QuoteWorsened` carries, rounded down to the asset's decimals;
    `start` guards with that same number. `RoutedSwapManager` takes a
    `guardMargin`.
+ - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
+   offer with a minimum the user was already shown, while the route's own
+   minimum still clears it, so a small move between the review and Start
+   neither asks again nor starts against a number the user did not see. It
+   never loosens the offer's own guard.
  - **FEAT**(trading): `TradingManager.orderbookDepth` counts the asks and bids
    of many pairs in one call, without subscribing to them, cached for 20 s.
    `TradingManager` takes an optional clock for its caches, which now drop
