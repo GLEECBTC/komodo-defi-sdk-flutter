@@ -146,6 +146,67 @@ void main() {
       },
     );
 
+    test('a native sell also holds back fees charged on top in it', () async {
+      final kdf = ScriptedKdf()
+        ..always(
+          'routed_swap::quote',
+          (_) => ok({
+            'routes': [
+              routeJson(
+                from: 'ETH',
+                fromAmount: '2',
+                gasCosts: const [
+                  {'coin': 'ETH', 'amount': '0.0005'},
+                ],
+                feeCosts: const [
+                  {
+                    'name': 'Gas receiver fee',
+                    'coin': 'ETH',
+                    'amount': '0.0012',
+                    'included': false,
+                  },
+                  // Taken from what arrives, paid in another coin, or in a
+                  // token the wallet cannot resolve: none comes from ETH.
+                  {
+                    'name': 'LI.FI fee',
+                    'coin': 'ETH',
+                    'amount': '0.005',
+                    'included': true,
+                  },
+                  {
+                    'name': 'Relayer fee',
+                    'coin': 'MATIC',
+                    'amount': '1',
+                    'included': false,
+                  },
+                  {
+                    'name': 'Bridge fee',
+                    'symbol': 'ETH',
+                    'amount': '0.002',
+                    'included': false,
+                  },
+                ],
+              ),
+            ],
+          }),
+        );
+
+      final max = await managerFor(
+        kdf,
+      ).maxSellAmount(from: eth, to: usdt, balance: d('2'));
+
+      // 0.0005 * 3 + 0.0012 = 0.0027.
+      expect(
+        max,
+        RoutedSwapMaxSell(
+          amount: d('1.9973'),
+          reservedForFees: d('0.0027'),
+          feeAsset: eth,
+          reservedForProviderFees: d('0.0012'),
+        ),
+      );
+    });
+
     test('nothing to sell holds nothing back and names the gas coin', () async {
       final kdf = ScriptedKdf();
       final manager = managerFor(kdf);

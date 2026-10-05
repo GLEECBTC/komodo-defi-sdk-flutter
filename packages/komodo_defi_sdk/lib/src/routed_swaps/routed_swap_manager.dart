@@ -179,12 +179,13 @@ class RoutedSwapManager {
   }
 
   /// The largest amount of [from] that can be sold for [to] while keeping the
-  /// source chain's gas.
+  /// source chain's gas, and the provider fees the route charges on top.
   ///
   /// Interim, until the contract grows a max option of its own: a token sell
   /// may use its whole [balance], because its gas is paid in the chain's
   /// native coin; a native sell holds back the route's network fee, probed at
-  /// the full balance, times [maxSellFeeMargin].
+  /// the full balance, times [maxSellFeeMargin], and the provider fees the
+  /// probe charges on top in [from], as quoted.
   Future<RoutedSwapMaxSell> maxSellAmount({
     required AssetId from,
     required AssetId to,
@@ -219,9 +220,18 @@ class RoutedSwapManager {
     final gas = probe.networkFees
         .where((fee) => fee.assetId == from || fee.ticker == from.id)
         .fold<Decimal>(Decimal.zero, (sum, fee) => sum + fee.amount);
+    // Paid on top of the amount, so the balance needs them as it needs gas.
+    final providerFees = probe.costs
+        .where(
+          (cost) =>
+              cost.kind == RoutedSwapCostKind.providerFee &&
+              !cost.isDeductedFromReceive &&
+              cost.assetId == from,
+        )
+        .fold<Decimal>(Decimal.zero, (sum, cost) => sum + cost.amount);
 
     final decimals = from.chainId.decimals;
-    var reserve = gas * maxSellFeeMargin;
+    var reserve = gas * maxSellFeeMargin + providerFees;
     var amount = balance - reserve;
     if (decimals != null) {
       reserve = reserve.ceil(scale: decimals);
@@ -233,6 +243,7 @@ class RoutedSwapManager {
       amount: amount,
       reservedForFees: reserve,
       feeAsset: from,
+      reservedForProviderFees: providerFees,
     );
   }
 
