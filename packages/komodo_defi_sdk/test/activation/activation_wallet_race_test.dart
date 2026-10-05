@@ -195,7 +195,9 @@ void main() {
         } else if (scenario != 'success' && scenario != 'metadata_switch') {
           current = walletB;
           if (scenario == 'reset') manager.resetActivationSessionState();
-          // Other switch cases deliberately delay the auth event.
+          // Other switch cases deliberately delay the auth event. The service
+          // still revokes the session as soon as it observes wallet B.
+          auth.runtimeSessions.observe(walletB);
         }
         if (scenario == 'status_lookup_switch') {
           statusGate.complete({asset.id});
@@ -217,6 +219,7 @@ void main() {
         if (scenario == 'metadata_switch') {
           await metadataStarted.future;
           current = walletB;
+          auth.runtimeSessions.observe(walletB);
           metadataGate.complete();
         }
         await completed;

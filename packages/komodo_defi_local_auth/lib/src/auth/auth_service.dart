@@ -176,8 +176,10 @@ class KdfAuthService implements IAuthService {
     this._hostConfig, {
     SecureLocalStorage? secureStorage,
     String? lifiApiUrl,
+    Duration identityRecheckDelay = const Duration(seconds: 2),
   }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
-       _lifiApiUrl = lifiApiUrl {
+       _lifiApiUrl = lifiApiUrl,
+       _identityRecheckDelay = identityRecheckDelay {
     _logger.info('KdfAuthService initialized');
     _startHealthCheck();
     unawaited(_lockWriteOperation(_subscribeToShutdownSignals));
@@ -331,6 +333,13 @@ class KdfAuthService implements IAuthService {
   }
 
   Timer? _healthCheckTimer;
+
+  /// Re-reads of a degraded (name-only) identity; see
+  /// [KdfAuthServiceOperationsExtension._trackIdentityRecovery].
+  final Duration _identityRecheckDelay;
+  Timer? _identityRecheckTimer;
+  int _identityRechecks = 0;
+  static const int _maxIdentityRechecks = 6;
 
   /// Compound ids of wallets this session created without an imported mnemonic.
   ///
@@ -1087,6 +1096,7 @@ class KdfAuthService implements IAuthService {
     // only be acquired once the active read/write operations complete.
     await _lockWriteOperation(() async {
       _healthCheckTimer?.cancel();
+      _identityRecheckTimer?.cancel();
       await _shutdownSubscription?.cancel();
       _shutdownSubscription = null;
       await _stopKdf();
