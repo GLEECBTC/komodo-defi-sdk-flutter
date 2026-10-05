@@ -22,6 +22,17 @@ class _MockAuth extends Mock
     with RuntimeAuthFixture
     implements KomodoDefiLocalAuth {}
 
+/// Delivers session changes to the manager only when the test adds them,
+/// synchronously.
+class _SessionEventAuth extends _MockAuth {
+  final sessionEvents = StreamController<AuthSessionContext?>.broadcast(
+    sync: true,
+  );
+
+  @override
+  Stream<AuthSessionContext?> watchSessionContext() => sessionEvents.stream;
+}
+
 class _MockAssetProvider extends Mock implements IAssetProvider {}
 
 class _MockActivationCoordinator extends Mock
@@ -397,13 +408,21 @@ void main() {
     },
   );
 
-  for (final microtaskDepth in [1, 2, 3, 4]) {
+  // Delivered asynchronously, the session event clears a marker recorded
+  // after the switch. Wasm queues async-return completions, so the event can
+  // arrive before the activation continuation resumes; then only the final
+  // synchronous check keeps a stale marker out.
+  for (final (microtaskDepth, sessionEventFirst) in [
+    for (final eventFirst in [false, true])
+      for (final depth in [1, 2, 3, 4]) (depth, eventFirst),
+  ]) {
     test(
       'wallet switch after activation validation cannot skip next activation '
-      '($microtaskDepth microtasks)',
+      '($microtaskDepth microtasks'
+      '${sessionEventFirst ? ', session event first' : ''})',
       () async {
         final client = _MockApiClient();
-        final auth = _MockAuth();
+        final auth = sessionEventFirst ? _SessionEventAuth() : _MockAuth();
         final assetProvider = _MockAssetProvider();
         final activation = _MockActivationCoordinator();
         final pubkeys = _MockPubkeyManager();
@@ -427,6 +446,9 @@ void main() {
               // The service revokes the session as soon as it observes
               // another wallet, before the auth-stream event is delivered.
               auth.runtimeSessions.observe(walletB);
+              if (auth is _SessionEventAuth) {
+                auth.sessionEvents.add(auth.runtimeSessions.current);
+              }
               authChanges.add(walletB);
               switched.complete();
             }
