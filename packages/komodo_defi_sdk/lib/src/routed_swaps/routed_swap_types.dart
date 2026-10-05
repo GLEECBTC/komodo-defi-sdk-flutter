@@ -356,12 +356,12 @@ class RoutedSwapMaxSell with RoutedSwapValue {
     Decimal? reservedForProviderFees,
   }) : reservedForProviderFees = reservedForProviderFees ?? Decimal.zero;
 
-  /// What may be sold. Zero when the balance cannot even cover the gas.
+  /// What may be sold. Zero when the balance cannot even cover the fees.
   final Decimal amount;
 
   /// What was held back for fees, in [feeAsset] units: the network fee, and
-  /// [reservedForProviderFees]. Zero for a token sell, whose gas is paid in
-  /// the chain's native coin.
+  /// [reservedForProviderFees]. A token sell keeps only provider fees back,
+  /// because its gas is paid in the chain's native coin.
   final Decimal reservedForFees;
 
   /// The part of [reservedForFees] kept for provider fees the route charges

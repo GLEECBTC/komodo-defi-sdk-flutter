@@ -181,11 +181,11 @@ class RoutedSwapManager {
   /// The largest amount of [from] that can be sold for [to] while keeping the
   /// source chain's gas, and the provider fees the route charges on top.
   ///
-  /// Interim, until the contract grows a max option of its own: a token sell
-  /// may use its whole [balance], because its gas is paid in the chain's
-  /// native coin; a native sell holds back the route's network fee, probed at
-  /// the full balance, times [maxSellFeeMargin], and the provider fees the
-  /// probe charges on top in [from], as quoted.
+  /// Interim, until the contract grows a max option of its own: both hold
+  /// back the provider fees a probe at the full [balance] charges on top in
+  /// [from], as quoted; a native sell also holds back the probe's network fee
+  /// times [maxSellFeeMargin]. A token sell keeps no gas back, because its
+  /// gas is paid in the chain's native coin.
   Future<RoutedSwapMaxSell> maxSellAmount({
     required AssetId from,
     required AssetId to,
@@ -201,14 +201,6 @@ class RoutedSwapManager {
         feeAsset: from.parentId ?? from,
       );
     }
-    if (from.isChildAsset) {
-      return RoutedSwapMaxSell(
-        amount: balance,
-        reservedForFees: Decimal.zero,
-        feeAsset: from.parentId,
-      );
-    }
-
     final probe = await quote(
       from: from,
       to: to,
@@ -217,9 +209,11 @@ class RoutedSwapManager {
       order: order,
       provider: provider,
     );
-    final gas = probe.networkFees
-        .where((fee) => fee.assetId == from || fee.ticker == from.id)
-        .fold<Decimal>(Decimal.zero, (sum, fee) => sum + fee.amount);
+    final gas = from.isChildAsset
+        ? Decimal.zero
+        : probe.networkFees
+              .where((fee) => fee.assetId == from || fee.ticker == from.id)
+              .fold<Decimal>(Decimal.zero, (sum, fee) => sum + fee.amount);
     // Paid on top of the amount, so the balance needs them as it needs gas.
     final providerFees = probe.costs
         .where(
@@ -242,7 +236,10 @@ class RoutedSwapManager {
     return RoutedSwapMaxSell(
       amount: amount,
       reservedForFees: reserve,
-      feeAsset: from,
+      // A token sell with nothing held back still names its gas coin.
+      feeAsset: from.isChildAsset && reserve == Decimal.zero
+          ? from.parentId
+          : from,
       reservedForProviderFees: providerFees,
     );
   }
