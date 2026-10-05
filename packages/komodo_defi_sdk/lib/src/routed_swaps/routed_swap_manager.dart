@@ -86,6 +86,7 @@ class RoutedSwapManager {
     Duration firstReadRetryDelay = const Duration(milliseconds: 500),
     int firstReadAttempts = 3,
     DateTime Function()? now,
+    Decimal? guardMargin,
   }) : _client = client,
        _resolveAsset = resolveAsset,
        _taskNudges = taskNudges,
@@ -95,7 +96,8 @@ class RoutedSwapManager {
        _delayedAfterFailures = delayedAfterFailures,
        _firstReadRetryDelay = firstReadRetryDelay,
        _firstReadAttempts = firstReadAttempts,
-       _now = now ?? DateTime.now;
+       _now = now ?? DateTime.now,
+       _guardMargin = guardMargin ?? defaultGuardMargin;
 
   final ApiClient _client;
   final RoutedSwapAssetResolver _resolveAsset;
@@ -107,6 +109,7 @@ class RoutedSwapManager {
   final Duration _firstReadRetryDelay;
   final int _firstReadAttempts;
   final DateTime Function() _now;
+  final Decimal _guardMargin;
 
   final Map<String, _RoutedSwapSession> _sessions = {};
 
@@ -118,6 +121,15 @@ class RoutedSwapManager {
   /// KDF's figure fails the start, so the margin is generous: leftover dust
   /// is the cheaper failure.
   static final Decimal maxSellFeeMargin = Decimal.parse('3');
+
+  /// How far below the provider's minimum an offer's guaranteed receive sits.
+  ///
+  /// `init` quotes again and refuses a fresh minimum below the guard. Quotes
+  /// seconds apart differ by hundredths of a percent, and more when the
+  /// provider switches tools, so a guard equal to the minimum failed most
+  /// starts on some routes. The offer shows the guard it enforces, so a swap
+  /// still never starts against a number the user was not shown.
+  static final Decimal defaultGuardMargin = Decimal.parse('0.003');
 
   /// Wallet assets that are eligible to be quoted.
   ///
@@ -175,6 +187,7 @@ class RoutedSwapManager {
       to: to,
       order: order,
       slippage: slippage,
+      guarded: true,
     );
   }
 

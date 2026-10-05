@@ -174,12 +174,14 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
       final from = accepted?.from ?? _resolveAssetOf(freshRoute.from);
       final to = accepted?.to ?? _resolveAssetOf(freshRoute.toMinimum);
       if (from != null && to != null) {
+        // Accepting it starts a swap, so it carries a guard like a quote.
         freshOffer = _offerFrom(
           freshRoute,
           from: from,
           to: to,
           order: accepted?.order,
           slippage: accepted?.slippage,
+          guarded: true,
         );
       }
     }

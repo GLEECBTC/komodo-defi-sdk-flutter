@@ -249,12 +249,13 @@ void main() {
                 : ok(inProgress(first, 'FetchingQuote')),
           )
           // Both records match the offer; within one second the engine
-          // sorts by uuid, so the swap already followed comes first.
+          // sorts by uuid, so the swap already followed comes first. Each
+          // keeps the guard init was sent: the route's 99, less the margin.
           ..always(
             'routed_swap::history',
             (_) => historyAnswer([
-              entryJson(inProgress(first, 'FetchingQuote')),
-              entryJson(inProgress(second, 'FetchingQuote')),
+              entryJson(inProgress(first, 'FetchingQuote'), minimum: '98.703'),
+              entryJson(inProgress(second, 'FetchingQuote'), minimum: '98.703'),
             ]),
           );
         final manager = managerFor(kdf);

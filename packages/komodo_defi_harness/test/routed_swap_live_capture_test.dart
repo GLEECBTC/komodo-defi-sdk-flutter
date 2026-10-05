@@ -42,7 +42,8 @@ void main() {
         expect(offer.isCrossChain, isFalse);
         expect(offer.sellAmount, Decimal.parse('0.05'));
         expect(offer.expectedReceive, Decimal.parse('132.767617'));
-        expect(offer.guaranteedReceive, Decimal.parse('132.103779'));
+        // The provider's 132.103779 less the 0.3% guard margin.
+        expect(offer.guaranteedReceive, Decimal.parse('131.707467'));
         expect(offer.estimatedDuration, Duration.zero);
         expect(offer.approval, isNull);
         expect(offer.fromAddress, offer.toAddress);

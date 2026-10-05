@@ -245,12 +245,14 @@ RoutedSwapManager managerFor(
   int firstReadAttempts = 3,
   RoutedSwapAssetResolver? resolve,
   DateTime Function()? now,
+  Decimal? guardMargin,
 }) => RoutedSwapManager(
   client: kdf,
   resolveAsset: resolve ?? (ticker) => knownAssets[ticker],
   taskNudges: nudges,
   firstReadAttempts: firstReadAttempts,
   now: now,
+  guardMargin: guardMargin,
 );
 
 /// Runs [future] to completion on fake time and returns its value.

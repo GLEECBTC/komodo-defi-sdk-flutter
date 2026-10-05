@@ -1,5 +1,14 @@
 ## Unreleased
 
+ - **FIX**(routed-swap): a routed start no longer fails on a tiny price move.
+   `init` quotes again and refuses a fresh minimum below the guard, and
+   quotes seconds apart differ by hundredths of a percent, so a guard equal
+   to the provider's minimum failed most starts on some routes. An offer's
+   `guaranteedReceive` now sits `RoutedSwapManager.defaultGuardMargin`
+   (0.3%) below the provider's minimum, on a quote and on the re-priced
+   offer a `QuoteWorsened` carries, rounded down to the asset's decimals;
+   `start` guards with that same number. `RoutedSwapManager` takes a
+   `guardMargin`.
  - **FEAT**(trading): `TradingManager.orderbookDepth` counts the asks and bids
    of many pairs in one call, without subscribing to them, cached for 20 s.
    `TradingManager` takes an optional clock for its caches, which now drop

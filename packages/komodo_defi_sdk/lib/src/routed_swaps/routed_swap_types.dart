@@ -205,6 +205,9 @@ class RoutedSwapOffer with RoutedSwapValue {
   ///
   /// **This is the number to show.** It is also the value enforced when the
   /// swap runs: if a fresh quote falls below it, nothing is sent on-chain.
+  /// On an offer a swap can start from, it sits
+  /// `RoutedSwapManager.defaultGuardMargin` below the provider's minimum, so
+  /// a small move before the engine's own quote does not refuse the start.
   final Decimal guaranteedReceive;
 
   /// Same-chain, cross-chain, or a kind this build does not know.

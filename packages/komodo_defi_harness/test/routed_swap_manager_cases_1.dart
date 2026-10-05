@@ -85,8 +85,9 @@ void _cases1() {
       expect(offer.to, usdc);
       expect(offer.sellAmount, Decimal.parse('100.5'));
       expect(offer.expectedReceive, Decimal.parse('100.21'));
-      expect(offer.guaranteedReceive, Decimal.parse('99.71'));
-      expect(offer.slippageAllowance, Decimal.parse('0.5'));
+      // The provider's 99.71 less the 0.3% guard margin.
+      expect(offer.guaranteedReceive, Decimal.parse('99.41087'));
+      expect(offer.slippageAllowance, Decimal.parse('0.79913'));
       expect(offer.kind, RoutedSwapRouteKind.crossChain);
       expect(offer.isCrossChain, isTrue);
     });
@@ -277,7 +278,7 @@ void _cases1() {
         'amount': '100.5',
         // The guaranteed receive: the expected one would fail nearly every
         // swap QuoteWorsened.
-        'min_to_amount': '99.71',
+        'min_to_amount': '99.41087',
         'slippage': 0.01,
         'order': 'fastest',
         'provider': 'lifi',
