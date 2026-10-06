@@ -1,6 +1,7 @@
 // @ts-check
 import init, { LogLevel } from "../kdf/bin/kdflib.js";
 import * as kdflib from "../kdf/bin/kdflib.js";
+import { loadCompressedWasm } from "./wasm_loader.js";
 
 const LOG_LEVEL = LogLevel.Info;
 
@@ -42,7 +43,11 @@ kdf.init_wasm = async function () {
     }
 
     kdf._isInitializing = true;
-    kdf._initPromise = init()
+    const gzipWasmBinPath = "../kdf/bin/kdflib_bg.wasm.gz"
+    const gzipKdfBinUrl = new URL(gzipWasmBinPath, import.meta.url);
+    const kdfBinBuffer = await loadCompressedWasm(gzipKdfBinUrl);
+
+    kdf._initPromise = init(kdfBinBuffer)
         .then(() => {
             kdf._isInitializing = false;
             kdf._initPromise = null;
