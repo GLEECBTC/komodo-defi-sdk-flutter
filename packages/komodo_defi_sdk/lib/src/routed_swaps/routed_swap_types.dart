@@ -366,25 +366,36 @@ class RoutedSwapOffer with RoutedSwapValue {
   ];
 }
 
-/// The largest amount that can be sold while keeping the source chain's gas.
+/// The largest amount that can be sold while keeping what its fees need.
 class RoutedSwapMaxSell with RoutedSwapValue {
   /// Creates a max-sell result.
-  const RoutedSwapMaxSell({
+  RoutedSwapMaxSell({
     required this.amount,
     required this.reservedForFees,
     this.feeAsset,
-  });
+    Decimal? reservedForProviderFees,
+  }) : reservedForProviderFees = reservedForProviderFees ?? Decimal.zero;
 
-  /// What may be sold. Zero when the balance cannot even cover the gas.
+  /// What may be sold. Zero when the balance cannot even cover the fees.
   final Decimal amount;
 
-  /// What was held back for network fees, in [feeAsset] units. Zero for a
-  /// token sell, whose gas is paid in the chain's native coin.
+  /// What was held back for fees, in [feeAsset] units: the network fee, and
+  /// [reservedForProviderFees]. A token sell keeps only provider fees back,
+  /// because its gas is paid in the chain's native coin.
   final Decimal reservedForFees;
+
+  /// The part of [reservedForFees] kept for provider fees the route charges
+  /// on top of the amount.
+  final Decimal reservedForProviderFees;
 
   /// The coin the reserve is held in, when there is one.
   final AssetId? feeAsset;
 
   @override
-  List<Object?> get props => [amount, reservedForFees, feeAsset];
+  List<Object?> get props => [
+    amount,
+    reservedForFees,
+    reservedForProviderFees,
+    feeAsset,
+  ];
 }

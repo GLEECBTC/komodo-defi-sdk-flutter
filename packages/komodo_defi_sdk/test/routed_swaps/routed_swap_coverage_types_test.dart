@@ -124,14 +124,21 @@ void main() {
       expect(approval(reset: true).hashCode, approval(reset: true).hashCode);
       expect(approval(reset: true), isNot(approval(reset: false)));
 
-      RoutedSwapMaxSell max(AssetId? feeAsset) => RoutedSwapMaxSell(
-        amount: d('0.99'),
-        reservedForFees: d('0.01'),
-        feeAsset: feeAsset,
-      );
+      RoutedSwapMaxSell max(AssetId? feeAsset, {String? providerFees}) =>
+          RoutedSwapMaxSell(
+            amount: d('0.99'),
+            reservedForFees: d('0.01'),
+            feeAsset: feeAsset,
+            reservedForProviderFees: providerFees == null
+                ? null
+                : d(providerFees),
+          );
       expect(max(eth), max(eth));
       expect(max(eth).hashCode, max(eth).hashCode);
       expect(max(eth), isNot(max(null)));
+      expect(max(eth).reservedForProviderFees, d('0'));
+      expect(max(eth), max(eth, providerFees: '0'));
+      expect(max(eth), isNot(max(eth, providerFees: '0.004')));
     });
   });
 

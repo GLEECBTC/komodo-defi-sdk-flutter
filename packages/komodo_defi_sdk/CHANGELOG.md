@@ -46,7 +46,10 @@
      For a network's own coin it keeps back three times the probed network
      fee: KDF checks the balance at start against the route's gas limit at
      its own maximum fee per gas, which runs well above the provider's
-     estimate.
+     estimate. Native and token sells alike also keep back the provider fees
+     the route charges on top in the sold coin, as quoted, and report them as
+     `RoutedSwapMaxSell.reservedForProviderFees`, so a token sell spends a
+     probe quote on that.
  - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
    now pick repositories that support price history. They asked for current
    prices, so the Komodo feed could answer a dated lookup with today's price,

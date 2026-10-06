@@ -194,15 +194,16 @@ void _cases1() {
   });
 
   group('maxSellAmount', () {
-    test('a token sells its whole balance; gas is the parent coin', () async {
-      final client = _Client(RoutedSwapFixture().build());
+    test('a token with no fee on top in it sells its whole balance', () async {
+      // The probe charges only MATIC gas, which a token keeps none back for.
+      final client = _Client((RoutedSwapFixture()..quote(route())).build());
       final max = await _managerFor(
         client,
       ).maxSellAmount(from: usdt, to: usdc, balance: Decimal.parse('250'));
       expect(max.amount, Decimal.parse('250'));
       expect(max.reservedForFees, Decimal.zero);
       expect(max.feeAsset, matic);
-      expect(client.requestsFor('routed_swap::quote'), isEmpty);
+      expect(client.paramsFor('routed_swap::quote').single['amount'], '250');
     });
 
     test('a native sell holds back 3x its network fee', () async {
