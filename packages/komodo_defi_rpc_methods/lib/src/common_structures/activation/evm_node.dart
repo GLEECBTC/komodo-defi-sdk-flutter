@@ -24,7 +24,7 @@ const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
 ///  * `mm2_wasm_lib.rs:129` says outright that it cannot wrap the async entry
 ///    in `catch_unwind`, so nothing contains it.
 ///
-/// Verified at source in the pinned artefact `4872ef2`
+/// Verified at source in the pinned artefact `7d6fd1e`
 /// (`feat/lifi-integration`): `websocket_transport.rs` still carries the
 /// `.expect("receiver channel must be alive")` at both :207 and :306.
 ///

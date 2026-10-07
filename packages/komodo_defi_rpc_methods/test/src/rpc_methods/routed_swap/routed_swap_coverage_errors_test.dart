@@ -125,9 +125,14 @@ void main() {
       expect([address.coin, address.detail], ['ETH', 'no enabled address']);
 
       final config =
-          _parse('InvalidConfig', {'message': 'lifi_api is invalid'})
+          _parse('InvalidConfig', {
+                'message': 'Could not create LI.FI Komodo proxy authentication',
+              })
               as RoutedSwapInvalidConfigException;
-      expect(config.detail, 'lifi_api is invalid');
+      expect(
+        config.detail,
+        'Could not create LI.FI Komodo proxy authentication',
+      );
 
       final transport =
           _parse('TransportError', {'message': 'unreachable'})
@@ -353,7 +358,9 @@ void main() {
         );
 
         final config = _Kdf(
-          _error('InvalidConfig', {'message': 'lifi_api is invalid'}),
+          _error('InvalidConfig', {
+            'message': 'Could not create LI.FI Komodo proxy authentication',
+          }),
         );
         await expectLater(
           config.rpc.routedSwap.supportedCoins(),

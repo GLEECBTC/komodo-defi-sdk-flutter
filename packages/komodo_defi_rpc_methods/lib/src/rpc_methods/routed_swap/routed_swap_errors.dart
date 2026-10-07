@@ -237,8 +237,9 @@ final class RoutedSwapMyAddressException extends RoutedSwapRpcException {
   final String detail;
 }
 
-/// The node's provider configuration is invalid. Operator-side; not
-/// retryable.
+/// The provider request's configuration is invalid, or KDF could not sign a
+/// LI.FI proxy request. Operator-side; not retryable. A proxy that refuses
+/// the signature arrives as [RoutedSwapProviderException] instead.
 final class RoutedSwapInvalidConfigException extends RoutedSwapRpcException {
   const RoutedSwapInvalidConfigException({
     required this.detail,
@@ -268,7 +269,8 @@ final class RoutedSwapNoRouteException extends RoutedSwapRpcException {
   final String? providerRequestId;
 }
 
-/// The provider's quota is exhausted. Slow re-quoting and retry after a pause.
+/// The provider's or the LI.FI proxy's quota is exhausted. Slow re-quoting and
+/// retry after a pause. A proxy refusal carries no [providerRequestId].
 final class RoutedSwapRateLimitedException extends RoutedSwapRpcException {
   const RoutedSwapRateLimitedException({
     required super.message,
@@ -317,7 +319,9 @@ final class RoutedSwapTransportException extends RoutedSwapRpcException {
   bool get isTransient => true;
 }
 
-/// An internal KDF failure.
+/// An internal KDF failure. From a quote this includes a LI.FI client KDF
+/// could not build: a bad `lifi_proxy_url`, or P2P off so there is no key to
+/// sign proxy requests with. Those need an operator-side fix.
 final class RoutedSwapInternalException extends RoutedSwapRpcException {
   const RoutedSwapInternalException({
     required this.detail,

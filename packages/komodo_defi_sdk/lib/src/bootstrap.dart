@@ -165,7 +165,7 @@ Future<void> bootstrap({
       kdf: framework,
       hostConfig:
           hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword),
-      lifiApiUrl: config.lifiApiUrl,
+      lifiProxyUrl: config.lifiProxyUrl,
     );
     await auth.ensureInitialized();
     return auth;

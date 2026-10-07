@@ -1968,11 +1968,11 @@ void main() {
     });
   });
 
-  test('the signed-out and wallet starts both carry lifi_api', () async {
+  test('the signed-out and wallet starts both carry lifi_proxy_url', () async {
     const url = 'https://swap.example.com/lifi';
     late _FakeKdfOperations operations;
     final service = _createService(
-      lifiApiUrl: url,
+      lifiProxyUrl: url,
       onOperationsCreated: (created) =>
           (operations = created)._isRunning = false,
     );
@@ -1987,7 +1987,15 @@ void main() {
       null,
       'new-wallet',
     ]);
-    expect(operations.starts.map((params) => params['lifi_api']), [url, url]);
+    expect(operations.starts.map((params) => params['lifi_proxy_url']), [
+      url,
+      url,
+    ]);
+    // KDF signs proxy requests with its P2P key, so neither start turns it off.
+    expect(
+      operations.starts.map((params) => params['disable_p2p']),
+      everyElement(isNot(isTrue)),
+    );
   });
 }
 
@@ -2046,7 +2054,7 @@ KdfAuthService _createService({
   Future<Map<String, dynamic>> Function()? walletNamesResponseHandler,
   void Function(_FakeKdfOperations operations)? onOperationsCreated,
   SecureLocalStorage? secureStorage,
-  String? lifiApiUrl,
+  String? lifiProxyUrl,
 }) {
   final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
   final operations = _FakeKdfOperations(
@@ -2101,7 +2109,7 @@ KdfAuthService _createService({
     framework,
     hostConfig,
     secureStorage: secureStorage,
-    lifiApiUrl: lifiApiUrl,
+    lifiProxyUrl: lifiProxyUrl,
   );
 }
 

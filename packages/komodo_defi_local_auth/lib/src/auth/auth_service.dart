@@ -175,10 +175,10 @@ class KdfAuthService implements IAuthService {
     this._kdfFramework,
     this._hostConfig, {
     SecureLocalStorage? secureStorage,
-    String? lifiApiUrl,
+    String? lifiProxyUrl,
     Duration identityRecheckDelay = const Duration(seconds: 2),
   }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
-       _lifiApiUrl = lifiApiUrl,
+       _lifiProxyUrl = lifiProxyUrl,
        _identityRecheckDelay = identityRecheckDelay {
     _logger.info('KdfAuthService initialized');
     _startHealthCheck();
@@ -187,7 +187,7 @@ class KdfAuthService implements IAuthService {
 
   final KomodoDefiFramework _kdfFramework;
   final IKdfHostConfig _hostConfig;
-  final String? _lifiApiUrl;
+  final String? _lifiProxyUrl;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage;
@@ -1109,7 +1109,7 @@ class KdfAuthService implements IAuthService {
       KdfStartupConfig.noAuthStartup(
         rpcPassword: _hostConfig.rpcPassword,
         rpcPort: _hostConfig.port,
-        lifiApiUrl: _lifiApiUrl,
+        lifiProxyUrl: _lifiProxyUrl,
       );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {

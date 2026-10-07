@@ -1,7 +1,7 @@
 ## Unreleased
 
  - **FEAT**(auth): `KomodoDefiLocalAuth` and `KdfAuthService` take
-   `lifiApiUrl` and write it to the signed-out and wallet startup confs.
+   `lifiProxyUrl` and write it to the signed-out and wallet startup confs.
  - **FIX**(auth): re-read a degraded identity until KDF answers
    `get_public_key_hash` again. A failed identity read leaves a name-only
    user, and GasFree stays paused until an enriched one is emitted; the SDK

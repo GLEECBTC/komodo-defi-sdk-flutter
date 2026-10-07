@@ -300,9 +300,13 @@ void _cases1() {
             'message': 'HD wallet has no enabled address',
           },
         },
-        RoutedSwapQuoteError.invalidConfig('lifi_api is not a URL'): {
-          'error': 'lifi_api is not a URL',
-          'error_data': {'message': 'lifi_api is not a URL'},
+        RoutedSwapQuoteError.invalidConfig(
+          'Could not create LI.FI Komodo proxy authentication',
+        ): {
+          'error': 'Could not create LI.FI Komodo proxy authentication',
+          'error_data': {
+            'message': 'Could not create LI.FI Komodo proxy authentication',
+          },
         },
         RoutedSwapQuoteError.noRouteFound(
           reasons: const ['Amount too low (across)'],

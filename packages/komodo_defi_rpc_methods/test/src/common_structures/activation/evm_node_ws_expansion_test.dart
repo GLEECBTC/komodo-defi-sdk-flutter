@@ -18,7 +18,7 @@ import 'package:test/test.dart';
 /// assert the behaviour of the build that runs them. Both are currently off:
 /// `_kSendWsNodesOnNative` because the native rollout is unmeasured, and
 /// `_kSendWsNodesOnWeb` because the pinned KDF (`feat/lifi-integration`,
-/// `4872ef2`) still panics
+/// `7d6fd1e`) still panics
 /// at `websocket_transport.rs:207` on a response that lands after the caller's
 /// 10s timeout but inside the 30s notifier window - and a wasm panic takes the
 /// whole instance down. See `docs/WALLET_LOAD_MEASUREMENT.md`.

@@ -18,9 +18,9 @@
    of many pairs in one call, without subscribing to them, cached for 20 s.
    `TradingManager` takes an optional clock for its caches, which now drop
    expired answers instead of keeping every one.
- - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiApiUrl` sends KDF's LI.FI
-   requests to a proxy instead of the public API; bootstrap hands it to every
-   KDF start.
+ - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiProxyUrl` sends KDF's LI.FI
+   requests through a Komodo proxy instead of the public API; bootstrap hands
+   it to every KDF start.
  - **FEAT**(routed-swap): add `RoutedSwapManager`, exposed as
    `KomodoDefiSdk.routedSwaps`. A liquidity source separate from `trading`'s
    atomic-swap orderbook: KDF executes the swap against an external aggregator,

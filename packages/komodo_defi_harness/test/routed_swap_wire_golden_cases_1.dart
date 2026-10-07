@@ -176,12 +176,20 @@ void _cases1() {
 
       final config =
           thrown(
-                _rpcError('InvalidConfig', 'lifi_api is invalid', {
-                  'message': 'lifi_api is invalid',
-                }),
+                _rpcError(
+                  'InvalidConfig',
+                  'Could not create LI.FI Komodo proxy authentication',
+                  {
+                    'message':
+                        'Could not create LI.FI Komodo proxy authentication',
+                  },
+                ),
               )
               as rpc.RoutedSwapInvalidConfigException;
-      expect(config.detail, 'lifi_api is invalid');
+      expect(
+        config.detail,
+        'Could not create LI.FI Komodo proxy authentication',
+      );
 
       final noRoute =
           thrown(

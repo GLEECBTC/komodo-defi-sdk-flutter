@@ -513,7 +513,7 @@ extension KdfExtensions on KdfAuthService {
       allowWeakPassword: allowWeakPassword,
       seedNodes: seedNodes,
       netid: netId,
-      lifiApiUrl: _lifiApiUrl,
+      lifiProxyUrl: _lifiProxyUrl,
     );
   }
 }

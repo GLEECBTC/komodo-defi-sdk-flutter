@@ -322,8 +322,8 @@ final class RoutedSwapNoRouteTaskError extends RoutedSwapTaskError {
   List<Object?> get props => [reasons, providerRequestId];
 }
 
-/// The provider's quota was exhausted during the internal re-quote. Nothing
-/// was sent.
+/// The provider's or the LI.FI proxy's quota was exhausted during the internal
+/// re-quote. Nothing was sent.
 final class RoutedSwapRateLimitedTaskError extends RoutedSwapTaskError {
   const RoutedSwapRateLimitedTaskError({this.providerRequestId});
 

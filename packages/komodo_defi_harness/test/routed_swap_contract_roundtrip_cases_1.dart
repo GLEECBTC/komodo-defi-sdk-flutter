@@ -91,11 +91,11 @@ void _cases1() {
         'no enabled address',
       ),
       RoutedSwapQuoteError.invalidConfig(
-        'bad lifi_api',
+        'Could not create LI.FI Komodo proxy authentication',
       ): isA<rpc.RoutedSwapInvalidConfigException>().having(
         (e) => e.detail,
         'detail',
-        'bad lifi_api',
+        'Could not create LI.FI Komodo proxy authentication',
       ),
       RoutedSwapQuoteError.noRouteFound(
         reasons: const ['too low (across)'],
@@ -123,11 +123,11 @@ void _cases1() {
         'unreachable',
       ),
       RoutedSwapQuoteError.internalError(
-        'boom',
+        'LI.FI Komodo proxy requires P2P to be enabled and initialized',
       ): isA<rpc.RoutedSwapInternalException>().having(
         (e) => e.detail,
         'detail',
-        'boom',
+        'LI.FI Komodo proxy requires P2P to be enabled and initialized',
       ),
     };
     for (final MapEntry(key: error, value: matcher) in expected.entries) {

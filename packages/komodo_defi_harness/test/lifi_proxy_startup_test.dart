@@ -24,19 +24,24 @@ Future<List<Map<String, dynamic>>> _startConfs(
 }
 
 void main() {
-  test('the sign-in start carries the configured LI.FI URL', () async {
+  test('the sign-in start carries the configured LI.FI proxy URL', () async {
     const url = 'https://swap.example.com/lifi';
     final starts = await _startConfs(
-      const KomodoDefiSdkConfig(lifiApiUrl: url),
+      const KomodoDefiSdkConfig(lifiProxyUrl: url),
     );
 
     expect(starts.single['wallet_name'], 'harness-wallet');
-    expect(starts.single['lifi_api'], url);
+    expect(starts.single['lifi_proxy_url'], url);
+    // KDF signs proxy requests with its P2P key.
+    expect(starts.single['disable_p2p'], isNot(isTrue));
   });
 
-  test('KDF keeps its default LI.FI URL when none is configured', () async {
-    final starts = await _startConfs(const KomodoDefiSdkConfig());
+  test(
+    'KDF stays on the public LI.FI API when no proxy is configured',
+    () async {
+      final starts = await _startConfs(const KomodoDefiSdkConfig());
 
-    expect(starts.single, isNot(contains('lifi_api')));
-  });
+      expect(starts.single, isNot(contains('lifi_proxy_url')));
+    },
+  );
 }
