@@ -1,11 +1,74 @@
 ## Unreleased
 
+ - **FIX**(routed-swap): a routed start no longer fails on a tiny price move.
+   `init` quotes again and refuses a fresh minimum below the guard, and
+   quotes seconds apart differ by hundredths of a percent, so a guard equal
+   to the provider's minimum failed most starts on some routes. An offer's
+   `guaranteedReceive` now sits `RoutedSwapManager.defaultGuardMargin`
+   (0.3%) below the provider's minimum, on a quote and on the re-priced
+   offer a `QuoteWorsened` carries, rounded down to the asset's decimals;
+   `start` guards with that same number. `RoutedSwapManager` takes a
+   `guardMargin`.
+ - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
+   offer with a minimum the user was already shown, while the route's own
+   minimum still clears it, so a small move between the review and Start
+   neither asks again nor starts against a number the user did not see. It
+   never loosens the offer's own guard.
+ - **FEAT**(trading): `TradingManager.orderbookDepth` counts the asks and bids
+   of many pairs in one call, without subscribing to them, cached for 20 s.
+   `TradingManager` takes an optional clock for its caches, which now drop
+   expired answers instead of keeping every one.
+ - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiProxyUrl` sends KDF's LI.FI
+   requests through a Komodo proxy instead of the public API; bootstrap hands
+   it to every KDF start.
+ - **FEAT**(routed-swap): add `RoutedSwapManager`, exposed as
+   `KomodoDefiSdk.routedSwaps`. A liquidity source separate from `trading`'s
+   atomic-swap orderbook: KDF executes the swap against an external aggregator,
+   and the manager hides the task lifecycle behind a `RoutedSwapHandle`.
+ - **FEAT**(routed-swap): rewrite `RoutedSwapManager`.
+   - **Following a swap:** each swap is followed by one session that replays
+     its latest state, keeps polling whether or not anyone listens, and
+     emits only real changes.
+   - **Resuming:** `watch(uuid)` picks a swap back up after a restart;
+     `inFlight()` and paged `history()` list what is running and what has
+     finished.
+   - **Tasks that disappear:** a task that vanished, or whose id KDF has
+     reused for another swap after a restart, is resolved against history.
+   - **Finishing:** a finished task's result is read once with
+     `forget_if_finished`, then released.
+   - **Starting:** `start` passes the route order through, retries the first
+     status read, and otherwise finds the swap it created in history. If the
+     start still can't be confirmed, it raises
+     `RoutedSwapStartUnconfirmedException` rather than inviting a second
+     start.
+   - **Cancelling:** refusals are typed.
+   - **Max:** `maxSellAmount` is an interim Max until the contract has one.
+     For a network's own coin it keeps back three times the probed network
+     fee: KDF checks the balance at start against the route's gas limit at
+     its own maximum fee per gas, which runs well above the provider's
+     estimate. Native and token sells alike also keep back the provider fees
+     the route charges on top in the sold coin, as quoted, and report them as
+     `RoutedSwapMaxSell.reservedForProviderFees`, so a token sell spends a
+     probe quote on that.
+ - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
+   now pick repositories that support price history. They asked for current
+   prices, so the Komodo feed could answer a dated lookup with today's price,
+   and CoinPaprika skipped coins outside its bulk tickers although its
+   historical endpoint serves them.
  - **FIX**(history): stop the transaction cache falling back to memory when it
    rebuilds a box Hive refused to open, which a native install does once when
    it upgrades past the AES-CBC cache, and again after a lost key or a corrupt
    box. Hive closes the refused box without awaiting the close, and the
    rebuild's delete could lose a race with it and fail, leaving that session's
    history unpersisted. The delete is now retried after a short pause.
+ - **FIX**(auth): stop the balance, pubkey and transaction history managers
+   re-verifying the wallet identity at every step of every poll. Each
+   `currentUser` read is a `get_wallet_names` and a `get_public_key_hash`
+   round trip under the auth write lock, and each poll read it up to eleven
+   times per watched asset, so an idle wallet sent both about eight times a
+   second. The managers now check the SDK session, which every sign-in,
+   sign-out and KDF restart revokes, and read the signed-in user once per
+   session.
  - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
    that fails to open as an uncaught async error even when the caller handles
    the failure, and the transaction history cache handles one by design: on a
@@ -30,12 +93,6 @@ Patch release of SDK 0.8.0; no migration is needed. See the
    no error handler is logged instead of reported as uncaught.
  - **CHORE**(deps): require `komodo_defi_framework` `^0.6.1` and
    `komodo_defi_local_auth` `^0.6.1`.
-
- - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
-   now pick repositories that support price history. They asked for current
-   prices, so the Komodo feed could answer a dated lookup with today's price,
-   and CoinPaprika skipped coins outside its bulk tickers although its
-   historical endpoint serves them.
 
 ## 0.8.0 (2026-09-24)
 

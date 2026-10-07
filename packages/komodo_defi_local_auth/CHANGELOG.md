@@ -1,3 +1,13 @@
+## Unreleased
+
+ - **FEAT**(auth): `KomodoDefiLocalAuth` and `KdfAuthService` take
+   `lifiProxyUrl` and write it to the signed-out and wallet startup confs.
+ - **FIX**(auth): re-read a degraded identity until KDF answers
+   `get_public_key_hash` again. A failed identity read leaves a name-only
+   user, and GasFree stays paused until an enriched one is emitted; the SDK
+   managers' frequent reads used to recover it as a side effect. The service
+   now re-reads it itself, backing off from 2 s, and stops after six tries.
+
 ## 0.6.1 (2026-09-28)
 
 Patch release for SDK 0.8.1; no migration from 0.6.0.

@@ -231,9 +231,15 @@ jobs:
           BRANCH="${{ needs.check-for-updates.outputs.branch }}"
           NEW_COMMIT="${{ needs.check-for-updates.outputs.new_commit }}"
           SHORT_COMMIT="${NEW_COMMIT:0:7}"
+          # `BRANCH` names a branch of the KDF repository, not of this one, and
+          # it is not a legal ref component once it contains a `/` segment that
+          # no SDK branch shares. Slugify it for the head branch and target the
+          # ref this workflow is running from, or the roll opens a PR against a
+          # base that does not exist here.
+          SAFE_BRANCH="${BRANCH//\//-}"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "GitHub Actions"
-          git checkout -b kdf-roll/$BRANCH-$SHORT_COMMIT
+          git checkout -b "kdf-roll/$SAFE_BRANCH-$SHORT_COMMIT"
 
       - name: Roll KDF version
         id: roll-version
@@ -313,6 +319,7 @@ jobs:
           BRANCH="${{ needs.check-for-updates.outputs.branch }}"
           NEW_COMMIT="${{ needs.check-for-updates.outputs.new_commit }}"
           SHORT_COMMIT="${NEW_COMMIT:0:7}"
+          SAFE_BRANCH="${BRANCH//\//-}"
 
           PR_TITLE="chore: roll KDF version to commit $SHORT_COMMIT for branch $BRANCH"
           PR_BODY="This PR rolls the KDF version to the latest commit ($SHORT_COMMIT) for the '$BRANCH' branch.
@@ -325,5 +332,5 @@ jobs:
           gh pr create \
             --title "$PR_TITLE" \
             --body "$PR_BODY" \
-            --base "$BRANCH" \
-            --head "kdf-roll/$BRANCH-$SHORT_COMMIT"
+            --base "${{ github.ref_name }}" \
+            --head "kdf-roll/$SAFE_BRANCH-$SHORT_COMMIT"
