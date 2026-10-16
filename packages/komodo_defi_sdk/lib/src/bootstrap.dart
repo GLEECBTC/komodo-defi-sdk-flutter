@@ -165,6 +165,7 @@ Future<void> bootstrap({
       kdf: framework,
       hostConfig:
           hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword),
+      lifiProxyUrl: config.lifiProxyUrl,
     );
     await auth.ensureInitialized();
     return auth;
@@ -402,6 +403,20 @@ Future<void> bootstrap({
       eventStreamingManager: eventStreamingManager,
     );
   }, dependsOn: [ApiClient, EventStreamingManager]);
+
+  container.registerSingletonAsync<RoutedSwapManager>(() async {
+    final client = await container.getAsync<ApiClient>();
+    final assets = await container.getAsync<AssetManager>();
+    final framework = await container.getAsync<KomodoDefiFramework>();
+    return RoutedSwapManager(
+      client: client,
+      resolveAsset: (ticker) {
+        final matches = assets.findAssetsByConfigId(ticker);
+        return matches.isEmpty ? null : matches.first.id;
+      },
+      taskNudges: (taskId) => framework.streaming.taskEventsForId(taskId),
+    );
+  }, dependsOn: [ApiClient, AssetManager, KomodoDefiFramework]);
 
   container.registerSingletonAsync<LegacyWithdrawalManager>(() async {
     final client = await container.getAsync<ApiClient>();

@@ -103,6 +103,37 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
     );
   }
 
+  /// Re-reads a degraded identity until KDF answers `get_public_key_hash`.
+  ///
+  /// A name-only user means the identity RPC failed, typically while a web
+  /// login's activation fan-out saturates KDF. GasFree stays paused until an
+  /// enriched identity is emitted, and the SDK managers no longer re-read the
+  /// user on every poll, so nothing else would ask again promptly. The
+  /// re-reads back off from [_identityRecheckDelay] and stop after
+  /// [KdfAuthService._maxIdentityRechecks]; the periodic health check and any
+  /// later read can still enrich the identity.
+  void _trackIdentityRecovery(KdfUser? user) {
+    if (user == null || user.walletId.hasFullIdentity) {
+      _identityRecheckTimer?.cancel();
+      _identityRecheckTimer = null;
+      _identityRechecks = 0;
+      return;
+    }
+    if (_isDisposed ||
+        _identityRecheckTimer != null ||
+        _identityRechecks >= KdfAuthService._maxIdentityRechecks) {
+      return;
+    }
+    final delay = _identityRecheckDelay * (1 << _identityRechecks);
+    _identityRechecks++;
+    _identityRecheckTimer = Timer(delay, () {
+      _identityRecheckTimer = null;
+      if (_isDisposed || _lastEmittedUser == null) return;
+      // The read emits what it finds, which clears or re-arms this.
+      getActiveUser().ignore();
+    });
+  }
+
   Future<void> _checkKdfHealth() async {
     try {
       await _lockWriteOperation(() async {

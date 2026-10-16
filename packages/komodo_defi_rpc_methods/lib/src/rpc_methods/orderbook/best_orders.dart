@@ -39,25 +39,57 @@ class BestOrdersRequest
       BestOrdersResponse.parse(json);
 }
 
-/// Response containing best orders list
+/// Response containing the best orders for each coin that trades against the
+/// requested one
 class BestOrdersResponse extends BaseResponse {
-  BestOrdersResponse({required super.mmrpc, required this.orders});
+  BestOrdersResponse({
+    required super.mmrpc,
+    required this.orders,
+    required this.originalTickers,
+  });
 
   factory BestOrdersResponse.parse(JsonMap json) {
     final result = json.value<JsonMap>('result');
+    final orders = result.value<JsonMap>('orders');
+    final originalTickers = result.value<JsonMap>('original_tickers');
 
     return BestOrdersResponse(
-      mmrpc: json.value<String>('mmrpc'),
-      orders: result.value<JsonList>('orders').map(OrderInfo.fromJson).toList(),
+      mmrpc: json.valueOrNull<String>('mmrpc'),
+      orders: {
+        for (final ticker in orders.keys)
+          ticker: orders
+              .value<JsonList>(ticker)
+              .map(OrderInfo.fromJson)
+              .toList(),
+      },
+      originalTickers: {
+        for (final ticker in originalTickers.keys)
+          ticker: originalTickers.value<List<String>>(ticker),
+      },
     );
   }
 
-  /// Sorted list of best orders that can fulfill the request
-  final List<OrderInfo> orders;
+  /// Each coin's orders, best first. KDF repeats an orderbook ticker's orders
+  /// (BTC) under each of its [originalTickers] (BTC-segwit), changing only
+  /// [OrderInfo.coin].
+  final Map<String, List<OrderInfo>> orders;
+
+  /// The tickers that trade under each orderbook ticker, such as
+  /// `{'BTC': ['BTC-segwit']}`, for every coin in KDF's config rather than
+  /// only those in [orders].
+  final Map<String, List<String>> originalTickers;
 
   @override
   Map<String, dynamic> toJson() => {
-    'mmrpc': mmrpc,
-    'result': {'orders': orders.map((e) => e.toJson()).toList()},
+    if (mmrpc != null) 'mmrpc': mmrpc,
+    'result': {
+      'orders': orders.map(
+        (ticker, tickerOrders) =>
+            MapEntry(ticker, tickerOrders.map((e) => e.toJson()).toList()),
+      ),
+      'original_tickers': originalTickers.map(
+        (ticker, aliases) => MapEntry(ticker, [...aliases]),
+      ),
+    },
   };
 }

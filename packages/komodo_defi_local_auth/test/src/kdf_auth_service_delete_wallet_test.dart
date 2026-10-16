@@ -26,6 +26,7 @@ class _FakeKdfOperations implements IKdfOperations {
   responseHandlersByMethod;
   bool _isRunning = true;
   int stopCount = 0;
+  final starts = <Map<String, dynamic>>[];
 
   @override
   String get operationsName => 'fake';
@@ -35,6 +36,7 @@ class _FakeKdfOperations implements IKdfOperations {
     Map<String, dynamic> startParams, {
     int? logLevel,
   }) async {
+    starts.add(startParams);
     _isRunning = true;
     return KdfStartupResult.ok;
   }
@@ -1965,6 +1967,36 @@ void main() {
       expect(names, ['new-wallet']);
     });
   });
+
+  test('the signed-out and wallet starts both carry lifi_proxy_url', () async {
+    const url = 'https://swap.example.com/lifi';
+    late _FakeKdfOperations operations;
+    final service = _createService(
+      lifiProxyUrl: url,
+      onOperationsCreated: (created) =>
+          (operations = created)._isRunning = false,
+    );
+    addTearDown(service.dispose);
+
+    await service.register(
+      walletName: 'new-wallet',
+      password: 'correct horse battery staple',
+    );
+
+    expect(operations.starts.map((params) => params['wallet_name']), [
+      null,
+      'new-wallet',
+    ]);
+    expect(operations.starts.map((params) => params['lifi_proxy_url']), [
+      url,
+      url,
+    ]);
+    // KDF signs proxy requests with its P2P key, so neither start turns it off.
+    expect(
+      operations.starts.map((params) => params['disable_p2p']),
+      everyElement(isNot(isTrue)),
+    );
+  });
 }
 
 const _publicKeyHash = '05aab5342166f8594baf17a7d9bef5d567443327';
@@ -2022,6 +2054,7 @@ KdfAuthService _createService({
   Future<Map<String, dynamic>> Function()? walletNamesResponseHandler,
   void Function(_FakeKdfOperations operations)? onOperationsCreated,
   SecureLocalStorage? secureStorage,
+  String? lifiProxyUrl,
 }) {
   final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
   final operations = _FakeKdfOperations(
@@ -2072,7 +2105,12 @@ KdfAuthService _createService({
     kdfOperations: operations,
   );
 
-  return KdfAuthService(framework, hostConfig, secureStorage: secureStorage);
+  return KdfAuthService(
+    framework,
+    hostConfig,
+    secureStorage: secureStorage,
+    lifiProxyUrl: lifiProxyUrl,
+  );
 }
 
 KdfUser _testUser() {

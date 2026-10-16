@@ -58,26 +58,67 @@ class SwapInfo {
     this.takerAmountRat,
     this.makerAmountFraction,
     this.makerAmountRat,
+    this.eventTypes = const [],
+    this.isFinishedFlag,
   });
 
   /// Creates a [SwapInfo] instance from a JSON map.
   ///
-  /// Parses the swap information from the API response format.
+  /// Accepts a bare saved swap (which carries its own `type`) or the v2
+  /// `{swap_type, swap_data}` envelope that `my_swap_status`,
+  /// `my_recent_swaps` and `active_swaps` return. Inside the envelope a
+  /// legacy swap has no `type` and may lack its order uuid and amounts, and a
+  /// v2-protocol swap reports `my_coin`/`other_coin` and volumes instead;
+  /// missing strings read as empty rather than failing the whole swap.
   factory SwapInfo.fromJson(JsonMap json) {
+    final data = json.valueOrNull<JsonMap>('swap_data');
+    if (data != null) {
+      return SwapInfo._fromSwapData(
+        data,
+        json.valueOrNull<String>('swap_type'),
+      );
+    }
+    return SwapInfo._fromSwapData(json, null);
+  }
+
+  factory SwapInfo._fromSwapData(JsonMap json, String? swapType) {
+    final type =
+        json.valueOrNull<String>('type') ??
+        switch (swapType) {
+          'MakerV1' || 'MakerV2' => 'Maker',
+          'TakerV1' || 'TakerV2' => 'Taker',
+          _ => swapType ?? '',
+        };
+    final isTaker = type == 'Taker';
+    final myCoin = json.valueOrNull<String>('my_coin');
+    final otherCoin = json.valueOrNull<String>('other_coin');
+    String volume(String key) =>
+        json.valueOrNull<JsonMap>(key)?.valueOrNull<String>('decimal') ?? '';
     return SwapInfo(
       uuid: json.value<String>('uuid'),
-      myOrderUuid: json.value<String>('my_order_uuid'),
-      takerAmount: json.value<String>('taker_amount'),
-      takerCoin: json.value<String>('taker_coin'),
-      makerAmount: json.value<String>('maker_amount'),
-      makerCoin: json.value<String>('maker_coin'),
-      type: json.value<String>('type'),
+      myOrderUuid: json.valueOrNull<String>('my_order_uuid') ?? '',
+      takerAmount:
+          json.valueOrNull<String>('taker_amount') ?? volume('taker_volume'),
+      takerCoin:
+          json.valueOrNull<String>('taker_coin') ??
+          (isTaker ? myCoin : otherCoin) ??
+          '',
+      makerAmount:
+          json.valueOrNull<String>('maker_amount') ?? volume('maker_volume'),
+      makerCoin:
+          json.valueOrNull<String>('maker_coin') ??
+          (isTaker ? otherCoin : myCoin) ??
+          '',
+      type: type,
       gui: json.valueOrNull<String?>('gui'),
       mmVersion: json.valueOrNull<String?>('mm_version'),
-      successEvents: json.value<List<String>>('success_events'),
-      errorEvents: json.value<List<String>>('error_events'),
+      successEvents:
+          json.valueOrNull<List<String>>('success_events') ?? const [],
+      errorEvents: json.valueOrNull<List<String>>('error_events') ?? const [],
       startedAt: json.valueOrNull<int?>('started_at'),
       finishedAt: json.valueOrNull<int?>('finished_at'),
+      eventTypes: _eventTypesOf(json.valueOrNull<List<dynamic>>('events')),
+      isFinishedFlag: json.valueOrNull<bool>('is_finished'),
       takerAmountFraction:
           json.valueOrNull<JsonMap>('taker_amount_fraction') != null
               ? Fraction.fromJson(json.value<JsonMap>('taker_amount_fraction'))
@@ -188,6 +229,18 @@ class SwapInfo {
   /// Optional rational representation of the maker amount
   final Rational? makerAmountRat;
 
+  /// The types of the events that have actually happened, in order.
+  ///
+  /// Not to be confused with [successEvents] and [errorEvents], which KDF
+  /// reports as the *static* lists of event names that count as success or
+  /// error for this swap type — [errorEvents] is never empty, so it says
+  /// nothing about whether an error occurred. Whether one did is answered by
+  /// intersecting it with these.
+  final List<String> eventTypes;
+
+  /// KDF's own `is_finished` flag, when the payload carries one.
+  final bool? isFinishedFlag;
+
   /// Converts this [SwapInfo] instance to a JSON map.
   ///
   /// The resulting map can be serialized to JSON and follows the
@@ -206,6 +259,14 @@ class SwapInfo {
     'error_events': errorEvents,
     if (startedAt != null) 'started_at': startedAt,
     if (finishedAt != null) 'finished_at': finishedAt,
+    if (eventTypes.isNotEmpty)
+      'events': [
+        for (final type in eventTypes)
+          {
+            'event': {'type': type},
+          },
+      ],
+    if (isFinishedFlag != null) 'is_finished': isFinishedFlag,
     if (takerAmountFraction != null)
       'taker_amount_fraction': takerAmountFraction!.toJson(),
     if (takerAmountRat != null)
@@ -218,13 +279,26 @@ class SwapInfo {
 
   /// Whether this swap has completed (successfully or with failure).
   ///
-  /// A swap is considered complete if it has a [finishedAt] timestamp.
-  bool get isComplete => finishedAt != null;
+  /// Complete when it has a [finishedAt] timestamp, KDF flags it finished,
+  /// or its event log contains `Finished`.
+  bool get isComplete =>
+      finishedAt != null ||
+      (isFinishedFlag ?? false) ||
+      eventTypes.contains('Finished');
 
-  /// Whether this swap completed successfully.
+  /// Whether an error event has actually occurred.
   ///
-  /// A swap is successful if it's complete and has no error events.
-  bool get isSuccessful => isComplete && errorEvents.isEmpty;
+  /// [errorEvents] alone cannot answer this: it is the static list of event
+  /// names that would count as errors, and it is never empty. A v2-protocol
+  /// swap reports no such list, so its abort and refund events are checked
+  /// by name.
+  bool get hasFailed => eventTypes.any(
+    (type) => errorEvents.contains(type) || _v2FailureEvents.contains(type),
+  );
+
+  /// Whether this swap completed successfully: complete, with no error event
+  /// in its log.
+  bool get isSuccessful => isComplete && !hasFailed;
 
   /// Duration of the swap in seconds.
   ///
@@ -234,3 +308,34 @@ class SwapInfo {
     return finishedAt! - startedAt!;
   }
 }
+
+/// The v2-protocol (`TakerSwapEvent`/`MakerSwapEvent`) events that mean the
+/// swap did not complete as agreed.
+const _v2FailureEvents = {
+  'Aborted',
+  'TakerFundingRefundRequired',
+  'TakerPaymentRefundRequired',
+  'MakerPaymentRefundRequired',
+  'TakerFundingRefunded',
+  'TakerPaymentRefunded',
+  'MakerPaymentRefunded',
+};
+
+/// Reads the event types from an `events` list.
+///
+/// Legacy swaps report `{timestamp, event: {type, data}}`; newer payloads have
+/// used `{event_type, event_data}` and a flat `{type}`. Anything else is
+/// skipped rather than failing the whole swap.
+List<String> _eventTypesOf(List<dynamic>? events) {
+  if (events == null) return const [];
+  final types = <String>[];
+  for (final entry in events) {
+    if (entry is! Map) continue;
+    final event = entry['event'];
+    final type =
+        event is Map ? event['type'] : entry['event_type'] ?? entry['type'];
+    if (type is String) types.add(type);
+  }
+  return types;
+}
+

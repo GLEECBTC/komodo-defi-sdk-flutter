@@ -175,7 +175,11 @@ class KdfAuthService implements IAuthService {
     this._kdfFramework,
     this._hostConfig, {
     SecureLocalStorage? secureStorage,
-  }) : _secureStorage = secureStorage ?? SecureLocalStorage() {
+    String? lifiProxyUrl,
+    Duration identityRecheckDelay = const Duration(seconds: 2),
+  }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
+       _lifiProxyUrl = lifiProxyUrl,
+       _identityRecheckDelay = identityRecheckDelay {
     _logger.info('KdfAuthService initialized');
     _startHealthCheck();
     unawaited(_lockWriteOperation(_subscribeToShutdownSignals));
@@ -183,6 +187,7 @@ class KdfAuthService implements IAuthService {
 
   final KomodoDefiFramework _kdfFramework;
   final IKdfHostConfig _hostConfig;
+  final String? _lifiProxyUrl;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage;
@@ -328,6 +333,13 @@ class KdfAuthService implements IAuthService {
   }
 
   Timer? _healthCheckTimer;
+
+  /// Re-reads of a degraded (name-only) identity; see
+  /// [KdfAuthServiceOperationsExtension._trackIdentityRecovery].
+  final Duration _identityRecheckDelay;
+  Timer? _identityRecheckTimer;
+  int _identityRechecks = 0;
+  static const int _maxIdentityRechecks = 6;
 
   /// Compound ids of wallets this session created without an imported mnemonic.
   ///
@@ -1084,6 +1096,7 @@ class KdfAuthService implements IAuthService {
     // only be acquired once the active read/write operations complete.
     await _lockWriteOperation(() async {
       _healthCheckTimer?.cancel();
+      _identityRecheckTimer?.cancel();
       await _shutdownSubscription?.cancel();
       _shutdownSubscription = null;
       await _stopKdf();
@@ -1096,6 +1109,7 @@ class KdfAuthService implements IAuthService {
       KdfStartupConfig.noAuthStartup(
         rpcPassword: _hostConfig.rpcPassword,
         rpcPort: _hostConfig.port,
+        lifiProxyUrl: _lifiProxyUrl,
       );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {

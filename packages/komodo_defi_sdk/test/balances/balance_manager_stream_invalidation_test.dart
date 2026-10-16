@@ -102,10 +102,6 @@ void main() {
   late StreamController<KdfEventDisconnection> disconnections;
   late EventStreamingManager streaming;
   late BalanceManager manager;
-  late Completer<void> walletCheck;
-  late bool holdWalletCheck;
-  late bool isEnableRequested;
-  late bool isHeld;
   late List<String> balanceLogs;
   late StreamSubscription<LogRecord> balanceLogSubscription;
 
@@ -122,22 +118,13 @@ void main() {
     disconnections = StreamController<KdfEventDisconnection>.broadcast(
       sync: true,
     );
-    walletCheck = Completer<void>();
-    isEnableRequested = false;
-    isHeld = false;
     balanceLogs = <String>[];
     balanceLogSubscription = Logger.root.onRecord
         .where((record) => record.loggerName == 'BalanceManager')
         .listen((record) => balanceLogs.add(record.message));
 
     when(() => auth.authStateChanges).thenAnswer((_) => authChanges.stream);
-    when(() => auth.currentUser).thenAnswer((_) async {
-      if (holdWalletCheck && isEnableRequested) {
-        isHeld = true;
-        await walletCheck.future;
-      }
-      return _wallet;
-    });
+    when(() => auth.currentUser).thenAnswer((_) async => _wallet);
     when(() => assetLookup.fromId(_atom.id)).thenReturn(_atom);
     when(
       () => activation.isAssetActive(_atom.id),
@@ -166,7 +153,6 @@ void main() {
           'result': {'result': 'Success'},
         };
       }
-      isEnableRequested = true;
       return {
         'mmrpc': '2.0',
         'result': {'streamer_id': 'BALANCE:${_atom.id.id}'},
@@ -196,14 +182,12 @@ void main() {
   /// Starts a watcher, disconnects streaming as sign-out does once the watcher
   /// has subscribed, and returns what escaped the watcher's zone as uncaught.
   ///
-  /// Sign-out disconnects before it signs out, so the watcher's wallet check
-  /// after subscribing, which queues on auth, still passes. With
-  /// [holdAtWalletCheck] the disconnect lands during that check, before the
-  /// watcher has set its handlers.
-  Future<List<Object>> signOutDuringWatcherStart({
-    required bool holdAtWalletCheck,
-  }) async {
-    holdWalletCheck = holdAtWalletCheck;
+  /// Sign-out disconnects before it signs out, so the session check after
+  /// subscribing still passes. That check is synchronous, so there is no await
+  /// between getting the subscription and setting its handlers any more. A
+  /// disconnect inside `subscribeToBalance` itself is held until the handlers
+  /// are set; event_streaming_manager_late_handlers_test.dart covers that.
+  Future<List<Object>> signOutDuringWatcherStart() async {
     final uncaught = <Object>[];
     final finished = Completer<void>();
     unawaited(
@@ -211,8 +195,7 @@ void main() {
         try {
           final watcher = manager.watchBalance(_atom.id).listen((_) {});
           bool isInPlace() =>
-              streaming.isStreamActive('balance:${_atom.id.id}') &&
-              isHeld == holdAtWalletCheck;
+              streaming.isStreamActive('balance:${_atom.id.id}');
           await _waitUntil(isInPlace);
           expect(
             isInPlace(),
@@ -220,7 +203,6 @@ void main() {
             reason: 'sign-out must disconnect after the watcher subscribes',
           );
           await streaming.disconnect();
-          walletCheck.complete();
           await _waitUntil(() => balanceLogs.contains(_fallbackLog));
           await watcher.cancel();
           finished.complete();
@@ -235,16 +217,7 @@ void main() {
 
   group('a sign-out disconnect while a balance watcher starts', () {
     test('moves a watcher whose handlers are set to polling', () async {
-      final uncaught = await signOutDuringWatcherStart(
-        holdAtWalletCheck: false,
-      );
-
-      expect(uncaught, isEmpty);
-      expect(balanceLogs, contains(_fallbackLog));
-    });
-
-    test('moves a watcher still at its wallet check the same way', () async {
-      final uncaught = await signOutDuringWatcherStart(holdAtWalletCheck: true);
+      final uncaught = await signOutDuringWatcherStart();
 
       expect(uncaught, isEmpty);
       expect(balanceLogs, contains(_fallbackLog));

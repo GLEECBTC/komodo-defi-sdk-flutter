@@ -1,3 +1,55 @@
+## Unreleased
+
+ - **FEAT**(routed-swap): add the `routed_swap` method namespace - quote,
+   start, status, cancel and history requests with their typed models -
+   covering aggregator-executed swaps such as cross-chain bridges.
+ - **FEAT**(routed-swap): align the models with the contract at
+   `gleec-specs#2` `0b209b2`, as emitted by KDF `feat/lifi-integration`
+   `4872ef2`:
+   - the route carries `approval`, `total_gas_costs`, addresses and typed
+     `steps`;
+   - status carries `stage`, `executed_route`, `partial_reason`, and
+     `source_tx_hash` (with a fallback to `tx_hash`);
+   - a failed task carries a sealed error type for every row of the
+     contract's error table;
+   - history carries its filters, `total_pages`, and the entry envelope with
+     timestamps, the requested side, the accepted minimum and gas spent.
+
+   Requests parse their typed errors through `RoutedSwapRpcException`.
+   Errors that happen to share a name with another method's error no longer
+   decode as that method's class.
+ - **FIX**(routed-swap): `RoutedSwapStatusResponse.toJson` and
+   `RoutedSwapHistoryResponse.toJson` write the whole wire shape, and `parse`
+   reads it back into an equal value. They wrote the swap's uuid in place of
+   its details, and an entry count in place of the entries.
+   `RoutedSwapStatus`, `RoutedSwapTaskError`, `RoutedSwapHistoryEntry` and its
+   parts gain `toJson`, and `RoutedSwapStatus.taskStatus` names the status a
+   payload is reported under.
+ - **FIX**(routed-swap): read `routed_swap::supported_coins` entries one at a
+   time. An entry the SDK cannot read, such as one with a non-EVM chain id, is
+   logged, left out and counted in `skipped`, instead of failing the whole
+   response and emptying the list of routed-swap assets.
+ - **FIX**(trading): read the v2 `{swap_type, swap_data}` envelope that
+   `my_swap_status`, `my_recent_swaps` and `active_swaps` return. The swap
+   inside has no `type` of its own (it comes from `swap_type`), a legacy swap
+   may lack its order uuid and amounts, and a v2-protocol swap reports
+   `my_coin`/`other_coin` and volumes, so each of these used to fail to parse.
+   Report `SwapInfo.isSuccessful` from the swap's events: `error_events` is
+   KDF's list of every *possible* error, not the ones that occurred, so every
+   swap used to read as failed.
+ - **FIX**(trading): send `min_trading_vol`, `max_taker_vol` and
+   `orderbook_depth` without `mmrpc`. KDF serves them only on its legacy
+   dispatcher, so every call used to fail with `NoSuchMethod`. Their answers
+   are read in the legacy shapes KDF returns. **BREAKING:**
+   `OrderbookDepthResponse.depth` is now a list of `OrderbookPairDepth` (ask
+   and bid counts per pair); the old map of orderbook snapshots never parsed.
+ - **FIX**(trading): read `best_orders` in the shape KDF returns, where
+   `result.orders` maps each ticker to its orders. The SDK read a list, so
+   every call failed to parse. **BREAKING:** `BestOrdersResponse.orders` is
+   now a `Map<String, List<OrderInfo>>`, and the constructor requires
+   `originalTickers`, the tickers each orderbook ticker's orders are repeated
+   under (BTC-segwit under BTC).
+
 ## 0.7.0 (2026-09-24)
 
  - **REFACTOR**(wallet): remove the temporary typed `show_priv_key` and
