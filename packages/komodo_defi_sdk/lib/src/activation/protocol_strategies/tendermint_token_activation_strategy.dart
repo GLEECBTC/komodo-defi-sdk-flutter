@@ -23,11 +23,12 @@ class TendermintTokenActivationStrategy extends ProtocolActivationStrategy {
   bool get supportsBatchActivation => false;
 
   @override
+  Set<AssetRole> get supportedRoles => const {AssetRole.token};
+
+  @override
   bool canHandle(Asset asset) {
-    // Use tendermint token activation for token assets (not platform assets, not trezor)
-    final isTokenAsset = asset.id.parentId != null;
-    return isTokenAsset &&
-        privKeyPolicy != const PrivateKeyPolicy.trezor() &&
+    // Use tendermint token activation unless the wallet is a Trezor
+    return privKeyPolicy != const PrivateKeyPolicy.trezor() &&
         super.canHandle(asset);
   }
 

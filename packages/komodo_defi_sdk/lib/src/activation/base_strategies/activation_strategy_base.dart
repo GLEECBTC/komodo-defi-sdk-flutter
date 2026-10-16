@@ -17,11 +17,6 @@ abstract class BatchCapableActivator extends AssetActivator {
   const BatchCapableActivator(super.client);
 
   bool get supportsBatchActivation;
-
-  /// Whether the activator supports activation of custom EVM-chain
-  /// tokens that are not part of the live coins configuration.
-  /// Defaults to false.
-  bool get supportsCustomTokenActivation => false;
 }
 
 /// Smart activator that chooses between batch/single methods
@@ -141,7 +136,23 @@ class CompositeAssetActivator extends BatchCapableActivator {
   }
 }
 
-/// Base class for protocol-specific activation implementations
+/// Whether an asset is a platform coin or a token on one.
+enum AssetRole {
+  /// An asset without a parent, such as ETH or ATOM.
+  platform,
+
+  /// A child asset activated on its platform coin, such as an ERC20 token.
+  token;
+
+  /// The role [asset] plays.
+  static AssetRole of(Asset asset) =>
+      asset.id.isChildAsset ? AssetRole.token : AssetRole.platform;
+}
+
+/// Base class for protocol-specific activation implementations.
+///
+/// [canHandle] is a template method over the [supportedProtocols],
+/// [supportedRoles] and [supportsCustomTokenActivation] hooks.
 abstract class ProtocolActivationStrategy extends BatchCapableActivator {
   const ProtocolActivationStrategy(super.client);
 
@@ -154,9 +165,23 @@ abstract class ProtocolActivationStrategy extends BatchCapableActivator {
       // | false         | true                         | true   |
       // | false         | false                        | false  |
       (!asset.protocol.isCustomToken || supportsCustomTokenActivation) &&
+      supportedRoles.contains(AssetRole.of(asset)) &&
       supportedProtocols.contains(asset.protocol.subClass);
 
   Set<CoinSubClass> get supportedProtocols;
+
+  /// Hook: whether this strategy activates platform coins, tokens or both.
+  /// Defaults to both; a protocol whose platform and tokens go to different
+  /// KDF RPCs splits them between strategies.
+  Set<AssetRole> get supportedRoles => const {
+    AssetRole.platform,
+    AssetRole.token,
+  };
+
+  /// Hook: whether this strategy supports activation of custom EVM-chain
+  /// tokens that are not part of the live coins configuration. Defaults to
+  /// false.
+  bool get supportsCustomTokenActivation => false;
 
   @protected
   ActivationProgress buildErrorProgress({

@@ -47,13 +47,9 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool get supportsBatchActivation => false;
 
+  // Trezor too: KDF gives the token its active platform's key policy.
   @override
-  bool canHandle(Asset asset) {
-    // Use erc20 activation for token assets (not platform assets), Trezor
-    // too: KDF gives the token its active platform's key policy.
-    final isTokenAsset = asset.id.parentId != null;
-    return isTokenAsset && super.canHandle(asset);
-  }
+  Set<AssetRole> get supportedRoles => const {AssetRole.token};
 
   @override
   Stream<ActivationProgress> activate(

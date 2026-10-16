@@ -53,13 +53,15 @@ class EthTaskActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool get supportsBatchActivation => true;
 
+  // KDF takes only platform tickers here; a token added later goes through
+  // enable_erc20.
+  @override
+  Set<AssetRole> get supportedRoles => const {AssetRole.platform};
+
   @override
   bool canHandle(Asset asset) {
-    // Use task-based activation for Trezor platform assets. KDF takes only
-    // platform tickers here; a token added later goes through enable_erc20.
-    final isPlatformAsset = asset.id.parentId == null;
-    return isPlatformAsset &&
-        privKeyPolicy == const PrivateKeyPolicy.trezor() &&
+    // Use task-based activation for Trezor private key policy
+    return privKeyPolicy == const PrivateKeyPolicy.trezor() &&
         super.canHandle(asset);
   }
 
