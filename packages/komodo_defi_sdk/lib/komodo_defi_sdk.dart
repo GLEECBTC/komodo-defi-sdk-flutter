@@ -43,6 +43,7 @@ export 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart'
         RoutedSwapApprovalFailureReason,
         RoutedSwapBridgeStage,
         RoutedSwapCoinNotActiveException,
+        RoutedSwapGasEstimationFailedException,
         RoutedSwapHistoryFilter,
         RoutedSwapInternalException,
         RoutedSwapInvalidConfigException,

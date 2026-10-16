@@ -95,6 +95,12 @@ sealed class RoutedSwapRpcException implements Exception {
         message: message,
         errorData: raw,
       ),
+      'GasEstimationFailed' => RoutedSwapGasEstimationFailedException(
+        coin: req('coin'),
+        detail: req('message'),
+        message: message,
+        errorData: raw,
+      ),
       'TransportError' => RoutedSwapTransportException(
         detail: req('message'),
         message: message,
@@ -299,6 +305,29 @@ final class RoutedSwapProviderException extends RoutedSwapRpcException {
 
   @override
   final String? providerRequestId;
+
+  @override
+  bool get isTransient => true;
+}
+
+/// A gas estimate the quote needs could not be established: the source or an
+/// approval transaction, on [coin]'s network. KDF returns no partial totals.
+/// A node refusing to estimate for an address without gas money reads the
+/// same as a node fault.
+final class RoutedSwapGasEstimationFailedException
+    extends RoutedSwapRpcException {
+  const RoutedSwapGasEstimationFailedException({
+    required this.coin,
+    required this.detail,
+    required super.message,
+    super.errorData,
+  }) : super(errorType: 'GasEstimationFailed');
+
+  /// The network coin whose gas could not be estimated.
+  final String coin;
+
+  /// Diagnostic text.
+  final String detail;
 
   @override
   bool get isTransient => true;

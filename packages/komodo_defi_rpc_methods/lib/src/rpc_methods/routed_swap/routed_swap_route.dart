@@ -83,7 +83,9 @@ class RoutedSwapRoute extends Equatable {
   final RoutedSwapApproval? approval;
 
   /// Per-coin sums of [gasCosts] plus the approval's gas: the single network
-  /// fee figure to display.
+  /// fee figure to display. Each total also carries
+  /// [RoutedSwapGasCost.requiredBalance], the native balance KDF checks before
+  /// it sends.
   final List<RoutedSwapGasCost> totalGasCosts;
 
   /// Per-leg breakdown.
@@ -177,7 +179,8 @@ enum RoutedSwapState {
   /// Committed to the network transport. No longer cancellable.
   broadcasting('Broadcasting'),
 
-  /// Waiting on source-chain confirmation.
+  /// Waiting on source-chain confirmation. A same-chain swap stays here while
+  /// KDF measures its payout.
   waitingSourceConfirmation('WaitingSourceConfirmation'),
 
   /// Following the bridge to the destination.
@@ -254,8 +257,9 @@ enum RoutedSwapOutcome {
   /// Delivered the requested coin at or above the accepted minimum.
   completed('completed'),
 
-  /// Delivered on the destination chain, but below the minimum or as an
-  /// intermediate token — see [RoutedSwapPartialReason].
+  /// Delivered, but below the minimum or as an intermediate token — see
+  /// [RoutedSwapPartialReason]. A same-chain swap can end here too, when its
+  /// measured payout falls short.
   partial('partial'),
 
   /// Did not happen; funds returned on the source chain.

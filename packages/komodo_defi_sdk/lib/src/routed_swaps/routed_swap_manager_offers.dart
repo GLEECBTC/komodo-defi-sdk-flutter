@@ -139,24 +139,25 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   }
 
   /// The per-coin network fee. Uses the engine's totals when present, and
-  /// otherwise sums execution and approval gas the same way — a USD value
-  /// only when every contributing row has one.
+  /// otherwise sums execution and approval gas the same way — a USD value or
+  /// a required balance only when every contributing row has one.
   List<RoutedSwapNetworkFee> _networkFeesOf(rpc.RoutedSwapRoute route) {
     final rows = route.totalGasCosts.isNotEmpty
         ? route.totalGasCosts
         : [...route.gasCosts, ...?route.approval?.gasCosts];
     final amounts = <String, Decimal>{};
     final usd = <String, Decimal?>{};
+    final required = <String, Decimal?>{};
+    Decimal? sum(Map<String, Decimal?> totals, String key, Decimal? value) =>
+        !totals.containsKey(key)
+        ? value
+        : (totals[key] == null || value == null ? null : totals[key]! + value);
     for (final row in rows) {
       final ticker = row.amount.label;
       amounts[ticker] =
           (amounts[ticker] ?? Decimal.zero) + Decimal.parse(row.amount.amount);
-      final rowUsd = _decimal(row.amountUsd);
-      usd[ticker] = !usd.containsKey(ticker)
-          ? rowUsd
-          : (usd[ticker] == null || rowUsd == null
-                ? null
-                : usd[ticker]! + rowUsd);
+      usd[ticker] = sum(usd, ticker, _decimal(row.amountUsd));
+      required[ticker] = sum(required, ticker, _decimal(row.requiredBalance));
     }
     return [
       for (final entry in amounts.entries)
@@ -165,6 +166,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
           assetId: _resolveAsset(entry.key),
           amount: entry.value,
           usdValue: usd[entry.key],
+          requiredBalance: required[entry.key],
         ),
     ];
   }

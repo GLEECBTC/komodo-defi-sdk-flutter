@@ -124,8 +124,8 @@ void main() {
       final status = _parse('Ok', _okDetails()) as RoutedSwapFinished;
       expect(status.outcome, RoutedSwapOutcome.completed);
       expect(status.partialReason, isNull);
-      expect(status.received.coin, 'USDC-POLYGON');
-      expect(status.received.amount, '1.95');
+      expect(status.received!.coin, 'USDC-POLYGON');
+      expect(status.received!.amount, '1.95');
       expect(status.sourceTxHash, '0xsource');
       expect(status.destTxHash, '0xdest');
       expect(status.providerExplorerUrl, 'https://scan.li.fi/tx/1');
@@ -161,8 +161,8 @@ void main() {
                 'received': {'symbol': 'axlUSDC', 'amount': '1.9'},
               })
               as RoutedSwapFinished;
-      expect(status.received.isKnownAsset, isFalse);
-      expect(status.received.label, 'axlUSDC');
+      expect(status.received!.isKnownAsset, isFalse);
+      expect(status.received!.label, 'axlUSDC');
       expect(status.destTxHash, isNull);
     });
   });

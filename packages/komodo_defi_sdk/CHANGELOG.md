@@ -1,5 +1,24 @@
 ## Unreleased
 
+ - **FEAT**(routed-swap): follow KDF `667045c`'s gas funding and measured
+   payouts.
+   - **Gas funding:** `RoutedSwapNetworkFee.requiredBalance` is the balance
+     KDF checks before it sends. A native Max keeps back that balance times
+     `RoutedSwapManager.maxSellFundingMargin` (1.25) instead of three times
+     the estimated fee, which on Arbitrum was too little: there KDF requires
+     several times the estimate. `RoutedSwapManager.nativeGasReserve` applies
+     the same rule to any offer. An engine that reports no required balance
+     keeps the old rule.
+   - **Payouts:** `RoutedSwapReceipt.amount` is the payout KDF measured, null
+     when it could not measure one; `reported` is the provider's figure
+     (`RoutedSwapReportedAmount`), and `isMeasured` tells the two apart.
+     `RoutedSwapProgress.providerReported` carries the provider's report while
+     the bridge is still being measured.
+   - **Failures:** `GasEstimationFailed` becomes
+     `RoutedSwapFailureKind.gasEstimationFailed`, retryable, with the coin in
+     `RoutedSwapFailure.gasCoin`.
+
+   **Breaking:** `RoutedSwapReceipt.amount` is nullable.
  - **FIX**(routed-swap): a routed start no longer fails on a tiny price move.
    `init` quotes again and refuses a fresh minimum below the guard, and
    quotes seconds apart differ by hundredths of a percent, so a guard equal

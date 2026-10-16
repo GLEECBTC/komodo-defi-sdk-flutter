@@ -61,6 +61,10 @@ sealed class RoutedSwapTaskError extends Equatable {
         min: req('min'),
         max: req('max'),
       ),
+      'GasEstimationFailed' => RoutedSwapGasEstimationFailedTaskError(
+        coin: req('coin'),
+        message: req('message'),
+      ),
       'AbortedOnRestart' => const RoutedSwapAbortedOnRestartError(),
       'TaskCancelled' => const RoutedSwapTaskCancelledError(),
       'InternalError' => RoutedSwapInternalTaskError(message: req('message')),
@@ -127,6 +131,10 @@ sealed class RoutedSwapTaskError extends Equatable {
       'min': e.min,
       'max': e.max,
     },
+    RoutedSwapGasEstimationFailedTaskError(:final coin, :final message) => {
+      'coin': coin,
+      'message': message,
+    },
     RoutedSwapAbortedOnRestartError() || RoutedSwapTaskCancelledError() => {},
     RoutedSwapInternalTaskError(:final message) ||
     RoutedSwapTransportTaskError(:final message) => {'message': message},
@@ -152,8 +160,11 @@ final class RoutedSwapQuoteWorsenedError extends RoutedSwapTaskError {
   List<Object?> get props => [freshRoute];
 }
 
-/// Not enough balance on the source chain, including routed execution gas and
-/// any required approval gas.
+/// [coin] cannot fund the rest of the swap. Checked before each send, so an
+/// earlier approval and its gas may already be spent.
+///
+/// For the network coin, [required] is the remaining gas funding plus, on a
+/// native sell, the sold amount; for a token, it is the sold amount.
 final class RoutedSwapInsufficientBalanceError extends RoutedSwapTaskError {
   const RoutedSwapInsufficientBalanceError({
     required this.coin,
@@ -282,7 +293,8 @@ final class RoutedSwapBridgeFailedError extends RoutedSwapTaskError {
   ];
 }
 
-/// A pre-sign safety check failed. Nothing was sent.
+/// A safety check failed before the source transaction was sent. An earlier
+/// approval and its gas may remain.
 final class RoutedSwapPreflightRejectedError extends RoutedSwapTaskError {
   const RoutedSwapPreflightRejectedError({required this.check});
 
@@ -394,8 +406,33 @@ final class RoutedSwapAmountOutOfBoundsTaskError extends RoutedSwapTaskError {
   List<Object?> get props => [param, value, min, max];
 }
 
-/// KDF restarted before `Broadcasting`. Nothing executed, though an already
-/// confirmed exact approval may remain. History only.
+/// A gas estimate the swap needs could not be established, while fetching the
+/// fresh quote or rechecking funding before a send. The swap itself was not
+/// sent, but an earlier approval and its gas may have been.
+final class RoutedSwapGasEstimationFailedTaskError extends RoutedSwapTaskError {
+  const RoutedSwapGasEstimationFailedTaskError({
+    required this.coin,
+    required this.message,
+  });
+
+  /// The coin whose gas could not be estimated: the source network's own.
+  final String coin;
+
+  /// Sanitized diagnostic text.
+  final String message;
+
+  @override
+  String get errorType => 'GasEstimationFailed';
+
+  @override
+  bool get isPreBroadcast => true;
+
+  @override
+  List<Object?> get props => [coin, message];
+}
+
+/// KDF restarted before `Broadcasting`. No swap was sent, though an earlier
+/// approval and its gas remain. History only.
 final class RoutedSwapAbortedOnRestartError extends RoutedSwapTaskError {
   const RoutedSwapAbortedOnRestartError();
 

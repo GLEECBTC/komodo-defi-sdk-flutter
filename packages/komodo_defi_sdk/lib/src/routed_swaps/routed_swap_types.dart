@@ -48,7 +48,7 @@ class RoutedSwapCost with RoutedSwapValue {
   /// symbols collide with real tickers.
   final String? symbol;
 
-  /// USD value, when the provider supplied one. Never present on approval gas.
+  /// USD value, when the quote priced one.
   final Decimal? usdValue;
 
   /// A label for the token this cost is paid in.
@@ -87,6 +87,7 @@ class RoutedSwapNetworkFee with RoutedSwapValue {
     required this.amount,
     this.assetId,
     this.usdValue,
+    this.requiredBalance,
   });
 
   /// The gas coin's KDF ticker.
@@ -95,16 +96,27 @@ class RoutedSwapNetworkFee with RoutedSwapValue {
   /// The wallet asset, when the ticker maps to one.
   final AssetId? assetId;
 
-  /// How much, in coin units.
+  /// The estimated spend, in coin units. The figure to show as the fee.
   final Decimal amount;
 
-  /// USD value, present only when every contributing row carried one — so it
-  /// is absent for the coin paying approval gas. Fill it from a price source
-  /// rather than presenting a partial sum.
+  /// USD value of [amount], present only when every contributing row carried
+  /// one. Fill it from a price source rather than presenting a partial sum.
   final Decimal? usdValue;
 
+  /// What KDF requires the balance of this coin to hold for gas before it
+  /// sends: every transaction at its gas limit and fee cap. It replaces
+  /// [amount] in a balance check rather than adding to it, and covers no sold
+  /// amount or provider fee. Null from an engine that does not report it.
+  final Decimal? requiredBalance;
+
   @override
-  List<Object?> get props => [ticker, assetId, amount, usdValue];
+  List<Object?> get props => [
+    ticker,
+    assetId,
+    amount,
+    usdValue,
+    requiredBalance,
+  ];
 }
 
 /// The approval transactions a sell needs before the swap.

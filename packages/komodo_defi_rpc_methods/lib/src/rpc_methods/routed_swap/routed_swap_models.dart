@@ -13,7 +13,8 @@ part 'routed_swap_task_errors.dart';
 /// symbols collide with real tickers (axlUSDC's on-chain symbol is frequently
 /// `USDC`), so resolving one against the coin registry names the wrong asset.
 ///
-/// The same rule covers `fee_costs[]` and a terminal `received`.
+/// The same rule covers `fee_costs[]` and a terminal `received` or
+/// `provider_received`.
 class RoutedSwapAmount extends Equatable {
   const RoutedSwapAmount({required this.amount, this.coin, this.symbol})
     : assert(
@@ -136,33 +137,46 @@ class RoutedSwapFeeCost extends Equatable {
 /// Gas for one coin.
 ///
 /// Used for the route's execution gas, the approval's gas, and the per-coin
-/// totals. Approval gas never carries [amountUsd] — KDF computes it on-chain
-/// and has no USD source — so a total for the coin paying approval gas omits
-/// it too; fill it from the app's own price source rather than presenting a
-/// partial sum as a total.
+/// totals. [amountUsd] is priced from the source coin's price in the same
+/// quote and is absent when that price is; a total carries it only when every
+/// row in it does, so fill a missing one from the app's own price source
+/// rather than presenting a partial sum as a total.
 class RoutedSwapGasCost extends Equatable {
-  const RoutedSwapGasCost({required this.amount, this.amountUsd});
+  const RoutedSwapGasCost({
+    required this.amount,
+    this.amountUsd,
+    this.requiredBalance,
+  });
 
   /// Parses a gas entry.
   factory RoutedSwapGasCost.fromJson(JsonMap json) => RoutedSwapGasCost(
     amount: RoutedSwapAmount.fromJson(json),
     amountUsd: json.valueOrNull<String>('amount_usd'),
+    requiredBalance: json.valueOrNull<String>('required_balance'),
   );
 
-  /// The gas token and amount.
+  /// The gas token and the estimated spend.
   final RoutedSwapAmount amount;
 
-  /// Optional USD value.
+  /// Optional USD value of [amount].
   final String? amountUsd;
+
+  /// On a `total_gas_costs` entry: the native balance KDF requires before it
+  /// sends, every required transaction at its gas limit and fee cap. An
+  /// alternative to [amount], never added to it, and excluding the sold
+  /// amount and provider fees. Absent on itemized rows, and from an engine
+  /// older than the funding contract.
+  final String? requiredBalance;
 
   /// Serialises back to the wire shape.
   JsonMap toJson() => {
     ...amount.toJson(),
+    if (requiredBalance != null) 'required_balance': requiredBalance,
     if (amountUsd != null) 'amount_usd': amountUsd,
   };
 
   @override
-  List<Object?> get props => [amount, amountUsd];
+  List<Object?> get props => [amount, amountUsd, requiredBalance];
 }
 
 /// Why a sell needs approval transactions.
@@ -224,7 +238,8 @@ class RoutedSwapApproval extends Equatable {
   /// The contract the approval grants to. KDF allowlists it independently.
   final String spender;
 
-  /// Approval gas, additive to the route's execution gas. Never has USD.
+  /// Gas for every approval and reset transaction, additive to the route's
+  /// execution gas.
   final List<RoutedSwapGasCost> gasCosts;
 
   /// Whether the current allowance is reset to zero before the exact approval.
