@@ -347,8 +347,8 @@ void main() {
     });
   });
 
-  // KDF refuses Trezor for Tendermint platforms today, so this pins only the
-  // routing.
+  // Trezor wallets never list Tendermint coins (TrezorAssetFilterStrategy),
+  // so this pins only the routing.
   group('Trezor Tendermint token', () {
     test('adds an IBC token to an active platform via '
         'enable_tendermint_token', () async {
