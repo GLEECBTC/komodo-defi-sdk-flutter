@@ -66,7 +66,9 @@ class V2TransactionStrategy extends TransactionHistoryStrategy {
   ) async {
     validatePagination(pagination);
 
-    final isHdWallet = (await _auth.currentUser)?.isHd ?? false;
+    // HD mode is part of the session's wallet identity; `currentUser` would
+    // re-verify it against KDF with two RPCs on every page fetched.
+    final isHdWallet = (await _auth.captureSessionContext()).walletId.isHd;
 
     return switch (pagination) {
       final PagePagination p => client.rpc.transactionHistory.myTxHistory(

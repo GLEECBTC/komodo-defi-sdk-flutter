@@ -38,6 +38,7 @@ class KdfStartupConfig {
     required this.iAmSeed,
     required this.isBootstrapNode,
     required this.eventStreamingConfiguration,
+    required this.lifiProxyUrl,
   }) {
     SeedNodeValidator.validate(
       seedNodes: seedNodes,
@@ -45,6 +46,7 @@ class KdfStartupConfig {
       iAmSeed: iAmSeed,
       isBootstrapNode: isBootstrapNode,
     );
+    _validateLifiProxyUrl(lifiProxyUrl, disableP2p: disableP2p);
   }
 
   final String? walletName;
@@ -68,6 +70,12 @@ class KdfStartupConfig {
   final bool? iAmSeed;
   final bool? isBootstrapNode;
   final EventStreamingConfiguration? eventStreamingConfiguration;
+
+  /// Komodo proxy URL for routed swaps' LI.FI requests, written to the conf as
+  /// `lifi_proxy_url`; null or empty keeps KDF on LI.FI's public API with no
+  /// key. KDF signs each proxy request with its P2P key, so P2P must stay on.
+  /// The LI.FI key lives on the proxy and never in a client.
+  final String? lifiProxyUrl;
 
   // Either a list of coin JSON objects or a string of the path to a file
   // containing a list of coin JSON objects.
@@ -96,6 +104,7 @@ class KdfStartupConfig {
     bool? iAmSeed,
     bool? isBootstrapNode,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    String? lifiProxyUrl,
   }) async {
     assert(
       !kIsWeb || userHome == null && dbDir == null,
@@ -150,6 +159,7 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      lifiProxyUrl: lifiProxyUrl,
     );
   }
 
@@ -175,6 +185,7 @@ class KdfStartupConfig {
     String? rpcIp,
     int rpcPort = 7783,
     EventStreamingConfiguration? eventStreamingConfiguration,
+    String? lifiProxyUrl,
   }) async {
     final (String? home, String? dbDir) = await _getAndSetupUserHome();
 
@@ -206,7 +217,36 @@ class KdfStartupConfig {
       eventStreamingConfiguration:
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
+      lifiProxyUrl: lifiProxyUrl,
     );
+  }
+
+  /// KDF does not check `lifi_proxy_url` when it starts, so a bad value would
+  /// otherwise surface much later, as failed quotes. KDF appends `/` and then
+  /// `v1/<endpoint>`, so a query or fragment would swallow that slash and drop
+  /// the last path segment; a browser refuses a URL with credentials. The
+  /// value is not echoed in the error because it may hold those credentials.
+  /// Without P2P, KDF has no key to sign with and fails every routed swap.
+  static void _validateLifiProxyUrl(String? url, {required bool? disableP2p}) {
+    if (url == null || url.isEmpty) return;
+    if (disableP2p ?? false) {
+      throw ArgumentError(
+        'A LI.FI proxy needs P2P: KDF signs its requests with the P2P key',
+        'lifiProxyUrl',
+      );
+    }
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !const {'http', 'https'}.contains(uri.scheme.toLowerCase()) ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw ArgumentError(
+        'Must be an http(s) URL without credentials, query or fragment',
+        'lifiProxyUrl',
+      );
+    }
   }
 
   JsonMap encodeStartParams() {
@@ -237,6 +277,7 @@ class KdfStartupConfig {
       if (isBootstrapNode != null) 'is_bootstrap_node': isBootstrapNode,
       if (eventStreamingConfiguration != null)
         'event_streaming_configuration': eventStreamingConfiguration!.toJson(),
+      if (lifiProxyUrl?.isNotEmpty ?? false) 'lifi_proxy_url': lifiProxyUrl,
     };
   }
 

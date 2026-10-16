@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## Unreleased
+
+ - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
+   on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
+   harness fixture. A liquidity source separate from the atomic-swap orderbook.
+ - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiProxyUrl` sends KDF's LI.FI
+   requests through a Komodo proxy, set with KDF's `lifi_proxy_url` startup
+   setting. KDF signs each request with its P2P key and the proxy holds the
+   LI.FI key. Unset, KDF uses LI.FI's public API with no key.
+ - **BUILD**(kdf): the bundled KDF artefact is repinned to
+   `feat/lifi-integration` `7d6fd1ea9ba10057aab99b3d2a717806c3f87990`, which
+   implements the routed-swap contract and the LI.FI proxy; see the
+   [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
+
 ## 2026-09-28 — SDK 0.8.1
 
 ### SDK 0.8.1 overview

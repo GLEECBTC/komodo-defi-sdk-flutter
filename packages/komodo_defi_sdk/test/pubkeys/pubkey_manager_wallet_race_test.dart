@@ -309,6 +309,9 @@ void main() {
     final freshFetch = manager.getFreshPubkeys(asset);
     await fetchStarted.future;
     currentUser = _walletB;
+    // The service revokes the session as soon as it observes another wallet;
+    // the auth-stream event can still arrive later.
+    auth.runtimeSessions.observe(_walletB);
     response.complete({
       'address': 'cosmos1walleta',
       'balance': '5',
@@ -386,8 +389,10 @@ void main() {
       await walletAFetchStarted.future;
 
       currentUser = _walletB;
-      // Deliberately do not emit authChanges. getPubkeys must consult
-      // currentUser before looking at A's asset-only cache/in-flight request.
+      // Deliberately do not emit authChanges. The service revokes A's session
+      // as soon as it observes B, and getPubkeys must not reuse A's
+      // asset-only cache or in-flight request under B's session.
+      auth.runtimeSessions.observe(_walletB);
       expect(manager.lastKnownForWallet(asset.id, _walletB.walletId), isNull);
 
       final walletBFetch = manager.getPubkeys(asset);
@@ -480,7 +485,9 @@ void main() {
       );
 
       currentUser = _walletB;
-      // No auth event: the wallet-bound cache cannot reveal A to B.
+      // No auth event, only the revocation the service makes on observing B:
+      // the wallet-bound cache cannot reveal A to B.
+      auth.runtimeSessions.observe(_walletB);
       expect(manager.lastKnownForWallet(asset.id, _walletB.walletId), isNull);
 
       final walletBPubkeys = await manager.getPubkeys(asset);
@@ -534,10 +541,14 @@ void main() {
       final nameOnlyPubkeys = await manager.getPubkeys(asset);
       expect(nameOnlyPubkeys.keys.single.address, 'cosmos1hasha');
 
+      // Each observation is what a service read of that identity does: hash A
+      // enriches the session, and hash B under the same name revokes it.
       currentUser = _hashAWallet;
+      auth.runtimeSessions.observe(_hashAWallet);
       expect(await manager.getPubkeys(asset), nameOnlyPubkeys);
 
       currentUser = _hashBWallet;
+      auth.runtimeSessions.observe(_hashBWallet);
       expect(
         manager.lastKnownForWallet(asset.id, _hashBWallet.walletId),
         isNull,
@@ -645,8 +656,10 @@ void main() {
       expect(cached.keys.single.address, 'cosmos1walletA');
 
       // Switch wallets WITHOUT pushing an auth event, which is the race: the
-      // stream is asynchronous and a caller can get here first.
+      // stream is asynchronous and a caller can get here first. Only the
+      // session revocation the service makes on observing B has happened.
       currentUser = _walletB;
+      auth.runtimeSessions.observe(_walletB);
 
       expect(
         await manager.hydratedPubkeys(asset),

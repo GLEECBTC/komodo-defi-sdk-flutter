@@ -129,6 +129,18 @@ jobs:
           test/withdrawals/gasless_submission_lock_web_test.dart
           test/withdrawals/pending_gasless_transfer_repository_web_test.dart
 
+      - name: Test the KDF web transport in WebAssembly
+        if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_framework')
+        timeout-minutes: 10
+        working-directory: packages/komodo_defi_framework
+        env:
+          CHROME_EXECUTABLE: ${{ github.workspace }}/tool/flutter_test_chrome.sh
+          GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          flutter test --no-pub --platform chrome --wasm --reporter expanded
+          test/operations/kdf_operations_wasm_errors_test.dart
+          test/operations/kdf_operations_wasm_diagnostics_test.dart
+
       - name: Run tests for all packages
         if: steps.discover.outputs.packages != ''
         env:

@@ -198,8 +198,10 @@ void main() {
       );
 
       currentUser = _walletB;
-      // Deliberately do not emit authChanges. The async currentUser check must
-      // invalidate A before watchBalance considers any cached value.
+      // Deliberately do not emit authChanges. The service revokes A's session
+      // as soon as it observes B, and that alone must keep A's cached value
+      // from wallet B's watcher.
+      auth.runtimeSessions.observe(_walletB);
       expect(manager.lastKnownForWallet(asset.id, _walletB.walletId), isNull);
 
       final firstForWalletB = await manager.watchBalance(asset.id).first;
