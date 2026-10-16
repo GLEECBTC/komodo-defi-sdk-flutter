@@ -101,13 +101,16 @@ class CompositeAssetActivator extends BatchCapableActivator {
   bool get supportsBatchActivation => true;
 
   ProtocolActivationStrategy _findStrategy(Asset asset) {
-    final strategy = _strategies.firstWhere(
-      (s) => s.canHandle(asset),
-      orElse: () => throw UnsupportedError(
-        'No activation strategy found for ${asset.id}',
-      ),
+    final matches = _strategies.where((s) => s.canHandle(asset)).toList();
+    assert(
+      matches.length <= 1,
+      'Activation strategies overlap on ${asset.id}: '
+      '${matches.map((s) => s.runtimeType).join(', ')}',
     );
-    return strategy;
+    if (matches.isEmpty) {
+      throw UnsupportedError('No activation strategy found for ${asset.id}');
+    }
+    return matches.first;
   }
 
   bool supportsBatchActivationFor(Asset asset) {
@@ -153,18 +156,14 @@ enum AssetRole {
 ///
 /// [canHandle] is a template method over the [supportedProtocols],
 /// [supportedRoles] and [supportsCustomTokenActivation] hooks.
+/// [CompositeAssetActivator] takes the first strategy that can handle an
+/// asset, so the strategies in a chain must not overlap.
 abstract class ProtocolActivationStrategy extends BatchCapableActivator {
   const ProtocolActivationStrategy(super.client);
 
   @override
   bool canHandle(Asset asset) =>
-      // | isCustomToken | supportsCustomTokenActivation | result |
-      // |---------------|------------------------------|--------|
-      // | true          | true                         | true   |
-      // | true          | false                        | false  |
-      // | false         | true                         | true   |
-      // | false         | false                        | false  |
-      (!asset.protocol.isCustomToken || supportsCustomTokenActivation) &&
+      asset.protocol.isCustomToken == supportsCustomTokenActivation &&
       supportedRoles.contains(AssetRole.of(asset)) &&
       supportedProtocols.contains(asset.protocol.subClass);
 
@@ -178,9 +177,10 @@ abstract class ProtocolActivationStrategy extends BatchCapableActivator {
     AssetRole.token,
   };
 
-  /// Hook: whether this strategy supports activation of custom EVM-chain
-  /// tokens that are not part of the live coins configuration. Defaults to
-  /// false.
+  /// Hook: whether this strategy activates custom tokens, the ones a user
+  /// imports that are not in the coins configuration. Such a strategy takes
+  /// only custom tokens, because KDF refuses a custom-token request for a
+  /// configured ticker. Defaults to false.
   bool get supportsCustomTokenActivation => false;
 
   @protected

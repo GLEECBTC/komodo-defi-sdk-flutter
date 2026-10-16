@@ -22,15 +22,10 @@ class TendermintTokenActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool get supportsBatchActivation => false;
 
+  // Trezor too: KDF builds the token from its active platform coin and
+  // ignores the activation params.
   @override
   Set<AssetRole> get supportedRoles => const {AssetRole.token};
-
-  @override
-  bool canHandle(Asset asset) {
-    // Use tendermint token activation unless the wallet is a Trezor
-    return privKeyPolicy != const PrivateKeyPolicy.trezor() &&
-        super.canHandle(asset);
-  }
 
   @override
   Stream<ActivationProgress> activate(

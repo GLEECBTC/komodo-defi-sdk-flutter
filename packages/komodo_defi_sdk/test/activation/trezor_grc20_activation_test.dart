@@ -157,7 +157,7 @@ void main() {
     });
 
     // CompositeAssetActivator takes the first match, so these three must not
-    // overlap; CustomErc20ActivationStrategy matches both and stays last.
+    // overlap.
     test(
       'splits GLEEC and KMD-GRC20 between platform and token strategies',
       () {
