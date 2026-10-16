@@ -301,6 +301,9 @@ jobs:
           BRANCH="${{ needs.check-for-updates.outputs.branch }}"
           NEW_COMMIT="${{ needs.check-for-updates.outputs.new_commit }}"
           SHORT_COMMIT="${NEW_COMMIT:0:7}"
+          # The head branch was created from the slug; see "Create branch for
+          # roll".
+          SAFE_BRANCH="${BRANCH//\//-}"
 
           # Check if there are changes to commit
           if git diff --quiet; then
@@ -310,7 +313,7 @@ jobs:
 
           git add packages/komodo_defi_framework/app_build/build_config.json
           git commit -m "chore: roll KDF version to commit $SHORT_COMMIT for branch $BRANCH"
-          git push origin kdf-roll/$BRANCH-$SHORT_COMMIT
+          git push origin "kdf-roll/$SAFE_BRANCH-$SHORT_COMMIT"
 
       - name: Create Pull Request
         env:
