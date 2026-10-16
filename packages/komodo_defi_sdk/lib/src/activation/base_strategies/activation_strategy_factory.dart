@@ -3,6 +3,7 @@ import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:meta/meta.dart';
 
 /// Factory for creating the complete activation strategy stack
 class ActivationStrategyFactory {
@@ -25,41 +26,60 @@ class ActivationStrategyFactory {
   }) {
     return SmartAssetActivator(
       client,
-      CompositeAssetActivator(client, [
-        // BCH strategy needs to be before UTXO strategy to handle the special case
-        // BchActivationStrategy(client),
-        UtxoActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
-        EthTaskActivationStrategy(
+      CompositeAssetActivator(
+        client,
+        createProtocolStrategies(
           client,
           privKeyPolicy,
+          configService,
           tronGaslessProvider: tronGaslessProvider,
           hdGapLimit: hdGapLimit,
         ),
-        EthWithTokensActivationStrategy(
-          client,
-          privKeyPolicy,
-          tronGaslessProvider: tronGaslessProvider,
-          hdGapLimit: hdGapLimit,
-        ),
-        Erc20ActivationStrategy(
-          client,
-          privKeyPolicy,
-          tronGaslessProvider: tronGaslessProvider,
-        ),
-        // SlpActivationStrategy(client),
-        // Tendermint strategies follow same pattern as ETH: task -> platform -> tokens
-        TendermintTaskActivationStrategy(client, privKeyPolicy),
-        TendermintWithTokensActivationStrategy(client, privKeyPolicy),
-        TendermintTokenActivationStrategy(client, privKeyPolicy),
-        QtumActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
-        SiaActivationStrategy(client),
-        ZhtlcActivationStrategy(client, privKeyPolicy, configService),
-        CustomErc20ActivationStrategy(
-          client,
-          tronGaslessProvider: tronGaslessProvider,
-        ),
-      ]),
+      ),
       activatedAssetsCache,
     );
+  }
+
+  /// The protocol strategies [createStrategy] chains, with the same
+  /// parameters.
+  @visibleForTesting
+  static List<ProtocolActivationStrategy> createProtocolStrategies(
+    ApiClient client,
+    PrivateKeyPolicy privKeyPolicy,
+    ActivationConfigService configService, {
+    TronGaslessProviderConfig? tronGaslessProvider,
+    int? hdGapLimit,
+  }) {
+    return [
+      UtxoActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
+      EthTaskActivationStrategy(
+        client,
+        privKeyPolicy,
+        tronGaslessProvider: tronGaslessProvider,
+        hdGapLimit: hdGapLimit,
+      ),
+      EthWithTokensActivationStrategy(
+        client,
+        privKeyPolicy,
+        tronGaslessProvider: tronGaslessProvider,
+        hdGapLimit: hdGapLimit,
+      ),
+      Erc20ActivationStrategy(
+        client,
+        privKeyPolicy,
+        tronGaslessProvider: tronGaslessProvider,
+      ),
+      // Tendermint: Trezor platforms, other platforms, tokens
+      TendermintTaskActivationStrategy(client, privKeyPolicy),
+      TendermintWithTokensActivationStrategy(client, privKeyPolicy),
+      TendermintTokenActivationStrategy(client, privKeyPolicy),
+      QtumActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
+      SiaActivationStrategy(client),
+      ZhtlcActivationStrategy(client, privKeyPolicy, configService),
+      CustomErc20ActivationStrategy(
+        client,
+        tronGaslessProvider: tronGaslessProvider,
+      ),
+    ];
   }
 }
