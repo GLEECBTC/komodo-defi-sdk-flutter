@@ -49,11 +49,10 @@ class Erc20ActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   bool canHandle(Asset asset) {
-    // Use erc20 activation for token assets (not platform assets, not trezor)
+    // Use erc20 activation for token assets (not platform assets), Trezor
+    // too: KDF gives the token its active platform's key policy.
     final isTokenAsset = asset.id.parentId != null;
-    return isTokenAsset &&
-        privKeyPolicy != const PrivateKeyPolicy.trezor() &&
-        super.canHandle(asset);
+    return isTokenAsset && super.canHandle(asset);
   }
 
   @override
