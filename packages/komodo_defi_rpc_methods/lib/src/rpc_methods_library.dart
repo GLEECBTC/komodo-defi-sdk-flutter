@@ -60,6 +60,8 @@ class KomodoDefiRpcMethods {
 
   MessageSigningMethodsNamespace get messageSigning =>
       MessageSigningMethodsNamespace(_client);
+  SmartAccountMethodsNamespace get smartAccount =>
+      SmartAccountMethodsNamespace(_client);
   UtilityMethods get utility => UtilityMethods(_client);
   FeeManagementMethodsNamespace get feeManagement =>
       FeeManagementMethodsNamespace(_client);
