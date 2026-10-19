@@ -13,8 +13,9 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
    setting. KDF signs each request with its P2P key and the proxy holds the
    LI.FI key. Unset, KDF uses LI.FI's public API with no key.
  - **BUILD**(kdf): the bundled KDF artefact is repinned to
-   `feat/lifi-integration` `7d6fd1ea9ba10057aab99b3d2a717806c3f87990`, which
-   implements the routed-swap contract and the LI.FI proxy; see the
+   `feat/lifi-integration` `667045caba04bee5992065279884ec56e2f8d9ff`, which
+   implements the routed-swap contract (`gleec-specs#2` at `2880c32`) and the
+   LI.FI proxy; see the
    [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
 
 ## 2026-09-28 — SDK 0.8.1
