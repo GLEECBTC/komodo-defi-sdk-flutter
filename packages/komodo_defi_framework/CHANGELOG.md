@@ -1,5 +1,9 @@
 ## Unreleased
 
+ - **FEAT**(config): serialize optional validated `lifi_integrator` on every
+   startup path. All seven KDF archives are pinned to `35f0bde`; the Linux job
+   was recovered by retrying its runner-shutdown failure. The coins pin is unchanged.
+
  - **CHORE**(coins): roll the bundled coins configuration from `f766b261` to
    the coins repository's `master` `2b0aefb7` (79 commits, mostly icons).
    The same 770 coins; in the bundled config only GLMR and MOVR (nodes) and
@@ -21,14 +25,15 @@
    labels almost none of them, so non-ASCII text in errors and results arrived
    garbled (`ü` as `Ã¼`), a wallet name from `get_wallet_names` included.
  - **BUILD**(kdf): repin the bundled artefact from `main` `f3efd2ca` to
-   `feat/lifi-integration` `667045caba04bee5992065279884ec56e2f8d9ff` for all
+   `feat/lifi-integration` `35f0bde438eec2cb0471b19642b9d9c4602fa17d` for all
    seven targets, so the routed-swap RPC namespace is exercisable against a
    real binary rather than only the scripted harness fixture. `7d6fd1e`
    replaced `lifi_api` and `lifi_api_key` with `lifi_proxy_url`, signs proxy
    requests with the P2P key, and reports the proxy's empty 406 as
-   `RateLimited`. `667045c` adds each route's `required_balance` for gas,
+   `RateLimited`. `35f0bde` adds each route's `required_balance` for gas,
    measured payouts and `GasEstimationFailed`. Its Development builds ran on
-   2026-10-18; the seven checksums were each checked against a fresh download
+   2026-10-22 (run `39776954239`), with Linux recovered on 2026-10-26;
+   the seven checksums were each checked against a fresh download
    from devbuilds. That branch forks from `main` at `750be938` and does not
    carry the five later `main` merges; it still lacks the websocket `.expect`
    fix, so `ws_url` expansion stays off on web.

@@ -49,9 +49,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   Decimal? _decimal(String? value) =>
       value == null ? null : Decimal.tryParse(value);
 
-  /// An offer for [route]. A [guarded] offer is one a swap can start from:
-  /// its guaranteed receive sits the guard margin below the provider's
-  /// minimum. An executed route keeps the provider's.
+  /// An offer retaining the provider's quoted minimum unchanged.
   RoutedSwapOffer _offerFrom(
     rpc.RoutedSwapRoute route, {
     required AssetId from,
@@ -59,7 +57,6 @@ extension _RoutedSwapOffers on RoutedSwapManager {
     rpc.RoutedSwapOrder? order,
     double? slippage,
     DateTime? quotedAt,
-    bool guarded = false,
   }) {
     RoutedSwapCost gasCost(
       rpc.RoutedSwapGasCost gas,
@@ -102,7 +99,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
       to: to,
       sellAmount: Decimal.parse(route.from.amount),
       expectedReceive: Decimal.parse(route.to.amount),
-      guaranteedReceive: guarded ? _guardFor(minimum, to) : minimum,
+      guaranteedReceive: minimum,
       kind: route.kind,
       costs: costs,
       networkFees: _networkFeesOf(route),
@@ -195,14 +192,4 @@ extension _RoutedSwapOffers on RoutedSwapManager {
 
   AssetId? _resolveAssetOf(rpc.RoutedSwapAmount amount) =>
       amount.coin == null ? null : _resolveAsset(amount.coin!);
-
-  /// [minimum] less the guard margin, rounded down to [to]'s decimals, which
-  /// KDF requires of `min_to_amount`. Without known decimals it keeps the
-  /// minimum's own places, which KDF already accepted. Never zero.
-  Decimal _guardFor(Decimal minimum, AssetId to) {
-    if (_guardMargin <= Decimal.zero) return minimum;
-    final scale = to.chainId.decimals ?? minimum.scale;
-    final guard = (minimum * (Decimal.one - _guardMargin)).floor(scale: scale);
-    return guard > Decimal.zero ? guard : minimum;
-  }
 }

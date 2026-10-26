@@ -1,6 +1,6 @@
 {
   "api": {
-    "api_commit_hash": "667045caba04bee5992065279884ec56e2f8d9ff",
+    "api_commit_hash": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
     "branch": "feat/lifi-integration",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
@@ -14,55 +14,61 @@
       "linux",
       "windows"
     ],
-    "source_urls": ["https://devbuilds.gleec.com", "https://nebula.decker.im"],
+    "source_urls": [
+      "https://devbuilds.gleec.com",
+      "https://nebula.decker.im"
+    ],
     "platforms": {
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "c993c9d640f614a997d282560e24ad62cfbdd4d00c302ae97a0b6d5ba0d17fac"
+          "0992678b1d320f727f596dbbe3300799008719dedc2dba5d2203959d5bfa8c24"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "753b35437563ff0785e78732bbff56397ec54a56fb82a96bbef18309e173bfd2"
+          "cb069482dc2c64b0b9915af3bfe87bb967b3df5fd1eea4eccc414602f0efde5c"
         ],
         "path": "ios"
       },
       "macos": {
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
-        "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
+        "matching_preference": [
+          "kdf-macos-universal2-",
+          "mac-universal"
+        ],
         "valid_zip_sha256_checksums": [
-          "7b4dbb03778f460336260f5ea7950ee955d784ba24fbf4a7bab6741bece3b494"
+          "b67d93080bd3dfb87b5614c56cfd7971d3b5463f637f5950d23ed737285e1a17"
         ],
         "path": "macos/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "2ffe570e7846f646f8cfce5992f6ebcfe17080ea3925e12f5d05aa17d10f594b"
+          "f9cfb4efff5112aa674100d6f930f772d2305a0c8c5b8a3dc4d504d4c873fd75"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "7543c19be67e17ef67a3cee7bffc3fe25c3c3f4522d322637af594bc992778d2"
+          "9073f52b8652b19be34337c9fa9036a195fd104200ba6e0dd5ca5432c071093e"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "a2a6c648474314f18b19be8e99e486a63f922b2ca520cf3473ec1fd56482215c"
+          "cf0cdfc90f36481b645ef034d0a7c775eb8380c4e1386aa82fb8c01640c55724"
         ],
         "path": "linux/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "d6ec5b91019e7efdbf7868b53d840d7e5f4037d05106b08800d488bc4c8c886e"
+          "064298f3e743989630321c05ae02dcd1f95dc8df533cfe6c49d26b28464b2d54"
         ],
         "path": "windows/bin"
       }

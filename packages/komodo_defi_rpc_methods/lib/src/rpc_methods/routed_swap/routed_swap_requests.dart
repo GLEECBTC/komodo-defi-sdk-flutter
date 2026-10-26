@@ -41,11 +41,24 @@ class RoutedSwapQuoteRequest
     required super.rpcPass,
     required this.from,
     required this.to,
-    required this.amount,
+    required String this.amount,
     this.slippage,
     this.order,
     this.provider,
-  }) : super(method: 'routed_swap::quote');
+  }) : isMax = false,
+       super(method: 'routed_swap::quote');
+
+  /// Lets KDF calculate the largest fundable amount from its spendable balance.
+  RoutedSwapQuoteRequest.max({
+    required super.rpcPass,
+    required this.from,
+    required this.to,
+    this.slippage,
+    this.order,
+    this.provider,
+  }) : amount = null,
+       isMax = true,
+       super(method: 'routed_swap::quote');
 
   /// KDF ticker to sell. Must be activated.
   final String from;
@@ -54,7 +67,10 @@ class RoutedSwapQuoteRequest
   final String to;
 
   /// Sell amount in coin units — never wei.
-  final String amount;
+  final String? amount;
+
+  /// Whether KDF calculates the source amount. Never sent to init.
+  final bool isMax;
 
   /// Decimal fraction, max 0.5. Defaults to 0.005 (0.5%) KDF-side.
   final double? slippage;
@@ -71,7 +87,7 @@ class RoutedSwapQuoteRequest
     'params': {
       'from': from,
       'to': to,
-      'amount': amount,
+      if (isMax) 'max': true else 'amount': amount,
       if (slippage != null) 'slippage': slippage,
       if (order != null) 'order': order!.wire,
       if (provider != null) 'provider': provider,

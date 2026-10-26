@@ -29,6 +29,7 @@ class KomodoDefiSdkConfig {
     this.assetConfigTransform,
     this.initialActivationPolicy,
     this.lifiProxyUrl,
+    this.lifiIntegrator,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -107,6 +108,9 @@ class KomodoDefiSdkConfig {
   /// rate-limits each network address. See `KdfStartupConfig.lifiProxyUrl`.
   final String? lifiProxyUrl;
 
+  /// Optional deployment commission policy; null requests no commission.
+  final LifiIntegratorConfig? lifiIntegrator;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -124,6 +128,8 @@ class KomodoDefiSdkConfig {
     AssetConfigTransform? assetConfigTransform,
     ActivationPolicySnapshot? initialActivationPolicy,
     String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
+    bool clearLifiIntegrator = false,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -152,6 +158,9 @@ class KomodoDefiSdkConfig {
       initialActivationPolicy:
           initialActivationPolicy ?? this.initialActivationPolicy,
       lifiProxyUrl: lifiProxyUrl ?? this.lifiProxyUrl,
+      lifiIntegrator: clearLifiIntegrator
+          ? null
+          : lifiIntegrator ?? this.lifiIntegrator,
     );
   }
 }

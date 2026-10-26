@@ -25,17 +25,23 @@ extension _FixtureResponses on RoutedSwapFixture {
     final invalid =
         _shape(
           request,
-          allowed: _quoteKeys,
-          required: const {'from', 'to', 'amount'},
+          allowed: {..._quoteKeys, 'max'},
+          required: const {'from', 'to'},
           strings: const {'from', 'to', 'order', 'provider'},
           numbers: const {'amount', 'slippage'},
         ) ??
         _options(request);
     if (invalid != null) return invalid;
     final params = _params(request);
+    final isMax = params['max'] == true;
+    if ((isMax && params.containsKey('amount')) ||
+        (!isMax && !params.containsKey('amount')) ||
+        (params.containsKey('max') && params['max'] is! bool)) {
+      return _invalidRequest(request, 'Supply amount or max: true');
+    }
     final from = params['from'] as String;
     final to = params['to'] as String;
-    final amount = _numberText(params['amount']);
+    final amount = isMax ? null : _numberText(params['amount']);
 
     final errors = _quoteErrors[_pairKey(from, to)];
     if (errors != null && errors.isNotEmpty) {
@@ -47,7 +53,14 @@ extension _FixtureResponses on RoutedSwapFixture {
       return _scriptedError(request, scripted.error);
     }
 
-    final quote = _quoteFor(from, to, amount);
+    final quote = isMax
+        ? _quotes[_pairKey(from, to)]?.firstOrNull
+        : _quoteFor(from, to, amount!);
+    if (isMax && quote?.amount == null) {
+      throw StateError(
+        'A scripted Max quote must specify its concrete amount.',
+      );
+    }
     if (quote == null) {
       final scripted = _quotes[_pairKey(from, to)];
       throw StateError(
@@ -63,7 +76,7 @@ extension _FixtureResponses on RoutedSwapFixture {
       );
     }
     return _ok(request, {
-      'routes': [quote.toJson(amount: amount)],
+      'routes': [quote.toJson(amount: amount ?? quote.amount!)],
     });
   }
 

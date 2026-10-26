@@ -39,6 +39,7 @@ class KdfStartupConfig {
     required this.isBootstrapNode,
     required this.eventStreamingConfiguration,
     required this.lifiProxyUrl,
+    required this.lifiIntegrator,
   }) {
     SeedNodeValidator.validate(
       seedNodes: seedNodes,
@@ -77,6 +78,9 @@ class KdfStartupConfig {
   /// The LI.FI key lives on the proxy and never in a client.
   final String? lifiProxyUrl;
 
+  /// Optional LI.FI commission policy, enforced by KDF for every quote.
+  final LifiIntegratorConfig? lifiIntegrator;
+
   // Either a list of coin JSON objects or a string of the path to a file
   // containing a list of coin JSON objects.
   final dynamic coins;
@@ -105,6 +109,7 @@ class KdfStartupConfig {
     bool? isBootstrapNode,
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
   }) async {
     assert(
       !kIsWeb || userHome == null && dbDir == null,
@@ -160,6 +165,7 @@ class KdfStartupConfig {
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
       lifiProxyUrl: lifiProxyUrl,
+      lifiIntegrator: lifiIntegrator,
     );
   }
 
@@ -186,6 +192,7 @@ class KdfStartupConfig {
     int rpcPort = 7783,
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
   }) async {
     final (String? home, String? dbDir) = await _getAndSetupUserHome();
 
@@ -218,6 +225,7 @@ class KdfStartupConfig {
           eventStreamingConfiguration ??
           EventStreamingConfiguration.defaultConfig(),
       lifiProxyUrl: lifiProxyUrl,
+      lifiIntegrator: lifiIntegrator,
     );
   }
 
@@ -278,6 +286,7 @@ class KdfStartupConfig {
       if (eventStreamingConfiguration != null)
         'event_streaming_configuration': eventStreamingConfiguration!.toJson(),
       if (lifiProxyUrl?.isNotEmpty ?? false) 'lifi_proxy_url': lifiProxyUrl,
+      if (lifiIntegrator != null) 'lifi_integrator': lifiIntegrator!.toJson(),
     };
   }
 

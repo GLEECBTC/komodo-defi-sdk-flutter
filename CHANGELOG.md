@@ -5,6 +5,11 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## Unreleased
 
+ - **FEAT**(routed-swap): KDF-owned Max quotes, exact accepted minima, global
+   integrator configuration, locked-balance shortfalls and missing-only EVM fee
+   model normalization. Funding, measured payouts and approval/gas evidence
+   remain distinct from estimates. See package changelogs for API changes.
+
  - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
    on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
    harness fixture. A liquidity source separate from the atomic-swap orderbook.
@@ -13,8 +18,8 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
    setting. KDF signs each request with its P2P key and the proxy holds the
    LI.FI key. Unset, KDF uses LI.FI's public API with no key.
  - **BUILD**(kdf): the bundled KDF artefact is repinned to
-   `feat/lifi-integration` `667045caba04bee5992065279884ec56e2f8d9ff`, which
-   implements the routed-swap contract (`gleec-specs#2` at `2880c32`) and the
+   `feat/lifi-integration` `35f0bde438eec2cb0471b19642b9d9c4602fa17d`, which
+   implements the routed-swap contract (`gleec-specs#2` at `7c388ea`) and the
    LI.FI proxy; see the
    [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
 

@@ -47,6 +47,7 @@ final assets = {
 
 RoutedSwapQuote route({
   String from = 'USDT-PLG20',
+  String? amount,
   String to = 'USDC-ERC20',
   RoutedSwapQuoteApproval? approval,
   bool crossChain = true,
@@ -56,6 +57,7 @@ RoutedSwapQuote route({
 }) => RoutedSwapQuote(
   from: from,
   to: to,
+  amount: amount,
   toAmount: '100.21',
   toAmountMin: '99.71',
   crossChain: crossChain,

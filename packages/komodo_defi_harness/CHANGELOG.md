@@ -1,3 +1,7 @@
+## Unreleased
+
+ - **TEST**(routed-swap): replay mutually exclusive exact/Max quote requests, concrete execution, exact accepted minima and startup commission propagation.
+
 ## 0.1.0
 
  - **TEST**(routed-swap): rebuild the scripted routed-swap KDF on the pinned

@@ -166,6 +166,7 @@ Future<void> bootstrap({
       hostConfig:
           hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword),
       lifiProxyUrl: config.lifiProxyUrl,
+      lifiIntegrator: config.lifiIntegrator,
     );
     await auth.ensureInitialized();
     return auth;

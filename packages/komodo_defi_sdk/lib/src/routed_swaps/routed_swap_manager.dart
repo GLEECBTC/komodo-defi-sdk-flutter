@@ -86,7 +86,6 @@ class RoutedSwapManager {
     Duration firstReadRetryDelay = const Duration(milliseconds: 500),
     int firstReadAttempts = 3,
     DateTime Function()? now,
-    Decimal? guardMargin,
   }) : _client = client,
        _resolveAsset = resolveAsset,
        _taskNudges = taskNudges,
@@ -96,8 +95,7 @@ class RoutedSwapManager {
        _delayedAfterFailures = delayedAfterFailures,
        _firstReadRetryDelay = firstReadRetryDelay,
        _firstReadAttempts = firstReadAttempts,
-       _now = now ?? DateTime.now,
-       _guardMargin = guardMargin ?? defaultGuardMargin;
+       _now = now ?? DateTime.now;
 
   final ApiClient _client;
   final RoutedSwapAssetResolver _resolveAsset;
@@ -109,50 +107,8 @@ class RoutedSwapManager {
   final Duration _firstReadRetryDelay;
   final int _firstReadAttempts;
   final DateTime Function() _now;
-  final Decimal _guardMargin;
 
   final Map<String, _RoutedSwapSession> _sessions = {};
-
-  /// How much of the probed network fee a native-coin Max holds back when the
-  /// engine reports no required balance.
-  ///
-  /// The probe reports the gas estimate at today's price, but KDF checks the
-  /// balance at start against the route's gas limit at its own maximum fee
-  /// per gas, which runs well above that. A reserve short of KDF's figure
-  /// fails the start, so the margin is generous: leftover dust is the cheaper
-  /// failure.
-  static final Decimal maxSellFeeMargin = Decimal.parse('3');
-
-  /// How much of the probed required balance a native-coin Max holds back.
-  ///
-  /// The required balance is KDF's own start-time check at the probe's fee
-  /// caps. `init` quotes again and checks again, so the margin only absorbs
-  /// gas prices rising between the probe and the start.
-  static final Decimal maxSellFundingMargin = Decimal.parse('1.25');
-
-  /// The gas a Max selling [coin], a network's own coin, keeps back for
-  /// [offer]: its required balance times [maxSellFundingMargin], or its
-  /// network fee times [maxSellFeeMargin] when the engine reports no required
-  /// balance. Zero when [offer] pays no gas in [coin].
-  static Decimal nativeGasReserve(RoutedSwapOffer offer, AssetId coin) => offer
-      .networkFees
-      .where((fee) => fee.assetId == coin || fee.ticker == coin.id)
-      .fold<Decimal>(Decimal.zero, (sum, fee) {
-        final required = fee.requiredBalance;
-        return sum +
-            (required == null
-                ? fee.amount * maxSellFeeMargin
-                : required * maxSellFundingMargin);
-      });
-
-  /// How far below the provider's minimum an offer's guaranteed receive sits.
-  ///
-  /// `init` quotes again and refuses a fresh minimum below the guard. Quotes
-  /// seconds apart differ by hundredths of a percent, and more when the
-  /// provider switches tools, so a guard equal to the minimum failed most
-  /// starts on some routes. The offer shows the guard it enforces, so a swap
-  /// still never starts against a number the user was not shown.
-  static final Decimal defaultGuardMargin = Decimal.parse('0.003');
 
   /// Wallet assets that are eligible to be quoted.
   ///
@@ -210,19 +166,41 @@ class RoutedSwapManager {
       to: to,
       order: order,
       slippage: slippage,
-      guarded: true,
     );
   }
 
-  /// The largest amount of [from] that can be sold for [to] while keeping the
-  /// source chain's gas, and the provider fees the route charges on top.
-  ///
-  /// Interim, until the contract grows a max option of its own: both hold
-  /// back the provider fees a probe at the full [balance] charges on top in
-  /// [from], as quoted. A native sell also holds back the probe's required
-  /// balance times [maxSellFundingMargin], or, from an engine that reports
-  /// none, its network fee times [maxSellFeeMargin]. A token sell keeps no
-  /// gas back, because its gas is paid in the chain's native coin.
+  /// Asks KDF to calculate and price Max, including native gas funding and
+  /// known atomic commitments. The returned amount and minimum are
+  /// one snapshot.
+  Future<RoutedSwapOffer> quoteMax({
+    required AssetId from,
+    required AssetId to,
+    double? slippage,
+    rpc.RoutedSwapOrder? order,
+    String? provider,
+  }) async {
+    final response = await _client.rpc.routedSwap.quoteMax(
+      from: from.id,
+      to: to.id,
+      slippage: slippage,
+      order: order,
+      provider: provider,
+    );
+    final route = response.best;
+    if (route == null) {
+      throw StateError('A successful Max quote must contain a route');
+    }
+    return _offerFrom(
+      route,
+      from: from,
+      to: to,
+      order: order,
+      slippage: slippage,
+    );
+  }
+
+  /// Compatibility wrapper around [quoteMax]. [balance] never resizes KDF's
+  /// quote; KDF owns spendable balances and the concrete source amount.
   Future<RoutedSwapMaxSell> maxSellAmount({
     required AssetId from,
     required AssetId to,
@@ -231,26 +209,22 @@ class RoutedSwapManager {
     rpc.RoutedSwapOrder? order,
     String? provider,
   }) async {
-    if (balance <= Decimal.zero) {
-      return RoutedSwapMaxSell(
-        amount: Decimal.zero,
-        reservedForFees: Decimal.zero,
-        feeAsset: from.parentId ?? from,
-      );
-    }
-    final probe = await quote(
+    final offer = await quoteMax(
       from: from,
       to: to,
-      amount: balance,
       slippage: slippage,
       order: order,
       provider: provider,
     );
     final gas = from.isChildAsset
         ? Decimal.zero
-        : nativeGasReserve(probe, from);
-    // Paid on top of the amount, so the balance needs them as it needs gas.
-    final providerFees = probe.costs
+        : offer.networkFees
+              .where((fee) => fee.assetId == from || fee.ticker == from.id)
+              .fold<Decimal>(
+                Decimal.zero,
+                (sum, fee) => sum + (fee.requiredBalance ?? fee.amount),
+              );
+    final providerFees = offer.costs
         .where(
           (cost) =>
               cost.kind == RoutedSwapCostKind.providerFee &&
@@ -258,24 +232,14 @@ class RoutedSwapManager {
               cost.assetId == from,
         )
         .fold<Decimal>(Decimal.zero, (sum, cost) => sum + cost.amount);
-
-    final decimals = from.chainId.decimals;
-    var reserve = gas + providerFees;
-    var amount = balance - reserve;
-    if (decimals != null) {
-      reserve = reserve.ceil(scale: decimals);
-      amount = (balance - reserve).floor(scale: decimals);
-    }
-    if (amount < Decimal.zero) amount = Decimal.zero;
-
     return RoutedSwapMaxSell(
-      amount: amount,
-      reservedForFees: reserve,
-      // A token sell with nothing held back still names its gas coin.
-      feeAsset: from.isChildAsset && reserve == Decimal.zero
+      amount: offer.sellAmount,
+      reservedForFees: gas + providerFees,
+      feeAsset: from.isChildAsset && providerFees == Decimal.zero
           ? from.parentId
           : from,
       reservedForProviderFees: providerFees,
+      offer: offer,
     );
   }
 

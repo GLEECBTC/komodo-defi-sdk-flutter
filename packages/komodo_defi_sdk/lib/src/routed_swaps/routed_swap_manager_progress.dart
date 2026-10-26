@@ -196,7 +196,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           to: to,
           order: accepted?.order,
           slippage: accepted?.slippage,
-          guarded: true,
         );
       }
     }
@@ -233,12 +232,14 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           :final coin,
           :final available,
           :final required,
+          :final lockedBySwaps,
         ) =>
           RoutedSwapShortfall(
             ticker: coin,
             assetId: _resolveAsset(coin),
             available: Decimal.tryParse(available) ?? Decimal.zero,
             required: Decimal.tryParse(required) ?? Decimal.zero,
+            lockedBySwaps: _decimal(lockedBySwaps),
           ),
         _ => null,
       },

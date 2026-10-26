@@ -1,33 +1,19 @@
 ## Unreleased
 
- - **FEAT**(routed-swap): follow KDF `667045c`'s gas funding and measured
-   payouts.
-   - **Gas funding:** `RoutedSwapNetworkFee.requiredBalance` is the balance
-     KDF checks before it sends. A native Max keeps back that balance times
-     `RoutedSwapManager.maxSellFundingMargin` (1.25) instead of three times
-     the estimated fee, which on Arbitrum was too little: there KDF requires
-     several times the estimate. `RoutedSwapManager.nativeGasReserve` applies
-     the same rule to any offer. An engine that reports no required balance
-     keeps the old rule.
-   - **Payouts:** `RoutedSwapReceipt.amount` is the payout KDF measured, null
-     when it could not measure one; `reported` is the provider's figure
-     (`RoutedSwapReportedAmount`), and `isMeasured` tells the two apart.
-     `RoutedSwapProgress.providerReported` carries the provider's report while
-     the bridge is still being measured.
-   - **Failures:** `GasEstimationFailed` becomes
-     `RoutedSwapFailureKind.gasEstimationFailed`, retryable, with the coin in
-     `RoutedSwapFailure.gasCoin`.
-
-   **Breaking:** `RoutedSwapReceipt.amount` is nullable.
- - **FIX**(routed-swap): a routed start no longer fails on a tiny price move.
-   `init` quotes again and refuses a fresh minimum below the guard, and
-   quotes seconds apart differ by hundredths of a percent, so a guard equal
-   to the provider's minimum failed most starts on some routes. An offer's
-   `guaranteedReceive` now sits `RoutedSwapManager.defaultGuardMargin`
-   (0.3%) below the provider's minimum, on a quote and on the re-priced
-   offer a `QuoteWorsened` carries, rounded down to the asset's decimals;
-   `start` guards with that same number. `RoutedSwapManager` takes a
-   `guardMargin`.
+ - **FEAT**(routed-swap): align with KDF `35f0bde` / specs `7c388ea`.
+   Typed `quoteMax` returns KDF's complete fundable route; `maxSellAmount`
+   consumes it without gas multipliers. Execution always uses a concrete amount.
+   The provider minimum reaches `init` unchanged; KDF owns tighter-slippage retries.
+ - **FEAT**(config): optional typed `lifiIntegrator` propagates through bootstrap,
+   authentication, wallet creation and restarts. The reusable SDK default is unset;
+   invalid names and fee totals are rejected. KDF owns commission validation.
+ - **FIX**(routed-swap): preserve `required_balance` separately from estimated
+   gas, optional measured and provider-reported payouts, and quote/task
+   `InsufficientBalance.locked_by_swaps`. Failures retain recorded approval gas.
+   `RoutedSwapReceipt.amount` remains nullable; `reported` is separate evidence.
+ - **BREAKING**(routed-swap): remove the interim `guardMargin`,
+   `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
+   `nativeGasReserve` APIs. Use the returned quote and its funding requirements.
  - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
    offer with a minimum the user was already shown, while the route's own
    minimum still clears it, so a small move between the review and Start
@@ -61,14 +47,9 @@
      `RoutedSwapStartUnconfirmedException` rather than inviting a second
      start.
    - **Cancelling:** refusals are typed.
-   - **Max:** `maxSellAmount` is an interim Max until the contract has one.
-     For a network's own coin it keeps back three times the probed network
-     fee: KDF checks the balance at start against the route's gas limit at
-     its own maximum fee per gas, which runs well above the provider's
-     estimate. Native and token sells alike also keep back the provider fees
-     the route charges on top in the sold coin, as quoted, and report them as
-     `RoutedSwapMaxSell.reservedForProviderFees`, so a token sell spends a
-     probe quote on that.
+   - **Max:** `quoteMax` delegates to KDF. `maxSellAmount` remains a compatibility
+     wrapper and carries the full offer; its balance argument does not override
+     the engine's spendable balance.
  - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
    now pick repositories that support price history. They asked for current
    prices, so the Komodo feed could answer a dated lookup with today's price,

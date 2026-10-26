@@ -217,9 +217,8 @@ class RoutedSwapOffer with RoutedSwapValue {
   ///
   /// **This is the number to show.** It is also the value enforced when the
   /// swap runs: if a fresh quote falls below it, nothing is sent on-chain.
-  /// On an offer a swap can start from, it sits
-  /// `RoutedSwapManager.defaultGuardMargin` below the provider's minimum, so
-  /// a small move before the engine's own quote does not refuse the start.
+  /// This is the provider's quoted minimum. KDF owns any tighter-slippage
+  /// retry; the client never reduces the accepted guard.
   final Decimal guaranteedReceive;
 
   /// Same-chain, cross-chain, or a kind this build does not know.
@@ -385,10 +384,14 @@ class RoutedSwapMaxSell with RoutedSwapValue {
     required this.amount,
     required this.reservedForFees,
     this.feeAsset,
+    this.offer,
     Decimal? reservedForProviderFees,
   }) : reservedForProviderFees = reservedForProviderFees ?? Decimal.zero;
 
-  /// What may be sold. Zero when the balance cannot even cover the fees.
+  /// The complete Max quote. Retain it instead of requesting an exact quote.
+  final RoutedSwapOffer? offer;
+
+  /// The concrete source amount KDF calculated.
   final Decimal amount;
 
   /// What was held back for fees, in [feeAsset] units: the network fee, and
@@ -409,5 +412,6 @@ class RoutedSwapMaxSell with RoutedSwapValue {
     reservedForFees,
     reservedForProviderFees,
     feeAsset,
+    offer,
   ];
 }

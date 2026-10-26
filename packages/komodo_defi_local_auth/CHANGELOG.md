@@ -1,5 +1,7 @@
 ## Unreleased
 
+ - **FEAT**(auth): propagate optional integrator policy through signed-out startup, registration, sign-in and engine restarts.
+
  - **FEAT**(auth): `KomodoDefiLocalAuth` and `KdfAuthService` take
    `lifiProxyUrl` and write it to the signed-out and wallet startup confs.
  - **FIX**(auth): re-read a degraded identity until KDF answers

@@ -99,87 +99,26 @@ void main() {
     });
   });
 
-  group('a native Max', () {
-    test('keeps back the required balance with its margin', () async {
+  test(
+    'Max keeps the KDF amount and reports funding without a multiplier',
+    () async {
       final kdf = _quoting(
-        _nativeRoute(
-          const [
-            {'coin': 'ETH', 'amount': '0.0005', 'required_balance': '0.0016'},
-          ],
-          fees: const [
-            {
-              'name': 'Gas receiver fee',
-              'coin': 'ETH',
-              'amount': '0.0012',
-              'included': false,
-            },
-          ],
-        ),
-      );
-
-      final max = await managerFor(
-        kdf,
-      ).maxSellAmount(from: eth, to: usdt, balance: d('2'));
-
-      // 0.0016 * 1.25 + 0.0012 = 0.0032, not the 0.0027 of 0.0005 * 3.
-      expect(
-        max,
-        RoutedSwapMaxSell(
-          amount: d('1.9968'),
-          reservedForFees: d('0.0032'),
-          feeAsset: eth,
-          reservedForProviderFees: d('0.0012'),
-        ),
-      );
-    });
-
-    test('falls back to three times the fee without one', () async {
-      final kdf = _quoting(
-        _nativeRoute(const [
-          {'coin': 'ETH', 'amount': '0.0005'},
-        ]),
-      );
-      final max = await managerFor(
-        kdf,
-      ).maxSellAmount(from: eth, to: usdt, balance: d('2'));
-      expect(max.reservedForFees, d('0.0015'));
-      expect(max.amount, d('1.9985'));
-    });
-
-    test('a token sell still keeps no gas back', () async {
-      final kdf = _quoting(
-        routeJson(
-          totalGasCosts: const [
-            {'coin': 'ETH', 'amount': '0.01', 'required_balance': '0.03'},
-          ],
-        ),
-      );
-      final max = await managerFor(
-        kdf,
-      ).maxSellAmount(from: usdc, to: usdt, balance: d('100'));
-      expect(max.amount, d('100'));
-      expect(max.reservedForFees, d('0'));
-      expect(max.feeAsset, eth);
-    });
-
-    test('nativeGasReserve applies the same rule to an offer', () async {
-      final kdf = _quoting(
-        _nativeRoute(const [
+        _nativeRoute([
           {'coin': 'ETH', 'amount': '0.0005', 'required_balance': '0.0016'},
         ]),
       );
-      final offer = await managerFor(
+      final max = await managerFor(
         kdf,
-      ).quote(from: eth, to: usdt, amount: d('2'));
-      expect(RoutedSwapManager.nativeGasReserve(offer, eth), d('0.002'));
-      expect(RoutedSwapManager.nativeGasReserve(offer, matic), d('0'));
+      ).maxSellAmount(from: eth, to: usdt, balance: d('2'));
+      expect(max.amount, d(max.offer!.route.from.amount));
+      expect(max.reservedForFees, d('0.0016'));
+      expect(kdf.paramsFor('routed_swap::quote').single['max'], isTrue);
       expect(
-        RoutedSwapManager.nativeGasReserve(offerOf(), eth),
-        d('0.03'),
-        reason: 'an offer with no required balance keeps three times its fee',
+        kdf.paramsFor('routed_swap::quote').single,
+        isNot(contains('amount')),
       );
-    });
-  });
+    },
+  );
 
   group('a finished swap', () {
     test('a measured payout is the receipt amount', () {

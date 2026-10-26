@@ -190,7 +190,7 @@ void _cases3() {
       expect(failure.retryPolicy, RoutedSwapRetryPolicy.requote);
       expect(failure.isRetryable, isTrue);
       // The re-priced 98.31 less the guard margin: accepting it starts.
-      expect(failure.freshOffer!.guaranteedReceive, Decimal.parse('98.01507'));
+      expect(failure.freshOffer!.guaranteedReceive, Decimal.parse('98.31'));
       expect(failure.freshOffer!.from, usdt);
       expect(failure.freshOffer!.to, usdc);
     });

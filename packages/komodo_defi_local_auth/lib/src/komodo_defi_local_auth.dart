@@ -368,11 +368,13 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
     String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
   }) : _allowRegistrations = allowRegistrations,
        _authService = KdfAuthService(
          kdf,
          hostConfig,
          lifiProxyUrl: lifiProxyUrl,
+         lifiIntegrator: lifiIntegrator,
        ) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }

@@ -43,6 +43,24 @@ class RoutedSwapMethodsNamespace extends BaseRpcMethodNamespace {
     );
   }
 
+  /// Prices the largest fundable source amount. Reserves nothing.
+  Future<RoutedSwapQuoteResponse> quoteMax({
+    required String from,
+    required String to,
+    double? slippage,
+    RoutedSwapOrder? order,
+    String? provider,
+  }) => execute(
+    RoutedSwapQuoteRequest.max(
+      rpcPass: rpcPass ?? '',
+      from: from,
+      to: to,
+      slippage: slippage,
+      order: order,
+      provider: provider,
+    ),
+  );
+
   /// Which activated coins are eligible to attempt a quote.
   ///
   /// Eligible is not routable: two coins listed here can still fail the quote

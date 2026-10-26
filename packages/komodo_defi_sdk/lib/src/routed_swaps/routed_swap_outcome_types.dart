@@ -315,6 +315,7 @@ class RoutedSwapShortfall with RoutedSwapValue {
     required this.ticker,
     required this.available,
     required this.required,
+    this.lockedBySwaps,
     this.assetId,
   });
 
@@ -330,8 +331,17 @@ class RoutedSwapShortfall with RoutedSwapValue {
   /// What was required.
   final Decimal required;
 
+  /// Atomic commitments already excluded from available.
+  final Decimal? lockedBySwaps;
+
   @override
-  List<Object?> get props => [ticker, assetId, available, required];
+  List<Object?> get props => [
+    ticker,
+    assetId,
+    available,
+    required,
+    lockedBySwaps,
+  ];
 }
 
 /// The accepted range for an amount.

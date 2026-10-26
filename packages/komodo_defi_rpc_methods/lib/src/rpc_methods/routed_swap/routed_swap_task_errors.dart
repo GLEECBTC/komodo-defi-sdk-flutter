@@ -23,6 +23,7 @@ sealed class RoutedSwapTaskError extends Equatable {
         coin: req('coin'),
         available: req('available'),
         required: req('required'),
+        lockedBySwaps: str('locked_by_swaps'),
       ),
       'ApprovalFailed' => RoutedSwapApprovalFailedError(
         reason: RoutedSwapApprovalFailureReason.parse(str('reason')),
@@ -97,6 +98,7 @@ sealed class RoutedSwapTaskError extends Equatable {
       'coin': e.coin,
       'available': e.available,
       'required': e.required,
+      if (e.lockedBySwaps != null) 'locked_by_swaps': e.lockedBySwaps,
     },
     RoutedSwapApprovalFailedError(:final reason) => {'reason': reason.wire},
     RoutedSwapTxFailedError(:final sourceTxHash, :final reason) => {
@@ -170,6 +172,7 @@ final class RoutedSwapInsufficientBalanceError extends RoutedSwapTaskError {
     required this.coin,
     required this.available,
     required this.required,
+    this.lockedBySwaps,
   });
 
   /// The coin that ran short.
@@ -181,6 +184,9 @@ final class RoutedSwapInsufficientBalanceError extends RoutedSwapTaskError {
   /// What was required, in coin units.
   final String required;
 
+  /// Known atomic commitments, excluded from available.
+  final String? lockedBySwaps;
+
   @override
   String get errorType => 'InsufficientBalance';
 
@@ -188,7 +194,7 @@ final class RoutedSwapInsufficientBalanceError extends RoutedSwapTaskError {
   bool get isPreBroadcast => true;
 
   @override
-  List<Object?> get props => [coin, available, required];
+  List<Object?> get props => [coin, available, required, lockedBySwaps];
 }
 
 /// The approval failed. Nothing was swapped, but approval gas may be spent.

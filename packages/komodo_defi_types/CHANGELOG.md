@@ -1,3 +1,7 @@
+## Unreleased
+
+ - **FEAT**(config): add validated `LifiIntegratorConfig` for global KDF commission policy.
+
 ## 0.6.0 (2026-09-24)
 
  - **BREAKING**(coins): rename `CoinSubClass.matic` to `CoinSubClass.polygon`

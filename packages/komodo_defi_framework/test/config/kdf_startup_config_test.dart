@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:path/path.dart' as path;
 
 void main() {
@@ -12,19 +13,44 @@ void main() {
   });
   tearDown(() => home.delete(recursive: true));
 
-  Future<KdfStartupConfig> generate({String? lifiProxyUrl, bool? disableP2p}) =>
-      KdfStartupConfig.generateWithDefaults(
-        walletName: 'wallet',
-        walletPassword: 'wallet-secret',
-        enableHd: true,
-        rpcPassword: 'rpc-secret',
-        coinsPath: 'coins',
-        userHome: home.path,
-        dbDir: path.join(home.path, 'db'),
-        seedNodes: (disableP2p ?? false) ? null : const ['seed01.kmdefi.net'],
-        disableP2p: disableP2p,
-        lifiProxyUrl: lifiProxyUrl,
+  Future<KdfStartupConfig> generate({
+    String? lifiProxyUrl,
+    bool? disableP2p,
+    LifiIntegratorConfig? lifiIntegrator,
+  }) => KdfStartupConfig.generateWithDefaults(
+    walletName: 'wallet',
+    walletPassword: 'wallet-secret',
+    enableHd: true,
+    rpcPassword: 'rpc-secret',
+    coinsPath: 'coins',
+    userHome: home.path,
+    dbDir: path.join(home.path, 'db'),
+    seedNodes: (disableP2p ?? false) ? null : const ['seed01.kmdefi.net'],
+    disableP2p: disableP2p,
+    lifiProxyUrl: lifiProxyUrl,
+    lifiIntegrator: lifiIntegrator,
+  );
+
+  test(
+    'commission is omitted by default and encoded only as global config',
+    () async {
+      expect(
+        (await generate()).encodeStartParams(),
+        isNot(contains('lifi_integrator')),
       );
+      final config = LifiIntegratorConfig(
+        name: 'gleec-dex-staging',
+        feeBps: 178,
+        lifiFeeBps: 22,
+      );
+      expect(
+        (await generate(
+          lifiIntegrator: config,
+        )).encodeStartParams()['lifi_integrator'],
+        config.toJson(),
+      );
+    },
+  );
 
   group('KdfStartupConfig lifi_proxy_url', () {
     test('is absent when no LI.FI proxy is set', () async {

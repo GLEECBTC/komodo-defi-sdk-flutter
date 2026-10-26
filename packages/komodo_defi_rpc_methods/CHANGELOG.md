@@ -1,5 +1,7 @@
 ## Unreleased
 
+ - **FEAT**(routed-swap): add typed Max quote requests and optional locked balances on quote/task shortfalls; execution remains concrete.
+
  - **FEAT**(routed-swap): read the contract at `gleec-specs#2` `2880c32`, as
    emitted by KDF `feat/lifi-integration` `667045c`:
    - each `total_gas_costs` entry carries `required_balance`

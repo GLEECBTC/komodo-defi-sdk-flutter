@@ -63,6 +63,14 @@ sealed class RoutedSwapRpcException implements Exception {
         message: message,
         errorData: raw,
       ),
+      'InsufficientBalance' => RoutedSwapInsufficientBalanceException(
+        coin: req('coin'),
+        available: req('available'),
+        required: req('required'),
+        lockedBySwaps: opt('locked_by_swaps'),
+        message: message,
+        errorData: raw,
+      ),
       'MyAddressError' => RoutedSwapMyAddressException(
         coin: req('coin'),
         detail: req('message'),
@@ -419,4 +427,21 @@ final class RoutedSwapUnknownRpcException extends RoutedSwapRpcException {
     final data = errorData;
     return data is Map ? data['provider_request_id'] as String? : null;
   }
+}
+
+/// KDF could not fund a tested Max amount from its spendable balance.
+final class RoutedSwapInsufficientBalanceException
+    extends RoutedSwapRpcException {
+  const RoutedSwapInsufficientBalanceException({
+    required this.coin,
+    required this.available,
+    required this.required,
+    required super.message,
+    this.lockedBySwaps,
+    super.errorData,
+  }) : super(errorType: 'InsufficientBalance');
+  final String coin;
+  final String available;
+  final String required;
+  final String? lockedBySwaps;
 }

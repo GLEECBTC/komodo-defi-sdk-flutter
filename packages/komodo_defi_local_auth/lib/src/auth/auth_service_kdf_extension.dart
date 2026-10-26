@@ -514,6 +514,7 @@ extension KdfExtensions on KdfAuthService {
       seedNodes: seedNodes,
       netid: netId,
       lifiProxyUrl: _lifiProxyUrl,
+      lifiIntegrator: _lifiIntegrator,
     );
   }
 }
