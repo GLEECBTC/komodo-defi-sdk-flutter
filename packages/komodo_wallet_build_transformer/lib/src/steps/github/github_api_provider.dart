@@ -56,8 +56,9 @@ class GithubApiProvider {
 
   /// Retrieves the contents of a file from the repository API. The [filePath]
   /// parameter specifies the path of the file within the repository.
-  Future<GitHubFile> getFileMetadata(String filePath) async {
-    final fileMetadataUrl = '$_baseUrl/contents/$filePath?ref=$_branch';
+  Future<GitHubFile> getFileMetadata(String filePath, {String? ref}) async {
+    final fileMetadataUrl =
+        '$_baseUrl/contents/$filePath?ref=${ref ?? _branch}';
     _log.finest('Fetching file metadata from $fileMetadataUrl');
 
     final fileContentResponse = await http.get(
@@ -136,17 +137,14 @@ class GithubApiProvider {
 
     final respString = response.body;
     final data = jsonDecode(respString) as List<dynamic>;
-    final files =
-        data
-            .where(
-              (dynamic item) =>
-                  (item as Map<String, dynamic>)['type'] == 'file',
-            )
-            .map(
-              (dynamic file) =>
-                  GitHubFile.fromJson(file as Map<String, dynamic>),
-            )
-            .toList();
+    final files = data
+        .where(
+          (dynamic item) => (item as Map<String, dynamic>)['type'] == 'file',
+        )
+        .map(
+          (dynamic file) => GitHubFile.fromJson(file as Map<String, dynamic>),
+        )
+        .toList();
 
     _log
       ..fine('Directory $repoPath contains ${data.length} items')

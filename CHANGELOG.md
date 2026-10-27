@@ -5,6 +5,11 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## Unreleased
 
+ - **FIX**(build): freeze bundled coin files and icons to their pinned revision,
+   bypass mutable branch mirrors, verify Git blob hashes on download and cache
+   reuse, reject unexpected cached icons, and require a rebuild after correction.
+   Runtime coin updates retain their existing independent policy (SDK #407).
+
  - **FEAT**(routed-swap): KDF-owned Max quotes, exact accepted minima, global
    integrator configuration, locked-balance shortfalls and missing-only EVM fee
    model normalization. Funding, measured payouts and approval/gas evidence
