@@ -26,6 +26,88 @@ const _b = KdfUser(
 );
 
 void main() {
+  test('cold-start recovery reads every in-flight history page', () async {
+    const total = 99;
+    final kdf = ScriptedKdf()
+      ..always('routed_swap::history', (params) {
+        final page = params['page_number'] as int;
+        expect(params['status_filter'], 'in_flight');
+        expect(params['limit'], 1);
+        expect(page, inInclusiveRange(1, total));
+        return historyAnswer(
+          [entryJson(inProgress(uuidOf(total - page + 1), 'TrackingBridge'))],
+          total: total,
+          page: page,
+          totalPages: total,
+          limit: 1,
+        );
+      });
+    final manager = managerFor(kdf);
+    addTearDown(manager.dispose);
+
+    final running = await manager.inFlight(pageSize: 1);
+
+    expect(running.map((swap) => swap.uuid), [
+      for (var n = total; n > 0; n--) uuidOf(n),
+    ]);
+    expect(kdf.calls('routed_swap::history'), total);
+  });
+
+  test('recovery never returns partial history after a late wallet change', () {
+    fakeAsync((async) {
+      final auth = HeldSessionStreamAuth(_a);
+      final pending = Completer<Map<String, dynamic>>();
+      final kdf = ScriptedKdf()
+        ..always('routed_swap::history', (params) {
+          final page = params['page_number'] as int;
+          if (page == 21) return pending.future;
+          return historyAnswer(
+            [entryJson(inProgress(uuidOf(page), 'TrackingBridge'))],
+            total: 21,
+            page: page,
+            totalPages: 21,
+            limit: 1,
+          );
+        });
+      final manager = managerFor(kdf, auth: auth);
+      List<RoutedSwapProgress>? recovered;
+      Object? failure;
+      manager
+          .inFlight(pageSize: 1)
+          .then<void>(
+            (value) {
+              recovered = value;
+            },
+            onError: (Object error) {
+              failure = error;
+            },
+          );
+      async.flushMicrotasks();
+      expect(kdf.calls('routed_swap::history'), 21);
+      auth.runtimeSessions.invalidate();
+      auth.user = _b;
+      auth.runtimeSessions.observe(_b);
+      pending.complete(
+        historyAnswer(
+          [entryJson(inProgress(uuidOf(21), 'TrackingBridge'))],
+          total: 21,
+          page: 21,
+          totalPages: 21,
+          limit: 1,
+        ),
+      );
+      async.flushMicrotasks();
+      expect(recovered, isNull);
+      expect(failure, isA<AuthSessionChangedException>());
+      expect(kdf.calls('routed_swap::history'), 21);
+      unawaited(manager.dispose());
+      unawaited(auth.runtimeSessions.dispose());
+      unawaited(auth.heldSessionEvents.close());
+      unawaited(auth.authChanges.close());
+      async.flushMicrotasks();
+    });
+  });
+
   for (final matches in [1, 2]) {
     test(
       '$matches matching history records never confirm unrelated tasks',

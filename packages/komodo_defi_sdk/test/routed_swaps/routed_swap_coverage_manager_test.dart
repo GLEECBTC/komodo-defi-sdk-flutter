@@ -350,28 +350,5 @@ void main() {
         async.flushMicrotasks();
       });
     });
-
-    test('inFlight reads at most twenty pages', () async {
-      final kdf = ScriptedKdf()
-        ..always('routed_swap::history', (params) {
-          final page = params['page_number'] as int;
-          return historyAnswer(
-            [entryJson(inProgress(uuidOf(page), 'TrackingBridge'))],
-            total: 99,
-            page: page,
-            totalPages: 99,
-          );
-        });
-
-      final running = await managerFor(kdf).inFlight(pageSize: 1);
-
-      expect(running, hasLength(20));
-      expect(kdf.calls('routed_swap::history'), 20);
-      expect(kdf.paramsFor('routed_swap::history').last, {
-        'status_filter': 'in_flight',
-        'limit': 1,
-        'page_number': 20,
-      });
-    });
   });
 }
