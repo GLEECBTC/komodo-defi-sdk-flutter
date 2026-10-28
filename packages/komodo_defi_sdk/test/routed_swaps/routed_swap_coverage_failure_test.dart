@@ -192,7 +192,7 @@ void main() {
         expect(known.freshOffer!.from, usdc);
         expect(known.freshOffer!.to, usdt);
         // Accepting it starts a swap, so it carries the guard margin too.
-        expect(known.freshOffer!.guaranteedReceive, d('97.706'));
+        expect(known.freshOffer!.guaranteedReceive, d('98'));
         expect(known.freshOffer!.order, isNull);
 
         final unknown = await failureOf(

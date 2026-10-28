@@ -1,16 +1,12 @@
 import 'dart:async';
 
-import 'package:decimal/decimal.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:test/test.dart';
 
 import 'routed_swap_coverage_fakes.dart';
 
-/// Covers the guard an offer carries. `init` quotes again and refuses a fresh
-/// minimum below the guard; a guard equal to the provider's minimum failed
-/// six starts in seven on a Relay route (2026-10-05), so an offer guards, and
-/// shows, a minimum slightly below the provider's.
+/// The accepted provider minimum reaches execution without an extra margin.
 void main() {
   ScriptedKdf quoting(String toMin, {String to = 'USDT-PLG20'}) => ScriptedKdf()
     ..always(
@@ -21,23 +17,18 @@ void main() {
     );
 
   group('a quote', () {
-    test(
-      "guards 0.3% below the provider's minimum, to the decimals",
-      () async {
-        final offer = await managerFor(
-          quoting('99.123457'),
-        ).quote(from: usdc, to: usdt, amount: d('100'));
+    test("keeps the provider's minimum exactly", () async {
+      final offer = await managerFor(
+        quoting('99.123457'),
+      ).quote(from: usdc, to: usdt, amount: d('100'));
 
-        // 99.123457 × 0.997 = 98.826086629, rounded down to 6 places.
-        expect(offer.guaranteedReceive, d('98.826086'));
-        expect(offer.route.toMinimum.amount, '99.123457');
-      },
-    );
+      expect(offer.guaranteedReceive, d('99.123457'));
+      expect(offer.route.toMinimum.amount, '99.123457');
+    });
 
     test("keeps the provider's minimum when there is no margin", () async {
       final offer = await managerFor(
         quoting('99.123457'),
-        guardMargin: Decimal.zero,
       ).quote(from: usdc, to: usdt, amount: d('100'));
 
       expect(offer.guaranteedReceive, d('99.123457'));
@@ -50,8 +41,7 @@ void main() {
         resolve: (ticker) => ticker == 'ODD-PLG20' ? odd : knownAssets[ticker],
       ).quote(from: usdc, to: odd, amount: d('100'));
 
-      // 12.34 × 0.997 = 12.30298, rounded down to 2 places.
-      expect(offer.guaranteedReceive, d('12.3'));
+      expect(offer.guaranteedReceive, d('12.34'));
     });
 
     test('keeps a minimum too small to lose anything whole', () async {
@@ -64,7 +54,6 @@ void main() {
   });
 
   group('keeping a minimum already shown', () {
-    // The provider's minimum is 99.123457; the offer's own guard 98.826086.
     Future<RoutedSwapOffer> offer() => managerFor(
       quoting('99.123457'),
     ).quote(from: usdc, to: usdt, amount: d('100'));
@@ -74,7 +63,7 @@ void main() {
 
       final kept = fresh.keepingMinimum(d('99'))!;
 
-      expect(kept.guaranteedReceive, d('99'));
+      expect(kept.guaranteedReceive, d('99.123457'));
       expect(kept.route, same(fresh.route));
       expect(kept.expectedReceive, fresh.expectedReceive);
       expect(kept.quotedAt, fresh.quotedAt);
@@ -94,7 +83,7 @@ void main() {
       final fresh = await offer();
 
       expect(fresh.keepingMinimum(d('98.5')), same(fresh));
-      expect(fresh.keepingMinimum(d('98.826086')), same(fresh));
+      expect(fresh.keepingMinimum(d('99.123457')), same(fresh));
     });
 
     test('start guards with the minimum kept', () {
@@ -115,7 +104,7 @@ void main() {
 
         expect(
           kdf.paramsFor('task::routed_swap::init').single['min_to_amount'],
-          '99',
+          '99.123457',
         );
         unawaited(manager.dispose());
         async.flushMicrotasks();
@@ -143,7 +132,7 @@ void main() {
         kdf.paramsFor('task::routed_swap::init').single['min_to_amount'],
         offer.guaranteedReceive.toString(),
       );
-      expect(offer.guaranteedReceive, d('98.826086'));
+      expect(offer.guaranteedReceive, d('99.123457'));
       unawaited(manager.dispose());
       async.flushMicrotasks();
     });

@@ -25,6 +25,10 @@ sealed class RoutedSwapStatus extends Equatable {
     final executedRoute = route == null
         ? null
         : RoutedSwapRoute.fromJson(route);
+    RoutedSwapAmount? amount(String key) {
+      final json = details.valueOrNull<JsonMap>(key);
+      return json == null ? null : RoutedSwapAmount.fromJson(json);
+    }
 
     switch (status) {
       case 'Ok':
@@ -38,9 +42,8 @@ sealed class RoutedSwapStatus extends Equatable {
               : RoutedSwapPartialReason.parse(
                   details.valueOrNull<String>('partial_reason'),
                 ),
-          received: RoutedSwapAmount.fromJson(
-            details.value<JsonMap>('received'),
-          ),
+          received: amount('received'),
+          providerReceived: amount('provider_received'),
           sourceTxHash: details.valueOrNull<String>('source_tx_hash'),
           destTxHash: details.valueOrNull<String>('dest_tx_hash'),
           providerExplorerUrl: details.valueOrNull<String>(
@@ -86,6 +89,7 @@ sealed class RoutedSwapStatus extends Equatable {
           ),
           executionDurationS: details.valueOrNull<int>('execution_duration_s'),
           actionUrl: details.valueOrNull<String>('action_url'),
+          providerReceived: amount('provider_received'),
         );
     }
   }
@@ -135,6 +139,7 @@ final class RoutedSwapInProgress extends RoutedSwapStatus {
     this.providerExplorerUrl,
     this.executionDurationS,
     this.actionUrl,
+    this.providerReceived,
   });
 
   /// The parsed state.
@@ -174,6 +179,11 @@ final class RoutedSwapInProgress extends RoutedSwapStatus {
   /// Where the user must act, when [stage] is `action_required`.
   final String? actionUrl;
 
+  /// On `TrackingBridge`: the payout or refund the provider reports, while
+  /// KDF measures it on-chain. Absent until the provider reports one, and a
+  /// report rather than a measurement.
+  final RoutedSwapAmount? providerReceived;
+
   @override
   String get taskStatus => 'InProgress';
 
@@ -190,6 +200,8 @@ final class RoutedSwapInProgress extends RoutedSwapStatus {
       'provider_explorer_url': providerExplorerUrl,
     if (executionDurationS != null) 'execution_duration_s': executionDurationS,
     if (actionUrl != null) 'action_url': actionUrl,
+    if (providerReceived != null)
+      'provider_received': providerReceived!.toJson(),
   };
 
   @override
@@ -206,6 +218,7 @@ final class RoutedSwapInProgress extends RoutedSwapStatus {
     providerExplorerUrl,
     executionDurationS,
     actionUrl,
+    providerReceived,
   ];
 }
 
@@ -217,8 +230,9 @@ final class RoutedSwapFinished extends RoutedSwapStatus {
     required super.uuid,
     required super.provider,
     required this.outcome,
-    required this.received,
     super.executedRoute,
+    this.received,
+    this.providerReceived,
     this.partialReason,
     this.sourceTxHash,
     this.destTxHash,
@@ -231,15 +245,24 @@ final class RoutedSwapFinished extends RoutedSwapStatus {
   /// Why the outcome is partial. Set only for [RoutedSwapOutcome.partial].
   final RoutedSwapPartialReason? partialReason;
 
-  /// The token and amount the user actually received. For a refund this is the
-  /// returned source coin, not the requested destination coin. For a
-  /// same-chain swap it is the executed route's quoted `to.amount`.
-  final RoutedSwapAmount received;
+  /// The token and gross amount KDF measured arriving on-chain. For a refund
+  /// it is the returned source coin, not the requested destination coin.
+  ///
+  /// Absent when KDF could not measure the payout, which does not mean
+  /// nothing arrived: a same-chain swap can be `completed` without it, and a
+  /// cross-chain outcome then rests on [providerReceived].
+  final RoutedSwapAmount? received;
+
+  /// The token and amount the provider reports, which can differ from
+  /// [received]. Neither stands in for the other or for the quote. Absent for
+  /// same-chain swaps, and when the provider reported none.
+  final RoutedSwapAmount? providerReceived;
 
   /// Source-chain transaction.
   final String? sourceTxHash;
 
-  /// Destination-chain transaction. Absent for refunds and same-chain swaps.
+  /// Destination-chain transaction. Absent for refunds and for same-chain
+  /// swaps, partial ones included, and whenever KDF has none.
   final String? destTxHash;
 
   /// Provider explorer link.
@@ -253,7 +276,9 @@ final class RoutedSwapFinished extends RoutedSwapStatus {
     ...super.toJson(),
     'outcome': outcome.wire,
     if (partialReason != null) 'partial_reason': partialReason!.wire,
-    'received': received.toJson(),
+    if (received != null) 'received': received!.toJson(),
+    if (providerReceived != null)
+      'provider_received': providerReceived!.toJson(),
     if (sourceTxHash != null) 'source_tx_hash': sourceTxHash,
     if (destTxHash != null) 'dest_tx_hash': destTxHash,
     if (providerExplorerUrl != null)
@@ -266,6 +291,7 @@ final class RoutedSwapFinished extends RoutedSwapStatus {
     outcome,
     partialReason,
     received,
+    providerReceived,
     sourceTxHash,
     destTxHash,
     providerExplorerUrl,

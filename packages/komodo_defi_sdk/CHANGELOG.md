@@ -1,5 +1,19 @@
 ## Unreleased
 
+ - **FEAT**(routed-swap): align with KDF `35f0bde` / specs `7c388ea`.
+   Typed `quoteMax` returns KDF's complete fundable route; `maxSellAmount`
+   consumes it without gas multipliers. Execution always uses a concrete amount.
+   The provider minimum reaches `init` unchanged; KDF owns tighter-slippage retries.
+ - **FEAT**(config): optional typed `lifiIntegrator` propagates through bootstrap,
+   authentication, wallet creation and restarts. The reusable SDK default is unset;
+   invalid names and fee totals are rejected. KDF owns commission validation.
+ - **FIX**(routed-swap): preserve `required_balance` separately from estimated
+   gas, optional measured and provider-reported payouts, and quote/task
+   `InsufficientBalance.locked_by_swaps`. Failures retain recorded approval gas.
+   `RoutedSwapReceipt.amount` remains nullable; `reported` is separate evidence.
+ - **BREAKING**(routed-swap): remove the interim `guardMargin`,
+   `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
+   `nativeGasReserve` APIs. Use the returned quote and its funding requirements.
  - **FIX**(activation): add a GRC-20 token to a Trezor wallet's active GLEEC
    through `enable_erc20`. It went out as `task::enable_eth::init` with the
    token's ticker, which KDF rejects. Activating GLEEC together with its tokens
@@ -11,15 +25,6 @@
    rather than to a task that takes only platform coins. Neither changes what
    users see today: the custom-token strategy came last in the chain, and the
    Trezor asset filter hides Tendermint coins from Trezor wallets.
- - **FIX**(routed-swap): a routed start no longer fails on a tiny price move.
-   `init` quotes again and refuses a fresh minimum below the guard, and
-   quotes seconds apart differ by hundredths of a percent, so a guard equal
-   to the provider's minimum failed most starts on some routes. An offer's
-   `guaranteedReceive` now sits `RoutedSwapManager.defaultGuardMargin`
-   (0.3%) below the provider's minimum, on a quote and on the re-priced
-   offer a `QuoteWorsened` carries, rounded down to the asset's decimals;
-   `start` guards with that same number. `RoutedSwapManager` takes a
-   `guardMargin`.
  - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
    offer with a minimum the user was already shown, while the route's own
    minimum still clears it, so a small move between the review and Start
@@ -53,14 +58,9 @@
      `RoutedSwapStartUnconfirmedException` rather than inviting a second
      start.
    - **Cancelling:** refusals are typed.
-   - **Max:** `maxSellAmount` is an interim Max until the contract has one.
-     For a network's own coin it keeps back three times the probed network
-     fee: KDF checks the balance at start against the route's gas limit at
-     its own maximum fee per gas, which runs well above the provider's
-     estimate. Native and token sells alike also keep back the provider fees
-     the route charges on top in the sold coin, as quoted, and report them as
-     `RoutedSwapMaxSell.reservedForProviderFees`, so a token sell spends a
-     probe quote on that.
+   - **Max:** `quoteMax` delegates to KDF. `maxSellAmount` remains a compatibility
+     wrapper and carries the full offer; its balance argument does not override
+     the engine's spendable balance.
  - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
    now pick repositories that support price history. They asked for current
    prices, so the Komodo feed could answer a dated lookup with today's price,

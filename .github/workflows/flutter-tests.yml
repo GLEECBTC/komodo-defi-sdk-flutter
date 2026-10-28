@@ -153,6 +153,8 @@ jobs:
           declare -A test_results
           declare -A test_outputs
           overall_success=true
+          log_dir="$GITHUB_WORKSPACE/test_logs"
+          mkdir -p "$log_dir"
 
           echo "# Test Results" > test_summary.md
           echo "" >> test_summary.md
@@ -168,14 +170,16 @@ jobs:
 
             cd "$pkg"
 
-            # Run flutter test and capture output and exit code
-            if flutter_output=$(flutter test -r expanded 2>&1); then
+            # pipefail preserves the test exit code while tee retains the full
+            # output, including failures before the final summary lines.
+            log_file="$log_dir/${pkg##*/}.log"
+            if flutter test -r expanded 2>&1 | tee "$log_file"; then
               test_results["$pkg"]="✅ PASS"
               test_outputs["$pkg"]="Tests passed successfully"
               echo "✅ $pkg: PASSED"
             else
               test_results["$pkg"]="❌ FAIL"
-              test_outputs["$pkg"]=$(echo "$flutter_output" | tail -n 10)  # Last 10 lines for brevity
+              test_outputs["$pkg"]=$(tail -n 10 "$log_file")
               echo "❌ $pkg: FAILED"
               overall_success=false
             fi
@@ -217,10 +221,12 @@ jobs:
             echo "✅ All test suites passed!"
           fi
 
-      - name: Upload test summary
+      - name: Upload test summary and package logs
         if: always() && steps.discover.outputs.packages != ''
         uses: actions/upload-artifact@v4
         with:
           name: test-summary
-          path: test_summary.md
+          path: |
+            test_summary.md
+            test_logs/*.log
           retention-days: 30

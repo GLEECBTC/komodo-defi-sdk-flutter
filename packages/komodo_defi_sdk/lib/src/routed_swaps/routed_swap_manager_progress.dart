@@ -41,8 +41,9 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
               ? executed?.estimatedDuration
               : Duration(seconds: status.executionDurationS!),
           actionUrl: status.actionUrl,
+          providerReported: _reportedOf(status.providerReceived),
         );
-      case rpc.RoutedSwapFinished():
+      case rpc.RoutedSwapFinished(:final received):
         return RoutedSwapProgress(
           uuid: status.uuid,
           provider: status.provider,
@@ -53,9 +54,10 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           receipt: RoutedSwapReceipt(
             outcome: status.outcome,
             partialReason: status.partialReason,
-            amount: Decimal.parse(status.received.amount),
-            assetId: _resolveAssetOf(status.received),
-            symbol: status.received.symbol ?? status.received.coin,
+            amount: received == null ? null : Decimal.parse(received.amount),
+            assetId: received == null ? null : _resolveAssetOf(received),
+            symbol: received?.symbol ?? received?.coin,
+            reported: _reportedOf(status.providerReceived),
           ),
           approvalTxHashes: approvalTxHashes,
           sourceTxHash: status.sourceTxHash,
@@ -81,6 +83,17 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           explorerUrl: failure.providerExplorerUrl,
         );
     }
+  }
+
+  RoutedSwapReportedAmount? _reportedOf(rpc.RoutedSwapAmount? amount) {
+    if (amount == null) return null;
+    final value = Decimal.tryParse(amount.amount);
+    if (value == null) return null;
+    return RoutedSwapReportedAmount(
+      amount: value,
+      assetId: _resolveAssetOf(amount),
+      symbol: amount.symbol ?? amount.coin,
+    );
   }
 
   RoutedSwapProgress _progressFromEntry(
@@ -156,6 +169,8 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
       rpc.RoutedSwapProviderTaskError() ||
       rpc.RoutedSwapAmountOutOfBoundsTaskError() =>
         RoutedSwapFailureKind.quoteUnavailable,
+      rpc.RoutedSwapGasEstimationFailedTaskError() =>
+        RoutedSwapFailureKind.gasEstimationFailed,
       rpc.RoutedSwapAbortedOnRestartError() =>
         RoutedSwapFailureKind.abortedOnRestart,
       rpc.RoutedSwapTaskCancelledError() => RoutedSwapFailureKind.cancelled,
@@ -181,7 +196,6 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           to: to,
           order: accepted?.order,
           slippage: accepted?.slippage,
-          guarded: true,
         );
       }
     }
@@ -218,12 +232,14 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
           :final coin,
           :final available,
           :final required,
+          :final lockedBySwaps,
         ) =>
           RoutedSwapShortfall(
             ticker: coin,
             assetId: _resolveAsset(coin),
             available: Decimal.tryParse(available) ?? Decimal.zero,
             required: Decimal.tryParse(required) ?? Decimal.zero,
+            lockedBySwaps: _decimal(lockedBySwaps),
           ),
         _ => null,
       },
@@ -245,6 +261,11 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
       providerExplorerUrl: switch (error) {
         rpc.RoutedSwapBridgeFailedError(:final providerExplorerUrl) =>
           providerExplorerUrl,
+        _ => null,
+      },
+      gasCoin: switch (error) {
+        rpc.RoutedSwapGasEstimationFailedTaskError(:final coin) =>
+          coin.isEmpty ? null : coin,
         _ => null,
       },
     );
@@ -323,7 +344,8 @@ RoutedSwapRetryPolicy _retryPolicyOf(
           ? RoutedSwapRetryPolicy.requote
           : RoutedSwapRetryPolicy.contactSupport,
     rpc.RoutedSwapRateLimitedTaskError() ||
-    rpc.RoutedSwapProviderTaskError() => RoutedSwapRetryPolicy.retry,
+    rpc.RoutedSwapProviderTaskError() ||
+    rpc.RoutedSwapGasEstimationFailedTaskError() => RoutedSwapRetryPolicy.retry,
     rpc.RoutedSwapNoRouteTaskError() ||
     rpc.RoutedSwapAmountOutOfBoundsTaskError() => RoutedSwapRetryPolicy.requote,
     rpc.RoutedSwapAbortedOnRestartError() ||

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:decimal/decimal.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:test/test.dart';
@@ -114,216 +113,75 @@ void main() {
     );
   });
 
-  group('maxSellAmount', () {
+  group('KDF Max', () {
     test(
-      'a native coin without chain decimals keeps the exact reserve',
+      'uses the returned amount and minimum, not the client balance',
       () async {
-        final bare = coverageAsset('BARE', chainId: 56);
         final kdf = ScriptedKdf()
           ..always(
             'routed_swap::quote',
             (_) => ok({
               'routes': [
                 routeJson(
-                  from: 'BARE',
-                  fromAmount: '1',
-                  gasCosts: const [
-                    {'coin': 'BARE', 'amount': '0.00123'},
-                    {'coin': 'ETH', 'amount': '0.5'},
+                  from: 'ETH',
+                  fromAmount: '0.75',
+                  toMin: '99.3',
+                  totalGasCosts: [
+                    {
+                      'coin': 'ETH',
+                      'amount': '0.001',
+                      'required_balance': '0.02',
+                    },
                   ],
                 ),
               ],
             }),
           );
-
         final max = await managerFor(
           kdf,
-        ).maxSellAmount(from: bare, to: usdt, balance: d('1'));
-
-        expect(max.reservedForFees, d('0.00369'));
-        expect(max.amount, d('0.99631'));
-        expect(max.feeAsset, bare);
+        ).maxSellAmount(from: eth, to: usdt, balance: d('100'));
+        expect(kdf.paramsFor('routed_swap::quote').single, {
+          'from': 'ETH',
+          'to': 'USDT-PLG20',
+          'max': true,
+        });
+        expect(max.amount, d('0.75'));
+        expect(max.reservedForFees, d('0.02'));
+        expect(max.offer!.sellAmount, max.amount);
+        expect(max.offer!.guaranteedReceive, d('99.3'));
       },
     );
-
-    test('a native sell also holds back fees charged on top in it', () async {
-      final kdf = ScriptedKdf()
-        ..always(
-          'routed_swap::quote',
-          (_) => ok({
-            'routes': [
-              routeJson(
-                from: 'ETH',
-                fromAmount: '2',
-                gasCosts: const [
-                  {'coin': 'ETH', 'amount': '0.0005'},
-                ],
-                feeCosts: const [
-                  {
-                    'name': 'Gas receiver fee',
-                    'coin': 'ETH',
-                    'amount': '0.0012',
-                    'included': false,
-                  },
-                  // Taken from what arrives, paid in another coin, or in a
-                  // token the wallet cannot resolve: none comes from ETH.
-                  {
-                    'name': 'LI.FI fee',
-                    'coin': 'ETH',
-                    'amount': '0.005',
-                    'included': true,
-                  },
-                  {
-                    'name': 'Relayer fee',
-                    'coin': 'MATIC',
-                    'amount': '1',
-                    'included': false,
-                  },
-                  {
-                    'name': 'Bridge fee',
-                    'symbol': 'ETH',
-                    'amount': '0.002',
-                    'included': false,
-                  },
-                ],
-              ),
-            ],
-          }),
-        );
-
-      final max = await managerFor(
-        kdf,
-      ).maxSellAmount(from: eth, to: usdt, balance: d('2'));
-
-      // 0.0005 * 3 + 0.0012 = 0.0027.
-      expect(
-        max,
-        RoutedSwapMaxSell(
-          amount: d('1.9973'),
-          reservedForFees: d('0.0027'),
-          feeAsset: eth,
-          reservedForProviderFees: d('0.0012'),
-        ),
-      );
-    });
-
     test(
-      'a token sell holds back fees charged on top in it, not gas',
+      'does not hide native insufficiency behind a smaller token amount',
       () async {
         final kdf = ScriptedKdf()
           ..always(
             'routed_swap::quote',
-            (_) => ok({
-              'routes': [
-                routeJson(
-                  gasCosts: const [
-                    {'coin': 'ETH', 'amount': '0.0005'},
-                  ],
-                  feeCosts: const [
-                    {
-                      'name': 'Integrator fee',
-                      'coin': 'USDC-ERC20',
-                      'amount': '0.25',
-                      'included': false,
-                    },
-                    {
-                      'name': 'LI.FI fee',
-                      'coin': 'USDC-ERC20',
-                      'amount': '0.1',
-                      'included': true,
-                    },
-                  ],
-                ),
-              ],
-            }),
+            (_) => {
+              'mmrpc': '2.0',
+              'error_type': 'InsufficientBalance',
+              'error': 'funding',
+              'error_data': {
+                'coin': 'ETH',
+                'available': '0',
+                'required': '0.02',
+                'locked_by_swaps': '1',
+              },
+            },
           );
-
-        final max = await managerFor(
-          kdf,
-        ).maxSellAmount(from: usdc, to: usdt, balance: d('100'));
-
-        expect(
-          max,
-          RoutedSwapMaxSell(
-            amount: d('99.75'),
-            reservedForFees: d('0.25'),
-            feeAsset: usdc,
-            reservedForProviderFees: d('0.25'),
+        await expectLater(
+          managerFor(kdf).quoteMax(from: usdc, to: usdt),
+          throwsA(
+            isA<RoutedSwapInsufficientBalanceException>().having(
+              (e) => e.lockedBySwaps,
+              'locked',
+              '1',
+            ),
           ),
         );
         expect(kdf.requests, hasLength(1));
       },
     );
-
-    test('a token sell with no fees on top sells its whole balance', () async {
-      final kdf = ScriptedKdf()
-        ..always(
-          'routed_swap::quote',
-          (_) => ok({
-            'routes': [
-              routeJson(
-                gasCosts: const [
-                  {'coin': 'ETH', 'amount': '0.0005'},
-                ],
-              ),
-            ],
-          }),
-        );
-
-      final max = await managerFor(
-        kdf,
-      ).maxSellAmount(from: usdc, to: usdt, balance: d('100'));
-
-      expect(
-        max,
-        RoutedSwapMaxSell(
-          amount: d('100'),
-          reservedForFees: Decimal.zero,
-          feeAsset: eth,
-        ),
-      );
-    });
-
-    test('nothing to sell holds nothing back and names the gas coin', () async {
-      final kdf = ScriptedKdf();
-      final manager = managerFor(kdf);
-
-      final token = await manager.maxSellAmount(
-        from: usdc,
-        to: usdt,
-        balance: Decimal.zero,
-      );
-      expect(
-        token,
-        RoutedSwapMaxSell(
-          amount: Decimal.zero,
-          reservedForFees: Decimal.zero,
-          feeAsset: eth,
-        ),
-      );
-      final native = await manager.maxSellAmount(
-        from: eth,
-        to: usdt,
-        balance: d('-1'),
-      );
-      expect(native.feeAsset, eth);
-      expect(native.amount, Decimal.zero);
-      expect(kdf.requests, isEmpty);
-    });
-
-    test('a failing probe quote throws its typed error', () async {
-      final kdf = ScriptedKdf()
-        ..always(
-          'routed_swap::quote',
-          (_) => rpcError('NoRouteFound', {
-            'reasons': ['amount too low'],
-          }),
-        );
-      await expectLater(
-        managerFor(kdf).maxSellAmount(from: eth, to: usdt, balance: d('0.01')),
-        throwsA(isA<RoutedSwapNoRouteException>()),
-      );
-    });
   });
 
   group('start', () {
@@ -388,12 +246,12 @@ void main() {
           )
           // Both records match the offer; within one second the engine
           // sorts by uuid, so the swap already followed comes first. Each
-          // keeps the guard init was sent: the route's 99, less the margin.
+          // keeps the exact route minimum sent to init.
           ..always(
             'routed_swap::history',
             (_) => historyAnswer([
-              entryJson(inProgress(first, 'FetchingQuote'), minimum: '98.703'),
-              entryJson(inProgress(second, 'FetchingQuote'), minimum: '98.703'),
+              entryJson(inProgress(first, 'FetchingQuote')),
+              entryJson(inProgress(second, 'FetchingQuote')),
             ]),
           );
         final manager = managerFor(kdf);

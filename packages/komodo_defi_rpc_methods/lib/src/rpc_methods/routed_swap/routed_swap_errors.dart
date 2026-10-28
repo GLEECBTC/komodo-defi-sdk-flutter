@@ -63,6 +63,14 @@ sealed class RoutedSwapRpcException implements Exception {
         message: message,
         errorData: raw,
       ),
+      'InsufficientBalance' => RoutedSwapInsufficientBalanceException(
+        coin: req('coin'),
+        available: req('available'),
+        required: req('required'),
+        lockedBySwaps: opt('locked_by_swaps'),
+        message: message,
+        errorData: raw,
+      ),
       'MyAddressError' => RoutedSwapMyAddressException(
         coin: req('coin'),
         detail: req('message'),
@@ -92,6 +100,12 @@ sealed class RoutedSwapRpcException implements Exception {
       'ProviderApiError' => RoutedSwapProviderException(
         detail: req('message'),
         providerRequestId: opt('provider_request_id'),
+        message: message,
+        errorData: raw,
+      ),
+      'GasEstimationFailed' => RoutedSwapGasEstimationFailedException(
+        coin: req('coin'),
+        detail: req('message'),
         message: message,
         errorData: raw,
       ),
@@ -304,6 +318,29 @@ final class RoutedSwapProviderException extends RoutedSwapRpcException {
   bool get isTransient => true;
 }
 
+/// A gas estimate the quote needs could not be established: the source or an
+/// approval transaction, on [coin]'s network. KDF returns no partial totals.
+/// A node refusing to estimate for an address without gas money reads the
+/// same as a node fault.
+final class RoutedSwapGasEstimationFailedException
+    extends RoutedSwapRpcException {
+  const RoutedSwapGasEstimationFailedException({
+    required this.coin,
+    required this.detail,
+    required super.message,
+    super.errorData,
+  }) : super(errorType: 'GasEstimationFailed');
+
+  /// The network coin whose gas could not be estimated.
+  final String coin;
+
+  /// Diagnostic text.
+  final String detail;
+
+  @override
+  bool get isTransient => true;
+}
+
 /// KDF could not reach the provider.
 final class RoutedSwapTransportException extends RoutedSwapRpcException {
   const RoutedSwapTransportException({
@@ -390,4 +427,21 @@ final class RoutedSwapUnknownRpcException extends RoutedSwapRpcException {
     final data = errorData;
     return data is Map ? data['provider_request_id'] as String? : null;
   }
+}
+
+/// KDF could not fund a tested Max amount from its spendable balance.
+final class RoutedSwapInsufficientBalanceException
+    extends RoutedSwapRpcException {
+  const RoutedSwapInsufficientBalanceException({
+    required this.coin,
+    required this.available,
+    required this.required,
+    required super.message,
+    this.lockedBySwaps,
+    super.errorData,
+  }) : super(errorType: 'InsufficientBalance');
+  final String coin;
+  final String available;
+  final String required;
+  final String? lockedBySwaps;
 }

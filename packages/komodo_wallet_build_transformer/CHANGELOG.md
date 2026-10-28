@@ -1,3 +1,12 @@
+## Unreleased
+
+ - **FIX**(assets): frozen coin builds use the pinned raw source and metadata,
+   never the branch CDN or branch head. Verify downloaded and cached contents,
+   reject extra cached icons, and request a rebuild when corrected assets need
+   to be recopied into Flutter's bundle. Preserve runtime-update configuration.
+ - **TEST**(assets): cover frozen source selection, explicit metadata revisions,
+   cached/downloaded corruption, extra icons and rebuild signaling.
+
 ## 0.5.0
 
  - **BREAKING** **FEAT**(build): write and verify artefact provenance markers

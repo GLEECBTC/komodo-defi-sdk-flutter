@@ -5,6 +5,16 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## Unreleased
 
+ - **FIX**(build): freeze bundled coin files and icons to their pinned revision,
+   bypass mutable branch mirrors, verify Git blob hashes on download and cache
+   reuse, reject unexpected cached icons, and require a rebuild after correction.
+   Runtime coin updates retain their existing independent policy (SDK #407).
+
+ - **FEAT**(routed-swap): KDF-owned Max quotes, exact accepted minima, global
+   integrator configuration, locked-balance shortfalls and missing-only EVM fee
+   model normalization. Funding, measured payouts and approval/gas evidence
+   remain distinct from estimates. See package changelogs for API changes.
+
  - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
    on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
    harness fixture. A liquidity source separate from the atomic-swap orderbook.
@@ -13,8 +23,9 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
    setting. KDF signs each request with its P2P key and the proxy holds the
    LI.FI key. Unset, KDF uses LI.FI's public API with no key.
  - **BUILD**(kdf): the bundled KDF artefact is repinned to
-   `feat/lifi-integration` `7d6fd1ea9ba10057aab99b3d2a717806c3f87990`, which
-   implements the routed-swap contract and the LI.FI proxy; see the
+   `feat/lifi-integration` `35f0bde438eec2cb0471b19642b9d9c4602fa17d`, which
+   implements the routed-swap contract (`gleec-specs#2` at `7c388ea`) and the
+   LI.FI proxy; see the
    [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
 
 ## 2026-09-28 — SDK 0.8.1

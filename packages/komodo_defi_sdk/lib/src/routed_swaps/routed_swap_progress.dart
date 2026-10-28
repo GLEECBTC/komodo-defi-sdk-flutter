@@ -34,6 +34,7 @@ class RoutedSwapProgress with RoutedSwapValue {
     this.gasSpent = const [],
     this.totalGasSpent = const [],
     this.delayedSince,
+    this.providerReported,
   });
 
   /// The durable swap id. Valid across restarts.
@@ -116,6 +117,10 @@ class RoutedSwapProgress with RoutedSwapValue {
   /// shown and may be out of date. A delay is not a failure.
   final DateTime? delayedSince;
 
+  /// While bridging: the payout or refund the provider reports, before KDF
+  /// has measured it and finished the swap.
+  final RoutedSwapReportedAmount? providerReported;
+
   /// Whether the swap has stopped, either way.
   bool get isTerminal =>
       phase == RoutedSwapPhase.finished || phase == RoutedSwapPhase.failed;
@@ -174,6 +179,7 @@ class RoutedSwapProgress with RoutedSwapValue {
     delayedSince: clearDelayedSince
         ? null
         : (delayedSince ?? this.delayedSince),
+    providerReported: providerReported,
   );
 
   @override
@@ -203,6 +209,7 @@ class RoutedSwapProgress with RoutedSwapValue {
     gasSpent,
     totalGasSpent,
     delayedSince,
+    providerReported,
   ];
 }
 

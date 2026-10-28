@@ -34,15 +34,42 @@ enum RoutedSwapPhase {
   unknown,
 }
 
+/// An amount the provider reported, rather than one KDF measured on-chain.
+class RoutedSwapReportedAmount with RoutedSwapValue {
+  /// Creates a reported amount.
+  const RoutedSwapReportedAmount({
+    required this.amount,
+    this.assetId,
+    this.symbol,
+  });
+
+  /// How much the provider says arrived, or came back for a refund.
+  final Decimal amount;
+
+  /// The asset, when it maps to a wallet asset.
+  final AssetId? assetId;
+
+  /// The provider's symbol, or KDF's ticker the wallet cannot resolve, when
+  /// it does not. Display-only.
+  final String? symbol;
+
+  /// A label for the token.
+  String get tokenLabel => assetId?.id ?? symbol ?? '';
+
+  @override
+  List<Object?> get props => [amount, assetId, symbol];
+}
+
 /// What the user ended up with.
 class RoutedSwapReceipt with RoutedSwapValue {
   /// Creates a receipt for a finished swap.
   const RoutedSwapReceipt({
     required this.outcome,
-    required this.amount,
+    this.amount,
     this.partialReason,
     this.assetId,
     this.symbol,
+    this.reported,
   });
 
   /// Whether the swap completed, partially filled, or refunded.
@@ -51,15 +78,23 @@ class RoutedSwapReceipt with RoutedSwapValue {
   /// Why the outcome is partial, when it is.
   final rpc.RoutedSwapPartialReason? partialReason;
 
-  /// How much was received.
-  final Decimal amount;
+  /// How much KDF measured arriving on-chain, gross. Null when it could not
+  /// measure it, which does not mean nothing arrived.
+  final Decimal? amount;
 
-  /// The received asset, when it maps to a wallet asset.
+  /// The measured asset, when it maps to a wallet asset.
   final AssetId? assetId;
 
-  /// The provider's symbol, or KDF's ticker the wallet cannot resolve, when
-  /// it does not. Display-only.
+  /// The measured asset's provider symbol, or KDF's ticker the wallet cannot
+  /// resolve, when it does not. Display-only.
   final String? symbol;
+
+  /// What the provider reported, which can differ from [amount]. Never a
+  /// stand-in for a measurement or for the quote.
+  final RoutedSwapReportedAmount? reported;
+
+  /// Whether [amount] was measured on-chain.
+  bool get isMeasured => amount != null;
 
   /// Whether this may be presented as a completed swap.
   ///
@@ -67,11 +102,18 @@ class RoutedSwapReceipt with RoutedSwapValue {
   /// what they asked for and must be surfaced as such, not as a success.
   bool get isSuccess => outcome.isSuccess;
 
-  /// A label for the received token.
-  String get tokenLabel => assetId?.id ?? symbol ?? '';
+  /// A label for the received token: the measured one, else the reported one.
+  String get tokenLabel => assetId?.id ?? symbol ?? reported?.tokenLabel ?? '';
 
   @override
-  List<Object?> get props => [outcome, partialReason, amount, assetId, symbol];
+  List<Object?> get props => [
+    outcome,
+    partialReason,
+    amount,
+    assetId,
+    symbol,
+    reported,
+  ];
 }
 
 /// Failure categories, mapped from the wire `error_type`.
@@ -101,7 +143,13 @@ enum RoutedSwapFailureKind {
   /// or amount out of bounds. Nothing was sent.
   quoteUnavailable,
 
-  /// KDF restarted before broadcasting. Nothing executed.
+  /// A gas estimate the swap needs could not be made, while re-quoting or
+  /// rechecking funding before a send. The swap was not sent; an earlier
+  /// approval may have been. See [RoutedSwapFailure.gasCoin].
+  gasEstimationFailed,
+
+  /// KDF restarted before broadcasting. No swap was sent, though an earlier
+  /// approval may have been.
   abortedOnRestart,
 
   /// The user cancelled before anything was broadcast.
@@ -170,6 +218,7 @@ class RoutedSwapFailure with RoutedSwapValue {
     this.providerRequestId,
     this.sourceTxHash,
     this.providerExplorerUrl,
+    this.gasCoin,
   });
 
   /// The failure category.
@@ -224,6 +273,10 @@ class RoutedSwapFailure with RoutedSwapValue {
   /// Provider explorer link, when the failure reports one.
   final String? providerExplorerUrl;
 
+  /// For [RoutedSwapFailureKind.gasEstimationFailed]: the KDF ticker of the
+  /// network coin whose gas could not be estimated.
+  final String? gasCoin;
+
   /// Whether nothing was broadcast, so the user's balance is unchanged.
   bool get fundsUntouched => fundsMovement == RoutedSwapFundsMovement.none;
 
@@ -251,6 +304,7 @@ class RoutedSwapFailure with RoutedSwapValue {
     providerRequestId,
     sourceTxHash,
     providerExplorerUrl,
+    gasCoin,
   ];
 }
 
@@ -261,6 +315,7 @@ class RoutedSwapShortfall with RoutedSwapValue {
     required this.ticker,
     required this.available,
     required this.required,
+    this.lockedBySwaps,
     this.assetId,
   });
 
@@ -276,8 +331,17 @@ class RoutedSwapShortfall with RoutedSwapValue {
   /// What was required.
   final Decimal required;
 
+  /// Atomic commitments already excluded from available.
+  final Decimal? lockedBySwaps;
+
   @override
-  List<Object?> get props => [ticker, assetId, available, required];
+  List<Object?> get props => [
+    ticker,
+    assetId,
+    available,
+    required,
+    lockedBySwaps,
+  ];
 }
 
 /// The accepted range for an amount.

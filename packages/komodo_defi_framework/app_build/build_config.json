@@ -1,6 +1,6 @@
 {
   "api": {
-    "api_commit_hash": "7d6fd1ea9ba10057aab99b3d2a717806c3f87990",
+    "api_commit_hash": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
     "branch": "feat/lifi-integration",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
@@ -14,55 +14,61 @@
       "linux",
       "windows"
     ],
-    "source_urls": ["https://devbuilds.gleec.com", "https://nebula.decker.im"],
+    "source_urls": [
+      "https://devbuilds.gleec.com",
+      "https://nebula.decker.im"
+    ],
     "platforms": {
       "web": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "e1546a4c648a295e3d0c3f46ea2a359824d5b07f23482d5c3c0f0ba7eade55f4"
+          "79c3b1b87c8408b2416381c8f62141770e0404bccb5881038504d6e973615f84"
         ],
         "path": "web/kdf/bin"
       },
       "ios": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "d9800948a32cda3b617982ea58d6659c71a1400cc63474dad1c320320b09f380"
+          "29440a5386054679f87486b3a4014427655122a8979f96fc7e275ca0dae3e2dd"
         ],
         "path": "ios"
       },
       "macos": {
         "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
-        "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
+        "matching_preference": [
+          "kdf-macos-universal2-",
+          "mac-universal"
+        ],
         "valid_zip_sha256_checksums": [
-          "81e85ddaa38ccc7a09cac7d1034802c159cc4f23d6716eb07b29ce09e5db6aff"
+          "118712f84f5a0888d9fa0237474710a1222be7e49ce0cab22ab4d05afa013c10"
         ],
         "path": "macos/bin"
       },
       "android-armv7": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "acdc1e7c84c6b099ccea0baa39556cc13bef9e1a6cc3a03c100fafcf343624f1"
+          "cd123afeda3fdc98a9d960b71215c8d875317c626eecc43fa84b672534911a35"
         ],
         "path": "android/app/src/main/cpp/libs/armeabi-v7a"
       },
       "android-aarch64": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "09dc56671db2783fdde8c58d7cbc61287410483217af0023f16d0ef972fb4109"
+          "7130aac8b03e6ba6c60e684b6b1304f6ea5d40d11bd9fd7f1f75ce6566d6bf3d"
         ],
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "269ed9fe8c8a384e272c449fe4c6e8485d8d12ea47fe97c32cc0e1f9946a8605"
+          "0e85b7c1db4d4865aa1228dcb509e69c83b276afeb4abee551285ce64fa02889"
         ],
         "path": "linux/bin"
       },
       "windows": {
         "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$",
         "valid_zip_sha256_checksums": [
-          "7d12ecbc6a6b681f52c3fd948605377b10484a942199b2cf871468f3d9831b6c"
+          "0750ed0b87d3d7550a2ac4e1f574c643962a66080ca935ab8b8f9e0ab470355a"
         ],
         "path": "windows/bin"
       }
@@ -70,7 +76,7 @@
   },
   "coins": {
     "fetch_at_build_enabled": true,
-    "update_commit_on_build": true,
+    "update_commit_on_build": false,
     "bundled_coins_repo_commit": "2b0aefb78b184091ab086c66e513d8b03f5d5a01",
     "coins_repo_api_url": "https://api.github.com/repos/GLEECBTC/coins",
     "coins_repo_content_url": "https://raw.githubusercontent.com/GLEECBTC/coins",

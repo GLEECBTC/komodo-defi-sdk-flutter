@@ -160,8 +160,8 @@ void _cases2() {
       expect(status.outcome, rpc.RoutedSwapOutcome.completed);
       expect(status.outcome.isSuccess, isTrue);
       expect(status.partialReason, isNull);
-      expect(status.received.coin, 'USDC-POLYGON');
-      expect(status.received.amount, '2');
+      expect(status.received!.coin, 'USDC-POLYGON');
+      expect(status.received!.amount, '2');
       expect(status.sourceTxHash, _sourceHash);
       expect(status.destTxHash, _destHash);
       expect(status.executedRoute, isNotNull);
@@ -208,8 +208,8 @@ void _cases2() {
         intermediate.partialReason,
         rpc.RoutedSwapPartialReason.intermediateToken,
       );
-      expect(intermediate.received.isKnownAsset, isFalse);
-      expect(intermediate.received.label, 'axlUSDC');
+      expect(intermediate.received!.isKnownAsset, isFalse);
+      expect(intermediate.received!.label, 'axlUSDC');
     });
 
     test('refunded returns the source coin, with no destination hash', () {
@@ -224,7 +224,7 @@ void _cases2() {
       });
       expect(status.outcome, rpc.RoutedSwapOutcome.refunded);
       expect(status.outcome.isSuccess, isFalse);
-      expect(status.received.coin, 'ETH');
+      expect(status.received!.coin, 'ETH');
       expect(status.destTxHash, isNull);
     });
   });

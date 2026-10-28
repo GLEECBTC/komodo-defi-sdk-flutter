@@ -49,9 +49,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   Decimal? _decimal(String? value) =>
       value == null ? null : Decimal.tryParse(value);
 
-  /// An offer for [route]. A [guarded] offer is one a swap can start from:
-  /// its guaranteed receive sits the guard margin below the provider's
-  /// minimum. An executed route keeps the provider's.
+  /// An offer retaining the provider's quoted minimum unchanged.
   RoutedSwapOffer _offerFrom(
     rpc.RoutedSwapRoute route, {
     required AssetId from,
@@ -59,7 +57,6 @@ extension _RoutedSwapOffers on RoutedSwapManager {
     rpc.RoutedSwapOrder? order,
     double? slippage,
     DateTime? quotedAt,
-    bool guarded = false,
   }) {
     RoutedSwapCost gasCost(
       rpc.RoutedSwapGasCost gas,
@@ -102,7 +99,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
       to: to,
       sellAmount: Decimal.parse(route.from.amount),
       expectedReceive: Decimal.parse(route.to.amount),
-      guaranteedReceive: guarded ? _guardFor(minimum, to) : minimum,
+      guaranteedReceive: minimum,
       kind: route.kind,
       costs: costs,
       networkFees: _networkFeesOf(route),
@@ -139,24 +136,25 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   }
 
   /// The per-coin network fee. Uses the engine's totals when present, and
-  /// otherwise sums execution and approval gas the same way — a USD value
-  /// only when every contributing row has one.
+  /// otherwise sums execution and approval gas the same way — a USD value or
+  /// a required balance only when every contributing row has one.
   List<RoutedSwapNetworkFee> _networkFeesOf(rpc.RoutedSwapRoute route) {
     final rows = route.totalGasCosts.isNotEmpty
         ? route.totalGasCosts
         : [...route.gasCosts, ...?route.approval?.gasCosts];
     final amounts = <String, Decimal>{};
     final usd = <String, Decimal?>{};
+    final required = <String, Decimal?>{};
+    Decimal? sum(Map<String, Decimal?> totals, String key, Decimal? value) =>
+        !totals.containsKey(key)
+        ? value
+        : (totals[key] == null || value == null ? null : totals[key]! + value);
     for (final row in rows) {
       final ticker = row.amount.label;
       amounts[ticker] =
           (amounts[ticker] ?? Decimal.zero) + Decimal.parse(row.amount.amount);
-      final rowUsd = _decimal(row.amountUsd);
-      usd[ticker] = !usd.containsKey(ticker)
-          ? rowUsd
-          : (usd[ticker] == null || rowUsd == null
-                ? null
-                : usd[ticker]! + rowUsd);
+      usd[ticker] = sum(usd, ticker, _decimal(row.amountUsd));
+      required[ticker] = sum(required, ticker, _decimal(row.requiredBalance));
     }
     return [
       for (final entry in amounts.entries)
@@ -165,6 +163,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
           assetId: _resolveAsset(entry.key),
           amount: entry.value,
           usdValue: usd[entry.key],
+          requiredBalance: required[entry.key],
         ),
     ];
   }
@@ -193,14 +192,4 @@ extension _RoutedSwapOffers on RoutedSwapManager {
 
   AssetId? _resolveAssetOf(rpc.RoutedSwapAmount amount) =>
       amount.coin == null ? null : _resolveAsset(amount.coin!);
-
-  /// [minimum] less the guard margin, rounded down to [to]'s decimals, which
-  /// KDF requires of `min_to_amount`. Without known decimals it keeps the
-  /// minimum's own places, which KDF already accepted. Never zero.
-  Decimal _guardFor(Decimal minimum, AssetId to) {
-    if (_guardMargin <= Decimal.zero) return minimum;
-    final scale = to.chainId.decimals ?? minimum.scale;
-    final guard = (minimum * (Decimal.one - _guardMargin)).floor(scale: scale);
-    return guard > Decimal.zero ? guard : minimum;
-  }
 }

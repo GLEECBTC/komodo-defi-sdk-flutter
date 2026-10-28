@@ -1,5 +1,22 @@
 ## Unreleased
 
+ - **FEAT**(routed-swap): add typed Max quote requests and optional locked balances on quote/task shortfalls; execution remains concrete.
+
+ - **FEAT**(routed-swap): read the contract at `gleec-specs#2` `2880c32`, as
+   emitted by KDF `feat/lifi-integration` `667045c`:
+   - each `total_gas_costs` entry carries `required_balance`
+     (`RoutedSwapGasCost.requiredBalance`), the native balance KDF requires
+     for gas before it sends;
+   - a terminal `Ok` reads `received` as optional, since KDF now measures the
+     payout on-chain and omits it when it cannot, and adds
+     `provider_received`, the provider's own report; `TrackingBridge` carries
+     `provider_received` while KDF measures;
+   - `GasEstimationFailed { coin, message }` is typed both as a quote error
+     (`RoutedSwapGasEstimationFailedException`) and as a terminal task error
+     (`RoutedSwapGasEstimationFailedTaskError`).
+
+   **Breaking:** `RoutedSwapFinished.received` is nullable. A finished swap
+   whose payout KDF could not measure used to fail to parse.
  - **FEAT**(routed-swap): add the `routed_swap` method namespace - quote,
    start, status, cancel and history requests with their typed models -
    covering aggregator-executed swaps such as cross-chain bridges.

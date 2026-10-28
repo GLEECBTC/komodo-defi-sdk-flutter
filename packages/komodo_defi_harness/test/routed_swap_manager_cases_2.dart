@@ -162,7 +162,7 @@ void _cases2() {
       expect(result.requested!.from, usdt);
       expect(result.requested!.amount, Decimal.parse('100.5'));
       // The guard init was sent: the shown 99.71 less the margin.
-      expect(result.minToAmountAccepted, Decimal.parse('99.41087'));
+      expect(result.minToAmountAccepted, Decimal.parse('99.71'));
 
       expect(client.paramsFor('task::routed_swap::status').last, {
         'task_id': 1,

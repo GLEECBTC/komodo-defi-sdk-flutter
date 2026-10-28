@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_harness/komodo_defi_harness.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Boots a real SDK, registers a wallet, and returns every KDF start conf.
 ///
@@ -24,6 +25,17 @@ Future<List<Map<String, dynamic>>> _startConfs(
 }
 
 void main() {
+  test('SDK bootstrap carries commission into the wallet start', () async {
+    final commission = LifiIntegratorConfig(
+      name: 'gleec-dex-staging',
+      feeBps: 178,
+      lifiFeeBps: 22,
+    );
+    final starts = await _startConfs(
+      KomodoDefiSdkConfig(lifiIntegrator: commission),
+    );
+    expect(starts.single['lifi_integrator'], commission.toJson());
+  });
   test('the sign-in start carries the configured LI.FI proxy URL', () async {
     const url = 'https://swap.example.com/lifi';
     final starts = await _startConfs(

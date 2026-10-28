@@ -255,14 +255,14 @@ void _cases1() {
     final completed = await terminal(RoutedSwapRun()) as rpc.RoutedSwapFinished;
     expect(completed.outcome, rpc.RoutedSwapOutcome.completed);
     expect(completed.outcome.isSuccess, isTrue);
-    expect(completed.received.coin, to);
+    expect(completed.received!.coin, to);
     expect(completed.destTxHash, isNotNull);
     expect(completed.executedRoute, isNotNull);
 
     final sameChain =
         await terminal(RoutedSwapRun(route: route(crossChain: false)))
             as rpc.RoutedSwapFinished;
-    expect(sameChain.received.amount, '100.21');
+    expect(sameChain.received!.amount, '100.21');
     expect(sameChain.destTxHash, isNull);
     expect(sameChain.providerExplorerUrl, isNull);
 
@@ -289,14 +289,14 @@ void _cases1() {
             )
             as rpc.RoutedSwapFinished;
     expect(symbol.partialReason, rpc.RoutedSwapPartialReason.intermediateToken);
-    expect(symbol.received.isKnownAsset, isFalse);
-    expect(symbol.received.label, 'axlUSDC');
+    expect(symbol.received!.isKnownAsset, isFalse);
+    expect(symbol.received!.label, 'axlUSDC');
 
     final refunded =
         await terminal(RoutedSwapRun(outcome: RoutedSwapRunOutcome.refunded))
             as rpc.RoutedSwapFinished;
     expect(refunded.outcome, rpc.RoutedSwapOutcome.refunded);
-    expect(refunded.received.coin, from);
+    expect(refunded.received!.coin, from);
     expect(refunded.destTxHash, isNull);
   });
 }

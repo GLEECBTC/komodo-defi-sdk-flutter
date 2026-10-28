@@ -10,6 +10,7 @@ export 'coin_config_storage.dart';
 export 'config_transform.dart';
 export 'custom_token_storage.dart';
 export 'custom_token_store.dart';
+export 'evm_fee_model_transform.dart';
 export 'github_coin_config_provider.dart';
 export 'local_asset_coin_config_provider.dart';
 export 'no_op_custom_token_storage.dart';

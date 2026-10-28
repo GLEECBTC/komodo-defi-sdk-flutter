@@ -1968,35 +1968,55 @@ void main() {
     });
   });
 
-  test('the signed-out and wallet starts both carry lifi_proxy_url', () async {
-    const url = 'https://swap.example.com/lifi';
-    late _FakeKdfOperations operations;
-    final service = _createService(
-      lifiProxyUrl: url,
-      onOperationsCreated: (created) =>
-          (operations = created)._isRunning = false,
-    );
-    addTearDown(service.dispose);
+  test(
+    'commission and proxy survive creation, sign-out and sign-in restarts',
+    () async {
+      const url = 'https://swap.example.com/lifi';
+      final commission = LifiIntegratorConfig(
+        name: 'gleec-dex-staging',
+        feeBps: 178,
+        lifiFeeBps: 22,
+      );
+      late _FakeKdfOperations operations;
+      final service = _createService(
+        lifiProxyUrl: url,
+        lifiIntegrator: commission,
+        onOperationsCreated: (created) =>
+            (operations = created)._isRunning = false,
+      );
+      addTearDown(service.dispose);
 
-    await service.register(
-      walletName: 'new-wallet',
-      password: 'correct horse battery staple',
-    );
+      await service.register(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+      );
 
-    expect(operations.starts.map((params) => params['wallet_name']), [
-      null,
-      'new-wallet',
-    ]);
-    expect(operations.starts.map((params) => params['lifi_proxy_url']), [
-      url,
-      url,
-    ]);
-    // KDF signs proxy requests with its P2P key, so neither start turns it off.
-    expect(
-      operations.starts.map((params) => params['disable_p2p']),
-      everyElement(isNot(isTrue)),
-    );
-  });
+      expect(operations.starts.map((params) => params['wallet_name']), [
+        null,
+        'new-wallet',
+      ]);
+      expect(operations.starts.map((params) => params['lifi_proxy_url']), [
+        url,
+        url,
+      ]);
+      await service.signOut();
+      await service.signIn(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+        options: _testUser().walletId.authOptions,
+      );
+      expect(operations.starts.length, greaterThan(2));
+      expect(
+        operations.starts.map((params) => params['lifi_integrator']),
+        everyElement(commission.toJson()),
+      );
+      // KDF signs proxy requests with its P2P key on every restart.
+      expect(
+        operations.starts.map((params) => params['disable_p2p']),
+        everyElement(isNot(isTrue)),
+      );
+    },
+  );
 }
 
 const _publicKeyHash = '05aab5342166f8594baf17a7d9bef5d567443327';
@@ -2055,6 +2075,7 @@ KdfAuthService _createService({
   void Function(_FakeKdfOperations operations)? onOperationsCreated,
   SecureLocalStorage? secureStorage,
   String? lifiProxyUrl,
+  LifiIntegratorConfig? lifiIntegrator,
 }) {
   final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
   final operations = _FakeKdfOperations(
@@ -2110,6 +2131,7 @@ KdfAuthService _createService({
     hostConfig,
     secureStorage: secureStorage,
     lifiProxyUrl: lifiProxyUrl,
+    lifiIntegrator: lifiIntegrator,
   );
 }
 
