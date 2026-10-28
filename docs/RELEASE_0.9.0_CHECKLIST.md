@@ -9,10 +9,14 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
   dependency constraints; it does not change the engine or swap implementation.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
-- `main` and its merge parent `331a6879` have identical trees. A normal merge
-  records `main` in this preparation history without overwriting source changes.
-  Promote with merge commits to preserve ancestry and avoid repeating the
-  0.8.0 squash-history conflict. Recheck ancestry after integration/preparation.
+- Branch strategy: **squash every PR into `dev`**; use a merge commit for
+  `dev` → `main` release promotion. Source-branch reconciliation merges do not
+  change this rule. Squashing drops source merge parents, so compare content
+  and record the real squash SHA rather than assuming ancestry is retained.
+- `main` and its merge parent `331a6879` have identical trees. The preparation
+  branch's earlier main-history sync is not expected to survive its squash.
+  Review the final promotion diff and merge result instead of requiring that
+  this source-branch sync become an ancestor of `dev`.
 - KDF: `35f0bde438eec2cb0471b19642b9d9c4602fa17d`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
   `2b0aefb78b184091ab086c66e513d8b03f5d5a01`.
@@ -34,12 +38,15 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
 - [x] Resolve SDK workspace and consumer dependencies offline; consumer lockfile
   changes only 11 local SDK package version lines; enforce-lockfile succeeds.
 - [x] Run all 16 SDK package suites on prepared versions.
-- [ ] Complete the app consumer unit run (recorded separately in app preparation).
+- [x] App consumer aggregator passed 3,898 tests / four skipped on the prepared
+  runtime and dependency graph, as recorded in app preparation #3560.
 - [x] Full consumer/workspace analysis after dependency setup: zero errors,
   55 warnings and 2,130 infos in unchanged code. No Dart implementation changed.
-- [ ] SDK #407 and this preparation reach `dev`; retarget preparation to `dev`
-  after the integration merges if required. Verify source/tree equivalence when
-  squash merges change commit identities.
+- [x] SDK #405 and #407 squash merged into `dev`; the combined resulting tree
+  exactly matches tested integration `03a3cb1a`.
+- [ ] Squash merge this preparation (#409) into `dev` after retargeting; record
+  the resulting SHA. Verify runtime/dependency content equivalence, then repin
+  the consumer to the real preparation/release commit.
 - [ ] Final `dev` → `main` promotion contains this preparation; record its SHA,
   complete CI and obtain release review. Keep the promotion PR draft until then.
 
@@ -105,3 +112,17 @@ WASM/platform builds and hosted CI must still run on final promotion.
 
 No tag, release publication, production deploy, ruleset bypass or merge is
 performed by these preparation changes.
+
+## Dev merge record — 28 October 2026
+
+- SDK #405: squash `50e4ef025692870f759b47d84ab2ba6c079a93f5`.
+- SDK #407: squash `76140abb2312f6c306c3118a2cd619c8985e64a3`.
+- Squashing #405 first created one changelog conflict in #407. Reconciliation
+  `63b3660d` retains the already combined notes; its complete tree matches
+  tested `03a3cb1a`. No runtime implementation or build pin changed.
+- The owner explicitly authorized admin bypass for these dev merges. Review
+  protections and repository settings were not changed. Final distribution
+  gates remain in force on draft SDK release PR #410.
+- The preparation source branch is reconciled with the real dev squash before
+  #409 is retargeted. Its runtime/dependency files remain those tested at
+  `2f6ba724`; subsequent changes only correct the strategy and execution record.
