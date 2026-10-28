@@ -1,15 +1,19 @@
+## 0.2.0 (2026-10-28)
+
+ - **BREAKING** **PERF**(coinpaprika): use one bulk tickers response cached
+   for five minutes for spot prices and 24h changes. Custom
+   `ICoinPaprikaProvider` implementations must add `fetchTickers`. Coins
+   absent from the provider's bulk response are unsupported and use fallback
+   repositories; failed bulk requests also cool down for five minutes (#393).
+ - **FIX**(market-data): parse CoinGecko 24h fields and live CoinPaprika
+   markets. `CoinPaprikaMarket.marketUrl` is nullable; decimal quote values
+   accept API numbers (#392).
+ - **FIX**(storage): require `hive_ce` ^2.14.0 for recoverable box-open failures.
+ - **TEST**(prices): replace live, expiring feed expectations with fixed HTTP
+   responses so the package suite is deterministic (#407).
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.1.0+2 (unreleased)
-
- - **FIX**(coinpaprika): parse live `fetchCoinMarkets` responses, which
-   always threw. `CoinPaprikaMarket.marketUrl` is now nullable because many
-   markets have none, and the adjusted 24h volume share is read from
-   `adjusted_volume_24h_share`. Quote prices and volumes use the new
-   `NonNullableDecimalConverter`, because the API sends them as numbers.
-
- - **FIX**(coingecko): parse the 24h market data fields, such as
-   `price_change_percentage_24h` and `high_24h`. They were read as
-   `price_change_percentage24h` and `high24h`, so they were always null and
-   `getCoin24hrPriceChange` always threw "Price change data not available".
 
  - **FIX**(coinpaprika): return current prices and 24h changes for stablecoin
    quotes such as the default USDT. CoinPaprika rejects stablecoin quotes, so
@@ -22,21 +26,8 @@
    name, such as `percent_change_24h` and `volume_24h`. They were read as
    `percent_change24h` and `volume24h`, so they always came back as 0.
 
- - **BREAKING** **PERF**(coinpaprika): read current prices and 24h changes
-   from one bulk `/v1/tickers` request reused for five minutes, instead of a
-   request per coin, to stay within the free plan's 20,000 monthly requests.
-   On the free plan that response holds only the 2,000 highest-ranked coins.
-   For other coins `supports()` now returns false for current prices and 24h
-   changes, and those calls throw. A failed bulk request is not retried for
-   five minutes. `ICoinPaprikaProvider` gains `fetchTickers`, which custom
-   implementations must add.
-
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
-
- - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
-   that fails to open as an uncaught async error even though
-   `SparklineRepository` recovers from it by deleting and reopening the box.
 
  - **FIX**(deps): declare `collection`, which `id_resolution_strategy.dart`
    imports. It resolved only through the workspace, so `dart pub publish`

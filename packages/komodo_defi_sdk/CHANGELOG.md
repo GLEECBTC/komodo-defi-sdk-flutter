@@ -1,4 +1,9 @@
-## Unreleased
+## 0.9.0 (2026-10-28)
+
+ - **BREAKING**(activation): `supportsCustomTokenActivation` moves from
+   `BatchCapableActivator` to `ProtocolActivationStrategy`; custom strategies
+   must also respect `supportedRoles` and own each asset unambiguously.
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(routed-swap): align with KDF `35f0bde` / specs `7c388ea`.
    Typed `quoteMax` returns KDF's complete fundable route; `maxSellAmount`

@@ -1,4 +1,9 @@
-## Unreleased
+## 0.2.0 (2026-10-28)
+
+ - **FEAT**(routed-swap): scripted fixtures exercise quote, execution,
+   cancellation, persistence/restart, approval evidence and typed failures.
+   Replay results do not establish live settlement or deployment readiness.
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **TEST**(routed-swap): replay mutually exclusive exact/Max quote requests, concrete execution, exact accepted minima and startup commission propagation.
 
