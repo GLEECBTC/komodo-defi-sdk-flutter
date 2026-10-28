@@ -5,15 +5,16 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
 ## Scope and immutable inputs
 
 - Integration source: `03a3cb1adf666952a16f0cd80e67b8173076f4c1` (SDK #407),
-  including SDK #405 activation fixes. Preparation adds release metadata and
-  dependency constraints; it does not change the engine or swap implementation.
+  including SDK #405 activation fixes. Initial preparation added release
+  metadata and dependency constraints. Runtime freeze fixes are SDK #412
+  (`97b48556`) and #413 (`56828b91`); the KDF engine input remains unchanged.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
 - Branch strategy: **squash every PR into `dev`**; use a merge commit for
   `dev` → `main` release promotion. Source-branch reconciliation merges do not
   change this rule. Squashing drops source merge parents, so compare content
   and record the real squash SHA rather than assuming ancestry is retained.
-- `main` and its merge parent `331a6879` have identical trees. The preparation
+- Previous main `a96398ba` and its merge parent `331a6879` have identical trees. The preparation
   branch's earlier main-history sync is not expected to survive its squash.
   Review the final promotion diff and merge result instead of requiring that
   this source-branch sync become an ancestor of `dev`.
@@ -44,11 +45,14 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
   55 warnings and 2,130 infos in unchanged code. No Dart implementation changed.
 - [x] SDK #405 and #407 squash merged into `dev`; the combined resulting tree
   exactly matches tested integration `03a3cb1a`.
-- [ ] Squash merge this preparation (#409) into `dev` after retargeting; record
-  the resulting SHA. Verify runtime/dependency content equivalence, then repin
-  the consumer to the real preparation/release commit.
+- [x] Preparation #409 squash merged into `dev` as `cc9a5855`; generation
+  repair #411 is `6038592a`. Ownership/recovery #412 is `97b48556` and EVM
+  history #413 is `56828b91`. Source-branch and squash content were compared.
+- [x] Resolve the two SDK #410 correlation/session review findings through
+  #412 and add native/browser regressions. Both threads are resolved.
 - [ ] Final `dev` → `main` promotion contains this preparation; record its SHA,
-  complete CI and obtain release review. Keep the promotion PR draft until then.
+  complete its required CI/review conditions. The promotion is ready for review;
+  its normal merge must still satisfy repository protections.
 
 ## Validation record
 
@@ -173,3 +177,25 @@ Fresh validation after the repair:
 - Changed-file Dart formatting and diff checks pass. Package versions and the
   consumer dependency versions do not change. No tag or publication command
   is needed to validate these already prepared candidate versions.
+
+## Code-freeze validation — runtime `56828b91`
+
+- [x] Enforced offline Melos bootstrap, including index/build-runner hooks,
+  completed after the final runtime fixes with no tracked generation drift.
+- [x] All 16 package suites: **3,056 passed / 14 skipped**. This supersedes the
+  earlier preparation counts above; those remain historical evidence.
+- [x] Nine core Chrome/WASM ownership, wallet/history and GasFree files:
+  **213 passed**. Both framework transport/diagnostic files also passed in
+  [SDK #413 CI](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/413/checks).
+- [x] A temporary real browser/WASM probe confirmed ETC Blockscout account API
+  reads across origins using only the public burn address. The configured
+  proxy ETC route returned 404. Private QA wallet addresses were not sent.
+- [x] SDK history analysis: zero errors, 14 existing informational diagnostics;
+  no new changed-line diagnostic. Changed Dart formatting and diff checks pass.
+- [x] SDK #412 and #413 hosted tests, SDK/playground builds and preview checks
+  passed. The promotion head must independently meet its required checks.
+
+SDK runtime changes are complete for this freeze scope. Main promotion and
+consumer immutable-main repin remain the ordered steps above. Tags, public
+publication, upstream operational signoff and signed-platform certification
+retain their separate release gates; no live funds were submitted by an agent.
