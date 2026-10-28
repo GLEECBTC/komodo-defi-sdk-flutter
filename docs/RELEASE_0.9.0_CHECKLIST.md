@@ -10,8 +10,10 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
   (`97b48556`) and #413 (`56828b91`); the KDF engine input remains unchanged.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
-- Branch strategy: **squash every PR into `dev`**; use a merge commit for
-  `dev` → `main` release promotion. Source-branch reconciliation merges do not
+- Branch strategy: **squash every PR into `dev`**; freeze `release-0.9.0`
+  from the reviewed dev snapshot and use a merge commit for its promotion
+  into `main`. Squash any release reconciliation back into `dev` through a
+  focused PR. Source-branch reconciliation merges do not
   change this rule. Squashing drops source merge parents, so compare content
   and record the real squash SHA rather than assuming ancestry is retained.
 - Previous main `a96398ba` and its merge parent `331a6879` have identical trees. The preparation
@@ -50,7 +52,7 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
   history #413 is `56828b91`. Source-branch and squash content were compared.
 - [x] Resolve the two SDK #410 correlation/session review findings through
   #412 and add native/browser regressions. Both threads are resolved.
-- [ ] Final `dev` → `main` promotion contains this preparation; record its SHA,
+- [ ] Final `release-0.9.0` → `main` promotion contains this preparation; record its SHA,
   complete its required CI/review conditions. The promotion is ready for review;
   its normal merge must still satisfy repository protections.
 
@@ -126,7 +128,9 @@ performed by these preparation changes.
   tested `03a3cb1a`. No runtime implementation or build pin changed.
 - The owner explicitly authorized admin bypass for these dev merges. Review
   protections and repository settings were not changed. Final distribution
-  gates remain in force on draft SDK release PR #410.
+  gates remain in force on the SDK release PR. The earlier dev-headed #410
+  is replaced by the frozen `release-0.9.0` candidate; its resolved review
+  discussions remain part of the release evidence.
 - The preparation source branch is reconciled with the real dev squash before
   #409 is retargeted. Its runtime/dependency files remain those tested at
   `2f6ba724`; subsequent changes only correct the strategy and execution record.
@@ -195,7 +199,10 @@ Fresh validation after the repair:
 - [x] SDK #412 and #413 hosted tests, SDK/playground builds and preview checks
   passed. The promotion head must independently meet its required checks.
 
-SDK runtime changes are complete for this freeze scope. Main promotion and
-consumer immutable-main repin remain the ordered steps above. Tags, public
+SDK runtime changes are complete for this freeze scope. Freeze the candidate
+on `release-0.9.0` and keep its main promotion open for tester/reviewer feedback.
+The app pins the exact frozen SDK commit during RC testing. Main promotion and
+consumer immutable-main repin remain the ordered distribution steps above;
+they are not prerequisites for freezing the RC source. Tags, public
 publication, upstream operational signoff and signed-platform certification
 retain their separate release gates; no live funds were submitted by an agent.
