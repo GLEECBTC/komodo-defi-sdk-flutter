@@ -418,7 +418,7 @@ class RoutedSwapManager {
   Future<List<RoutedSwapProgress>> inFlight({int pageSize = 50}) async {
     final context = await _captureSession();
     final entries = <RoutedSwapProgress>[];
-    for (var page = 1; page <= 20; page++) {
+    for (var page = 1; ; page++) {
       _requireCurrent(context);
       final result = await history(
         filter: rpc.RoutedSwapHistoryFilter.inFlight,

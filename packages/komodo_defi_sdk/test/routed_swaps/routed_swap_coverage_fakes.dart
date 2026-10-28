@@ -234,10 +234,11 @@ JsonMap historyAnswer(
   int? total,
   int page = 1,
   int totalPages = 1,
+  int limit = 20,
 }) => ok({
   'entries': entries,
   'total': total ?? entries.length,
-  'limit': 20,
+  'limit': limit,
   'page_number': page,
   'total_pages': totalPages,
 });
