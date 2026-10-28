@@ -1,5 +1,8 @@
 ## 0.4.0 (unreleased)
 
+ - **FEAT**(assets): show GLEEC and its GRC-20 tokens to Trezor wallets when
+   the coins config gives them a `trezor_coin`. Every other EVM coin stays
+   hidden from Trezor wallets.
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0`, `komodo_coin_updates` `^2.1.1` for SDK 0.8.0;
    retain this package version from the earlier preparation milestone.
 
