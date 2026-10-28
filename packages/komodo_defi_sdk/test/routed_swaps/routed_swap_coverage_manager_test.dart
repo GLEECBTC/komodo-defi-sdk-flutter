@@ -186,7 +186,7 @@ void main() {
 
   group('start', () {
     test(
-      'without first reads, a start missing from history is unconfirmed',
+      'without first reads, a start is unconfirmed without guessing history',
       () async {
         final kdf = ScriptedKdf()
           ..always(
@@ -217,11 +217,7 @@ void main() {
           ),
         );
         expect(kdf.calls('task::routed_swap::status'), 0);
-        final lookup = kdf.paramsFor('routed_swap::history').single;
-        expect(lookup['my_coin'], 'USDC-ERC20');
-        expect(lookup['other_coin'], 'USDT-PLG20');
-        expect(lookup['limit'], 10);
-        expect(lookup['from_timestamp'], isA<int>());
+        expect(kdf.calls('routed_swap::history'), 0);
       },
     );
 
@@ -261,16 +257,15 @@ void main() {
         );
 
         final a = awaited(async, manager.start(offer));
-        final b = awaited(
-          async,
-          manager.start(offer),
-          elapse: const Duration(seconds: 2),
-        );
-
+        final pending = manager.start(offer);
+        Object? error;
+        pending.then<void>((_) {}, onError: (Object e) => error = e);
+        async
+          ..flushMicrotasks()
+          ..elapse(const Duration(seconds: 2));
         expect(a.uuid, first);
-        expect(b.uuid, second);
-        expect(b.latest.createdAt, isNotNull);
-        expect(b.latest.acceptedOffer, offer);
+        expect(error, isA<RoutedSwapStartUnconfirmedException>());
+        expect(kdf.calls('routed_swap::history'), 0);
         unawaited(manager.dispose());
         async.flushMicrotasks();
       });

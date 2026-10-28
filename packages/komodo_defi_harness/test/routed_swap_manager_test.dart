@@ -10,6 +10,8 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+import 'support/routed_auth_fixture.dart';
+
 part 'routed_swap_manager_cases_1.dart';
 part 'routed_swap_manager_cases_2.dart';
 part 'routed_swap_manager_cases_3.dart';
@@ -76,6 +78,7 @@ RoutedSwapManager _managerFor(
   Duration pollInterval = const Duration(milliseconds: 5),
 }) {
   final manager = RoutedSwapManager(
+    auth: RoutedTestAuth(),
     client: client,
     resolveAsset: (ticker) => assets[ticker],
     taskNudges: nudges,

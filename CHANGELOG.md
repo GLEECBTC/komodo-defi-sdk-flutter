@@ -60,6 +60,11 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Routed identity and ownership** ([@CharlVS]): never infer a started swap's
+  UUID from matching amounts/minima in history. Missing task status remains an
+  unconfirmed start. Bind cached handles, polling and asynchronous results to
+  the authenticated runtime session; revoke them on sign-out, wallet switches
+  and same-wallet reauthentication. Direct manager construction requires auth.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.

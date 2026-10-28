@@ -36,6 +36,7 @@ class _RoutedSwapSession {
   _RoutedSwapSession({
     required RoutedSwapManager manager,
     required this.uuid,
+    required this.walletSession,
     required RoutedSwapProgress seed,
     int? taskId,
     this.offer,
@@ -43,10 +44,17 @@ class _RoutedSwapSession {
        _taskId = taskId,
        _latest = seed,
        // Every session starts from a read KDF has just answered.
-       _checkedAt = manager._now();
+       _checkedAt = manager._now() {
+    // A consumer may only request result later; revocation must not create an
+    // unhandled asynchronous error when nobody was awaiting it yet.
+    _result.future.ignore();
+  }
 
   final RoutedSwapManager _manager;
   final String uuid;
+  final AuthSessionContext walletSession;
+
+  bool get _active => !_disposed && _manager._isCurrent(walletSession);
 
   /// The offer the user accepted, for swaps started in this process.
   final RoutedSwapOffer? offer;
@@ -78,6 +86,11 @@ class _RoutedSwapSession {
   Stream<DateTime> get checks => _checks.stream;
 
   Stream<RoutedSwapProgress> get stream => Stream.multi((out) {
+    if (!_manager._auth.isSessionContextCurrent(walletSession)) {
+      out.addError(const AuthSessionChangedException());
+      unawaited(out.close());
+      return;
+    }
     out.add(_latest);
     if (_updates.isClosed) {
       unawaited(out.close());
@@ -116,19 +129,19 @@ class _RoutedSwapSession {
   }
 
   void _refreshSoon() {
-    if (_refreshing || _disposed || _latest.isTerminal) return;
+    if (_refreshing || !_active || _latest.isTerminal) return;
     _timer?.cancel();
     unawaited(_refresh());
   }
 
   void _schedule(Duration delay) {
     _timer?.cancel();
-    if (_disposed || _latest.isTerminal) return;
+    if (!_active || _latest.isTerminal) return;
     _timer = Timer(delay, () => unawaited(_refresh()));
   }
 
   Future<void> _refresh() async {
-    if (_refreshing || _disposed || _latest.isTerminal) return;
+    if (_refreshing || !_active || _latest.isTerminal) return;
     _refreshing = true;
     var next = _taskId != null
         ? _manager._pollInterval
@@ -139,6 +152,7 @@ class _RoutedSwapSession {
       } else {
         await _refreshFromHistory();
       }
+      _manager._requireCurrent(walletSession);
       _failures = 0;
       final checkedAt = _checkedAt = _manager._now();
       if (!_checks.isClosed) _checks.add(checkedAt);
@@ -151,6 +165,10 @@ class _RoutedSwapSession {
       _taskId = null;
       next = Duration.zero;
     } on Object {
+      if (!_active) {
+        unawaited(dispose());
+        return;
+      }
       _failures++;
       next = _backoff(next);
       if (_failures >= _manager._delayedAfterFailures &&
@@ -174,7 +192,9 @@ class _RoutedSwapSession {
   }
 
   Future<void> _refreshFromTask(int taskId) async {
+    _manager._requireCurrent(walletSession);
     final response = await _manager._client.rpc.routedSwap.status(taskId);
+    _manager._requireCurrent(walletSession);
     // KDF numbers tasks from zero again after a restart, so this id can now
     // belong to a different swap. Treat it as gone; history decides.
     if (response.details.uuid != uuid) {
@@ -201,7 +221,7 @@ class _RoutedSwapSession {
   /// approval, the gas actually spent — when the record has caught up.
   Future<RoutedSwapProgress> _enriched(RoutedSwapProgress terminal) async {
     try {
-      final entry = await _manager._entryFor(uuid);
+      final entry = await _manager._entryFor(uuid, walletSession);
       if (entry != null && entry.swap.isTerminal) {
         return _manager._progressFromEntry(
           entry,
@@ -224,7 +244,7 @@ class _RoutedSwapSession {
   }
 
   Future<void> _refreshFromHistory() async {
-    final entry = await _manager._entryFor(uuid);
+    final entry = await _manager._entryFor(uuid, walletSession);
     if (entry == null) throw RoutedSwapNotFoundException(uuid);
     _emit(
       _manager._progressFromEntry(entry, accepted: offer, previous: _latest),
@@ -236,6 +256,7 @@ class _RoutedSwapSession {
   Future<void> _forget(int taskId) async {
     _taskId = null;
     try {
+      _manager._requireCurrent(walletSession);
       await _manager._client.rpc.routedSwap.status(
         taskId,
         forgetIfFinished: true,
@@ -246,7 +267,7 @@ class _RoutedSwapSession {
   }
 
   void _emit(RoutedSwapProgress progress) {
-    if (_disposed || _updates.isClosed) return;
+    if (!_active || _updates.isClosed) return;
     if (progress == _latest) return;
     _latest = progress;
     _updates.add(progress);
@@ -254,6 +275,10 @@ class _RoutedSwapSession {
   }
 
   void _finish() {
+    if (!_active) {
+      unawaited(dispose());
+      return;
+    }
     _timer?.cancel();
     _timer = null;
     unawaited(_nudges?.cancel());
@@ -264,6 +289,7 @@ class _RoutedSwapSession {
   }
 
   Future<void> cancel() async {
+    _manager._requireCurrent(walletSession);
     final taskId = _taskId;
     if (_latest.isTerminal) {
       throw RoutedSwapNotCancellableException(
@@ -298,7 +324,9 @@ class _RoutedSwapSession {
               : RoutedSwapCancelRefusal.alreadyBroadcast,
         );
       }
+      _manager._requireCurrent(walletSession);
       await _manager._client.rpc.routedSwap.cancel(taskId);
+      _manager._requireCurrent(walletSession);
     } on RoutedSwapNotCancellableException {
       rethrow;
     } on rpc.RoutedSwapTaskAlreadyBroadcastException {
@@ -336,14 +364,18 @@ class _RoutedSwapSession {
 
   Future<void> _refreshNow() async {
     _timer?.cancel();
-    while (_refreshing) {
+    while (_refreshing && _active) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     await _refresh();
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
     _disposed = true;
+    if (!_result.isCompleted) {
+      _result.completeError(const AuthSessionChangedException());
+    }
     _timer?.cancel();
     _timer = null;
     await _nudges?.cancel();

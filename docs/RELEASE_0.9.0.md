@@ -41,6 +41,13 @@ the reviewed concrete amount and accepted minimum through start/revalidation.
 Never interpret a quote as a broadcast or automatically resubmit an uncertain
 start. Track/resume with the durable UUID (`watch(uuid)`); task IDs are transient.
 
+Prefer `sdk.routedSwaps`. Direct construction of `RoutedSwapManager` requires
+`auth: sdk.auth` so cached handles and background work share the SDK's runtime
+wallet ownership. Signing out, switching wallets or reauthenticating the same
+wallet invalidates existing sessions and rejects late responses. An unanswered
+initial status remains `RoutedSwapStartUnconfirmedException` with its task ID;
+matching amounts or minima in history never establish which swap was started.
+
 The [manager](../packages/komodo_defi_sdk/lib/src/routed_swaps/routed_swap_manager.dart)
 and [typed requests](../packages/komodo_defi_rpc_methods/lib/src/rpc_methods/routed_swap/routed_swap_requests.dart)
 define the supported parameters. Preserve typed errors, approval hashes,
