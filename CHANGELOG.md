@@ -61,6 +61,10 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Cold-start recovery** ([@CharlVS]) — follow every in-flight history page
+  instead of silently stopping after page 20. Wallet-session checks remain
+  active throughout pagination, and a wallet change rejects the whole read.
+
 - **EVM history** ([@CharlVS]) — preserve signed proxy movements on repeated
   fetches and
   cache reconciliation; route Ethereum Classic through its verified Blockscout

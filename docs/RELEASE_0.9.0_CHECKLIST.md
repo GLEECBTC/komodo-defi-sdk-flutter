@@ -206,3 +206,22 @@ consumer immutable-main repin remain the ordered distribution steps above;
 they are not prerequisites for freezing the RC source. Tags, public
 publication, upstream operational signoff and signed-platform certification
 retain their separate release gates; no live funds were submitted by an agent.
+
+## Freeze review repair — complete cold-start recovery
+
+The frozen SDK #416 review found that `inFlight(pageSize: 1)` silently omitted
+active swaps after page 20. Recovery now follows every reported page, retains
+the in-flight filter and rejects the entire read on wallet-session revocation,
+including a late response after page 20. The regression covers 99 pages and
+a wallet change while page 21 is pending; the old test that expected truncation
+was replaced and moved into the existing Chrome/WASM-gated ownership suite.
+
+- All 16 Melos package suites: **3,057 passed / 14 skipped**.
+- All nine core Chrome/WASM files: **215 passed**. This supersedes the earlier
+  native/core-WASM counts for runtime `56828b91`; those remain historical.
+- Focused manager/ownership native tests: **17 passed**. Changed-file analysis
+  is clean; full consumer analysis has zero errors and the existing 55 warnings
+  / 2,144 infos. Changed Dart formatting and diff checks pass.
+- KDF/spec/coin inputs, dependency versions and generated outputs are unchanged.
+  Carry the focused dev squash into the frozen SDK branch through a separate
+  release-repair PR; the main promotion remains open for tester/reviewer feedback.
