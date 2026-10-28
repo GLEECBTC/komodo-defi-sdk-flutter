@@ -7,6 +7,8 @@ import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
+import 'support/routed_auth_fixture.dart';
+
 part 'routed_swap_live_capture_payloads.dart';
 
 /// Parses what the pinned engine actually sent, with the real SDK models.
@@ -328,6 +330,7 @@ rpc.RoutedSwapRpcException _quoteError(String raw) {
 
 RoutedSwapManager _manager(Map<String, String> responses) {
   final manager = RoutedSwapManager(
+    auth: RoutedTestAuth(),
     client: _Replay(responses),
     resolveAsset: (ticker) => _assets[ticker],
   );

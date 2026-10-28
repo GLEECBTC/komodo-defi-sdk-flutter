@@ -3,6 +3,7 @@ part of 'routed_swap_manager.dart';
 /// Turns engine routes into offers, and finds swaps in the durable record.
 extension _RoutedSwapOffers on RoutedSwapManager {
   RoutedSwapHandle _register(_RoutedSwapSession session) {
+    _requireCurrent(session.walletSession);
     final existing = _sessions[session.uuid];
     if (existing != null && !existing.isDisposed) {
       unawaited(session.dispose());
@@ -13,37 +14,14 @@ extension _RoutedSwapOffers on RoutedSwapManager {
     return _RoutedSwapHandle(session);
   }
 
-  Future<rpc.RoutedSwapHistoryEntry?> _entryFor(String uuid) async {
+  Future<rpc.RoutedSwapHistoryEntry?> _entryFor(
+    String uuid,
+    AuthSessionContext context,
+  ) async {
+    _requireCurrent(context);
     final page = await _client.rpc.routedSwap.history(uuid: uuid, limit: 1);
+    _requireCurrent(context);
     return page.entries.isEmpty ? null : page.entries.first;
-  }
-
-  /// Finds the record `init` created for [offer] when its task could not be
-  /// read back.
-  Future<rpc.RoutedSwapHistoryEntry?> _findStartedEntry(
-    RoutedSwapOffer offer, {
-    required DateTime since,
-  }) async {
-    try {
-      final page = await _client.rpc.routedSwap.history(
-        myCoin: offer.from.id,
-        otherCoin: offer.to.id,
-        fromTimestamp: _unixSeconds(since) - 5,
-        limit: 10,
-      );
-      for (final entry in page.entries) {
-        final amount = Decimal.tryParse(entry.requested.amount);
-        final minimum = Decimal.tryParse(entry.minToAmountAccepted);
-        if (amount == offer.sellAmount &&
-            minimum == offer.guaranteedReceive &&
-            !_sessions.containsKey(entry.uuid)) {
-          return entry;
-        }
-      }
-    } on Object {
-      // The caller reports the start as unconfirmed.
-    }
-    return null;
   }
 
   Decimal? _decimal(String? value) =>

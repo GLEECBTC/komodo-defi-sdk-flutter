@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart' as rpc;
 import 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_types.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -77,6 +78,7 @@ class RoutedSwapManager {
   /// Creates the manager. Wired by the SDK container.
   RoutedSwapManager({
     required ApiClient client,
+    required KomodoDefiLocalAuth auth,
     required RoutedSwapAssetResolver resolveAsset,
     RoutedSwapTaskNudges? taskNudges,
     Duration pollInterval = const Duration(seconds: 3),
@@ -87,6 +89,7 @@ class RoutedSwapManager {
     int firstReadAttempts = 3,
     DateTime Function()? now,
   }) : _client = client,
+       _auth = auth,
        _resolveAsset = resolveAsset,
        _taskNudges = taskNudges,
        _pollInterval = pollInterval,
@@ -98,6 +101,10 @@ class RoutedSwapManager {
        _now = now ?? DateTime.now;
 
   final ApiClient _client;
+  final KomodoDefiLocalAuth _auth;
+  AuthSessionContext? _walletSession;
+  StreamSubscription<AuthSessionContext?>? _authSubscription;
+  bool _disposed = false;
   final RoutedSwapAssetResolver _resolveAsset;
   final RoutedSwapTaskNudges? _taskNudges;
   final Duration _pollInterval;
@@ -109,6 +116,49 @@ class RoutedSwapManager {
   final DateTime Function() _now;
 
   final Map<String, _RoutedSwapSession> _sessions = {};
+
+  Future<AuthSessionContext> _captureSession() async {
+    if (_disposed) throw const AuthSessionChangedException();
+    _authSubscription ??= _auth.watchSessionContext().listen(
+      _observeSession,
+      onError: (Object _) => _clearSessions(),
+    );
+    final context = await _auth.captureSessionContext();
+    _requireCurrent(context);
+    _observeSession(context);
+    return context;
+  }
+
+  bool _isCurrent(AuthSessionContext context) =>
+      !_disposed && _auth.isSessionContextCurrent(context);
+
+  void _requireCurrent(AuthSessionContext context) {
+    if (!_isCurrent(context)) throw const AuthSessionChangedException();
+  }
+
+  void _observeSession(AuthSessionContext? context) {
+    if (_disposed) return;
+    // Delayed events must not revoke a newer, synchronously captured session.
+    if (context != null && !_auth.isSessionContextCurrent(context)) return;
+    if (context == null &&
+        _walletSession != null &&
+        _auth.isSessionContextCurrent(_walletSession!)) {
+      return;
+    }
+    if (_walletSession == context) return;
+    _clearSessions();
+    _walletSession = context;
+  }
+
+  void _clearSessions() {
+    final sessions = _sessions.values.toList();
+    _sessions.clear();
+    _walletSession = null;
+    for (final session in sessions) {
+      // dispose revokes the session and its timer before its first await.
+      unawaited(session.dispose());
+    }
+  }
 
   /// Wallet assets that are eligible to be quoted.
   ///
@@ -143,6 +193,8 @@ class RoutedSwapManager {
     rpc.RoutedSwapOrder? order,
     String? provider,
   }) async {
+    final context = await _captureSession();
+    _requireCurrent(context);
     final response = await _client.rpc.routedSwap.quote(
       from: from.id,
       to: to.id,
@@ -152,6 +204,7 @@ class RoutedSwapManager {
       provider: provider,
     );
 
+    _requireCurrent(context);
     final route = response.best;
     if (route == null) {
       throw StateError(
@@ -179,6 +232,8 @@ class RoutedSwapManager {
     rpc.RoutedSwapOrder? order,
     String? provider,
   }) async {
+    final context = await _captureSession();
+    _requireCurrent(context);
     final response = await _client.rpc.routedSwap.quoteMax(
       from: from.id,
       to: to.id,
@@ -186,6 +241,7 @@ class RoutedSwapManager {
       order: order,
       provider: provider,
     );
+    _requireCurrent(context);
     final route = response.best;
     if (route == null) {
       throw StateError('A successful Max quote must contain a route');
@@ -257,7 +313,8 @@ class RoutedSwapManager {
   /// its durable id could not be read back: never retry on that; check
   /// history.
   Future<RoutedSwapHandle> start(RoutedSwapOffer offer) async {
-    final startedAt = DateTime.now();
+    final context = await _captureSession();
+    _requireCurrent(context);
     final rpc.RoutedSwapInitResponse init;
     try {
       init = await _client.rpc.routedSwap.init(
@@ -277,6 +334,13 @@ class RoutedSwapManager {
       throw RoutedSwapStartUnconfirmedException(error);
     }
 
+    if (!_isCurrent(context)) {
+      throw RoutedSwapStartUnconfirmedException(
+        const AuthSessionChangedException(),
+        taskId: init.taskId,
+      );
+    }
+
     // Resolve the uuid before handing back a handle. Everything after this
     // point is recoverable; the window before it is not, so it is closed here
     // rather than left to each caller.
@@ -285,11 +349,19 @@ class RoutedSwapManager {
       if (attempt > 0) {
         await Future<void>.delayed(_firstReadRetryDelay * attempt);
       }
+      if (!_isCurrent(context)) {
+        throw RoutedSwapStartUnconfirmedException(
+          const AuthSessionChangedException(),
+          taskId: init.taskId,
+        );
+      }
       try {
         final first = await _client.rpc.routedSwap.status(init.taskId);
+        _requireCurrent(context);
         final seed = _progressFromStatus(first.details, accepted: offer);
         final session = _RoutedSwapSession(
           manager: this,
+          walletSession: context,
           uuid: first.details.uuid,
           taskId: init.taskId,
           offer: offer,
@@ -298,26 +370,18 @@ class RoutedSwapManager {
         return _register(session);
       } on Object catch (error) {
         lastError = error;
+        if (!_isCurrent(context)) {
+          throw RoutedSwapStartUnconfirmedException(error, taskId: init.taskId);
+        }
       }
     }
 
-    // KDF persists the uuid before the task starts executing, so the durable
-    // record can still identify the swap this request created.
-    final entry = await _findStartedEntry(offer, since: startedAt);
-    if (entry == null) {
-      throw RoutedSwapStartUnconfirmedException(
-        lastError ?? StateError('No status for task ${init.taskId}'),
-        taskId: init.taskId,
-      );
-    }
-    final session = _RoutedSwapSession(
-      manager: this,
-      uuid: entry.uuid,
+    // Amounts and minima cannot correlate a history entry to this task.
+    // Even one matching record may belong to another concurrent caller.
+    throw RoutedSwapStartUnconfirmedException(
+      lastError ?? StateError('No status for task ${init.taskId}'),
       taskId: init.taskId,
-      offer: offer,
-      seed: _progressFromEntry(entry, accepted: offer),
     );
-    return _register(session);
   }
 
   /// Re-attaches to a swap by its durable id.
@@ -328,16 +392,19 @@ class RoutedSwapManager {
   ///
   /// Throws [RoutedSwapNotFoundException] when nothing is known about [uuid].
   Future<RoutedSwapHandle> watch(String uuid) async {
+    final context = await _captureSession();
+    _requireCurrent(context);
     final live = _sessions[uuid];
     if (live != null && !live.isDisposed) return _RoutedSwapHandle(live);
 
-    final entry = await _entryFor(uuid);
+    final entry = await _entryFor(uuid, context);
     if (entry == null) throw RoutedSwapNotFoundException(uuid);
 
     // A swap KDF is still tracking after a restart has no task id any client
     // can hold, so history polling is the only way to follow it.
     final session = _RoutedSwapSession(
       manager: this,
+      walletSession: context,
       uuid: uuid,
       seed: _progressFromEntry(entry),
     );
@@ -349,13 +416,16 @@ class RoutedSwapManager {
   /// The cold-start question: after a relaunch, what is still running? A
   /// 30-minute bridge outlives most app sessions, so this is the normal path.
   Future<List<RoutedSwapProgress>> inFlight({int pageSize = 50}) async {
+    final context = await _captureSession();
     final entries = <RoutedSwapProgress>[];
     for (var page = 1; page <= 20; page++) {
+      _requireCurrent(context);
       final result = await history(
         filter: rpc.RoutedSwapHistoryFilter.inFlight,
         limit: pageSize,
         pageNumber: page,
       );
+      _requireCurrent(context);
       entries.addAll(result.entries);
       if (!result.hasMore) break;
     }
@@ -372,6 +442,8 @@ class RoutedSwapManager {
     DateTime? createdAfter,
     DateTime? createdBefore,
   }) async {
+    final context = await _captureSession();
+    _requireCurrent(context);
     final page = await _client.rpc.routedSwap.history(
       filter: filter,
       myCoin: from?.id,
@@ -381,6 +453,7 @@ class RoutedSwapManager {
       limit: limit,
       pageNumber: pageNumber,
     );
+    _requireCurrent(context);
     return RoutedSwapHistoryPage(
       entries: [
         for (final entry in page.entries)
@@ -398,10 +471,14 @@ class RoutedSwapManager {
 
   /// Releases every live session.
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     final sessions = _sessions.values.toList();
     _sessions.clear();
-    for (final session in sessions) {
-      await session.dispose();
-    }
+    // Revoke every timer synchronously, before waiting for auth cancellation.
+    final pending = [for (final session in sessions) session.dispose()];
+    final authCancellation = _authSubscription?.cancel();
+    if (authCancellation != null) pending.add(authCancellation);
+    await Future.wait(pending);
   }
 }

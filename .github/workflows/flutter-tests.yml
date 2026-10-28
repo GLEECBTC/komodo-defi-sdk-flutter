@@ -128,6 +128,7 @@ jobs:
           test/withdrawals/withdrawal_manager_gasless_test.dart
           test/withdrawals/gasless_submission_lock_web_test.dart
           test/withdrawals/pending_gasless_transfer_repository_web_test.dart
+          test/routed_swaps/routed_swap_ownership_test.dart
 
       - name: Test the KDF web transport in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_framework')

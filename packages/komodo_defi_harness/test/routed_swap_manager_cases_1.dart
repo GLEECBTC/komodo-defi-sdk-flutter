@@ -258,7 +258,7 @@ void _cases1() {
       expect(client.requestsFor('task::routed_swap::status').length, 2);
     });
 
-    test('falls back to the durable record when reads keep failing', () async {
+    test('lost first reads require explicit durable-record recovery', () async {
       final fixture = RoutedSwapFixture(clock: RoutedSwapFixture.wallClock)
         ..quote(route())
         ..run(RoutedSwapRun());
@@ -266,13 +266,22 @@ void _cases1() {
         ..failNext('task::routed_swap::status', times: 3);
       final manager = _managerFor(client);
 
-      final handle = await manager.start(await offerFrom(manager));
-
-      expect(handle.uuid, fixture.uuidOf(1));
+      await expectLater(
+        manager.start(await offerFrom(manager)),
+        throwsA(isA<RoutedSwapStartUnconfirmedException>()),
+      );
+      expect(client.requestsFor('routed_swap::history'), isEmpty);
+      // The caller explicitly chooses a durable UUID; no amount-based guess
+      // is associated with the returned task ID.
+      final handle = await manager.watch(fixture.uuidOf(1));
       expect(handle.latest.createdAt, isNotNull);
-      // The task id is still followed once reads recover.
+      // Recovery follows the durable record without reusing the unknown task.
+      // Only status reads advance the scripted engine automatically; model
+      // its independent completion without issuing another status request.
+      fixture.advance(1, steps: 100);
       final result = await handle.result.timeout(_timeout);
       expect(result.isSuccess, isTrue);
+      expect(client.requestsFor('task::routed_swap::status'), hasLength(3));
     });
 
     test('an unrecoverable start is unconfirmed, never retried', () async {

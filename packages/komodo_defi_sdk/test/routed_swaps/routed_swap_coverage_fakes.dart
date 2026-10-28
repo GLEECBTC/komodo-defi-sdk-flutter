@@ -2,10 +2,13 @@ import 'dart:async';
 
 import 'package:decimal/decimal.dart';
 import 'package:fake_async/fake_async.dart';
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart' as rpc;
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+import '../helpers/counting_session_auth.dart';
 
 Decimal d(String value) => Decimal.parse(value);
 
@@ -242,11 +245,24 @@ JsonMap historyAnswer(
 RoutedSwapManager managerFor(
   ScriptedKdf kdf, {
   RoutedSwapTaskNudges? nudges,
+  KomodoDefiLocalAuth? auth,
   int firstReadAttempts = 3,
   RoutedSwapAssetResolver? resolve,
   DateTime Function()? now,
 }) => RoutedSwapManager(
   client: kdf,
+  auth:
+      auth ??
+      CountingSessionAuth(
+        const KdfUser(
+          walletId: WalletId(
+            name: 'routed-test-wallet',
+            pubkeyHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+          ),
+          isBip39Seed: false,
+        ),
+      ),
   resolveAsset: resolve ?? (ticker) => knownAssets[ticker],
   taskNudges: nudges,
   firstReadAttempts: firstReadAttempts,
