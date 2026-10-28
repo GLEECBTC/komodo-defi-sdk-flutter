@@ -122,7 +122,7 @@ support for new chains, external recipients or hardware signing from asset
 selection. KDF/spec/proxy review, final-head CI and signed consumer validation
 remain gates in the checklist. Replay tests do not certify live execution.
 
-**Review comparison:** [SDK 0.8.1 checkout to this preparation branch](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/a96398ba9ae72efbe654de7c3edc0bfe2b05dda0...chore/prepare-sdk-0.9.0).
+**Review comparison:** [SDK 0.8.1 checkout to the frozen 0.9.0 candidate](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/a96398ba9ae72efbe654de7c3edc0bfe2b05dda0...release-0.9.0).
 
 ## 2026-09-28 — SDK 0.8.1
 
