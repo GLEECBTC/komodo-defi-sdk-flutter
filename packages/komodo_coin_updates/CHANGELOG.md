@@ -1,4 +1,6 @@
-## Unreleased
+## 2.2.0 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FIX**(coins): fill missing native fee models for Base, Mantle, Monad and Avalanche on bundled, cached and refreshed configurations. Preserve explicit settings; tokens inherit the platform in KDF.
 

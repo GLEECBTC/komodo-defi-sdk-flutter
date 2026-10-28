@@ -4,7 +4,7 @@ description: >-
   Boots a real KomodoDefiSdk against a scripted fake KDF so login, activation
   and balance timings can be measured deterministically, in HD or iguana mode,
   with no binary and no network.
-version: 0.1.0
+version: 0.2.0
 publish_to: none
 repository: https://github.com/GLEECBTC/komodo-defi-sdk-flutter
 

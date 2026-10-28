@@ -1,4 +1,6 @@
-## Unreleased
+## 0.7.0 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(config): serialize optional validated `lifi_integrator` on every
    startup path. All seven KDF archives are pinned to `35f0bde`; the Linux job

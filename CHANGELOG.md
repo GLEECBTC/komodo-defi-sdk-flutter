@@ -3,30 +3,112 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## Unreleased
+## 2026-10-28 — SDK 0.9.0 release preparation
 
- - **FIX**(build): freeze bundled coin files and icons to their pinned revision,
-   bypass mutable branch mirrors, verify Git blob hashes on download and cache
-   reuse, reject unexpected cached icons, and require a rebuild after correction.
-   Runtime coin updates retain their existing independent policy (SDK #407).
+### SDK 0.9.0 overview
 
- - **FEAT**(routed-swap): KDF-owned Max quotes, exact accepted minima, global
-   integrator configuration, locked-balance shortfalls and missing-only EVM fee
-   model normalization. Funding, measured payouts and approval/gas evidence
-   remain distinct from estimates. See package changelogs for API changes.
+SDK 0.9.0 adds KDF-executed routed swaps alongside the atomic order book,
+including exact and Max quotes, durable recovery, explicit approval/funding
+requirements and separate measured/provider-reported payouts. It adds GLEEC
+and configured GRC-20 support to Trezor asset selection and fixes activation
+strategy routing, market-data parsing and encrypted history-cache recovery.
+Bundled coin files and icons now use verified, commit-addressed build inputs.
 
- - **FEAT**(routed-swap): routed (aggregator-executed) swaps - `RoutedSwapManager`
-   on `KomodoDefiSdk.routedSwaps`, the `routed_swap` RPC namespace and a scripted
-   harness fixture. A liquidity source separate from the atomic-swap orderbook.
- - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiProxyUrl` sends KDF's LI.FI
-   requests through a Komodo proxy, set with KDF's `lifi_proxy_url` startup
-   setting. KDF signs each request with its P2P key and the proxy holds the
-   LI.FI key. Unset, KDF uses LI.FI's public API with no key.
- - **BUILD**(kdf): the bundled KDF artefact is repinned to
-   `feat/lifi-integration` `35f0bde438eec2cb0471b19642b9d9c4602fa17d`, which
-   implements the routed-swap contract (`gleec-specs#2` at `7c388ea`) and the
-   LI.FI proxy; see the
-   [komodo_defi_framework changelog](packages/komodo_defi_framework/CHANGELOG.md).
+This is a candidate for the complete GitHub checkout/submodule distribution.
+It is not a tag, published release or pub.dev publication. The previous
+distribution commit is SDK 0.8.1 `a96398ba`; the latest published GitHub SDK
+release remains 0.8.0. Do not describe the intervening preparation records as
+published releases. See the [migration guide](docs/RELEASE_0.9.0.md) and
+[release checklist](docs/RELEASE_0.9.0_CHECKLIST.md).
+
+### Package versions
+
+| Package | Previous checkout | Candidate |
+| --- | --- | --- |
+| `komodo_defi_sdk` | `0.8.1` | `0.9.0` |
+| `komodo_defi_framework` | `0.6.1` | `0.7.0` |
+| `komodo_defi_local_auth` | `0.6.1` | `0.7.0` |
+| `komodo_defi_rpc_methods` | `0.7.0` | `0.8.0` |
+| `komodo_defi_types` | `0.6.0` | `0.7.0` |
+| `komodo_coins` | `0.4.0` | `0.5.0` |
+| `komodo_coin_updates` | `2.1.1` | `2.2.0` |
+| `komodo_cex_market_data` | `0.1.0+2` | `0.2.0` |
+| `komodo_wallet_build_transformer` | `0.5.0` | `0.5.1` |
+| `komodo_defi_harness` | `0.1.0` | `0.2.0` |
+| `komodo_ui` | `0.3.3` | `0.3.4` |
+| `komodo_legacy_wallet_migration` | `0.1.1` | `0.1.2` |
+| `komodo_wallet_cli` | `0.6.0` | `0.6.1` |
+
+Packages not listed retain their existing versions. Dependency-only releases
+are `komodo_ui`, `komodo_legacy_wallet_migration` and `komodo_wallet_cli`.
+The harness remains unpublished. All version constraints move together.
+
+### Breaking changes and migration
+
+- Custom `ICoinPaprikaProvider` implementations must implement `fetchTickers`;
+  bulk-response coverage now controls spot-price/24h support. Market URLs can
+  be absent. The provider cools down after a failed bulk request.
+- Custom activation strategies use the role and custom-token hooks on
+  `ProtocolActivationStrategy`. `BatchCapableActivator` no longer declares
+  `supportsCustomTokenActivation`. Each asset must match one strategy.
+- Adopters of interim routed-swap branches must remove `guardMargin`,
+  `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
+  `nativeGasReserve`. Use complete KDF quotes, concrete execution amounts and
+  the exact accepted minimum. `RoutedSwapFinished.received` and receipt amounts
+  can be absent; provider reports are separate evidence, never a replacement
+  for an unmeasured receipt. These APIs were not in SDK 0.8.1.
+
+### Features and fixes
+
+- **Routed swaps** ([@CharlVS], #389, #407): `KomodoDefiSdk.routedSwaps`
+  owns following/recovery through durable UUIDs. Typed quote, start, status,
+  cancel, history and supported-coins RPCs retain funding, locked-balance,
+  approval, executed-route and terminal-error evidence.
+- **Startup policy** ([@CharlVS], #407): optional `lifiProxyUrl` and validated
+  `LifiIntegratorConfig` propagate through bootstrap, authentication and engine
+  restarts. The SDK has no default commission. Proxy API keys stay server-side.
+- **Activation** ([@CharlVS], #405, #407): configured GLEEC/GRC-20 Trezor
+  assets are selectable; adding a token to an active GLEEC platform uses
+  `enable_erc20`. Protocol, asset role and custom-token status select a single
+  strategy. Degraded wallet identity retries without relying on manager reads.
+- **History recovery** ([@CharlVS], #400, #401, #402): recover the asynchronous Hive close/delete race
+  when rebuilding a refused box and require Hive CE 2.14 across affected storage users.
+- **Market data** ([@CharlVS], #392, #393, #407): correct CoinGecko 24h fields,
+  parse live CoinPaprika markets, share bulk ticker requests and isolate coin
+  list tests from a live feed.
+- **Performance** ([@CharlVS], #389): reuse verified session identity during
+  balance/history/pubkey polling and cache multi-pair order-book depth for
+  20 seconds. Dated fiat prices select a history-capable repository.
+- **Native transports** ([@CharlVS], #389): retain typed non-200 KDF errors and
+  decode native response text as UTF-8, including non-ASCII wallet names.
+- **Frozen builds** ([@CharlVS], #407): verify pinned coin files and icons on
+  download/cache reuse, reject extra cached icons, and request a rebuild after
+  correcting copied assets. Runtime coin updates retain their own policy.
+
+### Engine and build inputs
+
+- KDF source: `35f0bde438eec2cb0471b19642b9d9c4602fa17d` on
+  `feat/lifi-integration`, with seven verified 28 October archive checksums.
+  [Artifact provenance](docs/KDF_ARTIFACTS_2026-10-28.json) records the rebuild;
+  a rebuild of the same source is not a new behavior fix.
+- Bundled coins: `2b0aefb78b184091ab086c66e513d8b03f5d5a01`;
+  `update_commit_on_build: false`; runtime updates remain enabled.
+- Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.
+  Validation uses Flutter 3.41.4 / Dart 3.11.1; declared toolchain ranges stay
+  unchanged. Source and archive identity are separate release evidence.
+- The candidate source retains unconditional ERC-20 payment amount validation
+  from the 0.9.7-1 engine security update; see the release checklist for the
+  direct source comparison. Engine ancestry alone is not proof of parity.
+
+### Limits and release gates
+
+The wallet's native-Max gas reserve is consumer policy, not an SDK default.
+Remote engines must implement the pinned routed-swap contract. Do not infer
+support for new chains, external recipients or hardware signing from asset
+selection. KDF/spec/proxy review, final-head CI and signed consumer validation
+remain gates in the checklist. Replay tests do not certify live execution.
+
+**Review comparison:** [SDK 0.8.1 checkout to this preparation branch](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/a96398ba9ae72efbe654de7c3edc0bfe2b05dda0...chore/prepare-sdk-0.9.0).
 
 ## 2026-09-28 — SDK 0.8.1
 

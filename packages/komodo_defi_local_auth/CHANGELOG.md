@@ -1,4 +1,6 @@
-## Unreleased
+## 0.7.0 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(auth): propagate optional integrator policy through signed-out startup, registration, sign-in and engine restarts.
 

@@ -1,4 +1,6 @@
-## Unreleased
+## 0.5.1 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FIX**(assets): frozen coin builds use the pinned raw source and metadata,
    never the branch CDN or branch head. Verify downloaded and cached contents,
