@@ -80,3 +80,19 @@ not establish routed hardware signing, all-EVM support or funded device QA.
 Keep web websocket expansion disabled as documented for this engine. Native
 bridge-fee compatibility and provider/status polling remain upstream review
 items. The [checklist](RELEASE_0.9.0_CHECKLIST.md) records release gates.
+
+### EVM history provider and reconciliation fixes
+
+Ethereum Classic uses its configured Blockscout explorer. The legacy
+`https://blockscout.com/etc/mainnet/` config is mapped to the canonical
+`https://etc.blockscout.com/api` endpoint; the proxy's absent ETC route is no
+longer selected. The public account API was checked without wallet data.
+Explorer errors remain errors, rather than being rendered as empty histories.
+The existing per-address 1,000-row Blockscout bound remains; it is not a claim
+of complete internal-call coverage or unbounded archival history.
+
+Repeated proxy pages and older net-only cache rows retain their signed balance
+movement. Optional debit/credit fields no longer turn outgoing transfers into
+unsigned gross amounts, and complementary wallet-address perspectives still
+merge without duplication. Debug builds fetch history instead of returning a
+successful empty page. Existing wallet-session history isolation remains in force.

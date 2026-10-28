@@ -1,5 +1,4 @@
 import 'package:collection/collection.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:http/http.dart' as http;
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
@@ -47,11 +46,6 @@ class EtherscanTransactionStrategy extends TransactionHistoryStrategy {
       throw UnsupportedError(
         'Asset ${asset.id.name} is not supported by EtherscanTransactionStrategy',
       );
-    }
-
-    // TODO! Remove after resolving tx history spamming issue in KW.
-    if (kDebugMode) {
-      return MyTxHistoryResponse.empty();
     }
 
     validatePagination(pagination);
@@ -162,6 +156,8 @@ class EtherscanTransactionStrategy extends TransactionHistoryStrategy {
             from: List<String>.from(tx.value('from')),
             to: List<String>.from(tx.value('to')),
             myBalanceChange: tx.value<String>('my_balance_change'),
+            spentByMe: tx.valueOrNull<String>('spent_by_me'),
+            receivedByMe: tx.valueOrNull<String>('received_by_me'),
             blockHeight: tx.value<int>('block_height'),
             confirmations: tx.value<int>('confirmations'),
             timestamp: tx.value<int>('timestamp'),
@@ -293,7 +289,9 @@ class EtherscanProtocolHelper {
       CoinSubClass.base => _ethBaseTokenUrl,
       CoinSubClass.rskSmartBitcoin => _rskUrl,
       CoinSubClass.moonbeam => _glmrUrl,
-      CoinSubClass.ethereumClassic => _etcUrl,
+      // The proxy has no ETC route (404). The factory selects its verified
+      // Blockscout explorer instead of claiming this non-existent endpoint.
+      CoinSubClass.ethereumClassic => null,
       _ => null,
     };
   }
@@ -321,7 +319,6 @@ class EtherscanProtocolHelper {
   String get _maticTokenUrl => '$_baseUrl/v2/plg20_tx_history';
   String get _mvrTokenUrl => '$_baseUrl/v2/mvr20_tx_history';
 
-  String get _etcUrl => '$_baseUrl/v2/etc_tx_history';
   String get _glmrUrl => '$_baseUrl/v2/glmr_tx_history';
   String get _rskUrl => '$_baseUrl/v2/rsk_tx_history';
   String get _txByHashUrl => '$_baseUrl/v2/transactions_by_hash';

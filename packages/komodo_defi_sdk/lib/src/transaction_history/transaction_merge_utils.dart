@@ -28,12 +28,12 @@ class TransactionMergeUtils {
     // same perspective must not double-count, while the complementary credit
     // turns a consolidation into the correct net-zero internal transfer.
     final spent = _maxDecimal(
-      existing.balanceChanges.spentByMe,
-      incoming.balanceChanges.spentByMe,
+      _spent(existing.balanceChanges),
+      _spent(incoming.balanceChanges),
     );
     final received = _maxDecimal(
-      existing.balanceChanges.receivedByMe,
-      incoming.balanceChanges.receivedByMe,
+      _received(existing.balanceChanges),
+      _received(incoming.balanceChanges),
     );
     final totalAmount = _maxDecimal(
       existing.balanceChanges.totalAmount,
@@ -63,6 +63,22 @@ class TransactionMergeUtils {
           : incoming.timestamp,
     );
   }
+
+  // Older proxy/cache records contain an authoritative signed net change,
+  // but no debit/credit components. Preserve that direction when reconciling
+  // a repeated fetch; zero optional fields must never erase a known movement.
+  static bool _netOnly(BalanceChanges value) =>
+      value.spentByMe == Decimal.zero && value.receivedByMe == Decimal.zero;
+
+  static Decimal _spent(BalanceChanges value) =>
+      _netOnly(value) && value.netChange < Decimal.zero
+      ? -value.netChange
+      : value.spentByMe;
+
+  static Decimal _received(BalanceChanges value) =>
+      _netOnly(value) && value.netChange > Decimal.zero
+      ? value.netChange
+      : value.receivedByMe;
 
   static Decimal _maxDecimal(Decimal left, Decimal right) =>
       left >= right ? left : right;

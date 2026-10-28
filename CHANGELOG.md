@@ -5,6 +5,7 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
+
 ### SDK 0.9.0 overview
 
 SDK 0.9.0 adds KDF-executed routed swaps alongside the atomic order book,
@@ -60,6 +61,11 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **EVM history** ([@CharlVS]) — preserve signed proxy movements on repeated
+  fetches and
+  cache reconciliation; route Ethereum Classic through its verified Blockscout
+  deployment instead of the absent proxy endpoint. Debug builds fetch the same
+  history as release builds.
 - **Routed identity and ownership** ([@CharlVS]): never infer a started swap's
   UUID from matching amounts/minima in history. Missing task status remains an
   unconfirmed start. Bind cached handles, polling and asynchronous results to
