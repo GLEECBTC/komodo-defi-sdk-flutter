@@ -1,5 +1,7 @@
 ## 0.7.0 (2026-10-28)
 
+ - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
+   part files from standalone exports; regenerate release output.
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(auth): propagate optional integrator policy through signed-out startup, registration, sign-in and engine restarts.

@@ -1,5 +1,7 @@
 ## 0.9.0 (2026-10-28)
 
+ - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
+   part files from standalone exports; regenerate release output.
  - **BREAKING**(activation): `supportsCustomTokenActivation` moves from
    `BatchCapableActivator` to `ProtocolActivationStrategy`; custom strategies
    must also respect `supportedRoles` and own each asset unambiguously.

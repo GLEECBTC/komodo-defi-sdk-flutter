@@ -1,5 +1,7 @@
 ## 0.8.0 (2026-10-28)
 
+ - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
+   part files from standalone exports; regenerate release output.
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(routed-swap): add typed Max quote requests and optional locked balances on quote/task shortfalls; execution remains concrete.
