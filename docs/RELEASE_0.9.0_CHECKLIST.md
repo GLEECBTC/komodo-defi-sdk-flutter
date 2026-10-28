@@ -126,3 +126,50 @@ performed by these preparation changes.
 - The preparation source branch is reconciled with the real dev squash before
   #409 is retargeted. Its runtime/dependency files remain those tested at
   `2f6ba724`; subsequent changes only correct the strategy and execution record.
+
+## Melos release validation — 28 October 2026
+
+Workspace Melos 7.8.1 uses Flutter 3.41.4 / Dart 3.11.1. The configured
+`bootstrap` post-hook runs `prepare`, which runs indexes then build runners.
+The generated workspace lockfile remains ignored; release validation uses its
+locked cached dependencies, and consumer lockfile policy stays independent.
+
+```sh
+dart run melos --sdk-path /path/to/flutter-3.41.4 bootstrap --offline --enforce-lockfile
+dart run melos --sdk-path /path/to/flutter-3.41.4 run prepare --no-select
+dart run melos --sdk-path /path/to/flutter-3.41.4 list --json
+dart run melos --sdk-path /path/to/flutter-3.41.4 exec --concurrency=1 \
+  --dir-exists=test --ignore='*_example' --ignore=dex_dungeon \
+  --ignore=komodo_compliance_console -- flutter test --no-pub --reporter expanded
+```
+
+The first bootstrap completed but exposed invalid regenerated indexes: direct
+exports of routed-swap `part of` files and both native/web lock implementations
+caused five analysis errors. Generator exclusions now retain conditional entry
+points and export the owning routed-swap library. Bootstrap passes after the
+fix; repeating `prepare` produces identical output. Melos resolves 22 packages,
+and the test filters select the same 16 package suites as CI. Samples/products
+remain explicitly separate, as in the existing release process.
+
+Regenerated Hive registrars use the generator's current `hive_ce.dart` import.
+One Freezed file changed only four blank-line spaces; that unrelated whitespace
+was restored after generation stability was verified. Formatting changed Dart
+files requires no additional edits. Package versions and dependency constraints
+are unchanged by this generation repair.
+
+Fresh validation after the repair:
+
+- `melos exec` selected all 16 CI package suites: **3,045 passed / 14 skipped**.
+- App aggregator with all four production GasFree defines: **3,898 passed /
+  four skipped**, 4m59s, against the regenerated SDK.
+- Six SDK wallet-isolation/GasFree files: **176 passed in Chrome/WASM**.
+- Two framework WASM transport/diagnostic files: **10 passed**.
+- Auth suite after excluding the internal Trezor password-store helper from
+  the public generated barrel: **127 passed**. Its public export surface is
+  preserved; the service keeps its explicit internal helper import.
+- Full analysis: **zero errors**, 55 warnings and 2,146 infos. Generated ignored
+  web wrappers account for the added informational notices relative to the
+  earliest analysis snapshot. No new changed-line diagnostic remains.
+- Changed-file Dart formatting and diff checks pass. Package versions and the
+  consumer dependency versions do not change. No tag or publication command
+  is needed to validate these already prepared candidate versions.

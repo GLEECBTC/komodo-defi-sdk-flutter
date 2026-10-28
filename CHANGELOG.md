@@ -60,6 +60,9 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Melos generation** ([@CharlVS]): exclude conditional platform implementations
+  and routed-swap part files from generated indexes. Refresh tracked indexes
+  and Hive registrar imports so bootstrap produces compilable native/web code.
 - **Routed swaps** ([@CharlVS], #389, #407): `KomodoDefiSdk.routedSwaps`
   owns following/recovery through durable UUIDs. Typed quote, start, status,
   cancel, history and supported-coins RPCs retain funding, locked-balance,

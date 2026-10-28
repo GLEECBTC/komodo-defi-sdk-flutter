@@ -3,6 +3,7 @@
 /// Internal/private exports combining all market data provider functionality.
 library _internal_exports;
 
+export '_core_index.dart';
 export 'binance/_binance_index.dart';
 export 'bootstrap/_bootstrap_index.dart';
 export 'coingecko/_coingecko_index.dart';
