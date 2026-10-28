@@ -124,6 +124,8 @@ jobs:
           flutter test --no-pub --platform chrome --wasm --reporter expanded
           test/activation/activation_wallet_race_test.dart
           test/transaction_history/transaction_history_manager_wallet_race_test.dart
+          test/transaction_history/transaction_merge_utils_test.dart
+          test/transaction_history/blockscout_transaction_history_strategy_test.dart
           test/withdrawals/pending_gasless_transfer_repository_test.dart
           test/withdrawals/withdrawal_manager_gasless_test.dart
           test/withdrawals/gasless_submission_lock_web_test.dart
