@@ -14,6 +14,17 @@
  - **BREAKING**(routed-swap): remove the interim `guardMargin`,
    `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
    `nativeGasReserve` APIs. Use the returned quote and its funding requirements.
+ - **FIX**(activation): add a GRC-20 token to a Trezor wallet's active GLEEC
+   through `enable_erc20`. It went out as `task::enable_eth::init` with the
+   token's ticker, which KDF rejects. Activating GLEEC together with its tokens
+   is unchanged.
+ - **FIX**(activation): give every asset exactly one activation strategy, so
+   the order of the strategy chain no longer decides which one activates it.
+   The custom-token strategy now takes only custom tokens, as KDF requires,
+   and on a Trezor wallet a Tendermint token goes to `enable_tendermint_token`
+   rather than to a task that takes only platform coins. Neither changes what
+   users see today: the custom-token strategy came last in the chain, and the
+   Trezor asset filter hides Tendermint coins from Trezor wallets.
  - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
    offer with a minimum the user was already shown, while the route's own
    minimum still clears it, so a small move between the review and Start
