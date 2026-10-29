@@ -138,8 +138,9 @@ The harness remains unpublished. All version constraints move together.
   EVM assets and has no external-recipient parameter. Additional provider
   backends and routed hardware signing are not established by asset selection.
   Gleec hardware-wallet trading remains wallet-only, as in app 0.9.7-1.
-  The wallet's new atomic EVM-token sell refusal is separate from LI.FI's
-  explicit approval contract.
+  The wallet preserves its previous atomic EVM-token trading behavior and
+  describes engine-managed allowance in the existing review. LI.FI retains
+  its separate exact-approval/reset contract.
 - **Release evidence:** KDF/spec/proxy review, final-head CI and signed consumer
   validation retain their checklist gates. The owner accepted documented KDF
   failures for RC testing only; their production disposition remains pending.

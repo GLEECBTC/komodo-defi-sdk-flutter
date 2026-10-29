@@ -56,11 +56,11 @@ test results.
   no external-recipient parameter. Additional provider backends, expanded chain
   support and hardware signing require implementation or validation. Gleec
   hardware-wallet trading was wallet-only in 0.9.7-1 and remains so.
-- [x] Gleec Wallet [#3569](https://github.com/GLEECBTC/gleec-wallet/pull/3569)
-  adds an atomic EVM-token sell refusal separate from the SDK's LI.FI approval
-  contract. The atomic spender is negotiated after matching and
-  may receive an unlimited allowance without authoritative pre-Start evidence;
-  LI.FI token routes remain available under their own approval/funding checks.
+- [x] Gleec Wallet [#3579](https://github.com/GLEECBTC/gleec-wallet/pull/3579)
+  restores the previous atomic EVM-token behavior and describes engine-managed
+  permission in the existing review, with no new modal or confirmation step.
+  The engine may reuse or grant an unlimited allowance after matching. LI.FI
+  token routes retain their separate exact-approval/reset and funding checks.
 - [x] Keep the owner's RC-only KDF failure acceptance separate from production
   disposition. The wallet's usability/live-fiat deferrals and post-0.10.0 Banxa
   follow-up are recorded deferrals, not completed execution evidence.
