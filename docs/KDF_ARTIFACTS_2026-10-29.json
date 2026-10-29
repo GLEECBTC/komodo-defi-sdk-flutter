@@ -1,0 +1,268 @@
+{
+  "repository": "GLEECBTC/kdf-internal",
+  "branch": "dev",
+  "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+  "workflow_run_url": "https://github.com/GLEECBTC/kdf-internal/actions/runs/40849114158",
+  "build_target": "all",
+  "build_result": "success; all ten platform jobs passed",
+  "reason": "Pin the merged LI.FI development build. Every GitHub artifact digest, inner ZIP integrity and ordinary published mirror SHA-256 was independently checked before accepting its SDK checksum. The ARMv7 ordinary URL was reverified after a single-file cache purge. No checksum bypass is used.",
+  "previous_commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+  "previous_branch": "feat/lifi-integration",
+  "source_tree_comparison": [
+    {
+      "from": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "to": "e9e6fb34e82f6ec209a0ea4be1ee3e149c16190a",
+      "includes_file_modes_and_gitlinks": true,
+      "changed_files": []
+    },
+    {
+      "from": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "to": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "includes_file_modes_and_gitlinks": true,
+      "changed_files": [
+        "mm2src/coins/utxo/utxo_tests.rs",
+        "mm2src/mm2_test_helpers/src/electrums.rs",
+        "mm2src/mm2_test_helpers/src/for_tests.rs"
+      ]
+    }
+  ],
+  "upstream_test_run": {
+    "repository": "GLEECBTC/kdf-internal",
+    "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+    "workflow_run": 40755486033,
+    "conclusion": "failure",
+    "failed_jobs": [
+      {
+        "job_id": 123053156023,
+        "job": "Integration / macOS",
+        "failed_tests": [
+          "mm2_tests::best_orders_tests::best_orders_must_return_duplicate_for_orderbook_tickers",
+          "mm2_tests::best_orders_tests::test_best_orders_address_and_confirmations",
+          "mm2_tests::best_orders_tests::test_best_orders_v2_exclude_mine",
+          "mm2_tests::eth_tests::test_sign_eth_transaction",
+          "mm2_tests::eth_tests::test_sign_eth_transaction_eip1559",
+          "mm2_tests::best_orders_tests::test_best_orders_no_duplicates_after_update",
+          "mm2_tests::mm2_tests_inner::test_mm2_db_migration",
+          "mm2_tests::mm2_tests_inner::test_no_login",
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order_fail",
+          "mm2_tests::mm2_tests_inner::test_validateaddress",
+          "mm2_tests::mm2_tests_inner::test_withdraw_and_send",
+          "mm2_tests::mm2_tests_inner::test_withdraw_legacy",
+          "mm2_tests::orderbook_sync_tests::alice_can_see_the_active_order_after_orderbook_sync_segwit",
+          "mm2_tests::orderbook_sync_tests::orderbook_should_work_without_coins_activation",
+          "mm2_tests::orderbook_sync_tests::setprice_min_volume_should_be_displayed_in_orderbook",
+          "mm2_tests::orderbook_sync_tests::test_orderbook_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123053156055,
+        "job": "Integration / Windows",
+        "failed_tests": [
+          "mm2_tests::best_orders_tests::best_orders_must_return_duplicate_for_orderbook_tickers",
+          "mm2_tests::best_orders_tests::test_best_orders_address_and_confirmations",
+          "mm2_tests::best_orders_tests::test_best_orders_no_duplicates_after_update",
+          "mm2_tests::best_orders_tests::test_best_orders_v2_exclude_mine",
+          "mm2_tests::eth_tests::test_sign_eth_transaction",
+          "mm2_tests::eth_tests::test_sign_eth_transaction_eip1559",
+          "mm2_tests::mm2_tests_inner::test_mm2_db_migration",
+          "mm2_tests::mm2_tests_inner::test_no_login",
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order_fail",
+          "mm2_tests::mm2_tests_inner::test_validateaddress",
+          "mm2_tests::mm2_tests_inner::test_withdraw_and_send",
+          "mm2_tests::mm2_tests_inner::test_withdraw_legacy",
+          "mm2_tests::orderbook_sync_tests::alice_can_see_the_active_order_after_orderbook_sync_segwit",
+          "mm2_tests::orderbook_sync_tests::orderbook_should_work_without_coins_activation",
+          "mm2_tests::orderbook_sync_tests::setprice_min_volume_should_be_displayed_in_orderbook",
+          "mm2_tests::orderbook_sync_tests::test_orderbook_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123053156094,
+        "job": "Unit / Linux",
+        "failed_tests": [
+          "storage::session_storage_tests::update_session_test"
+        ]
+      },
+      {
+        "job_id": 123053156465,
+        "job": "Docker / ZCoin",
+        "failed_tests": [
+          "docker_tests::z_coin_docker_tests::zombie_coin_send_and_spend_maker_payment"
+        ]
+      },
+      {
+        "job_id": 123053156488,
+        "job": "Integration / Linux",
+        "failed_tests": [
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123053156581,
+        "job": "Docker / Sia",
+        "failed_tests": [
+          "sia_tests::docker_functional_tests::test_dsia_withdraw_max_spends_full_balance_minus_fee"
+        ]
+      }
+    ]
+  },
+  "upstream_test_disposition": "Still failed; a successful artifact build and downstream SDK/app validation do not waive these upstream failures.",
+  "artifacts": [
+    {
+      "platform": "mac-universal",
+      "sdk_platform": "macos",
+      "artifact_id": 12887017108,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "05e1b157dae570732ba11fadcf0523e6a973e8a1694aabd7003fba0c40ed46cf",
+      "published_archive_sha256": "dcf9622f65f4a6bceae2a486fc4ffd9a7166dfb4a8620adf7ba3656e773892c4",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-mac-universal.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "118712f84f5a0888d9fa0237474710a1222be7e49ce0cab22ab4d05afa013c10"
+      ]
+    },
+    {
+      "platform": "ios-aarch64",
+      "sdk_platform": "ios",
+      "artifact_id": 12886902047,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "81b5c4a9e49012c9e8e9165980a1049451c1a91089b5d0dc48f73460821b66ca",
+      "published_archive_sha256": "67979dccf7249ed88431f8f811c96b1463e430747aa052f3817a64225c7c0f81",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-ios-aarch64.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "29440a5386054679f87486b3a4014427655122a8979f96fc7e275ca0dae3e2dd"
+      ]
+    },
+    {
+      "platform": "wasm",
+      "sdk_platform": "web",
+      "artifact_id": 12887292789,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "5be84e8bf01e6927f71dee26b537f336a895f8df00c90a8ed7ba288c0dd0963f",
+      "published_archive_sha256": "19e0c549a67a54c9046ece2bf9f26f315532d5024b4560ffb6e86cd2aa0fe04d",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-wasm.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "79c3b1b87c8408b2416381c8f62141770e0404bccb5881038504d6e973615f84"
+      ]
+    },
+    {
+      "platform": "android-armv7",
+      "sdk_platform": "android-armv7",
+      "artifact_id": 12887332780,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "581d78fff44c9554801c3ba73fbb91cf0513464e7a6093a070968a4f202e7a3c",
+      "published_archive_sha256": "dc33bd5a2e0ec65f76832a8accb1178d5be5607938bfc3973aa4e11b287792e0",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-android-armv7.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "cd123afeda3fdc98a9d960b71215c8d875317c626eecc43fa84b672534911a35"
+      ]
+    },
+    {
+      "platform": "linux-x86-64",
+      "sdk_platform": "linux",
+      "artifact_id": 12888230998,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "e4434f1cd19e0fd496cf44da1f66385547dd3cfd7b5d942597e912ff7a808421",
+      "published_archive_sha256": "0d2796d786936a9c95d13d21dd40c9d3c96a93ace7f69799f5e33e505be11baf",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-linux-x86-64.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "0e85b7c1db4d4865aa1228dcb509e69c83b276afeb4abee551285ce64fa02889"
+      ]
+    },
+    {
+      "platform": "android-aarch64",
+      "sdk_platform": "android-aarch64",
+      "artifact_id": 12887458615,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "6d1391017c5529293cbe7c18e6d020876c5e0e98b015b2fbe1d739682ec93701",
+      "published_archive_sha256": "05c6963feb06050b3ba173d71838595ecb5ec391486a88149abfae352ebccd66",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-android-aarch64.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "7130aac8b03e6ba6c60e684b6b1304f6ea5d40d11bd9fd7f1f75ce6566d6bf3d"
+      ]
+    },
+    {
+      "platform": "win-x86-64",
+      "sdk_platform": "windows",
+      "artifact_id": 12889155659,
+      "commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+      "workflow_run": 40849114158,
+      "github_archive_sha256": "cd746e9b5b789f36e79db5625ba2210ca5221c28fe9f572ae93f9050f6bb7f96",
+      "published_archive_sha256": "81249337ea6be7bfcd3eec6f4d0d7576d896dfcf04f3a3a68952185fe237ece9",
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_e40ac2f-win-x86-64.zip",
+      "zip_integrity_checked": true,
+      "previous_archive_sha256": [
+        "0750ed0b87d3d7550a2ac4e1f574c643962a66080ca935ab8b8f9e0ab470355a"
+      ]
+    }
+  ],
+  "build_inputs": {
+    "target": "all",
+    "push_docker": false,
+    "commit_deployment": false
+  },
+  "read_only_native_smoke": {
+    "date": "2026-10-29",
+    "runner": "tool/kdf_lifi_quote_smoke.py in gleec-wallet",
+    "version": "3.1.1-beta_e40ac2f",
+    "scope": "fresh unfunded wallet; version, activation, quote and stop only",
+    "pairs": [
+      "ETH-ARB20/USDC-ARB20",
+      "ETH-BASE/USDC-BASE"
+    ],
+    "assertions": [
+      "exact source amount",
+      "positive accepted minimum",
+      "required gas funding covers estimate",
+      "one included combined 178 + 22 bps fee",
+      "typed unfunded Max InsufficientBalance names the native coin"
+    ],
+    "result": "both pairs passed; no approval, init, withdrawal or broadcast"
+  },
+  "upstream_test_retry": {
+    "workflow_run": 40755486033,
+    "scope": "only the six failed jobs; one retry requested on 29 October",
+    "result": "pending; original attempt failure inventory retained"
+  },
+  "sdk_validation": {
+    "date": "2026-10-29",
+    "toolchain": {
+      "flutter": "3.41.4",
+      "dart": "3.11.1",
+      "melos": "7.8.1"
+    },
+    "melos_bootstrap": "--offline --enforce-lockfile; passed with prepare hooks",
+    "melos_prepare_repeat": "passed; no tracked generation drift",
+    "native_package_suites": 16,
+    "native_passed": 3057,
+    "native_skipped": 14,
+    "core_chrome_wasm_passed": 215,
+    "framework_chrome_wasm_passed": 10,
+    "strict_cli": "all seven platforms passed at the new exact commit against independently verified hashes",
+    "reference_yaml": "equals canonical JSON"
+  }
+}
