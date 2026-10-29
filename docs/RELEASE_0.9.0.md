@@ -69,11 +69,15 @@ The proxy owns its API key. Leave it unset to use KDF's public provider path.
 Optional `LifiIntegratorConfig` sets validated global commission at startup;
 the SDK default is unset. Preserve it through registration, sign-in and restart.
 
-Use the seven-platform KDF manifest at source `35f0bde` and the contract at
+Use the seven-platform KDF manifest at merged `dev` source `e40ac2f` and the contract at
 specs `7c388ea`. A remote KDF must implement that contract too. The frozen coins
 pin is `2b0aefb7`; runtime coin updates remain enabled independently of the
 bundle pin. Never replace a verified checksum with a freshly calculated value
-without independent rebuild provenance.
+without independent rebuild provenance. The [29 October roll record](KDF_ARTIFACTS_2026-10-29.json)
+compares every published archive with the matching GitHub Actions artifact.
+The LI.FI squash merge is tree-identical to the prior pin; only three test/helper
+files differ at the selected dev revision. Upstream test failures remain
+explicit in that record and are not waived by a successful build.
 
 Trezor asset selection now includes configured GLEEC/GRC-20 assets; this does
 not establish routed hardware signing, all-EVM support or funded device QA.
