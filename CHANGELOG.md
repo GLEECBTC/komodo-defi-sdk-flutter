@@ -105,10 +105,12 @@ The harness remains unpublished. All version constraints move together.
 
 ### Engine and build inputs
 
-- KDF source: `35f0bde438eec2cb0471b19642b9d9c4602fa17d` on
-  `feat/lifi-integration`, with seven verified 28 October archive checksums.
-  [Artifact provenance](docs/KDF_ARTIFACTS_2026-10-28.json) records the rebuild;
-  a rebuild of the same source is not a new behavior fix.
+- KDF source: `e40ac2fb4319d352bf9c93683eb2518ce9f939e0` on
+  `dev`, after the LI.FI squash merge and network-test stabilization.
+  [Artifact provenance](docs/KDF_ARTIFACTS_2026-10-29.json) records the full
+  build and seven independently checked archive digests. The LI.FI merge
+  tree equals the previous `35f0bde` pin; current dev changes only three
+  test/helper files. This roll does not claim a new runtime or API fix.
 - Bundled coins: `2b0aefb78b184091ab086c66e513d8b03f5d5a01`;
   `update_commit_on_build: false`; runtime updates remain enabled.
 - Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.

@@ -1,13 +1,15 @@
 # SDK 0.9.0 release checklist
 
-Prepared 28 October 2026. This is a candidate record, not publication approval.
+Prepared 28 October 2026; build-input roll prepared 29 October. This is a
+candidate record, not publication approval.
 
 ## Scope and immutable inputs
 
 - Integration source: `03a3cb1adf666952a16f0cd80e67b8173076f4c1` (SDK #407),
   including SDK #405 activation fixes. Initial preparation added release
   metadata and dependency constraints. Runtime freeze fixes are SDK #412
-  (`97b48556`) and #413 (`56828b91`); the KDF engine input remains unchanged.
+  (`97b48556`) and #413 (`56828b91`). The later merged-dev KDF artifact
+  roll retains the runtime sources and records the new build provenance.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
 - Branch strategy: **squash every PR into `dev`**; freeze `release-0.9.0`
@@ -20,14 +22,16 @@ Prepared 28 October 2026. This is a candidate record, not publication approval.
   branch's earlier main-history sync is not expected to survive its squash.
   Review the final promotion diff and merge result instead of requiring that
   this source-branch sync become an ancestor of `dev`.
-- KDF: `35f0bde438eec2cb0471b19642b9d9c4602fa17d`; specs:
+- KDF: `e40ac2fb4319d352bf9c93683eb2518ce9f939e0` on `dev`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
   `2b0aefb78b184091ab086c66e513d8b03f5d5a01`.
 - All seven archive checksums are in `app_build/build_config.json` with
-  [28 October provenance](KDF_ARTIFACTS_2026-10-28.json). Build-time coin
+  [29 October provenance](KDF_ARTIFACTS_2026-10-29.json). The prior
+  [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
+  historical evidence. Build-time coin
   advancement is disabled; runtime updates remain enabled.
-- Direct source inspection on 28 October confirms the security fix shipped in
-  wallet 0.9.7-1: [candidate eth.rs, line 5859](https://github.com/GLEECBTC/kdf-internal/blob/35f0bde438eec2cb0471b19642b9d9c4602fa17d/mm2src/coins/eth.rs#L5859)
+- Direct source inspection on 29 October confirms the security fix shipped in
+  wallet 0.9.7-1: [candidate eth.rs, line 5859](https://github.com/GLEECBTC/kdf-internal/blob/e40ac2fb4319d352bf9c93683eb2518ce9f939e0/mm2src/coins/eth.rs#L5859)
   checks the ERC-20 payment amount outside the watcher-reward branch, as in
   [KDF 3.1.1-beta](https://github.com/GLEECBTC/kdf-internal/commit/2023112fa67b28cbebc2a7064d22267fed40310f).
   The branches diverge; this source check does not certify every later main fix.
@@ -225,3 +229,35 @@ was replaced and moved into the existing Chrome/WASM-gated ownership suite.
 - KDF/spec/coin inputs, dependency versions and generated outputs are unchanged.
   Carry the focused dev squash into the frozen SDK branch through a separate
   release-repair PR; the main promotion remains open for tester/reviewer feedback.
+
+## Merged-dev engine roll — 29 October 2026
+
+This focused update replaces the feature-branch archives with the exact merged
+KDF dev revision `e40ac2fb4319d352bf9c93683eb2518ce9f939e0`. The LI.FI squash
+merge tree equals the prior source pin; only three test/helper files differ
+at the selected dev revision. Runtime/API behavior is unchanged by source.
+
+- Full build [40849114158](https://github.com/GLEECBTC/kdf-internal/actions/runs/40849114158):
+  all ten platform jobs passed; Docker push and deployment-commit mutation disabled.
+- All seven required GitHub artifact outer digests and inner ZIPs were checked;
+  ordinary published URLs match those independently verified archive bytes.
+  ARMv7 was reverified after its incomplete cached response was purged.
+- Canonical CLI `--branch dev --commit e40ac2fb4319d352bf9c93683eb2518ce9f939e0
+  --source mirror --platform all --strict` passed for every platform against the
+  independently seeded hashes. No checksum bypass or coin revision advancement.
+- Reference YAML now equals canonical JSON, including frozen build-time coins.
+- Enforced offline Melos bootstrap and repeated `melos run prepare --no-select`
+  passed without tracked generated-code drift. No Dart source changed.
+- Native read-only LI.FI smoke passed on the verified macOS universal binary:
+  Arbitrum/Base exact quotes, minima, funding, included 2% fee and typed unfunded
+  Max rejection. A fresh unfunded wallet was used; no transaction was submitted.
+- All **16 Melos native package suites passed: 3,057 tests / 14 skipped**.
+  Core Chrome/WASM: **215 passed**; framework Chrome/WASM: **10 passed**.
+  App consumer results are recorded separately in the app pointer PR.
+
+The [provenance record](KDF_ARTIFACTS_2026-10-29.json) names every failed test
+from upstream KDF run `40755486033`, including the session-storage SQLite
+failure and Sia Max balance assertion. One retry of the six failed jobs was
+requested; pending results do not waive the original failures. Merge the dev
+PR with squash, then carry only its reviewed diff into frozen `release-0.9.0`
+through a focused PR after tests and review pass. SDK #416 remains open.
