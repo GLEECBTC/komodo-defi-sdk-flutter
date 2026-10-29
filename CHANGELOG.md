@@ -122,11 +122,29 @@ The harness remains unpublished. All version constraints move together.
 
 ### Limits and release gates
 
-The wallet's native-Max gas reserve is consumer policy, not an SDK default.
-Remote engines must implement the pinned routed-swap contract. Do not infer
-support for new chains, external recipients or hardware signing from asset
-selection. KDF/spec/proxy review, final-head CI and signed consumer validation
-remain gates in the checklist. Replay tests do not certify live execution.
+- **SDK availability:** `sdk.routedSwaps` exposes supported LI.FI quotes,
+  cheapest/fastest ordering, exact/Max amounts, execution/approval progress,
+  history, recovery and eligible cancellation without a feature opt-in.
+  Remote engines must implement the pinned contract. The wallet's additional
+  native-Max gas reserve is consumer policy, not an SDK default.
+- **Wallet defaults:** Gleec Wallet 0.10.0 registers routed swaps by default.
+  Its `LIFI_INTEGRATOR_ENABLED` setting controls commission configuration,
+  not availability. The SDK does not own legal consent: ordinary wallet builds
+  still require available wallet/LI.FI documents before routed Start, with
+  `BYPASS_LEGAL_DOCUMENT_GATE=false` by default. Only the isolated manual RC
+  preview has the recorded availability exception; unavailable terms never
+  become acceptance records.
+- **Capability scope:** the pinned routed contract uses LI.FI and eligible
+  EVM assets and has no external-recipient parameter. Additional provider
+  backends and routed hardware signing are not established by asset selection.
+  Gleec hardware-wallet trading remains wallet-only, as in app 0.9.7-1.
+  The wallet preserves its previous atomic EVM-token trading behavior and
+  describes engine-managed allowance in the existing review. LI.FI retains
+  its separate exact-approval/reset contract.
+- **Release evidence:** KDF/spec/proxy review, final-head CI and signed consumer
+  validation retain their checklist gates. The owner accepted documented KDF
+  failures for RC testing only; their production disposition remains pending.
+  Replay tests do not certify live execution.
 
 **Review comparison:** [SDK 0.8.1 checkout to the frozen 0.9.0 candidate](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/a96398ba9ae72efbe654de7c3edc0bfe2b05dda0...release-0.9.0).
 
