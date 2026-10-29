@@ -281,3 +281,12 @@ Regression status is **unconfirmed**: production sources equal the previous
 so there is no passing comparable baseline in that run. The upstream failures
 remain production gates for a fix or explicit final disposition. SDK #416 stays
 open for testers and reviewers; this exception does not approve publication.
+
+A broader comparison against pre-merge dev `6afb05f4` on 17 August
+([run 31990542840](https://github.com/GLEECBTC/kdf-internal/actions/runs/31990542840))
+shows the three Z-coin light activation tests passed on Linux/macOS then and
+fail now. This is a confirmed **CI pass-to-fail regression** since that baseline;
+its code versus infrastructure cause is unassigned. Eighteen of the current
+21 macOS failures and Linux `test_tx_history_segwit` were already failing in
+that earlier dev run. Sia's regression status remains unconfirmed. This does
+not change the absence of a runtime-source delta from the prior RC pin.

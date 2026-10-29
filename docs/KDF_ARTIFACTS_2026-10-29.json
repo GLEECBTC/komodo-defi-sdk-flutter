@@ -324,7 +324,20 @@
       "Unit / Linux",
       "Docker / ZCoin"
     ],
-    "regression_assessment": "No confirmed runtime regression versus previous RC 35f0bde: production sources unchanged, only three test/helper files differ. Previous RC run39776341104 skipped integration and Docker, so it supplies no passing baseline for these failures."
+    "regression_assessment": "Production sources unchanged versus previous RC35f0bde; only three test/helper files differ. A broader CI baseline on dev6afb05f4051332cb526754da023d8859830feb18 (17August, run31990542840) passed all three Z-coin activation tests on Linux/macOS, so their current failures are a confirmed CI pass-to-fail regression since that baseline; code versus infrastructure cause is not established. Eighteen of21current macOS failures and Linux test_tx_history_segwit already failed in that baseline. The old RC35f0bde run39776341104 skipped integration and Docker, and the Sia regression remains unconfirmed.",
+    "comparison_baseline": {
+      "workflow_run": 31990542840,
+      "commit": "6afb05f4051332cb526754da023d8859830feb18",
+      "date": "2026-08-17",
+      "z_activation_previous_result": "all three passed on Linux and macOS",
+      "new_ci_regressions": [
+        "mm2_tests::z_coin_tests::activate_z_coin_light",
+        "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+        "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+      ],
+      "already_failing_current_macos_cases": 18,
+      "runtime_cause": "unattributed; a CI regression does not establish a wallet/runtime code regression"
+    }
   },
   "sdk_validation": {
     "date": "2026-10-29",
