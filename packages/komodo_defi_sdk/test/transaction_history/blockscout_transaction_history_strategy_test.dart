@@ -77,6 +77,26 @@ Asset _eth() => Asset.fromJson({
   'fallback_swap_contract': '0x0000000000000000000000000000000000000001',
 });
 
+Asset _etc({String explorerUrl = 'https://blockscout.com/etc/mainnet/'}) =>
+    Asset.fromJson({
+      'coin': 'ETC',
+      'type': 'Ethereum Classic',
+      'fname': 'Ethereum Classic',
+      'chain_id': 61,
+      'nodes': const [
+        {'url': 'https://rpc.example.com'},
+      ],
+      'swap_contract_address': '0x0000000000000000000000000000000000000001',
+      'fallback_swap_contract': '0x0000000000000000000000000000000000000001',
+
+      'decimals': 18,
+      'explorer_url': explorerUrl,
+      'protocol': const {
+        'type': 'ETH',
+        'protocol_data': {'chain_id': 61},
+      },
+    });
+
 AssetPubkeys _pubkeys(Asset asset, List<String> addresses) => AssetPubkeys(
   assetId: asset.id,
   keys: [
@@ -273,6 +293,100 @@ void main() {
       expect(factory.forAsset(_eth()), isA<EtherscanTransactionStrategy>());
     });
   });
+
+  test(
+    'ETC bypasses the absent proxy route and migrates the old explorer',
+    () async {
+      final asset = _etc();
+      final factory = TransactionHistoryStrategyFactory(
+        pubkeyManager,
+        _MockLocalAuth(),
+      );
+      expect(const EtherscanProtocolHelper().supportsProtocol(asset), isFalse);
+      expect(factory.forAsset(asset), isA<BlockscoutTransactionStrategy>());
+      expect(
+        factory.forAsset(asset).requiresKdfTransactionHistory(asset),
+        isFalse,
+      );
+      stubPubkeys(asset, [_myAddress]);
+      final api = _FakeApi(
+        (_) => _ok([
+          _nativeRow(
+            hash: 'outgoing-etc',
+            from: _myAddress.toLowerCase(),
+            to: _otherAddress,
+            value: '1000000000000000',
+            gasPrice: '1000000000',
+          ),
+        ]),
+      );
+      final strategy = BlockscoutTransactionStrategy(
+        pubkeyManager: pubkeyManager,
+        httpClient: api.client,
+      );
+      final response = await strategy.fetchTransactionHistory(
+        _MockApiClient(),
+        asset,
+        const PagePagination(pageNumber: 1, itemsPerPage: 50),
+      );
+      expect(api.requests.single.origin, 'https://etc.blockscout.com');
+      expect(api.requests.single.path, '/api');
+      expect(response.transactions.single.myBalanceChange, '-0.001021');
+      expect(response.transactions.single.spentByMe, '0.001021');
+      expect(response.transactions.single.feeDetails!.coin, 'ETC');
+    },
+  );
+
+  test('unverified ETC explorer is not claimed as Blockscout', () {
+    final strategy = BlockscoutTransactionStrategy(
+      pubkeyManager: pubkeyManager,
+    );
+    expect(
+      strategy.supportsAsset(_etc(explorerUrl: 'https://unverified.example/')),
+      isFalse,
+    );
+  });
+
+  test(
+    'proxy history preserves components and works in debug builds',
+    () async {
+      final asset = _eth();
+      stubPubkeys(asset, [_myAddress]);
+      final api = _FakeApi(
+        (_) => jsonEncode({
+          'result': {
+            'transactions': [
+              {
+                'tx_hash': 'proxy-transfer',
+                'internal_id': 'proxy-transfer',
+                'from': [_myAddress],
+                'to': [_otherAddress],
+                'my_balance_change': '-1.01',
+                'spent_by_me': '1.01',
+                'received_by_me': '0',
+                'block_height': 100,
+                'confirmations': 2,
+                'timestamp': 1786731540,
+              },
+            ],
+          },
+        }),
+      );
+      final response =
+          await EtherscanTransactionStrategy(
+            pubkeyManager: pubkeyManager,
+            httpClient: api.client,
+          ).fetchTransactionHistory(
+            _MockApiClient(),
+            asset,
+            const PagePagination(pageNumber: 1, itemsPerPage: 50),
+          );
+      expect(api.requests, hasLength(1));
+      expect(response.transactions.single.myBalanceChange, '-1.01');
+      expect(response.transactions.single.spentByMe, '1.01');
+      expect(response.transactions.single.receivedByMe, '0');
+    },
+  );
 
   group('endpoint construction', () {
     test('derives /api from the asset explorer, and queries txlist', () async {

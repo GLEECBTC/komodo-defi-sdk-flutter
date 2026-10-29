@@ -48,7 +48,11 @@ class FetchCoinAssetsBuildStep extends BuildStep {
 
     final downloader = GitHubFileDownloader(
       apiProvider: provider,
-      repoContentUrl: config.effectiveContentUrl,
+      // Branch mirrors serve mutable content and do not encode the commit.
+      // Frozen builds must use the configured source at the pinned revision.
+      repoContentUrl: config.updateCommitOnBuild
+          ? config.effectiveContentUrl
+          : config.coinsRepoContentUrl,
     );
 
     return FetchCoinAssetsBuildStep(
@@ -87,13 +91,12 @@ class FetchCoinAssetsBuildStep extends BuildStep {
     final isDebugBuild =
         (Platform.environment['FLUTTER_BUILD_MODE'] ?? '').toLowerCase() ==
         'debug';
-    final latestCommitHash = await githubApiProvider.getLatestCommitHash(
-      branch: config.coinsRepoBranch,
-    );
-    _log.fine('Latest commit hash: $latestCommitHash');
     var configWithUpdatedCommit = config;
 
     if (config.updateCommitOnBuild) {
+      final latestCommitHash = await githubApiProvider.getLatestCommitHash(
+        branch: config.coinsRepoBranch,
+      );
       _log.info('Updating commit hash in build config');
       configWithUpdatedCommit = config.copyWith(
         bundledCoinsRepoCommit: latestCommitHash,
@@ -107,17 +110,41 @@ class FetchCoinAssetsBuildStep extends BuildStep {
     final downloadMethod = config.concurrentDownloadsEnabled
         ? downloader.download
         : downloader.downloadSync;
+    final frozenAssetsWereCurrent =
+        config.updateCommitOnBuild ||
+        (await _canSkipMappedFiles(
+              config.mappedFiles,
+              config.bundledCoinsRepoCommit,
+            ) &&
+            await _canSkipMappedFolders(
+              config.mappedFolders,
+              config.bundledCoinsRepoCommit,
+            ));
     await downloadMethod(
       configWithUpdatedCommit.bundledCoinsRepoCommit,
       _adjustPaths(configWithUpdatedCommit.mappedFiles),
       _adjustPaths(configWithUpdatedCommit.mappedFolders),
     );
 
+    if (!config.updateCommitOnBuild &&
+        (!await _canSkipMappedFiles(
+              config.mappedFiles,
+              config.bundledCoinsRepoCommit,
+            ) ||
+            !await _canSkipMappedFolders(
+              config.mappedFolders,
+              config.bundledCoinsRepoCommit,
+            ))) {
+      throw StateError('Downloaded coin assets do not match the pinned commit');
+    }
+
     final wasCommitHashUpdated =
         config.bundledCoinsRepoCommit !=
         configWithUpdatedCommit.bundledCoinsRepoCommit;
 
-    if (wasCommitHashUpdated || !alreadyHadCoinAssets) {
+    if (wasCommitHashUpdated ||
+        !alreadyHadCoinAssets ||
+        !frozenAssetsWereCurrent) {
       final errorMessage =
           '''
         \n
@@ -164,25 +191,25 @@ class FetchCoinAssetsBuildStep extends BuildStep {
       return true;
     }
 
-    final latestCommitHash = await githubApiProvider.getLatestCommitHash(
-      branch: config.coinsRepoBranch,
-    );
-
-    if (latestCommitHash != config.bundledCoinsRepoCommit) {
-      _log.fine(
-        'Cannot skip build step: '
-        'Latest commit hash: $latestCommitHash, '
-        'config commit hash: ${config.bundledCoinsRepoCommit}',
+    if (config.updateCommitOnBuild) {
+      final latestCommitHash = await githubApiProvider.getLatestCommitHash(
+        branch: config.coinsRepoBranch,
       );
-      return false;
+      if (latestCommitHash != config.bundledCoinsRepoCommit) return false;
     }
 
-    if (!await _canSkipMappedFiles(config.mappedFiles)) {
+    if (!await _canSkipMappedFiles(
+      config.mappedFiles,
+      config.bundledCoinsRepoCommit,
+    )) {
       _log.fine('Cannot skip build step: mapped files check failed');
       return false;
     }
 
-    if (!await _canSkipMappedFolders(config.mappedFolders)) {
+    if (!await _canSkipMappedFolders(
+      config.mappedFolders,
+      config.bundledCoinsRepoCommit,
+    )) {
       _log.fine('Cannot skip build step: mapped folders check failed');
       return false;
     }
@@ -220,10 +247,14 @@ class FetchCoinAssetsBuildStep extends BuildStep {
     await GitHubFileDownloader.revertOrDeleteGitFiles(allFiles);
   }
 
-  Future<bool> _canSkipMappedFiles(Map<String, String> files) async {
+  Future<bool> _canSkipMappedFiles(
+    Map<String, String> files,
+    String repoCommit,
+  ) async {
     for (final mappedFile in files.entries) {
       final remoteFile = await githubApiProvider.getFileMetadata(
         mappedFile.value,
+        ref: repoCommit,
       );
       final canSkipFile = await _canSkipFile(
         path.join(artifactOutputDirectory, mappedFile.key),
@@ -238,11 +269,14 @@ class FetchCoinAssetsBuildStep extends BuildStep {
     return true;
   }
 
-  Future<bool> _canSkipMappedFolders(Map<String, String> folders) async {
+  Future<bool> _canSkipMappedFolders(
+    Map<String, String> folders,
+    String repoCommit,
+  ) async {
     for (final mappedFolder in folders.entries) {
       final remoteFolderContents = await githubApiProvider.getDirectoryContents(
         mappedFolder.value,
-        config.bundledCoinsRepoCommit,
+        repoCommit,
       );
       final canSkipFolder = await _canSkipDirectory(
         path.join(artifactOutputDirectory, mappedFolder.key),
@@ -294,6 +328,25 @@ class FetchCoinAssetsBuildStep extends BuildStep {
 
     if (!localFolder.existsSync()) {
       return Result.error('$directory does not exist');
+    }
+
+    if (!config.updateCommitOnBuild) {
+      final expectedNames = remoteDirectoryContents
+          .map((file) => file.name)
+          .toSet();
+      for (final entry in localFolder.listSync()) {
+        final name = path.basename(entry.path);
+        // The SDK tracks an empty placeholder for the generated directory.
+        if (name == '.gitkeep' && entry is File && entry.lengthSync() == 0) {
+          continue;
+        }
+        if (!expectedNames.contains(name)) {
+          return Result.error(
+            'Unexpected cached coin asset ${entry.path}; '
+            'remove the generated asset folder and rebuild',
+          );
+        }
+      }
     }
 
     for (final remoteFile in remoteDirectoryContents) {

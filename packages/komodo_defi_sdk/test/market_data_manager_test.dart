@@ -429,5 +429,51 @@ void main() {
 
       await manager.dispose();
     });
+
+    test('dated price lookups skip repositories without history', () async {
+      // Like the Komodo feed: current prices only, today's price for any date.
+      final currentOnlyRepo = MockPrimaryRepository();
+      final historyRepo = MockFallbackRepository();
+      final manager = CexMarketDataManager(
+        priceRepositories: [currentOnlyRepo, historyRepo],
+        selectionStrategy: DefaultRepositorySelectionStrategy(),
+      );
+
+      for (final (repo, price) in <(CexRepository, Decimal)>[
+        (currentOnlyRepo, Decimal.one),
+        (historyRepo, Decimal.fromInt(2)),
+      ]) {
+        when(repo.getCoinList).thenAnswer((_) async => []);
+        when(
+          () => repo.getCoinFiatPrice(
+            any(),
+            priceDate: any(named: 'priceDate'),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenAnswer((_) async => price);
+      }
+      when(() => currentOnlyRepo.supports(any(), any(), any())).thenAnswer(
+        (invocation) async =>
+            invocation.positionalArguments[2] != PriceRequestType.priceHistory,
+      );
+      when(
+        () => historyRepo.supports(any(), any(), any()),
+      ).thenAnswer((_) async => true);
+
+      await manager.init();
+      final date = DateTime.utc(2026, 9);
+
+      expect(
+        await manager.fiatPrice(asset('BTC'), priceDate: date),
+        Decimal.fromInt(2),
+      );
+      expect(
+        await manager.maybeFiatPrice(asset('KMD'), priceDate: date),
+        Decimal.fromInt(2),
+      );
+      expect(await manager.fiatPrice(asset('BTC')), Decimal.one);
+
+      await manager.dispose();
+    });
   });
 }

@@ -17,14 +17,17 @@ class TradingManager {
   TradingManager({
     required ApiClient client,
     required EventStreamingManager eventStreamingManager,
+    DateTime Function()? now,
   }) : _client = client,
-       _eventStreamingManager = eventStreamingManager;
+       _eventStreamingManager = eventStreamingManager,
+       _requestCache = _TimedRequestCache(now ?? DateTime.now);
 
   final ApiClient _client;
   final EventStreamingManager _eventStreamingManager;
-  final _requestCache = _TimedRequestCache();
+  final _TimedRequestCache _requestCache;
 
   static const Duration _orderbookCacheTtl = Duration(milliseconds: 800);
+  static const Duration _orderbookDepthCacheTtl = Duration(seconds: 20);
   static const Duration _swapStatusCacheTtl = Duration(milliseconds: 800);
   static const Duration _recentSwapsCacheTtl = Duration(seconds: 2);
   static const Duration _tradePreimageCacheTtl = Duration(seconds: 2);
@@ -40,6 +43,19 @@ class TradingManager {
       'orderbook:$base:$rel',
       ttl: _orderbookCacheTtl,
       request: () => _client.rpc.orderbook.orderbook(base: base, rel: rel),
+    );
+  }
+
+  /// Cached wrapper for `orderbook_depth`: how many asks and bids each of
+  /// [pairs] has, read without subscribing to any of them.
+  Future<OrderbookDepthResponse> orderbookDepth({
+    required List<OrderbookPair> pairs,
+  }) {
+    final keys = [for (final pair in pairs) '${pair.base}/${pair.rel}']..sort();
+    return _requestCache.getOrCreate<OrderbookDepthResponse>(
+      'orderbook_depth:${keys.join(',')}',
+      ttl: _orderbookDepthCacheTtl,
+      request: () => _client.rpc.orderbook.orderbookDepth(pairs: pairs),
     );
   }
 
@@ -380,6 +396,9 @@ class TradingManager {
 }
 
 class _TimedRequestCache {
+  _TimedRequestCache(this._now);
+
+  final DateTime Function() _now;
   final Map<String, _TimedCacheEntry<dynamic>> _resolved = {};
   final Map<String, Future<dynamic>> _inFlight = {};
 
@@ -388,7 +407,7 @@ class _TimedRequestCache {
     required Duration ttl,
     required Future<T> Function() request,
   }) async {
-    final now = DateTime.now();
+    final now = _now();
     final cached = _resolved[key];
     if (cached != null && now.difference(cached.cachedAt) < ttl) {
       return cached.value as T;
@@ -403,7 +422,14 @@ class _TimedRequestCache {
     _inFlight[key] = future;
     try {
       final value = await future;
-      _resolved[key] = _TimedCacheEntry(value: value, cachedAt: DateTime.now());
+      final storedAt = _now();
+      // Keys differ per request (every depth batch has its own), so expired
+      // entries are dropped rather than left to accumulate.
+      _resolved
+        ..removeWhere(
+          (_, entry) => storedAt.difference(entry.cachedAt) >= entry.ttl,
+        )
+        ..[key] = _TimedCacheEntry(value: value, cachedAt: storedAt, ttl: ttl);
       return value;
     } finally {
       final removed = _inFlight.remove(key);
@@ -415,8 +441,13 @@ class _TimedRequestCache {
 }
 
 class _TimedCacheEntry<T> {
-  _TimedCacheEntry({required this.value, required this.cachedAt});
+  _TimedCacheEntry({
+    required this.value,
+    required this.cachedAt,
+    required this.ttl,
+  });
 
   final T value;
   final DateTime cachedAt;
+  final Duration ttl;
 }

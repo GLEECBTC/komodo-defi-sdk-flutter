@@ -1,3 +1,13 @@
+## 2.2.0 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
+ - **FIX**(coins): fill missing native fee models for Base, Mantle, Monad and Avalanche on bundled, cached and refreshed configurations. Preserve explicit settings; tokens inherit the platform in KDF.
+
+ - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
+   that fails to open as an uncaught async error even though the custom token
+   storage catches the failure and retries.
+
 ## 2.1.1 (2026-09-24)
 
  - **SECURITY**(seed-nodes): keep the configured URL out of seed-node fetch

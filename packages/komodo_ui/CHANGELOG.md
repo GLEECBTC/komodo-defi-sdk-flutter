@@ -1,3 +1,7 @@
+## 0.3.4 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.3.3 (unreleased)
 
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0` for SDK 0.8.0;

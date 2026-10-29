@@ -1,3 +1,98 @@
+## 0.9.0 (2026-10-28)
+
+ - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
+   part files from standalone exports; regenerate release output.
+ - **BREAKING**(activation): `supportsCustomTokenActivation` moves from
+   `BatchCapableActivator` to `ProtocolActivationStrategy`; custom strategies
+   must also respect `supportedRoles` and own each asset unambiguously.
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
+ - **FEAT**(routed-swap): align with KDF `35f0bde` / specs `7c388ea`.
+   Typed `quoteMax` returns KDF's complete fundable route; `maxSellAmount`
+   consumes it without gas multipliers. Execution always uses a concrete amount.
+   The provider minimum reaches `init` unchanged; KDF owns tighter-slippage retries.
+ - **FEAT**(config): optional typed `lifiIntegrator` propagates through bootstrap,
+   authentication, wallet creation and restarts. The reusable SDK default is unset;
+   invalid names and fee totals are rejected. KDF owns commission validation.
+ - **FIX**(routed-swap): preserve `required_balance` separately from estimated
+   gas, optional measured and provider-reported payouts, and quote/task
+   `InsufficientBalance.locked_by_swaps`. Failures retain recorded approval gas.
+   `RoutedSwapReceipt.amount` remains nullable; `reported` is separate evidence.
+ - **BREAKING**(routed-swap): remove the interim `guardMargin`,
+   `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
+   `nativeGasReserve` APIs. Use the returned quote and its funding requirements.
+ - **FIX**(activation): add a GRC-20 token to a Trezor wallet's active GLEEC
+   through `enable_erc20`. It went out as `task::enable_eth::init` with the
+   token's ticker, which KDF rejects. Activating GLEEC together with its tokens
+   is unchanged.
+ - **FIX**(activation): give every asset exactly one activation strategy, so
+   the order of the strategy chain no longer decides which one activates it.
+   The custom-token strategy now takes only custom tokens, as KDF requires,
+   and on a Trezor wallet a Tendermint token goes to `enable_tendermint_token`
+   rather than to a task that takes only platform coins. Neither changes what
+   users see today: the custom-token strategy came last in the chain, and the
+   Trezor asset filter hides Tendermint coins from Trezor wallets.
+ - **FEAT**(routed-swap): `RoutedSwapOffer.keepingMinimum` guards a re-priced
+   offer with a minimum the user was already shown, while the route's own
+   minimum still clears it, so a small move between the review and Start
+   neither asks again nor starts against a number the user did not see. It
+   never loosens the offer's own guard.
+ - **FEAT**(trading): `TradingManager.orderbookDepth` counts the asks and bids
+   of many pairs in one call, without subscribing to them, cached for 20 s.
+   `TradingManager` takes an optional clock for its caches, which now drop
+   expired answers instead of keeping every one.
+ - **FEAT**(routed-swap): `KomodoDefiSdkConfig.lifiProxyUrl` sends KDF's LI.FI
+   requests through a Komodo proxy instead of the public API; bootstrap hands
+   it to every KDF start.
+ - **FEAT**(routed-swap): add `RoutedSwapManager`, exposed as
+   `KomodoDefiSdk.routedSwaps`. A liquidity source separate from `trading`'s
+   atomic-swap orderbook: KDF executes the swap against an external aggregator,
+   and the manager hides the task lifecycle behind a `RoutedSwapHandle`.
+ - **FEAT**(routed-swap): rewrite `RoutedSwapManager`.
+   - **Following a swap:** each swap is followed by one session that replays
+     its latest state, keeps polling whether or not anyone listens, and
+     emits only real changes.
+   - **Resuming:** `watch(uuid)` picks a swap back up after a restart;
+     `inFlight()` and paged `history()` list what is running and what has
+     finished.
+   - **Tasks that disappear:** a task that vanished, or whose id KDF has
+     reused for another swap after a restart, is resolved against history.
+   - **Finishing:** a finished task's result is read once with
+     `forget_if_finished`, then released.
+   - **Starting:** `start` passes the route order through, retries the first
+     status read, and otherwise finds the swap it created in history. If the
+     start still can't be confirmed, it raises
+     `RoutedSwapStartUnconfirmedException` rather than inviting a second
+     start.
+   - **Cancelling:** refusals are typed.
+   - **Max:** `quoteMax` delegates to KDF. `maxSellAmount` remains a compatibility
+     wrapper and carries the full offer; its balance argument does not override
+     the engine's spendable balance.
+ - **FIX**(market-data): `fiatPrice` and `maybeFiatPrice` with a `priceDate`
+   now pick repositories that support price history. They asked for current
+   prices, so the Komodo feed could answer a dated lookup with today's price,
+   and CoinPaprika skipped coins outside its bulk tickers although its
+   historical endpoint serves them.
+ - **FIX**(history): stop the transaction cache falling back to memory when it
+   rebuilds a box Hive refused to open, which a native install does once when
+   it upgrades past the AES-CBC cache, and again after a lost key or a corrupt
+   box. Hive closes the refused box without awaiting the close, and the
+   rebuild's delete could lose a race with it and fail, leaving that session's
+   history unpersisted. The delete is now retried after a short pause.
+ - **FIX**(auth): stop the balance, pubkey and transaction history managers
+   re-verifying the wallet identity at every step of every poll. Each
+   `currentUser` read is a `get_wallet_names` and a `get_public_key_hash`
+   round trip under the auth write lock, and each poll read it up to eleven
+   times per watched asset, so an idle wallet sent both about eight times a
+   second. The managers now check the SDK session, which every sign-in,
+   sign-out and KDF restart revokes, and read the signed-in user once per
+   session.
+ - **CHORE**(deps): require `hive_ce` `^2.14.0`. Older releases report a box
+   that fails to open as an uncaught async error even when the caller handles
+   the failure, and the transaction history cache handles one by design: on a
+   native install's first open after upgrading past the AES-CBC cache, and
+   after a lost key or a corrupt box.
+
 ## 0.8.1 (2026-09-28)
 
 Patch release of SDK 0.8.0; no migration is needed. See the

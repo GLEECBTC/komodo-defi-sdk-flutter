@@ -79,19 +79,15 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   /// Retrieves orderbook depth for multiple trading pairs.
   ///
   /// This method efficiently fetches depth information for multiple
-  /// trading pairs in a single request, useful for market overview
-  /// displays or price aggregation.
+  /// trading pairs in a single request, useful for telling which pairs
+  /// anyone is trading.
   ///
   /// - [pairs]: List of trading pairs to query
   /// - [rpcPass]: Optional RPC password override
   ///
   /// Returns a [Future] that completes with an [OrderbookDepthResponse]
-  /// containing depth data for each requested pair.
-  ///
-  /// Depth information includes:
-  /// - Best bid and ask prices
-  /// - Available volume at best prices
-  /// - Number of orders at each price level
+  /// holding the number of asks and bids for each requested pair. Prices and
+  /// volumes need [orderbook].
   Future<OrderbookDepthResponse> orderbookDepth({
     required List<OrderbookPair> pairs,
     String? rpcPass,
@@ -112,16 +108,12 @@ class OrderbookMethodsNamespace extends BaseRpcMethodNamespace {
   ///
   /// - [coin]: The coin to trade
   /// - [action]: Whether to buy or sell
-  /// - [volume]: The desired trade volume
+  /// - [requestBy]: The volume in [coin], or number of orders, per coin
   /// - [rpcPass]: Optional RPC password override
   ///
   /// Returns a [Future] that completes with a [BestOrdersResponse]
-  /// containing the best available orders.
-  ///
-  /// The response includes:
-  /// - Orders sorted by best price
-  /// - Cumulative volume information
-  /// - Average execution price for the volume
+  /// containing the best available orders for each coin that trades
+  /// against [coin].
   Future<BestOrdersResponse> bestOrders({
     required String coin,
     required OrderType action,

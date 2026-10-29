@@ -23,11 +23,11 @@ mixin _$CoinPaprikaMarket {
  String get baseCurrencyName;/// Quote currency identifier (e.g., "usdt-tether")
  String get quoteCurrencyId;/// Quote currency name (e.g., "Tether")
  String get quoteCurrencyName;/// Direct URL to the market on the exchange
- String get marketUrl;/// Market category (e.g., "Spot")
+ String? get marketUrl;/// Market category (e.g., "Spot")
  String get category;/// Fee type (e.g., "Percentage")
  String get feeType;/// Whether this market is considered an outlier
  bool get outlier;/// Adjusted 24h volume share percentage
- double get adjustedVolume24hShare;/// Quote data for different currencies
+@JsonKey(name: 'adjusted_volume_24h_share') double get adjustedVolume24hShare;/// Quote data for different currencies
  Map<String, CoinPaprikaQuote> get quotes;/// Last update timestamp as ISO 8601 string
  String get lastUpdated;
 /// Create a copy of CoinPaprikaMarket
@@ -62,7 +62,7 @@ abstract mixin class $CoinPaprikaMarketCopyWith<$Res>  {
   factory $CoinPaprikaMarketCopyWith(CoinPaprikaMarket value, $Res Function(CoinPaprikaMarket) _then) = _$CoinPaprikaMarketCopyWithImpl;
 @useResult
 $Res call({
- String exchangeId, String exchangeName, String pair, String baseCurrencyId, String baseCurrencyName, String quoteCurrencyId, String quoteCurrencyName, String marketUrl, String category, String feeType, bool outlier, double adjustedVolume24hShare, Map<String, CoinPaprikaQuote> quotes, String lastUpdated
+ String exchangeId, String exchangeName, String pair, String baseCurrencyId, String baseCurrencyName, String quoteCurrencyId, String quoteCurrencyName, String? marketUrl, String category, String feeType, bool outlier,@JsonKey(name: 'adjusted_volume_24h_share') double adjustedVolume24hShare, Map<String, CoinPaprikaQuote> quotes, String lastUpdated
 });
 
 
@@ -79,7 +79,7 @@ class _$CoinPaprikaMarketCopyWithImpl<$Res>
 
 /// Create a copy of CoinPaprikaMarket
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? exchangeId = null,Object? exchangeName = null,Object? pair = null,Object? baseCurrencyId = null,Object? baseCurrencyName = null,Object? quoteCurrencyId = null,Object? quoteCurrencyName = null,Object? marketUrl = null,Object? category = null,Object? feeType = null,Object? outlier = null,Object? adjustedVolume24hShare = null,Object? quotes = null,Object? lastUpdated = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? exchangeId = null,Object? exchangeName = null,Object? pair = null,Object? baseCurrencyId = null,Object? baseCurrencyName = null,Object? quoteCurrencyId = null,Object? quoteCurrencyName = null,Object? marketUrl = freezed,Object? category = null,Object? feeType = null,Object? outlier = null,Object? adjustedVolume24hShare = null,Object? quotes = null,Object? lastUpdated = null,}) {
   return _then(_self.copyWith(
 exchangeId: null == exchangeId ? _self.exchangeId : exchangeId // ignore: cast_nullable_to_non_nullable
 as String,exchangeName: null == exchangeName ? _self.exchangeName : exchangeName // ignore: cast_nullable_to_non_nullable
@@ -88,8 +88,8 @@ as String,baseCurrencyId: null == baseCurrencyId ? _self.baseCurrencyId : baseCu
 as String,baseCurrencyName: null == baseCurrencyName ? _self.baseCurrencyName : baseCurrencyName // ignore: cast_nullable_to_non_nullable
 as String,quoteCurrencyId: null == quoteCurrencyId ? _self.quoteCurrencyId : quoteCurrencyId // ignore: cast_nullable_to_non_nullable
 as String,quoteCurrencyName: null == quoteCurrencyName ? _self.quoteCurrencyName : quoteCurrencyName // ignore: cast_nullable_to_non_nullable
-as String,marketUrl: null == marketUrl ? _self.marketUrl : marketUrl // ignore: cast_nullable_to_non_nullable
-as String,category: null == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
+as String,marketUrl: freezed == marketUrl ? _self.marketUrl : marketUrl // ignore: cast_nullable_to_non_nullable
+as String?,category: null == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
 as String,feeType: null == feeType ? _self.feeType : feeType // ignore: cast_nullable_to_non_nullable
 as String,outlier: null == outlier ? _self.outlier : outlier // ignore: cast_nullable_to_non_nullable
 as bool,adjustedVolume24hShare: null == adjustedVolume24hShare ? _self.adjustedVolume24hShare : adjustedVolume24hShare // ignore: cast_nullable_to_non_nullable
@@ -180,7 +180,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String marketUrl,  String category,  String feeType,  bool outlier,  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String? marketUrl,  String category,  String feeType,  bool outlier, @JsonKey(name: 'adjusted_volume_24h_share')  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CoinPaprikaMarket() when $default != null:
 return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrencyId,_that.baseCurrencyName,_that.quoteCurrencyId,_that.quoteCurrencyName,_that.marketUrl,_that.category,_that.feeType,_that.outlier,_that.adjustedVolume24hShare,_that.quotes,_that.lastUpdated);case _:
@@ -201,7 +201,7 @@ return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrenc
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String marketUrl,  String category,  String feeType,  bool outlier,  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String? marketUrl,  String category,  String feeType,  bool outlier, @JsonKey(name: 'adjusted_volume_24h_share')  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaMarket():
 return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrencyId,_that.baseCurrencyName,_that.quoteCurrencyId,_that.quoteCurrencyName,_that.marketUrl,_that.category,_that.feeType,_that.outlier,_that.adjustedVolume24hShare,_that.quotes,_that.lastUpdated);case _:
@@ -221,7 +221,7 @@ return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrenc
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String marketUrl,  String category,  String feeType,  bool outlier,  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String exchangeId,  String exchangeName,  String pair,  String baseCurrencyId,  String baseCurrencyName,  String quoteCurrencyId,  String quoteCurrencyName,  String? marketUrl,  String category,  String feeType,  bool outlier, @JsonKey(name: 'adjusted_volume_24h_share')  double adjustedVolume24hShare,  Map<String, CoinPaprikaQuote> quotes,  String lastUpdated)?  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaMarket() when $default != null:
 return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrencyId,_that.baseCurrencyName,_that.quoteCurrencyId,_that.quoteCurrencyName,_that.marketUrl,_that.category,_that.feeType,_that.outlier,_that.adjustedVolume24hShare,_that.quotes,_that.lastUpdated);case _:
@@ -236,7 +236,7 @@ return $default(_that.exchangeId,_that.exchangeName,_that.pair,_that.baseCurrenc
 
 @JsonSerializable(fieldRename: FieldRename.snake)
 class _CoinPaprikaMarket implements CoinPaprikaMarket {
-  const _CoinPaprikaMarket({required this.exchangeId, required this.exchangeName, required this.pair, required this.baseCurrencyId, required this.baseCurrencyName, required this.quoteCurrencyId, required this.quoteCurrencyName, required this.marketUrl, required this.category, required this.feeType, required this.outlier, required this.adjustedVolume24hShare, required final  Map<String, CoinPaprikaQuote> quotes, required this.lastUpdated}): _quotes = quotes;
+  const _CoinPaprikaMarket({required this.exchangeId, required this.exchangeName, required this.pair, required this.baseCurrencyId, required this.baseCurrencyName, required this.quoteCurrencyId, required this.quoteCurrencyName, this.marketUrl, required this.category, required this.feeType, required this.outlier, @JsonKey(name: 'adjusted_volume_24h_share') required this.adjustedVolume24hShare, required final  Map<String, CoinPaprikaQuote> quotes, required this.lastUpdated}): _quotes = quotes;
   factory _CoinPaprikaMarket.fromJson(Map<String, dynamic> json) => _$CoinPaprikaMarketFromJson(json);
 
 /// Exchange identifier (e.g., "binance")
@@ -254,7 +254,7 @@ class _CoinPaprikaMarket implements CoinPaprikaMarket {
 /// Quote currency name (e.g., "Tether")
 @override final  String quoteCurrencyName;
 /// Direct URL to the market on the exchange
-@override final  String marketUrl;
+@override final  String? marketUrl;
 /// Market category (e.g., "Spot")
 @override final  String category;
 /// Fee type (e.g., "Percentage")
@@ -262,7 +262,7 @@ class _CoinPaprikaMarket implements CoinPaprikaMarket {
 /// Whether this market is considered an outlier
 @override final  bool outlier;
 /// Adjusted 24h volume share percentage
-@override final  double adjustedVolume24hShare;
+@override@JsonKey(name: 'adjusted_volume_24h_share') final  double adjustedVolume24hShare;
 /// Quote data for different currencies
  final  Map<String, CoinPaprikaQuote> _quotes;
 /// Quote data for different currencies
@@ -308,7 +308,7 @@ abstract mixin class _$CoinPaprikaMarketCopyWith<$Res> implements $CoinPaprikaMa
   factory _$CoinPaprikaMarketCopyWith(_CoinPaprikaMarket value, $Res Function(_CoinPaprikaMarket) _then) = __$CoinPaprikaMarketCopyWithImpl;
 @override @useResult
 $Res call({
- String exchangeId, String exchangeName, String pair, String baseCurrencyId, String baseCurrencyName, String quoteCurrencyId, String quoteCurrencyName, String marketUrl, String category, String feeType, bool outlier, double adjustedVolume24hShare, Map<String, CoinPaprikaQuote> quotes, String lastUpdated
+ String exchangeId, String exchangeName, String pair, String baseCurrencyId, String baseCurrencyName, String quoteCurrencyId, String quoteCurrencyName, String? marketUrl, String category, String feeType, bool outlier,@JsonKey(name: 'adjusted_volume_24h_share') double adjustedVolume24hShare, Map<String, CoinPaprikaQuote> quotes, String lastUpdated
 });
 
 
@@ -325,7 +325,7 @@ class __$CoinPaprikaMarketCopyWithImpl<$Res>
 
 /// Create a copy of CoinPaprikaMarket
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? exchangeId = null,Object? exchangeName = null,Object? pair = null,Object? baseCurrencyId = null,Object? baseCurrencyName = null,Object? quoteCurrencyId = null,Object? quoteCurrencyName = null,Object? marketUrl = null,Object? category = null,Object? feeType = null,Object? outlier = null,Object? adjustedVolume24hShare = null,Object? quotes = null,Object? lastUpdated = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? exchangeId = null,Object? exchangeName = null,Object? pair = null,Object? baseCurrencyId = null,Object? baseCurrencyName = null,Object? quoteCurrencyId = null,Object? quoteCurrencyName = null,Object? marketUrl = freezed,Object? category = null,Object? feeType = null,Object? outlier = null,Object? adjustedVolume24hShare = null,Object? quotes = null,Object? lastUpdated = null,}) {
   return _then(_CoinPaprikaMarket(
 exchangeId: null == exchangeId ? _self.exchangeId : exchangeId // ignore: cast_nullable_to_non_nullable
 as String,exchangeName: null == exchangeName ? _self.exchangeName : exchangeName // ignore: cast_nullable_to_non_nullable
@@ -334,8 +334,8 @@ as String,baseCurrencyId: null == baseCurrencyId ? _self.baseCurrencyId : baseCu
 as String,baseCurrencyName: null == baseCurrencyName ? _self.baseCurrencyName : baseCurrencyName // ignore: cast_nullable_to_non_nullable
 as String,quoteCurrencyId: null == quoteCurrencyId ? _self.quoteCurrencyId : quoteCurrencyId // ignore: cast_nullable_to_non_nullable
 as String,quoteCurrencyName: null == quoteCurrencyName ? _self.quoteCurrencyName : quoteCurrencyName // ignore: cast_nullable_to_non_nullable
-as String,marketUrl: null == marketUrl ? _self.marketUrl : marketUrl // ignore: cast_nullable_to_non_nullable
-as String,category: null == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
+as String,marketUrl: freezed == marketUrl ? _self.marketUrl : marketUrl // ignore: cast_nullable_to_non_nullable
+as String?,category: null == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
 as String,feeType: null == feeType ? _self.feeType : feeType // ignore: cast_nullable_to_non_nullable
 as String,outlier: null == outlier ? _self.outlier : outlier // ignore: cast_nullable_to_non_nullable
 as bool,adjustedVolume24hShare: null == adjustedVolume24hShare ? _self.adjustedVolume24hShare : adjustedVolume24hShare // ignore: cast_nullable_to_non_nullable
@@ -353,8 +353,8 @@ as String,
 mixin _$CoinPaprikaQuote {
 
 /// Current price as a [Decimal] for precision
-@DecimalConverter() Decimal get price;/// 24-hour trading volume as a [Decimal]
-@JsonKey(name: 'volume_24h')@DecimalConverter() Decimal get volume24h;
+@NonNullableDecimalConverter() Decimal get price;/// 24-hour trading volume as a [Decimal]
+@JsonKey(name: 'volume_24h')@NonNullableDecimalConverter() Decimal get volume24h;
 /// Create a copy of CoinPaprikaQuote
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -387,7 +387,7 @@ abstract mixin class $CoinPaprikaQuoteCopyWith<$Res>  {
   factory $CoinPaprikaQuoteCopyWith(CoinPaprikaQuote value, $Res Function(CoinPaprikaQuote) _then) = _$CoinPaprikaQuoteCopyWithImpl;
 @useResult
 $Res call({
-@DecimalConverter() Decimal price,@JsonKey(name: 'volume_24h')@DecimalConverter() Decimal volume24h
+@NonNullableDecimalConverter() Decimal price,@JsonKey(name: 'volume_24h')@NonNullableDecimalConverter() Decimal volume24h
 });
 
 
@@ -493,7 +493,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@DecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@DecimalConverter()  Decimal volume24h)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@NonNullableDecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@NonNullableDecimalConverter()  Decimal volume24h)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CoinPaprikaQuote() when $default != null:
 return $default(_that.price,_that.volume24h);case _:
@@ -514,7 +514,7 @@ return $default(_that.price,_that.volume24h);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@DecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@DecimalConverter()  Decimal volume24h)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@NonNullableDecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@NonNullableDecimalConverter()  Decimal volume24h)  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaQuote():
 return $default(_that.price,_that.volume24h);case _:
@@ -534,7 +534,7 @@ return $default(_that.price,_that.volume24h);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@DecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@DecimalConverter()  Decimal volume24h)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@NonNullableDecimalConverter()  Decimal price, @JsonKey(name: 'volume_24h')@NonNullableDecimalConverter()  Decimal volume24h)?  $default,) {final _that = this;
 switch (_that) {
 case _CoinPaprikaQuote() when $default != null:
 return $default(_that.price,_that.volume24h);case _:
@@ -549,13 +549,13 @@ return $default(_that.price,_that.volume24h);case _:
 @JsonSerializable()
 
 class _CoinPaprikaQuote implements CoinPaprikaQuote {
-  const _CoinPaprikaQuote({@DecimalConverter() required this.price, @JsonKey(name: 'volume_24h')@DecimalConverter() required this.volume24h});
+  const _CoinPaprikaQuote({@NonNullableDecimalConverter() required this.price, @JsonKey(name: 'volume_24h')@NonNullableDecimalConverter() required this.volume24h});
   factory _CoinPaprikaQuote.fromJson(Map<String, dynamic> json) => _$CoinPaprikaQuoteFromJson(json);
 
 /// Current price as a [Decimal] for precision
-@override@DecimalConverter() final  Decimal price;
+@override@NonNullableDecimalConverter() final  Decimal price;
 /// 24-hour trading volume as a [Decimal]
-@override@JsonKey(name: 'volume_24h')@DecimalConverter() final  Decimal volume24h;
+@override@JsonKey(name: 'volume_24h')@NonNullableDecimalConverter() final  Decimal volume24h;
 
 /// Create a copy of CoinPaprikaQuote
 /// with the given fields replaced by the non-null parameter values.
@@ -590,7 +590,7 @@ abstract mixin class _$CoinPaprikaQuoteCopyWith<$Res> implements $CoinPaprikaQuo
   factory _$CoinPaprikaQuoteCopyWith(_CoinPaprikaQuote value, $Res Function(_CoinPaprikaQuote) _then) = __$CoinPaprikaQuoteCopyWithImpl;
 @override @useResult
 $Res call({
-@DecimalConverter() Decimal price,@JsonKey(name: 'volume_24h')@DecimalConverter() Decimal volume24h
+@NonNullableDecimalConverter() Decimal price,@JsonKey(name: 'volume_24h')@NonNullableDecimalConverter() Decimal volume24h
 });
 
 

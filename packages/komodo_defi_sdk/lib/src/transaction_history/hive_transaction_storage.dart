@@ -116,6 +116,7 @@ class HiveTransactionStorage
   static const defaultBoxName = 'komodo_tx_history_v2';
   static const _plaintextBoxName = 'komodo_tx_history_v1';
   static const _deleteTimeout = Duration(seconds: 5);
+  static const _refusedBoxRetryDelay = Duration(milliseconds: 100);
   static const _openBatchSize = 64;
 
   /// Name of the encrypted Hive box.
@@ -646,7 +647,7 @@ class HiveTransactionStorage
       try {
         opened = await _openBox();
       } on Object {
-        await _deleteBox(boxName);
+        await _deleteRefusedBox();
         opened = await _openBox();
       }
       _box = opened;
@@ -674,6 +675,23 @@ class HiveTransactionStorage
     // Explicit cache recovery below deletes and rebuilds the whole cache.
     crashRecovery: false,
   );
+
+  /// Deletes the box Hive has just refused to open.
+  ///
+  /// Hive closes a refused box unawaited, and that close can remove the lock
+  /// file between Hive's exists-check and delete, failing the first attempt
+  /// spuriously. The pause is for a close still holding the files open; a
+  /// timeout is not that race, and retrying one would only double the stall.
+  Future<void> _deleteRefusedBox() async {
+    try {
+      await _deleteBox(boxName);
+    } on TimeoutException {
+      rethrow;
+    } on Object {
+      await Future<void>.delayed(_refusedBoxRetryDelay);
+      await _deleteBox(boxName);
+    }
+  }
 
   Future<void> _rebuildFromEnvelopes(LazyBox<String> box) async {
     _retention.clear();

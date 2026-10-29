@@ -28,6 +28,8 @@ class KomodoDefiSdkConfig {
     this.tronGaslessProvider,
     this.assetConfigTransform,
     this.initialActivationPolicy,
+    this.lifiProxyUrl,
+    this.lifiIntegrator,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -101,6 +103,14 @@ class KomodoDefiSdkConfig {
   /// Null keeps standalone SDK clients unrestricted by default.
   final ActivationPolicySnapshot? initialActivationPolicy;
 
+  /// Komodo proxy URL for routed swaps' LI.FI requests, handed to KDF at
+  /// startup as `lifi_proxy_url`. Null leaves KDF on LI.FI's public API, which
+  /// rate-limits each network address. See `KdfStartupConfig.lifiProxyUrl`.
+  final String? lifiProxyUrl;
+
+  /// Optional deployment commission policy; null requests no commission.
+  final LifiIntegratorConfig? lifiIntegrator;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -117,6 +127,9 @@ class KomodoDefiSdkConfig {
     TronGaslessProviderConfig? tronGaslessProvider,
     AssetConfigTransform? assetConfigTransform,
     ActivationPolicySnapshot? initialActivationPolicy,
+    String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
+    bool clearLifiIntegrator = false,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -144,6 +157,10 @@ class KomodoDefiSdkConfig {
       assetConfigTransform: assetConfigTransform ?? this.assetConfigTransform,
       initialActivationPolicy:
           initialActivationPolicy ?? this.initialActivationPolicy,
+      lifiProxyUrl: lifiProxyUrl ?? this.lifiProxyUrl,
+      lifiIntegrator: clearLifiIntegrator
+          ? null
+          : lifiIntegrator ?? this.lifiIntegrator,
     );
   }
 }

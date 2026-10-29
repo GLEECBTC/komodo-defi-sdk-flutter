@@ -62,6 +62,22 @@ class MockHelpers {
     when(
       () => mockProvider.fetchCoinList(),
     ).thenAnswer((_) async => TestData.activeCoins);
+
+    // Default bulk tickers: one for each active coin
+    when(
+      () => mockProvider.fetchTickers(quotes: any(named: 'quotes')),
+    ).thenAnswer(
+      (_) async => [
+        TestFixtures.createMockTicker(),
+        TestFixtures.createMockTicker(
+          id: TestConstants.ethereumCoinId,
+          name: TestConstants.ethereumName,
+          symbol: TestConstants.ethereumSymbol,
+          rank: 2,
+          price: TestConstants.ethereumPrice,
+        ),
+      ],
+    );
   }
 
   /// Configures MockHttpClient to return specific historical OHLC responses
@@ -168,17 +184,14 @@ class MockHelpers {
     ).thenAnswer((_) async => ohlcData ?? TestFixtures.createMockOhlcList());
   }
 
-  /// Configures MockCoinPaprikaProvider to return specific ticker data
+  /// Configures MockCoinPaprikaProvider's bulk tickers to hold only [ticker]
   static void setupProviderTickerResponse(
     MockCoinPaprikaProvider mockProvider, {
     CoinPaprikaTicker? ticker,
   }) {
     when(
-      () => mockProvider.fetchCoinTicker(
-        coinId: any(named: 'coinId'),
-        quotes: any(named: 'quotes'),
-      ),
-    ).thenAnswer((_) async => ticker ?? TestFixtures.createMockTicker());
+      () => mockProvider.fetchTickers(quotes: any(named: 'quotes')),
+    ).thenAnswer((_) async => [ticker ?? TestFixtures.createMockTicker()]);
   }
 
   /// Configures MockCoinPaprikaProvider to return specific markets data
@@ -247,10 +260,7 @@ class MockHelpers {
 
     if (tickerError != null) {
       when(
-        () => mockProvider.fetchCoinTicker(
-          coinId: any(named: 'coinId'),
-          quotes: any(named: 'quotes'),
-        ),
+        () => mockProvider.fetchTickers(quotes: any(named: 'quotes')),
       ).thenThrow(tickerError);
     }
 

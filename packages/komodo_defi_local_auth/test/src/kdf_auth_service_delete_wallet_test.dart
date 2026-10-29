@@ -26,6 +26,7 @@ class _FakeKdfOperations implements IKdfOperations {
   responseHandlersByMethod;
   bool _isRunning = true;
   int stopCount = 0;
+  final starts = <Map<String, dynamic>>[];
 
   @override
   String get operationsName => 'fake';
@@ -35,6 +36,7 @@ class _FakeKdfOperations implements IKdfOperations {
     Map<String, dynamic> startParams, {
     int? logLevel,
   }) async {
+    starts.add(startParams);
     _isRunning = true;
     return KdfStartupResult.ok;
   }
@@ -1965,6 +1967,56 @@ void main() {
       expect(names, ['new-wallet']);
     });
   });
+
+  test(
+    'commission and proxy survive creation, sign-out and sign-in restarts',
+    () async {
+      const url = 'https://swap.example.com/lifi';
+      final commission = LifiIntegratorConfig(
+        name: 'gleec-dex-staging',
+        feeBps: 178,
+        lifiFeeBps: 22,
+      );
+      late _FakeKdfOperations operations;
+      final service = _createService(
+        lifiProxyUrl: url,
+        lifiIntegrator: commission,
+        onOperationsCreated: (created) =>
+            (operations = created)._isRunning = false,
+      );
+      addTearDown(service.dispose);
+
+      await service.register(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+      );
+
+      expect(operations.starts.map((params) => params['wallet_name']), [
+        null,
+        'new-wallet',
+      ]);
+      expect(operations.starts.map((params) => params['lifi_proxy_url']), [
+        url,
+        url,
+      ]);
+      await service.signOut();
+      await service.signIn(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+        options: _testUser().walletId.authOptions,
+      );
+      expect(operations.starts.length, greaterThan(2));
+      expect(
+        operations.starts.map((params) => params['lifi_integrator']),
+        everyElement(commission.toJson()),
+      );
+      // KDF signs proxy requests with its P2P key on every restart.
+      expect(
+        operations.starts.map((params) => params['disable_p2p']),
+        everyElement(isNot(isTrue)),
+      );
+    },
+  );
 }
 
 const _publicKeyHash = '05aab5342166f8594baf17a7d9bef5d567443327';
@@ -2022,6 +2074,8 @@ KdfAuthService _createService({
   Future<Map<String, dynamic>> Function()? walletNamesResponseHandler,
   void Function(_FakeKdfOperations operations)? onOperationsCreated,
   SecureLocalStorage? secureStorage,
+  String? lifiProxyUrl,
+  LifiIntegratorConfig? lifiIntegrator,
 }) {
   final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
   final operations = _FakeKdfOperations(
@@ -2072,7 +2126,13 @@ KdfAuthService _createService({
     kdfOperations: operations,
   );
 
-  return KdfAuthService(framework, hostConfig, secureStorage: secureStorage);
+  return KdfAuthService(
+    framework,
+    hostConfig,
+    secureStorage: secureStorage,
+    lifiProxyUrl: lifiProxyUrl,
+    lifiIntegrator: lifiIntegrator,
+  );
 }
 
 KdfUser _testUser() {

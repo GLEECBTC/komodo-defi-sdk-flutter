@@ -1,3 +1,10 @@
+## 0.5.0 (2026-10-28)
+
+ - **FEAT**(assets): list GLEEC and configured GRC-20 tokens for Trezor
+   wallets when `trezor_coin` is present. This does not enable all EVM chains
+   or routed-swap hardware signing (#405).
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.4.0 (unreleased)
 
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0`, `komodo_coin_updates` `^2.1.1` for SDK 0.8.0;

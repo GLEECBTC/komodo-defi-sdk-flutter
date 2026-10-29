@@ -23,12 +23,12 @@ void main() {
       }
     });
 
-    group('CDN Branch Mirrors Integration', () {
+    group('Automatic updates with CDN branch mirrors', () {
       test('should use CDN URL when branch has mirror configured', () {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
           coinsRepoBranch: 'main',
@@ -79,7 +79,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
           coinsRepoBranch: 'feature-branch',
@@ -130,7 +130,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
           coinsRepoBranch: 'main',
@@ -176,7 +176,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/GLEECBTC/coins',
           coinsRepoContentUrl:
               'https://raw.githubusercontent.com/GLEECBTC/coins',
@@ -228,7 +228,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
           coinsRepoBranch: 'main',
@@ -300,7 +300,7 @@ void main() {
           final coinConfig = CoinBuildConfig(
             fetchAtBuildEnabled: true,
             bundledCoinsRepoCommit: 'abc123',
-            updateCommitOnBuild: false,
+            updateCommitOnBuild: true,
             coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
             coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
             coinsRepoBranch: testCase['branch']! as String,
@@ -355,7 +355,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
           coinsRepoBranch: 'main',
@@ -405,7 +405,7 @@ void main() {
           final coinConfig = CoinBuildConfig(
             fetchAtBuildEnabled: true,
             bundledCoinsRepoCommit: 'abc123',
-            updateCommitOnBuild: false,
+            updateCommitOnBuild: true,
             coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
             coinsRepoContentUrl: 'https://raw.githubusercontent.com/owner/repo',
             coinsRepoBranch: 'feature-branch',
@@ -459,7 +459,7 @@ void main() {
         final coinConfig = CoinBuildConfig(
           fetchAtBuildEnabled: true,
           bundledCoinsRepoCommit: 'abc123',
-          updateCommitOnBuild: false,
+          updateCommitOnBuild: true,
           coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
           coinsRepoContentUrl: originalContentUrl,
           coinsRepoBranch: 'custom-branch',
@@ -520,7 +520,7 @@ void main() {
             final coinConfig = CoinBuildConfig(
               fetchAtBuildEnabled: true,
               bundledCoinsRepoCommit: 'abc123',
-              updateCommitOnBuild: false,
+              updateCommitOnBuild: true,
               coinsRepoApiUrl: 'https://api.github.com/repos/owner/repo',
               coinsRepoContentUrl:
                   'https://raw.githubusercontent.com/owner/repo',

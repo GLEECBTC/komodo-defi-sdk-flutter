@@ -68,6 +68,20 @@ KdfScript _script({bool walletExists = false}) {
   return script;
 }
 
+/// Reads [read] until [done] accepts it, or 10 s pass: the pubkey manager
+/// persists fire-and-forget, so the write may land after the read it served.
+Future<T> _eventually<T>(
+  Future<T> Function() read,
+  bool Function(T value) done,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (true) {
+    final value = await read();
+    if (done(value) || DateTime.now().isAfter(deadline)) return value;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 void main() {
   group('wallet deletion purge (integration)', () {
     late Directory workspace;
@@ -189,7 +203,10 @@ void main() {
         reason: 'the history should be on disk before the wallet is deleted',
       );
       expect(
-        await pubkeys.listForWallet(user.walletId),
+        await _eventually(
+          () => pubkeys.listForWallet(user.walletId),
+          (cached) => cached.isNotEmpty,
+        ),
         isNotEmpty,
         reason: 'the pubkey cache should be populated by sign-in',
       );
