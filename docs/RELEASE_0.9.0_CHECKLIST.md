@@ -261,3 +261,23 @@ failure and Sia Max balance assertion. One retry of the six failed jobs was
 requested; pending results do not waive the original failures. Merge the dev
 PR with squash, then carry only its reviewed diff into frozen `release-0.9.0`
 through a focused PR after tests and review pass. SDK #416 remains open.
+
+### RC-only acceptance and accepted dev carry
+
+SDK #419 was squash merged into dev as
+`d111063426266e6b967b88f0f7a8598d1017b73e`; its complete tree equals tested
+source `21f64b50`. SDK #420 carries that actual accepted squash into the frozen
+branch. This release-only record adds no runtime or dependency change.
+
+The owner explicitly accepted the documented upstream failures **as-is for RC
+testing** on 29 October. Retry attempt 2 still fails Linux/macOS/Windows
+integration and the Sia Max test; Linux unit/session-storage and Docker ZCoin
+passed on retry. The Sia retry failed a balance assertion at line 110, whereas
+the original failure was its post-withdraw assertion at line 173. This is a
+repeated test failure, not proof that the same withdrawal defect reproduced.
+
+Regression status is **unconfirmed**: production sources equal the previous
+`35f0bde` RC, and that RC's run `39776341104` skipped integration and Docker,
+so there is no passing comparable baseline in that run. The upstream failures
+remain production gates for a fix or explicit final disposition. SDK #416 stays
+open for testers and reviewers; this exception does not approve publication.

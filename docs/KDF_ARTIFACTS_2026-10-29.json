@@ -119,7 +119,7 @@
       }
     ]
   },
-  "upstream_test_disposition": "Still failed; a successful artifact build and downstream SDK/app validation do not waive these upstream failures.",
+  "upstream_test_disposition": "Owner explicitly accepted these documented failures as-is for RC testing on 29 October 2026. They remain production gates requiring recorded fix or release-owner disposition; neither build success nor downstream tests certify the upstream failures as fixed.",
   "artifacts": [
     {
       "platform": "mac-universal",
@@ -245,8 +245,86 @@
   },
   "upstream_test_retry": {
     "workflow_run": 40755486033,
-    "scope": "only the six failed jobs; one retry requested on 29 October",
-    "result": "pending; original attempt failure inventory retained"
+    "attempt": 2,
+    "result": "failure",
+    "failed_jobs": [
+      {
+        "job_id": 123390454614,
+        "job": "Integration / Linux",
+        "failed_tests": [
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123390454940,
+        "job": "Integration / macOS",
+        "failed_tests": [
+          "mm2_tests::best_orders_tests::best_orders_must_return_duplicate_for_orderbook_tickers",
+          "mm2_tests::best_orders_tests::test_best_orders_address_and_confirmations",
+          "mm2_tests::best_orders_tests::test_best_orders_v2_exclude_mine",
+          "mm2_tests::eth_tests::test_sign_eth_transaction",
+          "mm2_tests::eth_tests::test_sign_eth_transaction_eip1559",
+          "mm2_tests::best_orders_tests::test_best_orders_no_duplicates_after_update",
+          "mm2_tests::mm2_tests_inner::test_mm2_db_migration",
+          "mm2_tests::mm2_tests_inner::test_no_login",
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order_fail",
+          "mm2_tests::mm2_tests_inner::test_validateaddress",
+          "mm2_tests::mm2_tests_inner::test_withdraw_and_send",
+          "mm2_tests::mm2_tests_inner::test_withdraw_legacy",
+          "mm2_tests::orderbook_sync_tests::alice_can_see_the_active_order_after_orderbook_sync_segwit",
+          "mm2_tests::orderbook_sync_tests::orderbook_should_work_without_coins_activation",
+          "mm2_tests::orderbook_sync_tests::setprice_min_volume_should_be_displayed_in_orderbook",
+          "mm2_tests::orderbook_sync_tests::test_orderbook_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123390455185,
+        "job": "Integration / Windows",
+        "failed_tests": [
+          "mm2_tests::best_orders_tests::best_orders_must_return_duplicate_for_orderbook_tickers",
+          "mm2_tests::best_orders_tests::test_best_orders_address_and_confirmations",
+          "mm2_tests::best_orders_tests::test_best_orders_no_duplicates_after_update",
+          "mm2_tests::best_orders_tests::test_best_orders_v2_exclude_mine",
+          "mm2_tests::eth_tests::test_sign_eth_transaction",
+          "mm2_tests::eth_tests::test_sign_eth_transaction_eip1559",
+          "mm2_tests::mm2_tests_inner::test_mm2_db_migration",
+          "mm2_tests::mm2_tests_inner::test_no_login",
+          "mm2_tests::mm2_tests_inner::test_tx_history_segwit",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order",
+          "mm2_tests::mm2_tests_inner::test_update_maker_order_fail",
+          "mm2_tests::mm2_tests_inner::test_validateaddress",
+          "mm2_tests::mm2_tests_inner::test_withdraw_and_send",
+          "mm2_tests::mm2_tests_inner::test_withdraw_legacy",
+          "mm2_tests::orderbook_sync_tests::alice_can_see_the_active_order_after_orderbook_sync_segwit",
+          "mm2_tests::orderbook_sync_tests::orderbook_should_work_without_coins_activation",
+          "mm2_tests::orderbook_sync_tests::setprice_min_volume_should_be_displayed_in_orderbook",
+          "mm2_tests::orderbook_sync_tests::test_orderbook_segwit",
+          "mm2_tests::z_coin_tests::activate_z_coin_light",
+          "mm2_tests::z_coin_tests::activate_z_coin_light_with_changing_height",
+          "mm2_tests::z_coin_tests::activate_z_coin_with_hd_account"
+        ]
+      },
+      {
+        "job_id": 123390455660,
+        "job": "Docker / Sia",
+        "failed_tests": [
+          "sia_tests::docker_functional_tests::test_dsia_withdraw_max_spends_full_balance_minus_fee"
+        ]
+      }
+    ],
+    "recovered_jobs": [
+      "Unit / Linux",
+      "Docker / ZCoin"
+    ],
+    "regression_assessment": "No confirmed runtime regression versus previous RC 35f0bde: production sources unchanged, only three test/helper files differ. Previous RC run39776341104 skipped integration and Docker, so it supplies no passing baseline for these failures."
   },
   "sdk_validation": {
     "date": "2026-10-29",
