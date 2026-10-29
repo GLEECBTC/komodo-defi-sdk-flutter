@@ -36,6 +36,35 @@ candidate record, not publication approval.
   [KDF 3.1.1-beta](https://github.com/GLEECBTC/kdf-internal/commit/2023112fa67b28cbebc2a7064d22267fed40310f).
   The branches diverge; this source check does not certify every later main fix.
 
+## Feature defaults and consumer policy — 29 October
+
+These entries record a source audit, not new live-swap or signed-platform
+test results.
+
+- [x] `sdk.routedSwaps` exposes implemented LI.FI exact/Max quotes,
+  cheapest/fastest ordering, approval/execution progress, history, recovery and
+  eligible cancellation without a feature opt-in. Remote engines must support
+  the pinned contract; asset eligibility and runtime execution checks apply.
+- [x] Gleec Wallet registers routed swaps by default. Its integrator flag
+  controls commission configuration and does not enable/disable routing.
+  Native-Max gas headroom remains the wallet's separate quote policy.
+- [x] Legal consent is consumer-owned. Ordinary Gleec builds require available
+  wallet/LI.FI documents before routed Start; their availability bypass defaults
+  to false. Only the isolated manual RC preview has the recorded exception,
+  retaining warnings and refusing to record unavailable terms as accepted.
+- [x] The pinned routed requests support LI.FI and eligible EVM assets and have
+  no external-recipient parameter. Additional provider backends, expanded chain
+  support and hardware signing require implementation or validation. Gleec
+  hardware-wallet trading was wallet-only in 0.9.7-1 and remains so.
+- [x] Gleec Wallet [#3579](https://github.com/GLEECBTC/gleec-wallet/pull/3579)
+  restores the previous atomic EVM-token behavior and describes engine-managed
+  permission in the existing review, with no new modal or confirmation step.
+  The engine may reuse or grant an unlimited allowance after matching. LI.FI
+  token routes retain their separate exact-approval/reset and funding checks.
+- [x] Keep the owner's RC-only KDF failure acceptance separate from production
+  disposition. The wallet's usability/live-fiat deferrals and post-0.10.0 Banxa
+  follow-up are recorded deferrals, not completed execution evidence.
+
 ## Preparation gates
 
 - [x] Version every changed library package and dependency-only consumer.
