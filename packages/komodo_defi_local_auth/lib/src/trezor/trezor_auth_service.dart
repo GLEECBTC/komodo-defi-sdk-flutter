@@ -347,7 +347,7 @@ class TrezorAuthService implements IAuthService {
 
     final password = await _passwordStore.readPassword();
     if (password != null && _isClaimable(existing.walletId)) {
-      await _claimTrezorRecord(walletName, authOptions);
+      final replaced = await _claimTrezorRecord(walletName, authOptions);
       try {
         await _authService.signIn(
           walletName: walletName,
@@ -355,8 +355,9 @@ class TrezorAuthService implements IAuthService {
           options: authOptions,
         );
         return;
-      } on AuthException catch (e) {
-        if (!_cannotOpenWallet(e)) rethrow;
+      } catch (e) {
+        if (replaced != null) await _releaseTrezorRecord(walletName, replaced);
+        if (e is! AuthException || !_cannotOpenWallet(e)) rethrow;
       }
     }
 
@@ -399,18 +400,36 @@ class TrezorAuthService implements IAuthService {
 
   /// Gives a placeholder record the Trezor policy before signing in to it.
   /// Signing in with the default policy would use the local seed instead of
-  /// the device.
-  Future<void> _claimTrezorRecord(String walletName, AuthOptions authOptions) =>
-      _userStorage.updateUser(walletName, (current) {
-        if (current == null ||
-            current.walletId.authOptions.privKeyPolicy == _trezorPolicy ||
-            !_isClaimable(current.walletId)) {
-          return current;
-        }
-        return current.copyWith(
-          walletId: current.walletId.copyWith(authOptions: authOptions),
-        );
-      });
+  /// the device. Returns the options it replaced, or null if it changed
+  /// nothing.
+  Future<AuthOptions?> _claimTrezorRecord(
+    String walletName,
+    AuthOptions authOptions,
+  ) async {
+    AuthOptions? replaced;
+    await _userStorage.updateUser(walletName, (current) {
+      if (current == null ||
+          current.walletId.authOptions.privKeyPolicy == _trezorPolicy ||
+          !_isClaimable(current.walletId)) {
+        return current;
+      }
+      replaced = current.walletId.authOptions;
+      return current.copyWith(
+        walletId: current.walletId.copyWith(authOptions: authOptions),
+      );
+    });
+    return replaced;
+  }
+
+  /// Undoes [_claimTrezorRecord] after a failed sign-in, so a wallet the
+  /// device session could not open keeps its original policy.
+  Future<void> _releaseTrezorRecord(String walletName, AuthOptions original) =>
+      _userStorage.updateUser(
+        walletName,
+        (current) => current?.copyWith(
+          walletId: current.walletId.copyWith(authOptions: original),
+        ),
+      );
 
   /// "My Trezor 2", "My Trezor 3", ... compared case-insensitively, because
   /// wallet files can share a case-insensitive file system.

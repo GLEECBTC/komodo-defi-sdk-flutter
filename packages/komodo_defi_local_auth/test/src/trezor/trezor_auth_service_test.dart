@@ -682,6 +682,61 @@ void main() {
       },
     );
 
+    test(
+      'restores a claimed record when the saved password is rejected',
+      () async {
+        final placeholder = _user(
+          myTrezor,
+          const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+          metadata: {walletEntryIdMetadataKey: 'entry-1'},
+        );
+        FlutterSecureStorage.setMockInitialValues({
+          'trezor_wallet_password': 'stale-pass',
+          'user_$myTrezor': placeholder.toJson().toJsonString(),
+        });
+        auth
+          ..users = [placeholder]
+          ..signInError = incorrectPassword;
+
+        await signIn();
+
+        expect(auth.lastSignInArgs?.walletName, myTrezor);
+        expect(auth.lastRegisterArgs?.walletName, '$myTrezor 2');
+        expect(await userStorage.getUser(myTrezor), placeholder);
+      },
+    );
+
+    test(
+      'restores a claimed record when sign-in fails for another reason',
+      () async {
+        final placeholder = _user(
+          myTrezor,
+          const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+        );
+        FlutterSecureStorage.setMockInitialValues({
+          'trezor_wallet_password': 'saved-pass',
+          'user_$myTrezor': placeholder.toJson().toJsonString(),
+        });
+        auth
+          ..users = [placeholder]
+          ..signInError = AuthException(
+            'KDF is not available. Please try again.',
+            type: AuthExceptionType.apiConnectionError,
+          );
+
+        await expectLater(
+          service.signIn(
+            walletName: 'ignored',
+            password: 'device-passphrase',
+            options: _trezorOptions,
+          ),
+          throwsA(isA<AuthException>()),
+        );
+        expect(auth.lastRegisterArgs, isNull);
+        expect(await userStorage.getUser(myTrezor), placeholder);
+      },
+    );
+
     test('keeps the saved wallet when KDF fails to spawn', () async {
       FlutterSecureStorage.setMockInitialValues({
         'trezor_wallet_password': 'saved-pass',
