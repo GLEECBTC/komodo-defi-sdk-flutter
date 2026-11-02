@@ -161,7 +161,15 @@ class _FakeAuthService implements IAuthService {
   List<KdfUser> users = [];
   KdfUser? activeUser;
   bool signOutCalled = false;
-  AuthException? signInError;
+
+  /// Like [KdfAuthService], a sign-in takes its policy from the stored record.
+  SecureLocalStorage? records;
+  Exception? signInError;
+
+  /// Thrown by the next sign-ins, one per call, before [signInError].
+  final List<AuthException> signInFailures = [];
+  Future<void> Function(String walletName)? onSignIn;
+  int signInCalls = 0;
   AuthException? registerError;
   ({String walletName, String password, AuthOptions options})? lastSignInArgs;
   ({String walletName, String password, AuthOptions options})? lastRegisterArgs;
@@ -216,9 +224,16 @@ class _FakeAuthService implements IAuthService {
       password: password,
       options: options,
     );
+    signInCalls++;
+    await onSignIn?.call(walletName);
+    if (signInFailures.isNotEmpty) throw signInFailures.removeAt(0);
     if (signInError case final error?) throw error;
+    final stored = await records?.getUser(walletName);
     final user = KdfUser(
-      walletId: WalletId.fromName(walletName, options),
+      walletId: WalletId.fromName(
+        walletName,
+        stored?.walletId.authOptions ?? options,
+      ),
       isBip39Seed: true,
     );
     activeUser = user;
@@ -586,7 +601,7 @@ void main() {
     late TrezorAuthService service;
 
     setUp(() {
-      auth = _FakeAuthService();
+      auth = _FakeAuthService()..records = userStorage;
       repo = _FakeTrezorRepository();
       service = TrezorAuthService(
         auth,
@@ -652,6 +667,8 @@ void main() {
         final user = await signIn();
 
         expect(auth.lastSignInArgs?.password, 'stale-pass');
+        // A wallet without a verified identity gets no second attempt.
+        expect(auth.signInCalls, 1);
         expect(auth.lastRegisterArgs?.walletName, '$myTrezor 2');
         expect(auth.lastRegisterArgs?.password, 'fresh-pass');
         expect(auth.lastRegisterArgs?.options, _trezorOptions);
@@ -736,6 +753,176 @@ void main() {
         expect(await userStorage.getUser(myTrezor), placeholder);
       },
     );
+
+    test('restores a claimed record after an unexpected error', () async {
+      final placeholder = _user(
+        myTrezor,
+        const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_$myTrezor': placeholder.toJson().toJsonString(),
+      });
+      auth
+        ..users = [placeholder]
+        ..signInError = const FormatException('unexpected');
+
+      await expectLater(
+        service.signIn(
+          walletName: 'ignored',
+          password: 'device-passphrase',
+          options: _trezorOptions,
+        ),
+        throwsA(
+          isA<AuthException>().having(
+            (e) => e.message,
+            'message',
+            contains('FormatException'),
+          ),
+        ),
+      );
+      expect(await userStorage.getUser(myTrezor), placeholder);
+    });
+
+    test('keeps a record that a session verified during the attempt', () async {
+      final placeholder = _user(
+        myTrezor,
+        const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+      );
+      final verified = KdfUser(
+        walletId: WalletId.withPubkeyHash(myTrezor, _trezorOptions, _hash),
+        isBip39Seed: true,
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_$myTrezor': placeholder.toJson().toJsonString(),
+      });
+      auth
+        ..users = [placeholder]
+        ..onSignIn = ((_) => userStorage.saveUser(verified))
+        ..signInError = AuthException(
+          'KDF is not available. Please try again.',
+          type: AuthExceptionType.apiConnectionError,
+        );
+
+      await expectLater(
+        service.signIn(
+          walletName: 'ignored',
+          password: 'device-passphrase',
+          options: _trezorOptions,
+        ),
+        throwsA(isA<AuthException>()),
+      );
+      expect(await userStorage.getUser(myTrezor), verified);
+    });
+
+    test('retries a wallet opened here before once', () async {
+      final trezorWallet = KdfUser(
+        walletId: WalletId.withPubkeyHash(myTrezor, _trezorOptions, _hash),
+        isBip39Seed: true,
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_$myTrezor': trezorWallet.toJson().toJsonString(),
+      });
+      auth
+        ..users = [trezorWallet]
+        ..signInFailures.add(_desktopStartFailure());
+
+      final user = await signIn();
+
+      expect(auth.signInCalls, 2);
+      expect(auth.lastRegisterArgs, isNull);
+      expect(user.walletId.name, myTrezor);
+    });
+
+    test('replaces a wallet opened here before if the retry fails', () async {
+      final trezorWallet = KdfUser(
+        walletId: WalletId.withPubkeyHash(myTrezor, _trezorOptions, _hash),
+        isBip39Seed: true,
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_$myTrezor': trezorWallet.toJson().toJsonString(),
+      });
+      auth
+        ..users = [trezorWallet]
+        ..signInFailures.addAll([
+          _desktopStartFailure(),
+          _desktopStartFailure(),
+        ]);
+
+      await signIn();
+
+      expect(auth.signInCalls, 2);
+      expect(auth.lastRegisterArgs?.walletName, '$myTrezor 2');
+      expect(await userStorage.getUser(myTrezor), trezorWallet);
+    });
+
+    test('signs out of a wallet that turns out not to be Trezor', () async {
+      // Listed as a placeholder, but stored with an identity by the time the
+      // record is claimed.
+      final listed = _user(
+        myTrezor,
+        const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+      );
+      final software = KdfUser(
+        walletId: WalletId.withPubkeyHash(
+          myTrezor,
+          const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+          _hash,
+        ),
+        isBip39Seed: true,
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_$myTrezor': software.toJson().toJsonString(),
+      });
+      auth.users = [listed];
+
+      final user = await signIn();
+
+      expect(auth.signOutCalled, isTrue);
+      expect(auth.lastRegisterArgs?.walletName, '$myTrezor 2');
+      expect(user.walletId.authOptions, _trezorOptions);
+      expect(await userStorage.getUser(myTrezor), software);
+    });
+
+    test('finds the wallet under another letter case', () async {
+      final placeholder = _user(
+        'my trezor',
+        const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+      );
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+        'user_my trezor': placeholder.toJson().toJsonString(),
+      });
+      auth.users = [placeholder];
+
+      await signIn();
+
+      expect(auth.lastSignInArgs?.walletName, 'my trezor');
+      expect(auth.lastRegisterArgs, isNull);
+      final record = await userStorage.getUser('my trezor');
+      expect(record?.walletId.authOptions, _trezorOptions);
+    });
+
+    test('prefers the exact wallet name over another letter case', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'trezor_wallet_password': 'saved-pass',
+      });
+      auth.users = [
+        _user(
+          'my trezor',
+          const AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+        ),
+        _user(myTrezor, _trezorOptions),
+      ];
+
+      await signIn();
+
+      expect(auth.lastSignInArgs?.walletName, myTrezor);
+    });
 
     test('keeps the saved wallet when KDF fails to spawn', () async {
       FlutterSecureStorage.setMockInitialValues({
@@ -908,6 +1095,14 @@ void main() {
 const _trezorOptions = AuthOptions(
   derivationMethod: DerivationMethod.hdWallet,
   privKeyPolicy: PrivateKeyPolicy.trezor(),
+);
+
+const _hash = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+
+/// The desktop executable exits with status 1 for any startup error.
+AuthException _desktopStartFailure() => authExceptionForKdfStartup(
+  KdfStartupResult.invalidParams,
+  walletPasswordSent: true,
 );
 
 KdfUser _user(
