@@ -314,8 +314,8 @@ class TrezorAuthService implements IAuthService {
   ///
   /// The device holds the keys, so the local wallet's seed is never used.
   /// KDF's wallet files can outlive this app's secure storage or belong to
-  /// another app sharing the directory. A wallet the saved password cannot
-  /// open is left untouched, and a new one is registered under the next free
+  /// another app sharing the directory. A wallet the Trezor session cannot
+  /// use keeps its record, and a new one is registered under the next free
   /// name.
   /// [derivationMethod] The derivation method to use for the wallet.
   /// Defaults to [DerivationMethod.hdWallet], since trezor requires HD wallet
@@ -331,9 +331,7 @@ class TrezorAuthService implements IAuthService {
     final walletName =
         await _passwordStore.readWalletName() ?? trezorWalletName;
     final users = await _authService.getUsers();
-    final existing = users.firstWhereOrNull(
-      (u) => u.walletId.name == walletName,
-    );
+    final existing = _findWallet(users, walletName);
 
     if (existing == null) {
       await _authService.register(
@@ -347,16 +345,16 @@ class TrezorAuthService implements IAuthService {
 
     final password = await _passwordStore.readPassword();
     if (password != null && _isClaimable(existing.walletId)) {
-      final replaced = await _claimTrezorRecord(walletName, authOptions);
+      final name = existing.walletId.name;
+      final replaced = await _claimTrezorRecord(name, authOptions);
       try {
-        await _authService.signIn(
-          walletName: walletName,
-          password: password,
-          options: authOptions,
-        );
-        return;
+        final user = await _signInToExisting(existing, password, authOptions);
+        if (user.walletId.authOptions.privKeyPolicy == _trezorPolicy) return;
+        // The record gained an identity after the users were listed.
+        _log.warning('The existing wallet is not a Trezor wallet; signing out');
+        await _authService.signOut();
       } catch (e) {
-        if (replaced != null) await _releaseTrezorRecord(walletName, replaced);
+        if (replaced != null) await _releaseTrezorRecord(name, replaced);
         if (e is! AuthException || !_cannotOpenWallet(e)) rethrow;
       }
     }
@@ -364,8 +362,8 @@ class TrezorAuthService implements IAuthService {
     final freshName = _nextFreeWalletName(users);
     final freshPassword = _passwordStore.generatePassword();
     _log.warning(
-      'The saved password cannot open the existing Trezor wallet; '
-      'registering a new local wallet',
+      'The existing local wallet cannot be used with this Trezor; '
+      'registering a new one',
     );
     await _authService.register(
       walletName: freshName,
@@ -387,16 +385,49 @@ class TrezorAuthService implements IAuthService {
       (e.type == AuthExceptionType.walletStartFailed &&
           e.details?['kdf_error'] == KdfStartupResult.invalidParams.name);
 
+  /// The wallet named [walletName], or a case variant of it: KDF stores one
+  /// file per name, and macOS and Windows file systems ignore case.
+  static KdfUser? _findWallet(List<KdfUser> users, String walletName) {
+    final lower = walletName.toLowerCase();
+    return users.firstWhereOrNull((u) => u.walletId.name == walletName) ??
+        users.firstWhereOrNull((u) => u.walletId.name.toLowerCase() == lower);
+  }
+
+  /// Signs in to [existing], retrying once if a wallet opened here before
+  /// fails to start. The desktop executable reports a transient startup
+  /// failure the same way as a wrong password.
+  Future<KdfUser> _signInToExisting(
+    KdfUser existing,
+    String password,
+    AuthOptions authOptions,
+  ) async {
+    Future<KdfUser> signIn() => _authService.signIn(
+      walletName: existing.walletId.name,
+      password: password,
+      options: authOptions,
+    );
+    try {
+      return await signIn();
+    } on AuthException catch (e) {
+      if (!_cannotOpenWallet(e) || !_hasIdentity(existing.walletId)) rethrow;
+      _log.warning('A wallet opened here before failed to start; retrying');
+      return signIn();
+    }
+  }
+
   /// Whether a Trezor session may use the wallet with [walletId]: a Trezor
-  /// record, or a placeholder for a wallet this app has never opened.
+  /// record, or one without a verified identity.
   ///
   /// When KDF lists a wallet that has no record, the auth service saves one
-  /// with the default policy and no identity. A record with an identity
-  /// belongs to a wallet opened here, such as a software wallet that a user
-  /// named "My Trezor".
+  /// with the default policy and no identity. A record with an identity and
+  /// another policy is a software wallet, such as one a user named
+  /// "My Trezor".
   static bool _isClaimable(WalletId walletId) =>
       walletId.authOptions.privKeyPolicy == _trezorPolicy ||
-      (walletId.pubkeyHash?.trim().isEmpty ?? true);
+      !_hasIdentity(walletId);
+
+  static bool _hasIdentity(WalletId walletId) =>
+      walletId.pubkeyHash?.trim().isNotEmpty ?? false;
 
   /// Gives a placeholder record the Trezor policy before signing in to it.
   /// Signing in with the default policy would use the local seed instead of
@@ -422,14 +453,20 @@ class TrezorAuthService implements IAuthService {
   }
 
   /// Undoes [_claimTrezorRecord] after a failed sign-in, so a wallet the
-  /// device session could not open keeps its original policy.
+  /// device session could not open keeps its original policy. A record that
+  /// gained an identity meanwhile belongs to a session that opened it, and is
+  /// kept.
   Future<void> _releaseTrezorRecord(String walletName, AuthOptions original) =>
-      _userStorage.updateUser(
-        walletName,
-        (current) => current?.copyWith(
+      _userStorage.updateUser(walletName, (current) {
+        if (current == null ||
+            current.walletId.authOptions.privKeyPolicy != _trezorPolicy ||
+            _hasIdentity(current.walletId)) {
+          return current;
+        }
+        return current.copyWith(
           walletId: current.walletId.copyWith(authOptions: original),
-        ),
-      );
+        );
+      });
 
   /// "My Trezor 2", "My Trezor 3", ... compared case-insensitively, because
   /// wallet files can share a case-insensitive file system.
