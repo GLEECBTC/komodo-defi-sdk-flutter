@@ -61,6 +61,15 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Trezor sign-in** ([@CharlVS]) — sign in to a "My Trezor" wallet file
+  that has no saved record, in any letter case, after giving the record the
+  Trezor policy. A software wallet with that name is never used. When the
+  saved password cannot open the file, such as another app's in a shared
+  KDF directory, the record gets its policy back and a new local wallet is
+  registered under the next free "My Trezor N" name and remembered. A
+  wallet opened here before is tried twice first, because desktop KDF
+  reports any startup failure like a wrong password.
+
 - **Cold-start recovery** ([@CharlVS]) — follow every in-flight history page
   instead of silently stopping after page 20. Wallet-session checks remain
   active throughout pagination, and a wallet change rejects the whole read.
