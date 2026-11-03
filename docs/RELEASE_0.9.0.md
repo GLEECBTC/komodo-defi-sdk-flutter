@@ -100,15 +100,25 @@ The proxy owns its API key. Leave it unset to use KDF's public provider path.
 Optional `LifiIntegratorConfig` sets validated global commission at startup;
 the SDK default is unset. Preserve it through registration, sign-in and restart.
 
-Use the seven-platform KDF manifest at merged `dev` source `e40ac2f` and the contract at
-specs `7c388ea`. A remote KDF must implement that contract too. The frozen coins
-pin is `2b0aefb7`; runtime coin updates remain enabled independently of the
-bundle pin. Never replace a verified checksum with a freshly calculated value
-without independent rebuild provenance. The [29 October roll record](KDF_ARTIFACTS_2026-10-29.json)
-compares every published archive with the matching GitHub Actions artifact.
-The LI.FI squash merge is tree-identical to the prior pin; only three test/helper
-files differ at the selected dev revision. Upstream test failures remain
-explicit in that record and are not waived by a successful build.
+Use the seven-platform KDF manifest at exact `dev` source `a51d69a` and the
+contract at specs `7c388ea`. A remote KDF must implement that contract too.
+The frozen coins pin is `efd3a647`; runtime coin updates remain enabled and
+build-time revision advancement stays disabled. Never replace a checksum
+without independent artifact provenance. The [3 November roll record](KDF_ARTIFACTS_2026-11-03.json)
+compares all seven archives with GitHub artifact digests and ordinary mirrors.
+
+The two KDF commits after `e40ac2f` bump the engine to `3.2.0-beta` and repair
+CI fixtures, shared-wallet test races, test endpoints and proving performance
+in development/test profiles. All ten platform builds and all 17 test jobs
+passed. The original Linux Tendermint timeout and macOS Telegram assertion
+failure remain recorded alongside their passing retries. The upstream main
+merge later changed only `CHANGELOG.md`; this pin retains the exact requested
+and validated revision.
+
+The coins bundle adds TAR, TAR-segwit and TEL-BASE, removes TEL-KRC20 and
+updates TEL ERC-20/Polygon contracts and decimals. It also refreshes GLEEC/GRC-20
+Trezor metadata, ARRR activation data, endpoints and verified icons. Review
+existing TEL integrations against these network-specific migrations.
 
 Trezor asset selection now includes configured GLEEC/GRC-20 assets; this does
 not establish routed hardware signing, all-EVM support or funded device QA.
