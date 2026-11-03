@@ -125,6 +125,15 @@ class _FakeAuthService implements IAuthService {
   }
 
   @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) {
+    ensureSessionContextCurrent(expected);
+    return dispatch();
+  }
+
+  @override
   Stream<AuthSessionContext?> watchSessionContext() => sessions.changes;
   @override
   Future<KdfUser> updateMetadataForSession(

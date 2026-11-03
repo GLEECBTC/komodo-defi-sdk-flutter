@@ -177,6 +177,10 @@ class RoutedSwapLeg with RoutedSwapValue {
 /// offer, not loose numbers.
 class RoutedSwapOffer with RoutedSwapValue {
   /// Wraps a parsed route with the context needed to execute and display it.
+  ///
+  /// An offer made here belongs to no wallet session, so
+  /// `RoutedSwapManager.start` refuses it: only the manager's own offers
+  /// start, and only in the session that priced them.
   const RoutedSwapOffer({
     required this.from,
     required this.to,

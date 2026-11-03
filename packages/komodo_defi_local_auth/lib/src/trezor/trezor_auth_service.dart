@@ -94,6 +94,12 @@ class TrezorAuthService implements IAuthService {
       _authService.ensureSessionContextCurrent(context);
 
   @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) => _authService.runWithSession(expected, dispatch);
+
+  @override
   Stream<AuthSessionContext?> watchSessionContext() =>
       _authService.watchSessionContext();
 
