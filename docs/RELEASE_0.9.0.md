@@ -48,6 +48,12 @@ wallet invalidates existing sessions and rejects late responses. An unanswered
 initial status remains `RoutedSwapStartUnconfirmedException` with its task ID;
 matching amounts or minima in history never establish which swap was started.
 
+Start only offers the manager issued in the current session: from `quote`,
+`quoteMax`, `maxSellAmount` or a failure's `freshOffer`, or a `copyWith` or
+`keepingMinimum` copy of one. For an offer priced before a sign-out, a wallet
+switch or same-wallet reauthentication, and for one constructed directly,
+`start` throws `AuthSessionChangedException` having sent nothing; quote again.
+
 The [manager](../packages/komodo_defi_sdk/lib/src/routed_swaps/routed_swap_manager.dart)
 and [typed requests](../packages/komodo_defi_rpc_methods/lib/src/rpc_methods/routed_swap/routed_swap_requests.dart)
 define the supported parameters. Preserve typed errors, approval hashes,
@@ -62,6 +68,31 @@ part of stable SDK 0.8.1. Gleec Wallet's extra native-Max gas headroom is a
 separate, bounded quote policy and is not introduced into the reusable SDK.
 
 ## Startup and engine compatibility
+
+### Submission ownership
+
+Executable routed offers must come from the same `RoutedSwapManager` that
+executes them, in the same uninterrupted wallet session. Directly constructed
+offers are display-only. `copyWith` and `keepingMinimum` preserve private
+issuance; there is no public session-rebinding API. Reauthentication, including
+the same wallet, requires a fresh quote and confirmation.
+
+Custom auth implementations must implement
+`runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+Validate the original session before waiting and after acquiring the auth read
+lease. Retain that lease until the raw request settles; auth transitions use
+the corresponding write lease. The callback must not re-enter authentication
+or await status polling. Do not release ownership using a timeout while the
+underlying request can still execute. A stalled request can delay wallet
+switching until it settles; a bounded, abortable transport is separate work.
+
+`RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
+callback for a caller's revocable confirmation. It runs under the session lease
+immediately before raw init. A callback failure sends nothing and propagates
+unchanged. Once dispatch may have occurred, retain the existing unconfirmed
+handling and recover through task/history lookup rather than retrying.
+
+### Engine inputs
 
 `KomodoDefiSdkConfig.lifiProxyUrl` is optional. A proxy must be HTTP(S), without
 credentials/query/fragment, and requires P2P enabled because KDF signs requests.

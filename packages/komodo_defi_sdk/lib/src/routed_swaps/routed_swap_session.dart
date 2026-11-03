@@ -205,6 +205,7 @@ class _RoutedSwapSession {
     }
     final progress = _manager._progressFromStatus(
       response.details,
+      session: walletSession,
       accepted: offer,
       previousExecuted: _latest.executedOffer,
       approvalTxHashes: _latest.approvalTxHashes,
@@ -225,6 +226,7 @@ class _RoutedSwapSession {
       if (entry != null && entry.swap.isTerminal) {
         return _manager._progressFromEntry(
           entry,
+          session: walletSession,
           accepted: offer,
           previous: terminal,
         );
@@ -247,7 +249,12 @@ class _RoutedSwapSession {
     final entry = await _manager._entryFor(uuid, walletSession);
     if (entry == null) throw RoutedSwapNotFoundException(uuid);
     _emit(
-      _manager._progressFromEntry(entry, accepted: offer, previous: _latest),
+      _manager._progressFromEntry(
+        entry,
+        session: walletSession,
+        accepted: offer,
+        previous: _latest,
+      ),
     );
   }
 
