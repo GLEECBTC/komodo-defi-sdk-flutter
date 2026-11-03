@@ -24,6 +24,10 @@ abstract interface class IAuthService {
   bool isSessionContextCurrent(AuthSessionContext context);
   void ensureSessionContextCurrent(AuthSessionContext context);
   Stream<AuthSessionContext?> watchSessionContext();
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  );
   Future<KdfUser> updateMetadataForSession(
     AuthSessionContext context,
     Map<String, dynamic> updates,
@@ -275,6 +279,20 @@ class KdfAuthService implements IAuthService {
     if (!isSessionContextCurrent(context)) {
       throw const AuthSessionChangedException();
     }
+  }
+
+  @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) {
+    ensureSessionContextCurrent(expected);
+    return _authMutex.protectRead(() {
+      // A transition revokes its session before waiting for the write lock.
+      // Reject work that was queued behind another authentication operation.
+      ensureSessionContextCurrent(expected);
+      return dispatch();
+    });
   }
 
   @override

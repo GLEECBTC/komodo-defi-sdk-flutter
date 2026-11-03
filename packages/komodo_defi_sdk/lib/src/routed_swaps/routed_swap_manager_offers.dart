@@ -74,7 +74,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
 
     final approval = route.approval;
     final minimum = Decimal.parse(route.toMinimum.amount);
-    return RoutedSwapOffer(
+    final offer = RoutedSwapOffer(
       from: from,
       to: to,
       sellAmount: Decimal.parse(route.from.amount),
@@ -112,7 +112,8 @@ extension _RoutedSwapOffers on RoutedSwapManager {
           ? null
           : Duration(seconds: route.executionDurationS!),
       slippage: slippage,
-    ).boundTo(session);
+    );
+    return _IssuedRoutedSwapOffer(offer, owner: _offerOwner, session: session);
   }
 
   /// The per-coin network fee. Uses the engine's totals when present, and
