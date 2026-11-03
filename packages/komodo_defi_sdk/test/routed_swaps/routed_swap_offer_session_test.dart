@@ -124,35 +124,38 @@ void main() {
     });
   }
 
-  test('a Max offer priced before a wallet change never starts', () async {
-    final max = await manager.quoteMax(from: usdc, to: usdt);
-    final sell = await manager.maxSellAmount(
-      from: usdc,
-      to: usdt,
-      balance: d('100'),
-    );
-    _signIn(auth, _b);
+  for (final next in [_b, _a]) {
+    final transition = next == _a
+        ? 'same-wallet reauthentication'
+        : 'a wallet switch';
 
-    await expectRefused(max);
-    await expectRefused(sell.offer!);
-  });
+    test('a Max offer priced before $transition never starts', () async {
+      final max = await manager.quoteMax(from: usdc, to: usdt);
+      final sell = await manager.maxSellAmount(
+        from: usdc,
+        to: usdt,
+        balance: d('100'),
+      );
+      _signIn(auth, next);
 
-  test(
-    'a copy of an offer starts only in the session that priced it',
-    () async {
+      await expectRefused(max);
+      await expectRefused(sell.offer!);
+    });
+
+    test('a copied offer cannot start after $transition', () async {
       final copy = (await quoted()).copyWith(quotedAt: DateTime.utc(2026, 11));
 
       await manager.start(copy);
       expect(kdf.calls('task::routed_swap::init'), 1);
 
-      _signIn(auth, _b);
+      _signIn(auth, next);
       await expectLater(
         manager.start(copy),
         throwsA(isA<AuthSessionChangedException>()),
       );
       expect(kdf.calls('task::routed_swap::init'), 1);
-    },
-  );
+    });
+  }
 
   test('an offer built by hand never starts', () async {
     await expectRefused(offerOf());
@@ -205,22 +208,25 @@ void main() {
     },
   );
 
-  test(
-    'keeping an accepted minimum preserves original execution authority',
-    () async {
+  for (final next in [_b, _a]) {
+    final transition = next == _a
+        ? 'same-wallet reauthentication'
+        : 'a wallet switch';
+
+    test('keeping an accepted minimum cannot authorize $transition', () async {
       final offer = (await quoted()).keepingMinimum(d('98'))!;
       final copied = offer.copyWith(quotedAt: DateTime.utc(2026, 11));
       await manager.start(copied);
       expect(kdf.calls('task::routed_swap::init'), 1);
 
-      _signIn(auth, _a);
+      _signIn(auth, next);
       await expectLater(
         manager.start(copied),
         throwsA(isA<AuthSessionChangedException>()),
       );
       expect(kdf.calls('task::routed_swap::init'), 1);
-    },
-  );
+    });
+  }
 
   test(
     'a pending lease cannot start after the originating session ends',
@@ -347,41 +353,51 @@ void main() {
     },
   );
 
-  test('a re-priced offer from a failure seen before a wallet change never '
-      'starts', () async {
-    kdf.always(
-      'routed_swap::history',
-      (_) => historyAnswer([
-        entryJson(
-          failedWith(
-            uuidOf(2),
-            'QuoteWorsened',
-            data: {'fresh_route': routeJson(toMin: '98')},
+  for (final next in [_b, _a]) {
+    final transition = next == _a
+        ? 'same-wallet reauthentication'
+        : 'a wallet switch';
+
+    test('a re-priced recovery offer cannot start after $transition', () async {
+      kdf.always(
+        'routed_swap::history',
+        (_) => historyAnswer([
+          entryJson(
+            failedWith(
+              uuidOf(2),
+              'QuoteWorsened',
+              data: {'fresh_route': routeJson(toMin: '98')},
+            ),
           ),
-        ),
-      ]),
-    );
-    final fresh = (await manager.history()).entries.single.failure!.freshOffer!;
-    _signIn(auth, _b);
+        ]),
+      );
+      final fresh =
+          (await manager.history()).entries.single.failure!.freshOffer!;
+      _signIn(auth, next);
 
-    await expectRefused(fresh);
-  });
+      await expectRefused(fresh);
+    });
 
-  test('a quote answered after a wallet change gives no offer', () async {
-    final answer = Completer<Map<String, dynamic>>();
-    kdf.always('routed_swap::quote', (_) => answer.future);
-    final quoting = quoted();
-    await pumpEventQueue();
-    _signIn(auth, _b);
-    answer.complete(
-      ok({
-        'routes': [routeJson()],
-      }),
-    );
+    test('an exact quote answered after $transition gives no offer', () async {
+      final answer = Completer<Map<String, dynamic>>();
+      kdf.always('routed_swap::quote', (_) => answer.future);
+      final quoting = quoted();
+      final rejected = expectLater(
+        quoting,
+        throwsA(isA<AuthSessionChangedException>()),
+      );
+      await pumpEventQueue();
+      _signIn(auth, next);
+      answer.complete(
+        ok({
+          'routes': [routeJson()],
+        }),
+      );
 
-    await expectLater(quoting, throwsA(isA<AuthSessionChangedException>()));
-    expect(kdf.calls('task::routed_swap::init'), 0);
-  });
+      await rejected;
+      expect(kdf.calls('task::routed_swap::init'), 0);
+    });
+  }
 
   for (final next in [_b, _a]) {
     test('a Max quote answered after '
