@@ -9,6 +9,7 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 part 'routed_swap_manager_offers.dart';
 part 'routed_swap_manager_progress.dart';
+part 'routed_swap_issued_offer.dart';
 part 'routed_swap_session.dart';
 
 /// Resolves a KDF coin ticker to a wallet asset, or null when the wallet does
@@ -102,6 +103,7 @@ class RoutedSwapManager {
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
+  final Object _offerOwner = Object();
   AuthSessionContext? _walletSession;
   StreamSubscription<AuthSessionContext?>? _authSubscription;
   bool _disposed = false;
@@ -319,26 +321,44 @@ class RoutedSwapManager {
   /// not issued by this manager in the current wallet session: one priced in
   /// an earlier session, including the same wallet signed in again, or one
   /// built by hand.
-  Future<RoutedSwapHandle> start(RoutedSwapOffer offer) async {
-    final context = await _captureSession();
+  /// [beforeDispatch] may reject an obsolete caller intent. It runs after the
+  /// session lease is acquired, immediately before the init request is sent.
+  /// A throw from it is propagated unchanged and no request is sent.
+  Future<RoutedSwapHandle> start(
+    RoutedSwapOffer offer, {
+    void Function()? beforeDispatch,
+  }) async {
+    if (offer is! _IssuedRoutedSwapOffer ||
+        !identical(offer.owner, _offerOwner)) {
+      throw const AuthSessionChangedException();
+    }
+    final context = offer.session;
     _requireCurrent(context);
-    // Nothing is awaited between this and init.
-    if (offer.issuedIn != context) throw const AuthSessionChangedException();
     final rpc.RoutedSwapInitResponse init;
+    var dispatched = false;
     try {
-      init = await _client.rpc.routedSwap.init(
-        from: offer.from.id,
-        to: offer.to.id,
-        amount: offer.sellAmount.toString(),
-        minToAmount: offer.guaranteedReceive.toString(),
-        slippage: offer.slippage,
-        order: offer.order,
-        provider: offer.provider,
-      );
+      init = await _auth.runWithSession(context, () {
+        _requireCurrent(context);
+        beforeDispatch?.call();
+        _requireCurrent(context);
+        // The lease prevents a wallet switch even when the transport awaits
+        // connection or module setup before delivering this request to KDF.
+        dispatched = true;
+        return _client.rpc.routedSwap.init(
+          from: offer.from.id,
+          to: offer.to.id,
+          amount: offer.sellAmount.toString(),
+          minToAmount: offer.guaranteedReceive.toString(),
+          slippage: offer.slippage,
+          order: offer.order,
+          provider: offer.provider,
+        );
+      });
     } on rpc.RoutedSwapRpcException {
       // A typed rejection comes back before any task exists.
       rethrow;
     } on Object catch (error) {
+      if (!dispatched) rethrow;
       // The request may have reached KDF and created the task.
       throw RoutedSwapStartUnconfirmedException(error);
     }

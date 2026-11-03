@@ -69,6 +69,31 @@ separate, bounded quote policy and is not introduced into the reusable SDK.
 
 ## Startup and engine compatibility
 
+### Submission ownership
+
+Executable routed offers must come from the same `RoutedSwapManager` that
+executes them, in the same uninterrupted wallet session. Directly constructed
+offers are display-only. `copyWith` and `keepingMinimum` preserve private
+issuance; there is no public session-rebinding API. Reauthentication, including
+the same wallet, requires a fresh quote and confirmation.
+
+Custom auth implementations must implement
+`runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+Validate the original session before waiting and after acquiring the auth read
+lease. Retain that lease until the raw request settles; auth transitions use
+the corresponding write lease. The callback must not re-enter authentication
+or await status polling. Do not release ownership using a timeout while the
+underlying request can still execute. A stalled request can delay wallet
+switching until it settles; a bounded, abortable transport is separate work.
+
+`RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
+callback for a caller's revocable confirmation. It runs under the session lease
+immediately before raw init. A callback failure sends nothing and propagates
+unchanged. Once dispatch may have occurred, retain the existing unconfirmed
+handling and recover through task/history lookup rather than retrying.
+
+### Engine inputs
+
 `KomodoDefiSdkConfig.lifiProxyUrl` is optional. A proxy must be HTTP(S), without
 credentials/query/fragment, and requires P2P enabled because KDF signs requests.
 The proxy owns its API key. Leave it unset to use KDF's public provider path.

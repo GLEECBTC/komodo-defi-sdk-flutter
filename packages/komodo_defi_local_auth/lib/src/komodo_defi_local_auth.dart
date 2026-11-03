@@ -44,6 +44,23 @@ abstract interface class KomodoDefiAuth {
   void ensureSessionContextCurrent(AuthSessionContext context);
   Stream<AuthSessionContext?> watchSessionContext();
 
+  /// Dispatches one request against [expected]'s engine while preventing an
+  /// authentication transition from replacing it. An ended session is rejected
+  /// before [dispatch] runs, including one revoked while waiting for the lease.
+  ///
+  /// [dispatch] must perform only the raw request: it must not call auth APIs,
+  /// acquire another session lease, or include polling/recovery. The lease is
+  /// held until its actual transport settles. Do not return a timeout wrapper
+  /// while the underlying request is still executable. A stalled request can
+  /// therefore delay sign-out or wallet switching.
+  ///
+  /// Once [dispatch] begins, a later session change does not prove
+  /// cancellation; callers must preserve uncertainty about acceptance.
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  );
+
   /// Merges metadata atomically after fresh identity verification. Null values
   /// remove keys. Throws [AuthIdentityUnavailableException] for retryable proof
   /// loss and [AuthSessionChangedException] when the original session ended.
@@ -423,6 +440,12 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   @override
   Stream<AuthSessionContext?> watchSessionContext() =>
       _authService.watchSessionContext();
+
+  @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) => _authService.runWithSession(expected, dispatch);
 
   @override
   Future<KdfUser> updateMetadataForSession(

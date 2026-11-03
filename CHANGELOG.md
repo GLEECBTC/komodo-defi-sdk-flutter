@@ -88,7 +88,13 @@ The harness remains unpublished. All version constraints move together.
   session that priced it, and so do its copies. `start` refuses any other
   offer with `AuthSessionChangedException` before sending anything: one priced
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
-  constructed directly.
+  constructed directly or issued by another manager. Supported copies retain
+  private issuance; callers cannot rebind an old offer to a new session.
+- **Session-owned dispatch** ([@CharlVS]): `runWithSession` holds the auth read
+  lease until a raw submission request settles. Wallet switching cannot replace
+  the engine beneath that request. Routed starts recheck caller intent under
+  the lease through `beforeDispatch`; failures before dispatch are rejections,
+  while lost answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.

@@ -39,5 +39,14 @@ class RoutedTestAuth extends Fake implements KomodoDefiLocalAuth {
   }
 
   @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) async {
+    ensureSessionContextCurrent(expected);
+    return dispatch();
+  }
+
+  @override
   Stream<AuthSessionContext?> watchSessionContext() => _sessions.changes;
 }
