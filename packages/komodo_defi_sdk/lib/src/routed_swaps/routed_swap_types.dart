@@ -1,7 +1,10 @@
 import 'package:decimal/decimal.dart';
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart'
+    show AuthSessionContext;
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart' as rpc;
 import 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_value.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:meta/meta.dart' show internal;
 
 part 'routed_swap_outcome_types.dart';
 part 'routed_swap_progress.dart';
@@ -177,6 +180,10 @@ class RoutedSwapLeg with RoutedSwapValue {
 /// offer, not loose numbers.
 class RoutedSwapOffer with RoutedSwapValue {
   /// Wraps a parsed route with the context needed to execute and display it.
+  ///
+  /// An offer made here belongs to no wallet session, so
+  /// `RoutedSwapManager.start` refuses it: only the manager's own offers
+  /// start, and only in the session that priced them.
   const RoutedSwapOffer({
     required this.from,
     required this.to,
@@ -199,7 +206,35 @@ class RoutedSwapOffer with RoutedSwapValue {
     this.toolLogoUrl,
     this.estimatedDuration,
     this.slippage,
-  });
+  }) : _session = null;
+
+  const RoutedSwapOffer._issued({
+    required this.from,
+    required this.to,
+    required this.sellAmount,
+    required this.expectedReceive,
+    required this.guaranteedReceive,
+    required this.kind,
+    required this.costs,
+    required this.networkFees,
+    required this.legs,
+    required this.quotedAt,
+    required this.provider,
+    required this.toolKey,
+    required this.toolName,
+    required this.route,
+    required this.order,
+    required this.fromAddress,
+    required this.toAddress,
+    required this.approval,
+    required this.toolLogoUrl,
+    required this.estimatedDuration,
+    required this.slippage,
+    required AuthSessionContext? session,
+  }) : _session = session;
+
+  /// The wallet session that priced this offer; null for one built by hand.
+  final AuthSessionContext? _session;
 
   /// The asset being sold.
   final AssetId from;
@@ -326,30 +361,46 @@ class RoutedSwapOffer with RoutedSwapValue {
   /// A copy re-stamped with [quotedAt].
   RoutedSwapOffer copyWith({DateTime? quotedAt}) => _copy(quotedAt: quotedAt);
 
-  RoutedSwapOffer _copy({DateTime? quotedAt, Decimal? guaranteedReceive}) =>
-      RoutedSwapOffer(
-        from: from,
-        to: to,
-        sellAmount: sellAmount,
-        expectedReceive: expectedReceive,
-        guaranteedReceive: guaranteedReceive ?? this.guaranteedReceive,
-        kind: kind,
-        costs: costs,
-        networkFees: networkFees,
-        legs: legs,
-        quotedAt: quotedAt ?? this.quotedAt,
-        provider: provider,
-        toolKey: toolKey,
-        toolName: toolName,
-        toolLogoUrl: toolLogoUrl,
-        route: route,
-        order: order,
-        fromAddress: fromAddress,
-        toAddress: toAddress,
-        approval: approval,
-        estimatedDuration: estimatedDuration,
-        slippage: slippage,
-      );
+  /// The wallet session this offer was issued in by the manager, or null.
+  ///
+  /// Not part of equality: the same numbers are the same offer, whichever
+  /// session priced them.
+  @internal
+  AuthSessionContext? get issuedIn => _session;
+
+  /// This offer, issued in [session]. Its copies stay issued in it.
+  @internal
+  RoutedSwapOffer boundTo(AuthSessionContext session) =>
+      _copy(session: session);
+
+  RoutedSwapOffer _copy({
+    DateTime? quotedAt,
+    Decimal? guaranteedReceive,
+    AuthSessionContext? session,
+  }) => RoutedSwapOffer._issued(
+    from: from,
+    to: to,
+    sellAmount: sellAmount,
+    expectedReceive: expectedReceive,
+    guaranteedReceive: guaranteedReceive ?? this.guaranteedReceive,
+    kind: kind,
+    costs: costs,
+    networkFees: networkFees,
+    legs: legs,
+    quotedAt: quotedAt ?? this.quotedAt,
+    provider: provider,
+    toolKey: toolKey,
+    toolName: toolName,
+    toolLogoUrl: toolLogoUrl,
+    route: route,
+    order: order,
+    fromAddress: fromAddress,
+    toAddress: toAddress,
+    approval: approval,
+    estimatedDuration: estimatedDuration,
+    slippage: slippage,
+    session: session ?? _session,
+  );
 
   @override
   List<Object?> get props => [

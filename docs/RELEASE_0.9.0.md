@@ -48,6 +48,12 @@ wallet invalidates existing sessions and rejects late responses. An unanswered
 initial status remains `RoutedSwapStartUnconfirmedException` with its task ID;
 matching amounts or minima in history never establish which swap was started.
 
+Start only offers the manager issued in the current session: from `quote`,
+`quoteMax`, `maxSellAmount` or a failure's `freshOffer`, or a `copyWith` or
+`keepingMinimum` copy of one. For an offer priced before a sign-out, a wallet
+switch or same-wallet reauthentication, and for one constructed directly,
+`start` throws `AuthSessionChangedException` having sent nothing; quote again.
+
 The [manager](../packages/komodo_defi_sdk/lib/src/routed_swaps/routed_swap_manager.dart)
 and [typed requests](../packages/komodo_defi_rpc_methods/lib/src/rpc_methods/routed_swap/routed_swap_requests.dart)
 define the supported parameters. Preserve typed errors, approval hashes,
