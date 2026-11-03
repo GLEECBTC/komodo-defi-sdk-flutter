@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_build_config.dart';
 import 'package:komodo_wallet_build_transformer/src/steps/models/api/api_build_platform_config.dart';
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
 
 void main() {
   const pinnedCommit = 'bd413dcfea73c9de2e85903323946a378b180fa7';
@@ -47,6 +48,17 @@ void main() {
   };
 
   group('ApiBuildConfig artifact policy', () {
+    test('reference YAML matches the canonical frozen build configuration', () {
+      const base = '../komodo_defi_framework/app_build/build_config';
+      final canonical =
+          jsonDecode(File('$base.json').readAsStringSync())
+              as Map<String, dynamic>;
+      final reference = loadYaml(File('$base.yaml').readAsStringSync());
+      expect(reference, canonical);
+      final coins = canonical['coins'] as Map<String, dynamic>;
+      expect(coins['update_commit_on_build'], isFalse);
+    });
+
     test('the shipped manifest pins the complete platform build set', () {
       final manifest = File(
         '../komodo_defi_framework/app_build/build_config.json',

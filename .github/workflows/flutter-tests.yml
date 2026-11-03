@@ -22,32 +22,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Flutter (stable)
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: "3.41.4"
           architecture: x64
 
       - name: Cache pub dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.pub-cache
-            **/.dart_tool
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          key: ${{ runner.os }}-pub-flutter-3.41.4-${{ hashFiles('**/pubspec.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pub-
 
       - name: Discover packages
         id: discover
         shell: bash
+        env:
+          INPUT_PACKAGE: ${{ inputs.package }}
+          INPUT_PACKAGE_REGEX: ${{ inputs.package_regex }}
         run: |
           set -euo pipefail
-          input_pkg="${{ github.event.inputs.package || '' }}"
-          input_re="${{ github.event.inputs.package_regex || '' }}"
+          input_pkg="$INPUT_PACKAGE"
+          input_re="$INPUT_PACKAGE_REGEX"
 
           # Discover all packages with pubspec.yaml
           mapfile -t all_pkgs < <(find packages -mindepth 1 -maxdepth 1 -type d -exec test -e '{}/pubspec.yaml' ';' -print | sort)
@@ -106,12 +108,22 @@ jobs:
             done
           fi
 
+      - name: Record resolved validation dependencies
+        if: steps.discover.outputs.packages != ''
+        shell: bash
+        run: |
+          mkdir -p test_logs
+          cp pubspec.lock test_logs/pubspec.lock
+          flutter --version --machine > test_logs/flutter-version.json
+          git rev-parse HEAD > test_logs/sdk-commit.txt
+          cp packages/komodo_defi_framework/app_build/build_config.json test_logs/build_config.json
+
       - name: Run dry web build to generate assets (expected to fail)
         if: steps.discover.outputs.packages != ''
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: packages/komodo_defi_sdk/example
-        run: flutter build web --release || echo "Dry build completed (failure expected)"
+        run: flutter build web --no-pub --release || echo "Dry build completed (failure expected)"
 
       - name: Test wallet isolation and GasFree races in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_sdk')
@@ -159,10 +171,12 @@ jobs:
           log_dir="$GITHUB_WORKSPACE/test_logs"
           mkdir -p "$log_dir"
 
-          echo "# Test Results" > test_summary.md
-          echo "" >> test_summary.md
-          echo "| Package | Status | Details |" >> test_summary.md
-          echo "|---------|--------|---------|" >> test_summary.md
+          {
+            echo "# Test Results"
+            echo ""
+            echo "| Package | Status | Details |"
+            echo "|---------|--------|---------|"
+          } > test_summary.md
 
           # Run tests for each package
           for pkg in $packages; do
@@ -176,7 +190,7 @@ jobs:
             # pipefail preserves the test exit code while tee retains the full
             # output, including failures before the final summary lines.
             log_file="$log_dir/${pkg##*/}.log"
-            if flutter test -r expanded 2>&1 | tee "$log_file"; then
+            if flutter test --no-pub -r expanded 2>&1 | tee "$log_file"; then
               test_results["$pkg"]="✅ PASS"
               test_outputs["$pkg"]="Tests passed successfully"
               echo "✅ $pkg: PASSED"
@@ -224,12 +238,12 @@ jobs:
             echo "✅ All test suites passed!"
           fi
 
-      - name: Upload test summary and package logs
+      - name: Upload test summary, package logs and resolved dependencies
         if: always() && steps.discover.outputs.packages != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-summary
           path: |
             test_summary.md
-            test_logs/*.log
+            test_logs/
           retention-days: 30
