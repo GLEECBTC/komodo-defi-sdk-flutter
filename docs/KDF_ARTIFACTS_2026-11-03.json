@@ -1,0 +1,919 @@
+{
+  "repository": "GLEECBTC/kdf-internal",
+  "branch": "dev",
+  "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+  "previous_commit": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+  "source_comparison": {
+    "base": "e40ac2fb4319d352bf9c93683eb2518ce9f939e0",
+    "head": "a51d69a11ff937ecf9678e9b37632af578252846",
+    "status": "ahead",
+    "ahead_by": 2,
+    "commits": [
+      {
+        "sha": "8274979b89c4be52a1e45e90771519495f8ddbe6",
+        "subject": "chore(release): bump version to 3.2.0-beta (#36)"
+      },
+      {
+        "sha": "a51d69a11ff937ecf9678e9b37632af578252846",
+        "subject": "fix(tests): fix remaining CI failures on dev (#39)"
+      }
+    ],
+    "files": [
+      {
+        "path": ".docker/test-nodes.yml",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "Cargo.lock",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "Cargo.toml",
+        "status": "modified",
+        "additions": 32,
+        "deletions": 0
+      },
+      {
+        "path": "docs/DOCKER_TESTS.md",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "mm2src/kdf_walletconnect/src/storage/mod.rs",
+        "status": "modified",
+        "additions": 4,
+        "deletions": 3
+      },
+      {
+        "path": "mm2src/mm2_bin_lib/Cargo.toml",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "mm2src/mm2_main/tests/docker_tests/helpers/sia.rs",
+        "status": "modified",
+        "additions": 4,
+        "deletions": 2
+      },
+      {
+        "path": "mm2src/mm2_main/tests/docker_tests/helpers/tendermint.rs",
+        "status": "modified",
+        "additions": 59,
+        "deletions": 15
+      },
+      {
+        "path": "mm2src/mm2_main/tests/docker_tests/tendermint_swap_tests.rs",
+        "status": "modified",
+        "additions": 9,
+        "deletions": 4
+      },
+      {
+        "path": "mm2src/mm2_main/tests/docker_tests/tendermint_tests.rs",
+        "status": "modified",
+        "additions": 13,
+        "deletions": 8
+      },
+      {
+        "path": "mm2src/mm2_main/tests/mm2_tests/bch_and_slp_tests.rs",
+        "status": "modified",
+        "additions": 48,
+        "deletions": 123
+      },
+      {
+        "path": "mm2src/mm2_main/tests/mm2_tests/mm2_tests_inner.rs",
+        "status": "modified",
+        "additions": 123,
+        "deletions": 105
+      },
+      {
+        "path": "mm2src/mm2_test_helpers/src/for_tests.rs",
+        "status": "modified",
+        "additions": 43,
+        "deletions": 16
+      }
+    ]
+  },
+  "workflow_run_url": "https://github.com/GLEECBTC/kdf-internal/actions/runs/41650681364",
+  "build_inputs": {
+    "target": "all",
+    "push_docker": false,
+    "commit_deployment": false
+  },
+  "build_result": "success; all ten platform jobs passed on final attempt9, deployment commitment intentionally skipped",
+  "artifacts": [
+    {
+      "platform": "wasm",
+      "sdk_platform": "web",
+      "artifact_id": 13237478911,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "c899d3950470955a9d6a2c6c4602a05c8bccf041cbb92c99cc520086ae557c9b",
+      "published_archive_sha256": "5389d81b8ab6f126caa24782e4f8f15c5205cc7b5103c9602d8e5b554e390c51",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-wasm.zip",
+      "bytes": 11971521,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-wasm.zip",
+          "sha256": "5389d81b8ab6f126caa24782e4f8f15c5205cc7b5103c9602d8e5b554e390c51",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-wasm.zip",
+          "sha256": "5389d81b8ab6f126caa24782e4f8f15c5205cc7b5103c9602d8e5b554e390c51",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-wasm.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "ios-aarch64",
+      "sdk_platform": "ios",
+      "artifact_id": 13256875009,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "16213b2aba447316adb7292764be1ab568c24c585be33db3aa4221c570679a73",
+      "published_archive_sha256": "fb6f7a42cf43506478cd4cc7e398f0bde3a118778e03c2694ddefefc5e4c9c37",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-ios-aarch64.zip",
+      "bytes": 50307733,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-ios-aarch64.zip",
+          "sha256": "fb6f7a42cf43506478cd4cc7e398f0bde3a118778e03c2694ddefefc5e4c9c37",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-ios-aarch64.zip",
+          "sha256": "fb6f7a42cf43506478cd4cc7e398f0bde3a118778e03c2694ddefefc5e4c9c37",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-ios-aarch64.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "mac-universal",
+      "sdk_platform": "macos",
+      "artifact_id": 13258360978,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "ea2c0c242a229bc38d2d62c253c483b6feec479b78e92995843f2bc1b2e4e7ec",
+      "published_archive_sha256": "62fe0d767548987ecb901e4182f6d88efb65d019ceba20ab8510ce4d7a1e8626",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-mac-universal.zip",
+      "bytes": 55991414,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-mac-universal.zip",
+          "sha256": "62fe0d767548987ecb901e4182f6d88efb65d019ceba20ab8510ce4d7a1e8626",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-mac-universal.zip",
+          "sha256": "62fe0d767548987ecb901e4182f6d88efb65d019ceba20ab8510ce4d7a1e8626",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-mac-universal.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "android-armv7",
+      "sdk_platform": "android-armv7",
+      "artifact_id": 13238429821,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "3f2576d0b3950d07c480387e15e870dd23e12876ce4606cfa9e3763fc13a36a7",
+      "published_archive_sha256": "f5daf08c2089cefaa9c78ad9bdfb4895f452cfd0f27e368f4306298064797b3b",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-android-armv7.zip",
+      "bytes": 54484658,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-android-armv7.zip",
+          "sha256": "f5daf08c2089cefaa9c78ad9bdfb4895f452cfd0f27e368f4306298064797b3b",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-android-armv7.zip",
+          "sha256": "f5daf08c2089cefaa9c78ad9bdfb4895f452cfd0f27e368f4306298064797b3b",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-android-armv7.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "android-aarch64",
+      "sdk_platform": "android-aarch64",
+      "artifact_id": 13239722752,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "1472fa616912c7646eb3c8fa86fe801335b7a70d2b79bcc929752aa040bcdfd3",
+      "published_archive_sha256": "7b4b30d98ecc4b0a9fdc1a9b9a7a562c6269450f16087f82459239fe61dfe738",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-android-aarch64.zip",
+      "bytes": 55710175,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-android-aarch64.zip",
+          "sha256": "7b4b30d98ecc4b0a9fdc1a9b9a7a562c6269450f16087f82459239fe61dfe738",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-android-aarch64.zip",
+          "sha256": "7b4b30d98ecc4b0a9fdc1a9b9a7a562c6269450f16087f82459239fe61dfe738",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-android-aarch64.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "linux-x86-64",
+      "sdk_platform": "linux",
+      "artifact_id": 13237689858,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "fe0dca6aa54f98b1462bd273ab48879881e7ecfda3f66bf14c96751c0866326d",
+      "published_archive_sha256": "522fb3a5ec0524588be10a2fc71085b87d9333b459e68e52baef64f7ff13eb52",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-linux-x86-64.zip",
+      "bytes": 29708858,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-linux-x86-64.zip",
+          "sha256": "522fb3a5ec0524588be10a2fc71085b87d9333b459e68e52baef64f7ff13eb52",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-linux-x86-64.zip",
+          "sha256": "522fb3a5ec0524588be10a2fc71085b87d9333b459e68e52baef64f7ff13eb52",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-linux-x86-64.zip",
+      "status": "verified"
+    },
+    {
+      "platform": "win-x86-64",
+      "sdk_platform": "windows",
+      "artifact_id": 13239761371,
+      "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+      "workflow_run": 41650681364,
+      "github_archive_sha256": "f2978d11e9f85524d3a1352bc04afe073121ea3157c59187095687e0dfdfcec7",
+      "published_archive_sha256": "2f8a7f7ba3c659aaa685db9363b1d42cef5574a8a945e0d63b2e4bbcd222a0ef",
+      "zip_integrity_checked": true,
+      "filename": "kdf_a51d69a-win-x86-64.zip",
+      "bytes": 30254469,
+      "mirror_verification": [
+        {
+          "url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-win-x86-64.zip",
+          "sha256": "2f8a7f7ba3c659aaa685db9363b1d42cef5574a8a945e0d63b2e4bbcd222a0ef",
+          "status": "verified"
+        },
+        {
+          "url": "https://nebula.decker.im/dev/kdf_a51d69a-win-x86-64.zip",
+          "sha256": "2f8a7f7ba3c659aaa685db9363b1d42cef5574a8a945e0d63b2e4bbcd222a0ef",
+          "status": "verified"
+        }
+      ],
+      "published_url": "https://devbuilds.gleec.com/dev/kdf_a51d69a-win-x86-64.zip",
+      "status": "verified"
+    }
+  ],
+  "upstream_test_run": {
+    "repository": "GLEECBTC/kdf-internal",
+    "commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+    "workflow_run": 41650695853,
+    "attempt": 10,
+    "conclusion": "success",
+    "passed_jobs": 17,
+    "jobs": [
+      {
+        "name": "Unit / macOS",
+        "conclusion": "success"
+      },
+      {
+        "name": "Unit / Linux",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / SLP",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / ETH",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Watchers (UTXO)",
+        "conclusion": "success"
+      },
+      {
+        "name": "WASM",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / QRC20",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Integration (Cross-chain)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Swaps (UTXO)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Tendermint",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Ordermatch (UTXO)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / ZCoin",
+        "conclusion": "success"
+      },
+      {
+        "name": "Unit / Windows",
+        "conclusion": "success"
+      },
+      {
+        "name": "Docker / Sia",
+        "conclusion": "success"
+      },
+      {
+        "name": "Integration / Windows",
+        "conclusion": "success"
+      },
+      {
+        "name": "Integration / Linux",
+        "conclusion": "success"
+      },
+      {
+        "name": "Integration / macOS",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "original_failures_and_retries": [
+    {
+      "job": "Unit / Linux",
+      "original_job_id": 125967728827,
+      "test": "tendermint::tendermint_coin::tests::test_htlc_create_and_claim",
+      "failure": "TimeoutError",
+      "retry_job_id": 125989731415,
+      "retry_result": "success"
+    },
+    {
+      "job": "Unit / macOS",
+      "original_job_id": 126113230830,
+      "test": "lp_message_service::telegram::telegram_tests::test_send_message",
+      "failure": "assertion failed: resp; Telegram ok=false",
+      "retry_job_id": 126129990923,
+      "retry_result": "success"
+    }
+  ],
+  "capacity_cancellations": "Unstarted Apple jobs repeatedly cancelled because GitHub hosted runners were unavailable. Only failed/cancelled jobs were retried after each whole workflow completed; successful jobs were preserved. Original attempts retained. Capacity cancellations are not test passes.",
+  "coins": {
+    "repository": "GLEECBTC/coins",
+    "previous_commit": "2b0aefb78b184091ab086c66e513d8b03f5d5a01",
+    "commit": "efd3a6471709f7e13e0b03277e37548e11840aae",
+    "source_files": [
+      {
+        "revision": "previous",
+        "path": "coins",
+        "sha256": "ce2e8dbcde41a1a2d398ef9211ec89061d6dfb4e5b75e4293ee536b055e996ee",
+        "git_blob_sha1": "e5f5ff30389ba6df0872cc006eaa6b3bfbffa3ce",
+        "bytes": 383206
+      },
+      {
+        "revision": "previous",
+        "path": "utils/coins_config_unfiltered.json",
+        "sha256": "6a1cb3a8c0fc69f2ef2525151238c6433875ce947d8ced78c6411035dc662ea5",
+        "git_blob_sha1": "77679791efb677be55914a791dcd1b0f166f970c",
+        "bytes": 1564362
+      },
+      {
+        "revision": "previous",
+        "path": "seed-nodes.json",
+        "sha256": "d1f450fccc2a55b974e205e35042e56f82289a8fd0911cbe310234bef174f80b",
+        "git_blob_sha1": "ae897b2f1ffa833d8f706bedc1459df80f982d0f",
+        "bytes": 1930
+      },
+      {
+        "revision": "previous",
+        "path": "utils/icon_checksums.json",
+        "sha256": "9f321a0fab7479bafd126cc2444c5e10d7e432cdc22da025cb10413c435f4d34",
+        "git_blob_sha1": "0407a96217920380dbc06cca73822403702e0a77",
+        "bytes": 83751
+      },
+      {
+        "revision": "candidate",
+        "path": "coins",
+        "sha256": "8f212e78ffc6455d8266aa0c72c78e3843a0782b6daf93b60768c65598c92ecf",
+        "git_blob_sha1": "f3915200a2efca0d06a9f54030cb35db7e173a28",
+        "bytes": 385801
+      },
+      {
+        "revision": "candidate",
+        "path": "utils/coins_config_unfiltered.json",
+        "sha256": "13a060ffb3f01d5f565f203ee190bde9573eb0ae29223c61b8bfe19720e37d9f",
+        "git_blob_sha1": "934df00345f902b4a70a075a29ed1a572cd15152",
+        "bytes": 1566812
+      },
+      {
+        "revision": "candidate",
+        "path": "seed-nodes.json",
+        "sha256": "2755231cdd598dc89238cd9ad38d7df8acf00853c738aca7e467b2ea9622c756",
+        "git_blob_sha1": "b4435f6bf955a6818ce8e7d029fa3553e51add66",
+        "bytes": 1210
+      },
+      {
+        "revision": "candidate",
+        "path": "utils/icon_checksums.json",
+        "sha256": "cf338a935066a7f24c53cf55245a441ffedc0f0e547b3a106765d552150a321d",
+        "git_blob_sha1": "a61e8faf55a31e60d1e7296200de0dda278957dc",
+        "bytes": 83939
+      }
+    ],
+    "previous_count": 770,
+    "candidate_count": 772,
+    "added": [
+      "TAR",
+      "TAR-segwit",
+      "TEL-BASE"
+    ],
+    "removed": [
+      "TEL-KRC20"
+    ],
+    "changed": [
+      {
+        "coin": "A29-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "ARRR",
+        "fields": [
+          "protocol"
+        ]
+      },
+      {
+        "coin": "BCASH-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "BCZERO-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "GLEEC",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "GLEECT",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "IL8P",
+        "fields": [
+          "avg_blocktime",
+          "isPoS",
+          "mature_confirmations",
+          "required_confirmations"
+        ]
+      },
+      {
+        "coin": "KMD-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "KMDT-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "LYNX",
+        "fields": [
+          "avg_blocktime",
+          "links",
+          "mature_confirmations",
+          "required_confirmations"
+        ]
+      },
+      {
+        "coin": "MDX-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "MON",
+        "fields": [
+          "estimate_gas_mult"
+        ]
+      },
+      {
+        "coin": "RAPH-GRC20",
+        "fields": [
+          "trezor_coin"
+        ]
+      },
+      {
+        "coin": "RIN",
+        "fields": [
+          "links"
+        ]
+      },
+      {
+        "coin": "RIN-segwit",
+        "fields": [
+          "links"
+        ]
+      },
+      {
+        "coin": "TEL-ERC20",
+        "fields": [
+          "decimals",
+          "links",
+          "protocol"
+        ],
+        "contract": "0x7E13B43065380aCdeC1c2d138c579cbBbafA0731",
+        "decimals": {
+          "old": 2,
+          "new": 18
+        }
+      },
+      {
+        "coin": "TEL-PLG20",
+        "fields": [
+          "decimals",
+          "protocol"
+        ],
+        "contract": "0x7E13B43065380aCdeC1c2d138c579cbBbafA0731",
+        "decimals": {
+          "old": 2,
+          "new": 18
+        }
+      },
+      {
+        "coin": "USDC-MON",
+        "fields": [
+          "gas_limit"
+        ]
+      },
+      {
+        "coin": "USDE-MON",
+        "fields": [
+          "gas_limit"
+        ]
+      },
+      {
+        "coin": "USDT-MON",
+        "fields": [
+          "gas_limit"
+        ]
+      },
+      {
+        "coin": "WAM",
+        "fields": [
+          "links"
+        ]
+      },
+      {
+        "coin": "WBTC-MON",
+        "fields": [
+          "gas_limit"
+        ]
+      },
+      {
+        "coin": "ZEC",
+        "fields": [
+          "txfee"
+        ]
+      }
+    ],
+    "icon_validation": {
+      "checked": 445,
+      "missing": [],
+      "mismatches": [],
+      "tar_sha256": "e136260c98dc598b19b669ede5d2936436bba5dc27f3b51b6d30dbbb0e0864ec"
+    },
+    "provider_validation": {
+      "provider": "LocalAssetCoinConfigProvider",
+      "previous_loaded": 734,
+      "candidate_loaded": 736,
+      "omitted": {
+        "previous": [
+          "BRLA-GNO",
+          "ENA-MNT",
+          "EURE-GNO",
+          "FLR",
+          "GBPE-GNO",
+          "GLEECT",
+          "GNO-GNO",
+          "HYPE",
+          "KMDT-GRC20",
+          "MNT",
+          "MON",
+          "RBTC",
+          "SBCH",
+          "SEPOLIAETH",
+          "TAO",
+          "USDC-GNO",
+          "USDC-HYPE",
+          "USDC-MNT",
+          "USDC-MON",
+          "USDC-TAO",
+          "USDC-XDC",
+          "USDC-XPL",
+          "USDE-HYPE",
+          "USDE-MNT",
+          "USDE-MON",
+          "USDE-XPL",
+          "USDT-FLR",
+          "USDT-HYPE",
+          "USDT-MON",
+          "USDT-XPL",
+          "WBTC-MON",
+          "XAUT-XPL",
+          "XDAI",
+          "XDC",
+          "XPL",
+          "ZCHF-GNO"
+        ],
+        "candidate": [
+          "BRLA-GNO",
+          "ENA-MNT",
+          "EURE-GNO",
+          "FLR",
+          "GBPE-GNO",
+          "GLEECT",
+          "GNO-GNO",
+          "HYPE",
+          "KMDT-GRC20",
+          "MNT",
+          "MON",
+          "RBTC",
+          "SBCH",
+          "SEPOLIAETH",
+          "TAO",
+          "USDC-GNO",
+          "USDC-HYPE",
+          "USDC-MNT",
+          "USDC-MON",
+          "USDC-TAO",
+          "USDC-XDC",
+          "USDC-XPL",
+          "USDE-HYPE",
+          "USDE-MNT",
+          "USDE-MON",
+          "USDE-XPL",
+          "USDT-FLR",
+          "USDT-HYPE",
+          "USDT-MON",
+          "USDT-XPL",
+          "WBTC-MON",
+          "XAUT-XPL",
+          "XDAI",
+          "XDC",
+          "XPL",
+          "ZCHF-GNO"
+        ]
+      },
+      "new_omissions": []
+    },
+    "bundle_downloads": "All three mapped generated files equal exact-commit raw downloads byte for byte; repeated transformer pass skips unchanged verified assets",
+    "runtime_updates_enabled": true,
+    "update_commit_on_build": false
+  },
+  "strict_cli": {
+    "result": "passed",
+    "platforms": 7,
+    "source": "https://devbuilds.gleec.com",
+    "manifest": "Byte-identical to final SDK build_config.json; independently seeded seven trusted hashes",
+    "flags": "--branch dev --commit a51d69a11ff937ecf9678e9b37632af578252846 --source mirror --platform all --strict",
+    "configuration_sha256": "667a9e28268e691857712f2410a0d29564aca4dbd7dff8eb3a53848785bcca64"
+  },
+  "read_only_native_smoke": {
+    "tested_at": "2026-11-03T18:37:57.963163+00:00",
+    "engine_commit": "a51d69a11ff937ecf9678e9b37632af578252846",
+    "coins_commit": "efd3a6471709f7e13e0b03277e37548e11840aae",
+    "proxy": "https://quicknode.gleec.com/lifi",
+    "integrator": {
+      "name": "gleec-dex-staging",
+      "fee_bps": 178,
+      "lifi_fee_bps": 22
+    },
+    "scope": "fresh unfunded wallet; version, activation, quote and stop only",
+    "checks": [
+      {
+        "pair": [
+          "ETH-ARB20",
+          "USDC-ARB20"
+        ],
+        "fee_model": "standard",
+        "exact_amount": "0.05",
+        "receive": "112.61636",
+        "minimum": "112.053278",
+        "gas_funding": [
+          {
+            "coin": "ETH-ARB20",
+            "amount": "0.0000066856959",
+            "required_balance": "0.0000715671798051",
+            "amount_usd": "0.015382716554556"
+          }
+        ],
+        "included_commission": {
+          "name": "LIFI Fixed Fee",
+          "coin": "ETH-ARB20",
+          "amount": "0.001",
+          "amount_usd": "2.3008",
+          "included": true
+        },
+        "max_error": {
+          "error_type": "InsufficientBalance",
+          "error_data": {
+            "coin": "ETH-ARB20",
+            "available": "0",
+            "required": "0.000000000000000001"
+          }
+        },
+        "passed": true
+      },
+      {
+        "pair": [
+          "ETH-BASE",
+          "USDC-BASE"
+        ],
+        "fee_model": "op_stack",
+        "exact_amount": "0.05",
+        "receive": "112.616885",
+        "minimum": "112.053801",
+        "gas_funding": [
+          {
+            "coin": "ETH-BASE",
+            "amount": "0.000002119383755935",
+            "required_balance": "0.000005944082387591",
+            "amount_usd": "0.00487318384537158290"
+          }
+        ],
+        "included_commission": {
+          "name": "LIFI Fixed Fee",
+          "coin": "ETH-BASE",
+          "amount": "0.001",
+          "amount_usd": "2.2993",
+          "included": true
+        },
+        "max_error": {
+          "error_type": "InsufficientBalance",
+          "error_data": {
+            "coin": "ETH-BASE",
+            "available": "0",
+            "required": "0.000000000000000001"
+          }
+        },
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "coins_config_sha256": "13a060ffb3f01d5f565f203ee190bde9573eb0ae29223c61b8bfe19720e37d9f",
+    "phase": "complete",
+    "version": "3.2.0-beta_a51d69a"
+  },
+  "sdk_validation": {
+    "suites": 16,
+    "passed": 3112,
+    "skipped": 14,
+    "packages": [
+      {
+        "package": "dragon_charts_flutter",
+        "passed": 17,
+        "skipped": 0
+      },
+      {
+        "package": "dragon_logs",
+        "passed": 27,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_cex_market_data",
+        "passed": 362,
+        "skipped": 6
+      },
+      {
+        "package": "komodo_coin_updates",
+        "passed": 106,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_coins",
+        "passed": 143,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_defi_framework",
+        "passed": 101,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_defi_harness",
+        "passed": 224,
+        "skipped": 4
+      },
+      {
+        "package": "komodo_defi_local_auth",
+        "passed": 156,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_defi_rpc_methods",
+        "passed": 379,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_defi_sdk",
+        "passed": 1238,
+        "skipped": 1
+      },
+      {
+        "package": "komodo_defi_types",
+        "passed": 191,
+        "skipped": 3
+      },
+      {
+        "package": "komodo_legacy_wallet_migration",
+        "passed": 14,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_symbol_converter",
+        "passed": 1,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_ui",
+        "passed": 4,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_wallet_build_transformer",
+        "passed": 119,
+        "skipped": 0
+      },
+      {
+        "package": "komodo_wallet_cli",
+        "passed": 30,
+        "skipped": 0
+      }
+    ],
+    "kdf_pin": "a51d69a11ff937ecf9678e9b37632af578252846",
+    "coins_pin": "efd3a6471709f7e13e0b03277e37548e11840aae",
+    "sdk_base": "e217dbb6399859a2cd130ef43756a5c62e5039bb",
+    "core_chrome_wasm_passed": 249,
+    "framework_chrome_wasm_passed": 10,
+    "auth_chrome_wasm_passed": 10,
+    "bootstrap": "passed offline/enforced lockfile with prepare hooks",
+    "repeat_prepare": "passed without tracked generated drift",
+    "analysis": "Full consumer analysis:0errors,55existing warnings,2144infos; no changed Dart-line diagnostics",
+    "configuration_sha256": "667a9e28268e691857712f2410a0d29564aca4dbd7dff8eb3a53848785bcca64"
+  },
+  "external_kdf_main_merge": {
+    "pr": 40,
+    "merged_at": "2026-11-03T16:34:00Z",
+    "merge_sha": "f9632e0ec771668a6f21b37aede01a30110141cb",
+    "dev_head": "4398285213755812db39e1dfee45a5b2e91a7f4b",
+    "actor": "upstream maintainers; not this agent",
+    "difference_from_requested_a51": [
+      "CHANGELOG.md"
+    ],
+    "policy": "Continue exact user-authorized a51 source; do not silently retarget. Cannot keep externally merged PR open and must not reopen it. Keep SDK#416 and app#3575 open."
+  },
+  "build_attempt": 9,
+  "reason": "Roll exact requested a51d69a and reviewed coins after all ten builds and all17 upstream test jobs passed. Seven SDK archives match independent GitHub digests, intact ZIPs and ordinary primary/fallback mirror downloads."
+}

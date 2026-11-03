@@ -125,14 +125,17 @@ The harness remains unpublished. All version constraints move together.
 
 ### Engine and build inputs
 
-- KDF source: `e40ac2fb4319d352bf9c93683eb2518ce9f939e0` on
-  `dev`, after the LI.FI squash merge and network-test stabilization.
-  [Artifact provenance](docs/KDF_ARTIFACTS_2026-10-29.json) records the full
-  build and seven independently checked archive digests. The LI.FI merge
-  tree equals the previous `35f0bde` pin; current dev changes only three
-  test/helper files. This roll does not claim a new runtime or API fix.
-- Bundled coins: `2b0aefb78b184091ab086c66e513d8b03f5d5a01`;
-  `update_commit_on_build: false`; runtime updates remain enabled.
+- KDF source: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`,
+  engine `3.2.0-beta`; the two commits since `e40ac2f` bump the version and
+  stabilize CI fixtures, shared-wallet tests, endpoints and development/test
+  proving performance. All ten platform builds and 17 test jobs passed.
+  [Artifact provenance](docs/KDF_ARTIFACTS_2026-11-03.json) records seven
+  independently verified archives and the original failures/passing retries.
+- Bundled coins: `efd3a6471709f7e13e0b03277e37548e11840aae`;
+  `update_commit_on_build: false`; runtime updates remain enabled. Adds TAR,
+  TAR-segwit and TEL-BASE, removes TEL-KRC20, updates TEL ERC-20/Polygon
+  contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data,
+  endpoints and verified icons.
 - Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.
   Validation uses Flutter 3.41.4 / Dart 3.11.1; declared toolchain ranges stay
   unchanged. Source and archive identity are separate release evidence.
