@@ -84,6 +84,11 @@ The harness remains unpublished. All version constraints move together.
   unconfirmed start. Bind cached handles, polling and asynchronous results to
   the authenticated runtime session; revoke them on sign-out, wallet switches
   and same-wallet reauthentication. Direct manager construction requires auth.
+- **Routed offer ownership** ([@CharlVS]): an offer belongs to the wallet
+  session that priced it, and so do its copies. `start` refuses any other
+  offer with `AuthSessionChangedException` before sending anything: one priced
+  before a sign-out, a wallet switch or same-wallet reauthentication, or one
+  constructed directly.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.

@@ -215,6 +215,7 @@ class RoutedSwapManager {
     }
     return _offerFrom(
       route,
+      session: context,
       from: from,
       to: to,
       order: order,
@@ -248,6 +249,7 @@ class RoutedSwapManager {
     }
     return _offerFrom(
       route,
+      session: context,
       from: from,
       to: to,
       order: order,
@@ -312,9 +314,16 @@ class RoutedSwapManager {
   /// [RoutedSwapStartUnconfirmedException] when the swap may have started but
   /// its durable id could not be read back: never retry on that; check
   /// history.
+  ///
+  /// Throws [AuthSessionChangedException], sending nothing, when [offer] was
+  /// not issued by this manager in the current wallet session: one priced in
+  /// an earlier session, including the same wallet signed in again, or one
+  /// built by hand.
   Future<RoutedSwapHandle> start(RoutedSwapOffer offer) async {
     final context = await _captureSession();
     _requireCurrent(context);
+    // Nothing is awaited between this and init.
+    if (offer.issuedIn != context) throw const AuthSessionChangedException();
     final rpc.RoutedSwapInitResponse init;
     try {
       init = await _client.rpc.routedSwap.init(
@@ -358,7 +367,11 @@ class RoutedSwapManager {
       try {
         final first = await _client.rpc.routedSwap.status(init.taskId);
         _requireCurrent(context);
-        final seed = _progressFromStatus(first.details, accepted: offer);
+        final seed = _progressFromStatus(
+          first.details,
+          session: context,
+          accepted: offer,
+        );
         final session = _RoutedSwapSession(
           manager: this,
           walletSession: context,
@@ -406,7 +419,7 @@ class RoutedSwapManager {
       manager: this,
       walletSession: context,
       uuid: uuid,
-      seed: _progressFromEntry(entry),
+      seed: _progressFromEntry(entry, session: context),
     );
     return _register(session);
   }
@@ -459,6 +472,7 @@ class RoutedSwapManager {
         for (final entry in page.entries)
           _progressFromEntry(
             entry,
+            session: context,
             accepted: _sessions[entry.uuid]?.offer,
             previous: _sessions[entry.uuid]?.latest,
           ),

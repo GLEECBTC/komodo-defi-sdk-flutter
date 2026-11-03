@@ -27,9 +27,11 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   Decimal? _decimal(String? value) =>
       value == null ? null : Decimal.tryParse(value);
 
-  /// An offer retaining the provider's quoted minimum unchanged.
+  /// An offer retaining the provider's quoted minimum unchanged, issued in
+  /// [session]: only that session can start it.
   RoutedSwapOffer _offerFrom(
     rpc.RoutedSwapRoute route, {
+    required AuthSessionContext session,
     required AssetId from,
     required AssetId to,
     rpc.RoutedSwapOrder? order,
@@ -110,7 +112,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
           ? null
           : Duration(seconds: route.executionDurationS!),
       slippage: slippage,
-    );
+    ).boundTo(session);
   }
 
   /// The per-coin network fee. Uses the engine's totals when present, and
@@ -149,6 +151,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
   RoutedSwapOffer? _offerFromExecuted(
     rpc.RoutedSwapRoute? route,
     RoutedSwapOffer? accepted, {
+    required AuthSessionContext session,
     RoutedSwapOffer? previous,
   }) {
     if (route == null) return null;
@@ -160,6 +163,7 @@ extension _RoutedSwapOffers on RoutedSwapManager {
     if (from == null || to == null) return null;
     return _offerFrom(
       route,
+      session: session,
       from: from,
       to: to,
       order: accepted?.order,
