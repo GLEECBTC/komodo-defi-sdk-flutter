@@ -236,8 +236,7 @@ extension KdfExtensions on KdfAuthService {
     // must not keep telling the HD gap scan there is nothing to find. A later
     // sign-in to the same wallet gets the standard gap.
     _walletsGeneratedThisSession.clear();
-    await _lockEngine(_kdfFramework.kdfStop);
-    _kdfFramework.resetHttpClient();
+    await _stopEngine();
     _emitAuthStateChange(null);
   }
 
@@ -284,7 +283,7 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    _kdfFramework.resetHttpClient();
+    await _resetTransport();
     await _waitUntilKdfRpcReady();
     await _subscribeToShutdownSignals();
   }
@@ -314,7 +313,7 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    _kdfFramework.resetHttpClient();
+    await _resetTransport();
     final readyStopwatch = Stopwatch()..start();
     await _waitUntilKdfRpcReady();
     await _subscribeToShutdownSignals();
@@ -393,7 +392,7 @@ extension KdfExtensions on KdfAuthService {
         '_runStartupSensitiveRpc: omitted failed on first attempt, '
         'resetting HTTP client and retrying',
       );
-      _kdfFramework.resetHttpClient();
+      await _resetTransport();
       await _waitUntilKdfRpcReady();
 
       try {

@@ -80,14 +80,21 @@ the same wallet, requires a fresh quote and confirmation.
 Custom auth implementations must implement
 `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
 Validate the original session before waiting and after acquiring the engine
-lease. Hold that lease until the raw request settles; only engine stops and
-starts take the corresponding write lease, so identity reads never delay a
-dispatch. The callback must not re-enter authentication or await status
-polling. The lease is bounded (`dispatchLeaseTimeout`, 10 seconds by
-default): past it a transition may stop the engine, which fails the
-unanswered request and resets the HTTP client before any replacement engine
-starts, so the request never reaches another wallet's engine. A lost answer
-remains an unconfirmed start.
+lease. Hold that lease until the raw request settles; only engine stops,
+starts and transport resets take the corresponding write lease, so identity
+reads never delay a dispatch and recovering from a failed read never aborts
+one. The callback must not re-enter authentication or await status polling.
+The lease is bounded (`dispatchLeaseTimeout`, 10 seconds by default): past it
+a transition may stop the engine, which fails the unanswered request and
+resets the HTTP client before any replacement engine starts, so the request
+never reaches another wallet's engine. A lost answer remains an unconfirmed
+start.
+
+That guarantee rests on `IKdfOperations.resetHttpClient` aborting every
+request in flight, including one still connecting. The native, remote and
+local-executable operations do; a custom implementation must too. WASM
+hands a request to its engine within microtasks of the dispatch, long before
+the bound, so it has nothing left to abort.
 
 `RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
 callback for a caller's revocable confirmation. It runs under the session lease

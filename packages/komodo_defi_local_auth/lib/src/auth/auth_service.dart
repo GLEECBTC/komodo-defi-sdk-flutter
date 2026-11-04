@@ -187,7 +187,7 @@ class KdfAuthService implements IAuthService {
        _lifiProxyUrl = lifiProxyUrl,
        _lifiIntegrator = lifiIntegrator,
        _identityRecheckDelay = identityRecheckDelay,
-       _dispatchLeaseTimeout = dispatchLeaseTimeout {
+       _dispatchLeaseTimeout = _positiveLease(dispatchLeaseTimeout) {
     _logger.info('KdfAuthService initialized');
     _startHealthCheck();
     unawaited(_lockWriteOperation(_subscribeToShutdownSignals));
@@ -207,6 +207,19 @@ class KdfAuthService implements IAuthService {
   /// delay a start and an engine is never replaced beneath a request.
   final ReadWriteMutex _engineMutex = ReadWriteMutex();
   final Duration _dispatchLeaseTimeout;
+
+  /// A lease that expires at once would let a transition replace the engine
+  /// beneath every dispatch.
+  static Duration _positiveLease(Duration timeout) {
+    if (timeout <= Duration.zero) {
+      throw ArgumentError.value(
+        timeout,
+        'dispatchLeaseTimeout',
+        'must be positive',
+      );
+    }
+    return timeout;
+  }
   final Logger _logger = Logger('KdfAuthService');
 
   final _sessions = AuthSessionTracker();
@@ -1431,7 +1444,7 @@ class KdfAuthService implements IAuthService {
 
       // Reset HTTP client unconditionally to drop stale keep-alive connections
       _logger.info('_performHealthCheck: Resetting HTTP client');
-      _kdfFramework.resetHttpClient();
+      await _resetTransport();
 
       // Force restart KDF in no-auth mode (we don't have the password)
       // Use _forceStartKdf instead of _ensureKdfRunning to bypass isRunning check
@@ -1448,7 +1461,7 @@ class KdfAuthService implements IAuthService {
       _logger.info(
         '_performHealthCheck: Resetting HTTP client again after restart',
       );
-      _kdfFramework.resetHttpClient();
+      await _resetTransport();
 
       // Add 200ms delay after restart before verification to avoid race where
       // native status reports "up" but HTTP listener hasn't bound yet
@@ -1532,7 +1545,7 @@ class KdfAuthService implements IAuthService {
       );
     }
 
-    _kdfFramework.resetHttpClient();
+    await _resetTransport();
     _logger.info('_forceStartKdf: Waiting for RPC to be ready');
     final waitStopwatch = Stopwatch()..start();
     await _waitUntilKdfRpcReady();

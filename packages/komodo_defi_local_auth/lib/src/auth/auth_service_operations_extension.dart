@@ -5,9 +5,24 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
     return _authMutex.protectWrite(operation);
   }
 
-  /// Stops or starts the engine once no dispatched request leases it.
+  /// Stops, starts or resets the engine once no dispatched request leases it.
   Future<T> _lockEngine<T>(Future<T> Function() operation) =>
       _engineMutex.protectWrite(operation);
+
+  /// Stops KDF and resets the transport before releasing the engine, so a
+  /// request still pending, even one still connecting, fails before a
+  /// replacement engine can start.
+  Future<void> _stopEngine() => _lockEngine(() async {
+    await _kdfFramework.kdfStop();
+    _kdfFramework.resetHttpClient();
+  });
+
+  /// Resets the transport once no dispatch leases the engine.
+  ///
+  /// A reset aborts every request in flight. Outside an engine write, it
+  /// would abort a dispatch another caller is still awaiting.
+  Future<void> _resetTransport() =>
+      _lockEngine(() async => _kdfFramework.resetHttpClient());
 
   /// [runWithSession] on the engine lease. An ended session is refused before
   /// and after the wait, and the lease is held while [dispatch] is answered,

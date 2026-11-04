@@ -341,8 +341,9 @@ class RoutedSwapManager {
         _requireCurrent(context);
         beforeDispatch?.call();
         _requireCurrent(context);
-        // The lease prevents a wallet switch even when the transport awaits
-        // connection or module setup before delivering this request to KDF.
+        // The lease holds off a wallet switch while the transport connects.
+        // Past its bound, the switch stops KDF and resets the transport
+        // before a replacement starts, which aborts this request first.
         dispatched = true;
         return _client.rpc.routedSwap.init(
           from: offer.from.id,
