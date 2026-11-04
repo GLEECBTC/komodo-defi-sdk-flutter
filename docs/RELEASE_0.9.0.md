@@ -17,6 +17,11 @@ and ignored; do not add it. Package and dependency versions are listed in the
 
 ## Stable API changes since 0.8.1
 
+- Custom authentication implementations must provide `runWithSession`, which
+  keeps raw dispatch under a bounded lease on the originating wallet session's
+  engine.
+  See [submission ownership](#submission-ownership) for the exact signature,
+  reentrancy rules and uncertain-response handling.
 - Implement `fetchTickers` in custom `ICoinPaprikaProvider` adapters. Current
   prices and 24h changes share a bulk response for five minutes. A coin absent
   from it is unsupported; let repository selection choose another provider.

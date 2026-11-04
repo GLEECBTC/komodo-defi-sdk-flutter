@@ -3,13 +3,66 @@
 Prepared 28 October 2026; build-input rolls prepared 29 October and 3 November.
 This is a candidate record, not publication approval.
 
+## Current accepted snapshot — 4 November 2026
+
+- Frozen SDK: `bb5b4187bf49f844c01672799b451b50a5b08808` (normal #435). Its
+  tree equals carry head `caab72b973c3fa74a4b6a11a663e4e67798023e1`, which the app RC pins
+  through #3589; source #434 squash is `1205d305febccd5edd6e45f78fa7b55ceda25b28`.
+  It follows the final coins roll: #439 squash
+  `ab29d57aa05aa48240ab7430c6d51a4f5e60a579` and normal #440 `7636f554c77b0d4bfa02d20dc030f1a95596a755`
+  (carry head `ff43a0ba`). Before that came the session follow-ups: #437 squash `34dd5febb45193c7c66b649b89b68ef3d90f3675`
+  and normal #438 `ad1799272121c18c7391287b9744247f89c04e44`, whose carry head
+  `0c69bd35` the app RC pinned before its coins repin. Engine inputs are
+  unchanged since #430 / #431 (`3b462904`); coins are `cc8249e8`. Main #416
+  remains open, with automatic merging disabled.
+- [x] Final coins roll #439 / #440: coins `cc8249e8` replaces `efd3a647` (22
+  commits, YTN added, no coin removed). The three mapped files and all 446
+  icons match upstream exactly; the local provider parses 737 of 773 coins,
+  with the same 36 omissions. Seven SDK suites passed on the carry, including
+  `komodo_coins` **143** and `komodo_coin_updates` **106**; see the
+  "Final coins roll" section below for the KDF check.
+- [x] Session follow-ups #437 / #438. The dispatch lease is bounded at 10
+  seconds and taken on the engine only, and transport resets wait for it. The
+  local executable's reset aborts pending requests, and its `stop` gives up
+  after 5 seconds. Offers compare by their numbers. On the carry:
+  `komodo_defi_framework` **104**, `komodo_defi_local_auth` **163**,
+  `komodo_defi_sdk` **1,239** (1 skipped), routed-swap harness **60**. Hosted
+  checks passed on both PRs before merging. The changed files equal the
+  source squash except the root changelog, which lacks dev's #434 entry.
+- [x] Audit every accepted change since #416 opened at `22e14ac9`, including
+  root/package changelogs and the custom-auth `runWithSession` migration.
+  The [coverage record](RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) distinguishes
+  superseded input rolls and testing/documentation changes from runtime fixes.
+- [x] Recorded current-input SDK qualification: 16 suites, **3,112 passed /
+  14 skipped**, Chrome/WASM **249 +10 +10**, stable offline generation and
+  independently verified artifacts. All five main-RC hosted checks passed for
+  the previous frozen head `3b462904`. These results were reused, not rerun for
+  this audit; the follow-up suites above were run on the new head.
+- [x] Exact `a51d69a` completed ten platform builds and 17 test jobs. Historical
+  29 October failure dispositions below describe the older `e40ac2f` input;
+  they do not override this pin's result. Retain original failures/passing
+  retries in [the exact-pin provenance](KDF_ARTIFACTS_2026-11-03.json).
+- [x] Logging carry #435: normal merge `bb5b4187bf49f844c01672799b451b50a5b08808` carries #434
+  (squash `1205d305`), its four files identical to the source. The
+  `komodo_wallet_build_transformer` suite passed **125**; hosted checks passed
+  **4**. The app RC pins its head `caab72b9` through #3589, with no
+  development engine configuration substituted.
+- [ ] Complete final promotion review/checks, eventual consumer main pin and
+  signed consumer installation/upgrade qualification before distribution.
+  Keep #416 open until separately authorized; do not tag or publish here.
+
+The dated sections below retain the evidence for their original inputs.
+No KDF repository tests, version/dependency changes or runtime pin changes are
+part of this documentation update.
+
 ## Scope and immutable inputs
 
 - Integration source: `03a3cb1adf666952a16f0cd80e67b8173076f4c1` (SDK #407),
   including SDK #405 activation fixes. Initial preparation added release
-  metadata and dependency constraints. Runtime freeze fixes are SDK #412
-  (`97b48556`) and #413 (`56828b91`). The later merged-dev KDF artifact
-  roll retains the runtime sources and records the new build provenance.
+  metadata and dependency constraints. Initial runtime freeze fixes are SDK
+  #412 (`97b48556`) and #413 (`56828b91`). Subsequent accepted recovery,
+  Trezor and session-dispatch corrections (#418/#425/#427), transition tests
+  (#429) and input roll (#431) are mapped in the post-opening coverage record.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
 - Branch strategy: **squash every PR into `dev`**; freeze `release-0.9.0`
@@ -25,7 +78,8 @@ This is a candidate record, not publication approval.
 - KDF: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
   `cc8249e85e54467bc2684c2712857711eab55fd2` (final roll, 4 November).
-- All seven archive checksums are in `app_build/build_config.json` with
+- All seven archive checksums are in the
+  [framework build configuration](../packages/komodo_defi_framework/app_build/build_config.json) with
   [3 November provenance](KDF_ARTIFACTS_2026-11-03.json). The prior
   [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
   historical evidence. Build-time coin

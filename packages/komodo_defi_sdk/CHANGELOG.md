@@ -1,5 +1,28 @@
 ## 0.9.0 (2026-10-28)
 
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC changes.
+
+ - **FIX**(routed-swap): recover every in-flight history page instead of
+   stopping after page 20. A wallet change during pagination rejects the whole
+   read (#417, RC #418).
+ - **FIX**(routed-swap): accept executable offers only from the manager and
+   uninterrupted wallet session that issued them. Copies retain private
+   issuance; directly constructed, foreign-manager and stale-session offers
+   fail with `AuthSessionChangedException` before dispatch (#426, RC #427).
+ - **FEAT**(routed-swap): `start` accepts a synchronous `beforeDispatch`
+   callback for revocable caller intent. It runs under `auth.runWithSession`
+   immediately before raw init. Auth transitions wait for an in-flight
+   dispatch for at most 10 seconds; past that, stopping the engine fails the
+   request before a replacement starts. A lost answer after dispatch stays
+   unconfirmed and is not automatically retried (#426, RC #427; #437,
+   RC #438).
+ - **FIX**(routed-swap): `RoutedSwapOffer` compares its numbers whatever its
+   subclass, so an issued offer equals the same offer constructed directly,
+   which still cannot start (#437, RC #438).
+ - **TEST**(routed-swap): complete native/WASM transition regressions for
+   sign-out, same-wallet reauthentication, wallet switches, session restore,
+   registration, disposal and copied offers (#428, RC #429).
+
  - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
    part files from standalone exports; regenerate release output.
  - **BREAKING**(activation): `supportsCustomTokenActivation` moves from
