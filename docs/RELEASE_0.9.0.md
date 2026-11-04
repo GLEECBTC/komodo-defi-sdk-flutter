@@ -96,6 +96,12 @@ local-executable operations do; a custom implementation must too. WASM
 hands a request to its engine within microtasks of the dispatch, long before
 the bound, so it has nothing left to abort.
 
+A stop runs while the engine is held, and recovery waits for it, so a stop
+must not wait for good. The remote and local-executable operations give up on
+a `stop` request the engine never answers after `stopTimeout`, 5 seconds by
+default. A stop that fails still resets the transport before the engine is
+released.
+
 `RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
 callback for a caller's revocable confirmation. It runs under the session lease
 immediately before raw init. A callback failure sends nothing and propagates

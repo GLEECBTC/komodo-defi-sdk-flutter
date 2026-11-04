@@ -9,12 +9,15 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
   Future<T> _lockEngine<T>(Future<T> Function() operation) =>
       _engineMutex.protectWrite(operation);
 
-  /// Stops KDF and resets the transport before releasing the engine, so a
-  /// request still pending, even one still connecting, fails before a
-  /// replacement engine can start.
+  /// Stops KDF and resets the transport before releasing the engine, even
+  /// when the stop fails, so a request still pending, even one still
+  /// connecting, fails before a replacement engine can start.
   Future<void> _stopEngine() => _lockEngine(() async {
-    await _kdfFramework.kdfStop();
-    _kdfFramework.resetHttpClient();
+    try {
+      await _kdfFramework.kdfStop();
+    } finally {
+      _kdfFramework.resetHttpClient();
+    }
   });
 
   /// Resets the transport once no dispatch leases the engine.
