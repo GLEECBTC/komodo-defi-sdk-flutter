@@ -11,6 +11,9 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 const _walletName = 'dispatch-wallet';
 const _hash = '05aab5342166f8594baf17a7d9bef5d567443327';
 
+/// Long enough for every awaited step here, short enough to wait out.
+const _leaseBound = Duration(milliseconds: 200);
+
 /// The engine is replaceable only through the real auth service's write lock.
 /// Identity and dispatch gates put tests at exact asynchronous boundaries.
 class _Engine implements IKdfOperations {
@@ -111,7 +114,7 @@ void main() {
       hostConfig: config,
       kdfOperations: engine,
     );
-    auth = KdfAuthService(framework, config);
+    auth = KdfAuthService(framework, config, dispatchLeaseTimeout: _leaseBound);
     session = await auth.captureSessionContext();
   });
 
@@ -131,12 +134,23 @@ void main() {
     expect(calls, 0);
   });
 
-  test('a queued dispatch is rechecked after acquiring the lease', () async {
+  test('an identity read in progress does not delay a dispatch', () async {
     engine
       ..identityEntered = Completer<void>()
       ..identityGate = Completer<void>();
     final identityRead = auth.getActiveUser();
     await engine.identityEntered!.future;
+
+    try {
+      final sent = auth.runWithSession(session, () async => 'sent');
+      expect(await sent.timeout(_leaseBound), 'sent');
+    } finally {
+      engine.identityGate!.complete();
+      await identityRead;
+    }
+  });
+
+  test('a queued dispatch is rechecked after acquiring the lease', () async {
     var calls = 0;
     final pending = auth.runWithSession(session, () async => calls++);
     final rejected = expectLater(
@@ -145,12 +159,33 @@ void main() {
     );
     final signOut = auth.signOut();
     expect(auth.isSessionContextCurrent(session), isFalse);
-    engine.identityGate!.complete();
-    await identityRead;
     await rejected;
     await signOut;
     expect(calls, 0);
   });
+
+  test(
+    'an unanswered dispatch holds off sign-out only for its bound',
+    () async {
+      final entered = Completer<void>();
+      final response = Completer<String>();
+      final pending = auth.runWithSession(session, () {
+        entered.complete();
+        return response.future;
+      });
+      await entered.future;
+
+      try {
+        await auth.signOut().timeout(_leaseBound * 10);
+        expect(engine.stops, 1);
+        expect(engine.running, isFalse);
+      } finally {
+        // The caller still holds the request's own answer, however late.
+        response.complete('late');
+      }
+      expect(await pending, 'late');
+    },
+  );
 
   test('sign-out revokes immediately but waits for dispatched work', () async {
     final entered = Completer<void>();
