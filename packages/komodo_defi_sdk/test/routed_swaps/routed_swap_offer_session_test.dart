@@ -76,6 +76,8 @@ class _DispatchAuth extends CountingSessionAuth {
 }
 
 /// [offer]'s numbers in an offer built directly, which no manager issued.
+/// The same numbers in new collections and a new route, so equality has to
+/// compare them by value.
 RoutedSwapOffer _builtLike(RoutedSwapOffer offer) => RoutedSwapOffer(
   from: offer.from,
   to: offer.to,
@@ -83,14 +85,14 @@ RoutedSwapOffer _builtLike(RoutedSwapOffer offer) => RoutedSwapOffer(
   expectedReceive: offer.expectedReceive,
   guaranteedReceive: offer.guaranteedReceive,
   kind: offer.kind,
-  costs: offer.costs,
-  networkFees: offer.networkFees,
-  legs: offer.legs,
+  costs: [...offer.costs],
+  networkFees: [...offer.networkFees],
+  legs: [...offer.legs],
   quotedAt: offer.quotedAt,
   provider: offer.provider,
   toolKey: offer.toolKey,
   toolName: offer.toolName,
-  route: offer.route,
+  route: _routeLike(offer.route),
   order: offer.order,
   fromAddress: offer.fromAddress,
   toAddress: offer.toAddress,
@@ -99,6 +101,24 @@ RoutedSwapOffer _builtLike(RoutedSwapOffer offer) => RoutedSwapOffer(
   estimatedDuration: offer.estimatedDuration,
   slippage: offer.slippage,
 );
+
+rpc.RoutedSwapRoute _routeLike(rpc.RoutedSwapRoute route) =>
+    rpc.RoutedSwapRoute(
+      provider: route.provider,
+      from: route.from,
+      to: route.to,
+      toMinimum: route.toMinimum,
+      tool: route.tool,
+      kind: route.kind,
+      steps: [...route.steps],
+      feeCosts: [...route.feeCosts],
+      gasCosts: [...route.gasCosts],
+      totalGasCosts: [...route.totalGasCosts],
+      fromAddress: route.fromAddress,
+      toAddress: route.toAddress,
+      approval: route.approval,
+      executionDurationS: route.executionDurationS,
+    );
 
 /// Covers who may start an offer: only the session that priced it, so an
 /// offer reviewed before a sign-out, a wallet switch or a sign-in to the same
@@ -190,6 +210,10 @@ void main() {
       'never start', () async {
     final issued = await quoted();
     final built = _builtLike(issued);
+    expect(issued.costs, isNotEmpty);
+    expect(issued.route.steps, isNotEmpty);
+    expect(identical(built.costs, issued.costs), isFalse);
+    expect(identical(built.route, issued.route), isFalse);
 
     expect(issued, built);
     expect(built, issued);
