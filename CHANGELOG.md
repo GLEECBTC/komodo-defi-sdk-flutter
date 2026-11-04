@@ -90,6 +90,8 @@ The harness remains unpublished. All version constraints move together.
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
   constructed directly or issued by another manager. Supported copies retain
   private issuance; callers cannot rebind an old offer to a new session.
+  Equality is over the numbers alone: an issued offer equals the same offer
+  constructed directly, which still cannot start.
 - **Session-owned dispatch** ([@CharlVS]): `runWithSession` leases the engine
   until a raw submission request settles, for at most 10 seconds. Only engine
   stops and starts wait for that lease, so identity reads never delay a start,

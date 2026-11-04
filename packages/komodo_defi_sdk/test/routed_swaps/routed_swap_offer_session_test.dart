@@ -75,6 +75,31 @@ class _DispatchAuth extends CountingSessionAuth {
   }
 }
 
+/// [offer]'s numbers in an offer built directly, which no manager issued.
+RoutedSwapOffer _builtLike(RoutedSwapOffer offer) => RoutedSwapOffer(
+  from: offer.from,
+  to: offer.to,
+  sellAmount: offer.sellAmount,
+  expectedReceive: offer.expectedReceive,
+  guaranteedReceive: offer.guaranteedReceive,
+  kind: offer.kind,
+  costs: offer.costs,
+  networkFees: offer.networkFees,
+  legs: offer.legs,
+  quotedAt: offer.quotedAt,
+  provider: offer.provider,
+  toolKey: offer.toolKey,
+  toolName: offer.toolName,
+  route: offer.route,
+  order: offer.order,
+  fromAddress: offer.fromAddress,
+  toAddress: offer.toAddress,
+  approval: offer.approval,
+  toolLogoUrl: offer.toolLogoUrl,
+  estimatedDuration: offer.estimatedDuration,
+  slippage: offer.slippage,
+);
+
 /// Covers who may start an offer: only the session that priced it, so an
 /// offer reviewed before a sign-out, a wallet switch or a sign-in to the same
 /// wallet never reaches the engine.
@@ -159,6 +184,17 @@ void main() {
 
   test('an offer built by hand never starts', () async {
     await expectRefused(offerOf());
+  });
+
+  test('an issued offer equals the same numbers built by hand, which still '
+      'never start', () async {
+    final issued = await quoted();
+    final built = _builtLike(issued);
+
+    expect(issued, built);
+    expect(built, issued);
+    expect(issued.hashCode, built.hashCode);
+    await expectRefused(built);
   });
 
   test(
