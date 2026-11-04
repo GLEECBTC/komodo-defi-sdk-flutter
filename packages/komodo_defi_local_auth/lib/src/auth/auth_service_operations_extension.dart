@@ -5,6 +5,43 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
     return _authMutex.protectWrite(operation);
   }
 
+  /// Stops or starts the engine once no dispatched request leases it.
+  Future<T> _lockEngine<T>(Future<T> Function() operation) =>
+      _engineMutex.protectWrite(operation);
+
+  /// [runWithSession] on the engine lease. An ended session is refused before
+  /// and after the wait, and the lease is held while [dispatch] is answered,
+  /// for at most [_dispatchLeaseTimeout].
+  ///
+  /// Past that bound a transition may stop the engine. Stopping it fails an
+  /// unanswered request and resets the HTTP client, so the request never
+  /// reaches the engine that replaces it. The caller still awaits the
+  /// request's own answer and must treat a lost one as unconfirmed.
+  Future<T> _runWithEngineLease<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) async {
+    ensureSessionContextCurrent(expected);
+    await _engineMutex.acquireRead();
+    var leased = true;
+    void release() {
+      if (!leased) return;
+      leased = false;
+      _engineMutex.release();
+    }
+
+    final bound = Timer(_dispatchLeaseTimeout, release);
+    try {
+      // A transition revokes its session before it waits for the engine.
+      // Reject work that was queued behind one.
+      ensureSessionContextCurrent(expected);
+      return await dispatch();
+    } finally {
+      bound.cancel();
+      release();
+    }
+  }
+
   void _startHealthCheck() {
     _healthCheckTimer?.cancel();
     // With shutdown signal streaming in place, health checks serve primarily

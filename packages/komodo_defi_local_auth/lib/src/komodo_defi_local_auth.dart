@@ -50,9 +50,11 @@ abstract interface class KomodoDefiAuth {
   ///
   /// [dispatch] must perform only the raw request: it must not call auth APIs,
   /// acquire another session lease, or include polling/recovery. The lease is
-  /// held until its actual transport settles. Do not return a timeout wrapper
-  /// while the underlying request is still executable. A stalled request can
-  /// therefore delay sign-out or wallet switching.
+  /// held until its actual transport settles, for at most a bounded time, and
+  /// only stopping or starting the engine waits for it: identity reads never
+  /// delay a dispatch. Past the bound a transition may stop the engine, which
+  /// fails the unanswered request, so a stalled engine cannot hold off
+  /// sign-out or wallet switching.
   ///
   /// Once [dispatch] begins, a later session change does not prove
   /// cancellation; callers must preserve uncertainty about acceptance.

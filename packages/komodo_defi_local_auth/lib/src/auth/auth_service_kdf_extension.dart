@@ -236,7 +236,7 @@ extension KdfExtensions on KdfAuthService {
     // must not keep telling the HD gap scan there is nothing to find. A later
     // sign-in to the same wallet gets the standard gap.
     _walletsGeneratedThisSession.clear();
-    await _kdfFramework.kdfStop();
+    await _lockEngine(_kdfFramework.kdfStop);
     _kdfFramework.resetHttpClient();
     _emitAuthStateChange(null);
   }
@@ -270,7 +270,7 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _startNoAuthKdfWithinTransition() async {
     final startStopwatch = Stopwatch()..start();
     final config = await _noAuthConfig;
-    final kdfResult = await _kdfFramework.startKdf(config);
+    final kdfResult = await _lockEngine(() => _kdfFramework.startKdf(config));
     startStopwatch.stop();
     _logger.info(
       '_ensureKdfRunning: startKdf(no-auth) returned ${kdfResult.name} in '
@@ -300,7 +300,7 @@ extension KdfExtensions on KdfAuthService {
     );
 
     final startStopwatch = Stopwatch()..start();
-    final kdfResult = await _kdfFramework.startKdf(config);
+    final kdfResult = await _lockEngine(() => _kdfFramework.startKdf(config));
     startStopwatch.stop();
     _logger.info(
       '_restartKdf: auth start returned ${kdfResult.name} in '
