@@ -16,11 +16,13 @@ Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs 
    mirror downloads. Original failures/passing retries remain in the
    [3 November provenance](../../docs/KDF_ARTIFACTS_2026-11-03.json).
  - **CHORE**(coins): freeze bundled files/icons at
-   `efd3a6471709f7e13e0b03277e37548e11840aae`, superseding `2b0aefb7`.
-   Added TAR/TAR-segwit and TEL-BASE; removed TEL-KRC20; updated TEL
-   ERC-20/Polygon contracts and decimals, GLEEC/GRC-20 Trezor metadata,
-   ARRR activation data and endpoints. Build-time advancement stays off;
-   runtime updates retain their independent policy (#430, RC #431).
+   `cc8249e85e54467bc2684c2712857711eab55fd2`, superseding `efd3a647`
+   (#439, RC #440), which superseded `2b0aefb7` (#430, RC #431). Added
+   TAR/TAR-segwit, TEL-BASE and Yenten (YTN); removed TEL-KRC20; set L2 fee
+   models for AVAX, ETH-BASE, MNT and MON; updated TEL ERC-20/Polygon
+   contracts and decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data
+   and endpoints. Build-time advancement stays off; runtime updates retain
+   their independent policy.
  - **FEAT**(config): serialize optional validated `lifi_integrator` on every
    startup path; reusable SDK defaults remain unset.
  - **FEAT**(config): `KdfStartupConfig.lifiProxyUrl`, written as
