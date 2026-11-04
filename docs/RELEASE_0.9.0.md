@@ -118,7 +118,7 @@ the SDK default is unset. Preserve it through registration, sign-in and restart.
 
 Use the seven-platform KDF manifest at exact `dev` source `a51d69a` and the
 contract at specs `7c388ea`. A remote KDF must implement that contract too.
-The frozen coins pin is `efd3a647`; runtime coin updates remain enabled and
+The frozen coins pin is `cc8249e8`; runtime coin updates remain enabled and
 build-time revision advancement stays disabled. Never replace a checksum
 without independent artifact provenance. The [3 November roll record](KDF_ARTIFACTS_2026-11-03.json)
 compares all seven archives with GitHub artifact digests and ordinary mirrors.

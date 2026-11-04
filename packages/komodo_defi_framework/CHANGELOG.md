@@ -1,5 +1,9 @@
 ## 0.7.0 (2026-10-28)
 
+ - **CHORE**(coins): roll the bundled coins configuration from `efd3a647` to
+   the coins repository's `master` `cc8249e8` (22 commits). Adds Yenten (YTN)
+   and L2 fee models for AVAX, ETH-BASE, MNT and MON; no coin is removed.
+
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FEAT**(config): serialize optional validated `lifi_integrator` on every
