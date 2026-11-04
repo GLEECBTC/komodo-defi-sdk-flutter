@@ -83,12 +83,28 @@ the same wallet, requires a fresh quote and confirmation.
 
 Custom auth implementations must implement
 `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
-Validate the original session before waiting and after acquiring the auth read
-lease. Retain that lease until the raw request settles; auth transitions use
-the corresponding write lease. The callback must not re-enter authentication
-or await status polling. Do not release ownership using a timeout while the
-underlying request can still execute. A stalled request can delay wallet
-switching until it settles; a bounded, abortable transport is separate work.
+Validate the original session before waiting and after acquiring the engine
+lease. Hold that lease until the raw request settles; only engine stops,
+starts and transport resets take the corresponding write lease, so identity
+reads never delay a dispatch and recovering from a failed read never aborts
+one. The callback must not re-enter authentication or await status polling.
+The lease is bounded (`dispatchLeaseTimeout`, 10 seconds by default): past it
+a transition may stop the engine, which fails the unanswered request and
+resets the HTTP client before any replacement engine starts, so the request
+never reaches another wallet's engine. A lost answer remains an unconfirmed
+start.
+
+That guarantee rests on `IKdfOperations.resetHttpClient` aborting every
+request in flight, including one still connecting. The native, remote and
+local-executable operations do; a custom implementation must too. WASM
+hands a request to its engine within microtasks of the dispatch, long before
+the bound, so it has nothing left to abort.
+
+A stop runs while the engine is held, and recovery waits for it, so a stop
+must not wait for good. The remote and local-executable operations give up on
+a `stop` request the engine never answers after `stopTimeout`, 5 seconds by
+default. A stop that fails still resets the transport before the engine is
+released.
 
 `RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
 callback for a caller's revocable confirmation. It runs under the session lease

@@ -2,6 +2,7 @@ import 'package:decimal/decimal.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart' as rpc;
 import 'package:komodo_defi_sdk/src/routed_swaps/routed_swap_value.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:meta/meta.dart' show immutable;
 
 part 'routed_swap_outcome_types.dart';
 part 'routed_swap_progress.dart';
@@ -175,6 +176,7 @@ class RoutedSwapLeg with RoutedSwapValue {
 /// guard instead of the guaranteed minimum would reject nearly every swap, and
 /// that footgun is removed by construction: `RoutedSwapManager.start` takes an
 /// offer, not loose numbers.
+@immutable
 class RoutedSwapOffer with RoutedSwapValue {
   /// Wraps a parsed route with the context needed to execute and display it.
   ///
@@ -379,6 +381,17 @@ class RoutedSwapOffer with RoutedSwapValue {
     estimatedDuration,
     slippage,
   ];
+
+  /// The same numbers are the same offer, whether or not a manager issued
+  /// it: issuance carries the right to start one and is no part of its value.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RoutedSwapOffer &&
+          RoutedSwapValue.equalProps(props, other.props));
+
+  @override
+  int get hashCode => RoutedSwapValue.hashProps(props);
 }
 
 /// The largest amount that can be sold while keeping what its fees need.

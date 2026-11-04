@@ -16,15 +16,31 @@ class KdfOperationsRemote implements IKdfOperations {
     // required int port,
     required Uri rpcUrl,
     required String userpass,
+    Duration stopTimeout = const Duration(seconds: 5),
   }) {
-    return KdfOperationsRemote._(logCallback, rpcUrl, userpass);
+    return KdfOperationsRemote._(logCallback, rpcUrl, userpass, stopTimeout);
   }
 
-  KdfOperationsRemote._(this._logCallback, this._rpcUrl, this._userpass);
+  KdfOperationsRemote._(
+    this._logCallback,
+    this._rpcUrl,
+    this._userpass,
+    this._stopTimeout,
+  );
   final void Function(String) _logCallback;
   final String _userpass;
 
   final Uri _rpcUrl;
+
+  /// How long [kdfStop] waits for the engine to answer `stop`. A stop runs
+  /// while the auth service holds the engine, so it must not wait for good.
+  final Duration _stopTimeout;
+
+  /// Clients of the requests still awaiting an answer.
+  ///
+  /// Each request keeps its own client, as `http.post` does, so connections
+  /// are never reused. [resetHttpClient] closes them all.
+  final Set<http.Client> _inFlight = {};
 
   Uri get _baseUrl => _safeRpcUrl(_rpcUrl);
 
@@ -108,10 +124,15 @@ class KdfOperationsRemote implements IKdfOperations {
     return versionResult != null ? MainStatus.rpcIsUp : MainStatus.noRpc;
   }
 
+  /// Asks the engine to stop. An engine that takes the request and never
+  /// answers fails it after the stop timeout; the next transport reset aborts
+  /// the request itself.
   @override
   Future<StopStatus> kdfStop() async {
     try {
-      final stopResultResponse = await mm2Rpc({'method': 'stop'});
+      final stopResultResponse = await mm2Rpc({
+        'method': 'stop',
+      }).timeout(_stopTimeout);
 
       _log('KDF stop response received');
 
@@ -156,12 +177,17 @@ class KdfOperationsRemote implements IKdfOperations {
 
     late final http.Response response;
 
+    final client = http.Client();
+    _inFlight.add(client);
     try {
-      response = await http.post(_baseUrl, body: json.encode(request));
+      response = await client.post(_baseUrl, body: json.encode(request));
     } on http.ClientException {
       // ClientException can include a credential-bearing URL. Keep the public
       // failure stable and free of transport internals.
       return ConnectionError('Remote KDF request failed');
+    } finally {
+      _inFlight.remove(client);
+      client.close();
     }
 
     final body = kdfResponseBody(response);
@@ -223,15 +249,23 @@ class KdfOperationsRemote implements IKdfOperations {
     }
   }
 
+  /// Aborts every request still awaiting an answer, including one still
+  /// connecting, so none of them can reach an engine started afterwards.
+  /// Each aborted request answers [ConnectionError].
   @override
   void resetHttpClient() {
-    // No-op for remote operations - HTTP client is managed by http package
-    _log('resetHttpClient called on remote operations (no-op)');
+    final aborted = _inFlight.toList();
+    _inFlight.clear();
+    for (final client in aborted) {
+      client.close();
+    }
+    _log('Remote KDF transport reset');
   }
 
   @override
   void dispose() {
-    // No-op for remote operations - HTTP client is managed externally
+    // Requests in flight settle on their own. Aborting them here would also
+    // abort the stop request the local executable sends while disposing.
   }
 
   /// Returns [body] decoded when it is one of KDF's error envelopes: a typed

@@ -101,11 +101,23 @@ The harness remains unpublished. All version constraints move together.
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
   constructed directly or issued by another manager. Supported copies retain
   private issuance; callers cannot rebind an old offer to a new session.
-- **Session-owned dispatch** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): `runWithSession` holds the auth read
-  lease until a raw submission request settles. Wallet switching cannot replace
-  the engine beneath that request. Routed starts recheck caller intent under
-  the lease through `beforeDispatch`; failures before dispatch are rejections,
-  while lost answers after dispatch remain unconfirmed and are never retried.
+  Equality is over the numbers alone: an issued offer equals the same offer
+  constructed directly, which still cannot start.
+- **Session-owned dispatch** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): `runWithSession` leases the engine
+  until a raw submission request settles, for at most 10 seconds. Only engine
+  stops, starts and transport resets wait for that lease, so identity reads
+  never delay a start, recovering from a failed read never aborts one, and
+  wallet switching cannot replace the engine beneath a request in flight.
+  Past the bound, stopping the engine fails the unanswered request and resets
+  the transport before a replacement engine can start, so a request the
+  engine never answers cannot hold off sign-out. The remote and
+  local-executable transport now honours that reset: it aborts its requests
+  in flight, including one still connecting, as the native transport does.
+  A stop holds the engine, so that transport gives up on a `stop` the engine
+  never answers after 5 seconds, and a stop that fails still resets the
+  transport. Routed starts recheck caller intent under the lease through
+  `beforeDispatch`; failures before dispatch are rejections, while lost
+  answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.
