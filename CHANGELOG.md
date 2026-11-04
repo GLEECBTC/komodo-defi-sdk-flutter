@@ -5,10 +5,10 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
-Updated 4 November 2026 against frozen RC `7636f554`. The
+Updated 4 November 2026 against frozen RC `bb5b4187`. The
 [post-opening audit](docs/RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) covers every
-accepted change since release PR #416 opened at `22e14ac9`. Pending carries
-are tracked separately and are not described as part of this snapshot.
+accepted change since release PR #416 opened at `22e14ac9`. No SDK carry was
+pending at this snapshot.
 
 ### SDK 0.9.0 overview
 
@@ -72,7 +72,7 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
-- **Build-log privacy** — failed GitHub API requests report whether authentication
+- **Build-log privacy** ([@CharlVS], [#434](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/434), [RC #435](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/435)) — failed GitHub API requests report whether authentication
   was used without printing authorization headers.
 
 - **Trezor sign-in** ([@CharlVS], [#424](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/424), [RC #425](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/425)) — sign in to a "My Trezor" wallet file
@@ -160,8 +160,10 @@ The harness remains unpublished. All version constraints move together.
   ([#437](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/437),
   [RC #438](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/438)) changed no inputs, and the final coins roll
   ([#439](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/439),
-  [RC #440](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/440)) changed only the coins. Its carry is the frozen head
-  [`7636f554`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/7636f554c77b0d4bfa02d20dc030f1a95596a755).
+  [RC #440](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/440)) changed only the coins. The build-log redaction
+  ([#434](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/434),
+  [RC #435](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/435)) changed no inputs; its carry is the frozen head
+  [`bb5b4187`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/bb5b4187bf49f844c01672799b451b50a5b08808).
   Earlier `35f0bde` and `e40ac2f` preparation inputs are superseded by the
   following exact pins; their dated provenance remains historical evidence.
 - KDF source: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`,

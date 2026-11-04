@@ -5,10 +5,12 @@ This is a candidate record, not publication approval.
 
 ## Current accepted snapshot — 4 November 2026
 
-- Frozen SDK: `7636f554c77b0d4bfa02d20dc030f1a95596a755` (normal #440). Its
-  tree equals carry head `ff43a0bad14577b2f5649fae22233a5fe9fe02c4`; source
-  #439 squash is `ab29d57aa05aa48240ab7430c6d51a4f5e60a579`. It follows the
-  session follow-ups: #437 squash `34dd5febb45193c7c66b649b89b68ef3d90f3675`
+- Frozen SDK: `bb5b4187bf49f844c01672799b451b50a5b08808` (normal #435). Its
+  tree equals carry head `caab72b973c3fa74a4b6a11a663e4e67798023e1`, which the app RC pins
+  through #3589; source #434 squash is `1205d305febccd5edd6e45f78fa7b55ceda25b28`.
+  It follows the final coins roll: #439 squash
+  `ab29d57aa05aa48240ab7430c6d51a4f5e60a579` and normal #440 `7636f554c77b0d4bfa02d20dc030f1a95596a755`
+  (carry head `ff43a0ba`). Before that came the session follow-ups: #437 squash `34dd5febb45193c7c66b649b89b68ef3d90f3675`
   and normal #438 `ad1799272121c18c7391287b9744247f89c04e44`, whose carry head
   `0c69bd35` the app RC pinned before its coins repin. Engine inputs are
   unchanged since #430 / #431 (`3b462904`); coins are `cc8249e8`. Main #416
@@ -40,10 +42,11 @@ This is a candidate record, not publication approval.
   29 October failure dispositions below describe the older `e40ac2f` input;
   they do not override this pin's result. Retain original failures/passing
   retries in [the exact-pin provenance](KDF_ARTIFACTS_2026-11-03.json).
-- [ ] Finish normal logging carry #435 after GitHub completes the existing
-  merge operation/current gates. Development #434 is accepted, but is not in
-  this frozen snapshot. Refresh notes and the consumer's exact SDK pin after
-  acceptance; do not silently substitute the development engine configuration.
+- [x] Logging carry #435: normal merge `bb5b4187bf49f844c01672799b451b50a5b08808` carries #434
+  (squash `1205d305`), its four files identical to the source. The
+  `komodo_wallet_build_transformer` suite passed **125**; hosted checks passed
+  **4**. The app RC pins its head `caab72b9` through #3589, with no
+  development engine configuration substituted.
 - [ ] Complete final promotion review/checks, eventual consumer main pin and
   signed consumer installation/upgrade qualification before distribution.
   Keep #416 open until separately authorized; do not tag or publish here.
