@@ -102,7 +102,7 @@ class GithubApiProvider {
           '${response.statusCode} ${response.reasonPhrase}',
         )
         ..severe('Response body: ${response.body}')
-        ..severe('Request headers: $_headers');
+        ..severe('Using authentication: ${hasToken ? 'yes' : 'no'}');
       throw Exception(
         'Failed to retrieve latest commit hash: $branch'
         '[${response.statusCode}]: ${response.reasonPhrase}',
