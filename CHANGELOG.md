@@ -105,7 +105,9 @@ The harness remains unpublished. All version constraints move together.
   engine never answers cannot hold off sign-out. The remote and
   local-executable transport now honours that reset: it aborts its requests
   in flight, including one still connecting, as the native transport does.
-  Routed starts recheck caller intent under the lease through
+  A stop holds the engine, so that transport gives up on a `stop` the engine
+  never answers after 5 seconds, and a stop that fails still resets the
+  transport. Routed starts recheck caller intent under the lease through
   `beforeDispatch`; failures before dispatch are rejections, while lost
   answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations

@@ -47,6 +47,9 @@ class _Engine implements IKdfOperations {
   int starts = 0;
   Completer<void>? startEntered;
   int stops = 0;
+
+  /// Thrown by the next stops, as by an engine that fails to stop.
+  Object? stopError;
   int resets = 0;
   Completer<void>? identityEntered;
   Completer<void>? identityGate;
@@ -81,6 +84,8 @@ class _Engine implements IKdfOperations {
   @override
   Future<StopStatus> kdfStop() async {
     stops++;
+    final error = stopError;
+    if (error != null) throw error;
     running = false;
     return StopStatus.ok;
   }
@@ -257,9 +262,46 @@ void main() {
     final aborted = expectLater(pending, throwsA(isA<StateError>()));
     await entered.future;
 
-    await auth.signOut().timeout(_leaseBound * 10);
-    expect(engine.stops, 1);
-    expect(response.isCompleted, isTrue);
+    try {
+      await auth.signOut().timeout(_leaseBound * 10);
+      expect(engine.stops, 1);
+      expect(response.isCompleted, isTrue);
+    } finally {
+      if (!response.isCompleted) {
+        response.completeError(StateError('the test gave up'));
+      }
+    }
+    await aborted;
+  });
+
+  test('a failed stop still resets the transport', () async {
+    final entered = Completer<void>();
+    final response = Completer<String>();
+    final failure = StateError('the engine did not stop');
+    engine
+      ..stopError = failure
+      ..onReset = () {
+        if (!response.isCompleted) {
+          response.completeError(StateError('aborted by a reset'));
+        }
+      };
+    final pending = auth.runWithSession(session, () {
+      entered.complete();
+      return response.future;
+    });
+    final aborted = expectLater(pending, throwsA(isA<StateError>()));
+    await entered.future;
+
+    try {
+      await expectLater(
+        auth.signOut().timeout(_leaseBound * 10),
+        throwsA(same(failure)),
+      );
+      expect(engine.resets, 1);
+    } finally {
+      engine.stopError = null;
+      if (!response.isCompleted) response.complete('answered');
+    }
     await aborted;
   });
 
