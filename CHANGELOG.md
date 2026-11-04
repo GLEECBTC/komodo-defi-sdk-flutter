@@ -93,11 +93,23 @@ The harness remains unpublished. All version constraints move together.
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
   constructed directly or issued by another manager. Supported copies retain
   private issuance; callers cannot rebind an old offer to a new session.
-- **Session-owned dispatch** ([@CharlVS]): `runWithSession` holds the auth read
-  lease until a raw submission request settles. Wallet switching cannot replace
-  the engine beneath that request. Routed starts recheck caller intent under
-  the lease through `beforeDispatch`; failures before dispatch are rejections,
-  while lost answers after dispatch remain unconfirmed and are never retried.
+  Equality is over the numbers alone: an issued offer equals the same offer
+  constructed directly, which still cannot start.
+- **Session-owned dispatch** ([@CharlVS]): `runWithSession` leases the engine
+  until a raw submission request settles, for at most 10 seconds. Only engine
+  stops, starts and transport resets wait for that lease, so identity reads
+  never delay a start, recovering from a failed read never aborts one, and
+  wallet switching cannot replace the engine beneath a request in flight.
+  Past the bound, stopping the engine fails the unanswered request and resets
+  the transport before a replacement engine can start, so a request the
+  engine never answers cannot hold off sign-out. The remote and
+  local-executable transport now honours that reset: it aborts its requests
+  in flight, including one still connecting, as the native transport does.
+  A stop holds the engine, so that transport gives up on a `stop` the engine
+  never answers after 5 seconds, and a stop that fails still resets the
+  transport. Routed starts recheck caller intent under the lease through
+  `beforeDispatch`; failures before dispatch are rejections, while lost
+  answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.
@@ -134,11 +146,15 @@ The harness remains unpublished. All version constraints move together.
   proving performance. All ten platform builds and 17 test jobs passed.
   [Artifact provenance](docs/KDF_ARTIFACTS_2026-11-03.json) records seven
   independently verified archives and the original failures/passing retries.
-- Bundled coins: `efd3a6471709f7e13e0b03277e37548e11840aae`;
+- Bundled coins: `cc8249e85e54467bc2684c2712857711eab55fd2`;
   `update_commit_on_build: false`; runtime updates remain enabled. Adds TAR,
-  TAR-segwit and TEL-BASE, removes TEL-KRC20, updates TEL ERC-20/Polygon
-  contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data,
-  endpoints and verified icons.
+  TAR-segwit, TEL-BASE and Yenten (YTN), removes TEL-KRC20, updates TEL
+  ERC-20/Polygon contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR
+  activation data, endpoints and verified icons. Sets L2 fee models for AVAX,
+  ETH-BASE, MNT and MON, which KDF `a51d69a` uses to read the actual fee of a
+  transaction; makes the fork-id signature version explicit for BCH, XEC, XRG
+  and tBCH, and drops signature versions and decimals that matched KDF's
+  defaults.
 - Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.
   Validation uses Flutter 3.41.4 / Dart 3.11.1; declared toolchain ranges stay
   unchanged. Source and archive identity are separate release evidence.
