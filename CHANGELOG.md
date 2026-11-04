@@ -143,11 +143,15 @@ The harness remains unpublished. All version constraints move together.
   proving performance. All ten platform builds and 17 test jobs passed.
   [Artifact provenance](docs/KDF_ARTIFACTS_2026-11-03.json) records seven
   independently verified archives and the original failures/passing retries.
-- Bundled coins: `efd3a6471709f7e13e0b03277e37548e11840aae`;
+- Bundled coins: `cc8249e85e54467bc2684c2712857711eab55fd2`;
   `update_commit_on_build: false`; runtime updates remain enabled. Adds TAR,
-  TAR-segwit and TEL-BASE, removes TEL-KRC20, updates TEL ERC-20/Polygon
-  contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data,
-  endpoints and verified icons.
+  TAR-segwit, TEL-BASE and Yenten (YTN), removes TEL-KRC20, updates TEL
+  ERC-20/Polygon contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR
+  activation data, endpoints and verified icons. Sets L2 fee models for AVAX,
+  ETH-BASE, MNT and MON, which KDF `a51d69a` uses to read the actual fee of a
+  transaction; makes the fork-id signature version explicit for BCH, XEC, XRG
+  and tBCH, and drops signature versions and decimals that matched KDF's
+  defaults.
 - Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.
   Validation uses Flutter 3.41.4 / Dart 3.11.1; declared toolchain ranges stay
   unchanged. Source and archive identity are separate release evidence.
