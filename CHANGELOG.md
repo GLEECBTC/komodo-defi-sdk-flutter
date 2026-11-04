@@ -72,6 +72,9 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Build-log privacy** — failed GitHub API requests report whether authentication
+  was used without printing authorization headers.
+
 - **Trezor sign-in** ([@CharlVS], [#424](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/424), [RC #425](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/425)) — sign in to a "My Trezor" wallet file
   that has no saved record, in any letter case, after giving the record the
   Trezor policy. A software wallet with that name is never used. When the
