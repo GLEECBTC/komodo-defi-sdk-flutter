@@ -1,8 +1,12 @@
 ## 0.7.0 (2026-10-28)
 
 
-Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs.
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs and changes.
 
+ - **FIX**(transport): `resetHttpClient()` on the remote and local-executable
+   transport aborts every request in flight, including one still connecting;
+   it was a no-op. A `stop` request the engine never answers gives up after
+   `stopTimeout`, 5 seconds by default (#437, RC #438).
  - **BUILD**(kdf): freeze all seven SDK targets at validated KDF
    `a51d69a11ff937ecf9678e9b37632af578252846` (`3.2.0-beta`) with specs
    `7c388ea7b91cb7c657435d416bc03e5349b46162`. This supersedes the earlier

@@ -12,8 +12,13 @@ Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC changes
  - **FEAT**(routed-swap): `start` accepts a synchronous `beforeDispatch`
    callback for revocable caller intent. It runs under `auth.runWithSession`
    immediately before raw init. Auth transitions wait for an in-flight
-   dispatch; a lost answer after dispatch stays unconfirmed and is not
-   automatically retried (#426, RC #427).
+   dispatch for at most 10 seconds; past that, stopping the engine fails the
+   request before a replacement starts. A lost answer after dispatch stays
+   unconfirmed and is not automatically retried (#426, RC #427; #437,
+   RC #438).
+ - **FIX**(routed-swap): `RoutedSwapOffer` compares its numbers whatever its
+   subclass, so an issued offer equals the same offer constructed directly,
+   which still cannot start (#437, RC #438).
  - **TEST**(routed-swap): complete native/WASM transition regressions for
    sign-out, same-wallet reauthentication, wallet switches, session restore,
    registration, disposal and copied offers (#428, RC #429).
