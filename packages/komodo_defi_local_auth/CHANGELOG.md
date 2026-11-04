@@ -1,5 +1,24 @@
 ## 0.7.0 (2026-10-28)
 
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC changes.
+
+ - **FIX**(trezor): recover a hardware wallet file without a saved record,
+   including case-insensitive names, while refusing a software wallet with the
+   same name. Restore the prior record if a claim fails; retry a known wallet
+   before using a new remembered `My Trezor N` wallet when its existing file
+   cannot be opened. Existing files remain untouched (#424, RC #425).
+ - **FIX**(trezor): require successful device initialization and a readable
+   active wallet before completing sign-in, and preserve remembered credentials
+   across the supported recovery paths (#424, RC #425).
+ - **BREAKING** **FEAT**(auth): custom auth implementations must provide
+   `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+   Validate ownership before and after taking the auth read lease, and retain
+   it until the raw request settles. See the
+   [submission-ownership migration](../../docs/RELEASE_0.9.0.md#submission-ownership)
+   for reentrancy and pending-request restrictions (#426, RC #427).
+ - **TEST**(auth): cover dispatch versus wallet transitions and the completed
+   Trezor claim, rollback, retry and initialization-completion paths (#424, #428).
+
  - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
    part files from standalone exports; regenerate release output.
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.

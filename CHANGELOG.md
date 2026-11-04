@@ -5,6 +5,10 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
+Updated 4 November 2026 against frozen RC `3b462904`. The
+[post-opening audit](docs/RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) covers every
+accepted change since release PR #416 opened at `22e14ac9`. Pending carries
+are tracked separately and are not described as part of this snapshot.
 
 ### SDK 0.9.0 overview
 
@@ -52,6 +56,11 @@ The harness remains unpublished. All version constraints move together.
 - Custom activation strategies use the role and custom-token hooks on
   `ProtocolActivationStrategy`. `BatchCapableActivator` no longer declares
   `supportsCustomTokenActivation`. Each asset must match one strategy.
+- Custom `KomodoDefiAuth` / `IAuthService` implementations must provide
+  `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+  It validates the original session before and after taking the auth read
+  lease and retains that lease until dispatch settles. See the
+  [submission-ownership migration](docs/RELEASE_0.9.0.md#submission-ownership).
 - Adopters of interim routed-swap branches must remove `guardMargin`,
   `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
   `nativeGasReserve`. Use complete KDF quotes, concrete execution amounts and
@@ -61,16 +70,18 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
-- **Trezor sign-in** ([@CharlVS]) — sign in to a "My Trezor" wallet file
+- **Trezor sign-in** ([@CharlVS], [#424](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/424), [RC #425](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/425)) — sign in to a "My Trezor" wallet file
   that has no saved record, in any letter case, after giving the record the
   Trezor policy. A software wallet with that name is never used. When the
   saved password cannot open the file, such as another app's in a shared
   KDF directory, the record gets its policy back and a new local wallet is
   registered under the next free "My Trezor N" name and remembered. A
   wallet opened here before is tried twice first, because desktop KDF
-  reports any startup failure like a wrong password.
+  reports any startup failure like a wrong password. Failed placeholder claims
+  restore their prior policy. Sign-in completes only after device initialization
+  succeeds and the active wallet can be read.
 
-- **Cold-start recovery** ([@CharlVS]) — follow every in-flight history page
+- **Cold-start recovery** ([@CharlVS], [#417](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/417), [RC #418](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/418)) — follow every in-flight history page
   instead of silently stopping after page 20. Wallet-session checks remain
   active throughout pagination, and a wallet change rejects the whole read.
 
@@ -84,13 +95,13 @@ The harness remains unpublished. All version constraints move together.
   unconfirmed start. Bind cached handles, polling and asynchronous results to
   the authenticated runtime session; revoke them on sign-out, wallet switches
   and same-wallet reauthentication. Direct manager construction requires auth.
-- **Routed offer ownership** ([@CharlVS]): an offer belongs to the wallet
+- **Routed offer ownership** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): an offer belongs to the wallet
   session that priced it, and so do its copies. `start` refuses any other
   offer with `AuthSessionChangedException` before sending anything: one priced
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
   constructed directly or issued by another manager. Supported copies retain
   private issuance; callers cannot rebind an old offer to a new session.
-- **Session-owned dispatch** ([@CharlVS]): `runWithSession` holds the auth read
+- **Session-owned dispatch** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): `runWithSession` holds the auth read
   lease until a raw submission request settles. Wallet switching cannot replace
   the engine beneath that request. Routed starts recheck caller intent under
   the lease through `beforeDispatch`; failures before dispatch are rejections,
@@ -125,6 +136,12 @@ The harness remains unpublished. All version constraints move together.
 
 ### Engine and build inputs
 
+- The frozen SDK input is accepted normal carry
+  [`3b462904`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/3b4629048d8513af8f8a9d17a5cdf7eb5763d206)
+  ([#430](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/430),
+  [RC #431](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/431)).
+  Earlier `35f0bde` and `e40ac2f` preparation inputs are superseded by the
+  following exact pins; their dated provenance remains historical evidence.
 - KDF source: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`,
   engine `3.2.0-beta`; the two commits since `e40ac2f` bump the version and
   stabilize CI fixtures, shared-wallet tests, endpoints and development/test
@@ -142,6 +159,17 @@ The harness remains unpublished. All version constraints move together.
 - The candidate source retains unconditional ERC-20 payment amount validation
   from the 0.9.7-1 engine security update; see the release checklist for the
   direct source comparison. Engine ancestry alone is not proof of parity.
+
+### Testing and release preparation
+
+- **Session-transition coverage** ([@CharlVS], [#428](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/428), [RC #429](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/429)) — expanded native and browser/WASM regressions for
+  sign-out, wallet switching, same-wallet reauthentication, restore,
+  registration and disposal. Tests cover issued/copied offers, caller intent
+  revoked before dispatch and responses arriving after a session ends.
+- **Reproducible input evidence** ([@CharlVS], [RC #431](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/431)) — recorded independent GitHub artifact digests, ZIP checks and ordinary-mirror
+  byte comparisons for all seven archives, plus the frozen coin files/icons.
+  Original failed jobs and passing retries remain in the dated provenance;
+  test results describe their exact input, not publication approval.
 
 ### Limits and release gates
 
@@ -165,9 +193,11 @@ The harness remains unpublished. All version constraints move together.
   describes engine-managed allowance in the existing review. LI.FI retains
   its separate exact-approval/reset contract.
 - **Release evidence:** KDF/spec/proxy review, final-head CI and signed consumer
-  validation retain their checklist gates. The owner accepted documented KDF
-  failures for RC testing only; their production disposition remains pending.
-  Replay tests do not certify live execution.
+  validation retain their checklist gates. The pinned `a51d69a` completed all
+  ten platform builds and 17 test jobs. Older revisions' RC-only failure
+  dispositions remain historical and do not describe this pin's result.
+  Replay tests do not certify live execution, signed installation or legal
+  approval; see the current [release checklist](docs/RELEASE_0.9.0_CHECKLIST.md).
 
 **Review comparison:** [SDK 0.8.1 checkout to the frozen 0.9.0 candidate](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/a96398ba9ae72efbe654de7c3edc0bfe2b05dda0...release-0.9.0).
 

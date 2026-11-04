@@ -3,13 +3,44 @@
 Prepared 28 October 2026; build-input rolls prepared 29 October and 3 November.
 This is a candidate record, not publication approval.
 
+## Current accepted snapshot — 4 November 2026
+
+- Frozen SDK: `3b4629048d8513af8f8a9d17a5cdf7eb5763d206` (normal #431),
+  matching its tested candidate; source #430 squash is
+  `db73613cd34a2c0779da024a71338052e4bbb030`. Main #416 remains open, with
+  automatic merging disabled.
+- [x] Audit every accepted change since #416 opened at `22e14ac9`, including
+  root/package changelogs and the custom-auth `runWithSession` migration.
+  The [coverage record](RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) distinguishes
+  superseded input rolls and testing/documentation changes from runtime fixes.
+- [x] Recorded current-input SDK qualification: 16 suites, **3,112 passed /
+  14 skipped**, Chrome/WASM **249 +10 +10**, stable offline generation and
+  independently verified artifacts. All five main-RC hosted checks passed for
+  the accepted frozen head. These results were reused, not rerun for this audit.
+- [x] Exact `a51d69a` completed ten platform builds and 17 test jobs. Historical
+  29 October failure dispositions below describe the older `e40ac2f` input;
+  they do not override this pin's result. Retain original failures/passing
+  retries in [the exact-pin provenance](KDF_ARTIFACTS_2026-11-03.json).
+- [ ] Finish normal logging carry #435 after GitHub completes the existing
+  merge operation/current gates. Development #434 is accepted, but is not in
+  this frozen snapshot. Refresh notes and the consumer's exact SDK pin after
+  acceptance; do not silently substitute the development engine configuration.
+- [ ] Complete final promotion review/checks, eventual consumer main pin and
+  signed consumer installation/upgrade qualification before distribution.
+  Keep #416 open until separately authorized; do not tag or publish here.
+
+The dated sections below retain the evidence for their original inputs.
+No KDF repository tests, version/dependency changes or runtime pin changes are
+part of this documentation update.
+
 ## Scope and immutable inputs
 
 - Integration source: `03a3cb1adf666952a16f0cd80e67b8173076f4c1` (SDK #407),
   including SDK #405 activation fixes. Initial preparation added release
-  metadata and dependency constraints. Runtime freeze fixes are SDK #412
-  (`97b48556`) and #413 (`56828b91`). The later merged-dev KDF artifact
-  roll retains the runtime sources and records the new build provenance.
+  metadata and dependency constraints. Initial runtime freeze fixes are SDK
+  #412 (`97b48556`) and #413 (`56828b91`). Subsequent accepted recovery,
+  Trezor and session-dispatch corrections (#418/#425/#427), transition tests
+  (#429) and input roll (#431) are mapped in the post-opening coverage record.
 - Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
   merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
 - Branch strategy: **squash every PR into `dev`**; freeze `release-0.9.0`
@@ -25,7 +56,8 @@ This is a candidate record, not publication approval.
 - KDF: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
   `efd3a6471709f7e13e0b03277e37548e11840aae`.
-- All seven archive checksums are in `app_build/build_config.json` with
+- All seven archive checksums are in the
+  [framework build configuration](../packages/komodo_defi_framework/app_build/build_config.json) with
   [3 November provenance](KDF_ARTIFACTS_2026-11-03.json). The prior
   [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
   historical evidence. Build-time coin
