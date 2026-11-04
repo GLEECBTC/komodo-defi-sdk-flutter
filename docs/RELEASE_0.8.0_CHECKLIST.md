@@ -164,11 +164,13 @@ resolution and unit gate passed. No consumer changes are included in this PR.
 Its three skipped tests remain `Get formatted USD balance using SDK balance`,
 `getTotal24Change calculates total change`, and `Total fee positive test`.
 
-## Outstanding sample checks
+## Excluded sample checks
 
-Keep this PR draft until these existing sample-test failures are resolved or
-explicitly excluded from the release gate. They do not invalidate the passing
-SDK package suites, browser races, web builds or wallet unit gate.
+These five existing sample-test failures are excluded from the 0.8.0 release
+gate, as decided on 2026-09-24. They are in sample applications rather than
+shipped packages, and CI does not run them: it tests only the direct children
+of `packages/`. They do not invalidate the passing SDK package suites, browser
+races, web builds or wallet unit gate.
 
 | File / exact failing test | Finding |
 | --- | --- |
@@ -178,10 +180,10 @@ SDK package suites, browser races, web builds or wallet unit gate.
 | Same file — `AudioCubit toggleVolume unmutes the volume when the volume is 0` | Audio plugin initialization escapes the existing mock setup. |
 | `playground/test/widget_test.dart` — test-file loading | The entire file is commented out; no `main` exists. |
 
-All five failures also reproduce in a separate checkout of the starting `dev`
-commit. These sample test sources are unchanged.
-Dex Dungeon's remaining 24 tests pass. The failure is
-`MissingPluginException` on `xyz.luan/audioplayers.global`, not an SDK export
+All five failures reproduce on the starting `dev` commit and again on `dev` at
+`7a2b11f4` on 2026-09-24; nothing else in these suites fails, and the sample
+test sources are unchanged. Dex Dungeon's remaining 24 tests pass. The failure
+is `MissingPluginException` on `xyz.luan/audioplayers.global`, not an SDK export
 failure. The playground application itself builds successfully for web.
 
 ## Reproduce the retained additional gates
@@ -239,7 +241,8 @@ flutter test --no-pub test_units/main.dart \
 
 ## Platform and publication handoff
 
-- [ ] Resolve the sample-test gate above and review CI for the final PR commit.
+- [x] Exclude the sample-test failures above from the release gate.
+- [ ] Review CI for the final PR commit.
 - [ ] Perform Android/iOS device, Windows/Linux native and hardware-wallet
   smoke checks in their platform environments. Signed mobile/desktop builds,
   the real OS share sheet and cross-browser coverage were not exercised locally.
