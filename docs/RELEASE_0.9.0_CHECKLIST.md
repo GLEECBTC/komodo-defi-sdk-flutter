@@ -5,11 +5,20 @@ This is a candidate record, not publication approval.
 
 ## Current accepted snapshot — 4 November 2026
 
-- Frozen SDK: `ad1799272121c18c7391287b9744247f89c04e44` (normal #438). Its
-  tree equals carry head `0c69bd35082a10bff445ebf5c5a24de1d948b6ee`, which the
-  app RC pins; source #437 squash is `34dd5febb45193c7c66b649b89b68ef3d90f3675`.
-  Engine and coin inputs are unchanged since #430 / #431 (`3b462904`). Main
-  #416 remains open, with automatic merging disabled.
+- Frozen SDK: `7636f554c77b0d4bfa02d20dc030f1a95596a755` (normal #440). Its
+  tree equals carry head `ff43a0bad14577b2f5649fae22233a5fe9fe02c4`; source
+  #439 squash is `ab29d57aa05aa48240ab7430c6d51a4f5e60a579`. It follows the
+  session follow-ups: #437 squash `34dd5febb45193c7c66b649b89b68ef3d90f3675`
+  and normal #438 `ad1799272121c18c7391287b9744247f89c04e44`, whose carry head
+  `0c69bd35` the app RC pinned before its coins repin. Engine inputs are
+  unchanged since #430 / #431 (`3b462904`); coins are `cc8249e8`. Main #416
+  remains open, with automatic merging disabled.
+- [x] Final coins roll #439 / #440: coins `cc8249e8` replaces `efd3a647` (22
+  commits, YTN added, no coin removed). The three mapped files and all 446
+  icons match upstream exactly; the local provider parses 737 of 773 coins,
+  with the same 36 omissions. Seven SDK suites passed on the carry, including
+  `komodo_coins` **143** and `komodo_coin_updates` **106**; see the
+  "Final coins roll" section below for the KDF check.
 - [x] Session follow-ups #437 / #438. The dispatch lease is bounded at 10
   seconds and taken on the engine only, and transport resets wait for it. The
   local executable's reset aborts pending requests, and its `stop` gives up

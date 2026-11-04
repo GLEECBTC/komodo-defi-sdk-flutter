@@ -9,10 +9,10 @@ version, tag, publication, main promotion or test execution.
   opened on 28 October at 18:50:51 UTC with head
   `22e14ac94fb555776eda370de08f1dafd5ca4019`. Its first Actions runs use that
   exact SHA, independently confirming the initial boundary.
-- Audited accepted RC: `ad1799272121c18c7391287b9744247f89c04e44`.
-- [Complete post-opening comparison](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/22e14ac94fb555776eda370de08f1dafd5ca4019...ad1799272121c18c7391287b9744247f89c04e44).
-  The range contains **21 non-merge commits**, including source-branch
-  preparation commits reachable through the eight accepted carries below.
+- Audited accepted RC: `7636f554c77b0d4bfa02d20dc030f1a95596a755`.
+- [Complete post-opening comparison](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/compare/22e14ac94fb555776eda370de08f1dafd5ca4019...7636f554c77b0d4bfa02d20dc030f1a95596a755).
+  The range contains **23 non-merge commits**, including source-branch
+  preparation commits reachable through the nine accepted carries below.
   Repeated preparations and their accepted merge are one change, not two features.
 
 ## Coverage
@@ -27,6 +27,7 @@ version, tag, publication, main promotion or test execution.
 | [#428](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/428) / [#429](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/429) | Complete native/WASM auth-transition regressions and fixtures. Recorded as testing coverage, not another runtime feature. |
 | [#430](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/430) / [#431](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/431) | Validated `a51d69a` engine and `efd3a647` coin inputs, checksum/provenance and release records. Root, framework 0.7.0 and coin 0.5.0 notes now describe the final frozen inputs instead of the superseded preparation pins. |
 | [#437](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/437) / [#438](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/438) | Bounded, engine-only dispatch lease (10 s) and transport resets that wait for it; the local executable's reset aborts pending requests and its stop gives up after 5 s; a failed stop still resets; offers compare by their numbers. Root, `komodo_defi_local_auth`, `komodo_defi_framework` and `komodo_defi_sdk` changelogs and the migration guide. |
+| [#439](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/439) / [#440](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/440) | Final coins roll `efd3a647` → `cc8249e8`: Yenten (YTN), L2 fee models for AVAX, ETH-BASE, MNT and MON, and signature versions that restate KDF's defaults; no coin removed. Root and `komodo_defi_framework` changelogs, migration guide and checklist. |
 
 Git author names `CharlVS` and `Nitride` in this range resolve to **@CharlVS**;
 source and carry PR author metadata was checked. Existing initial-RC features
@@ -38,8 +39,11 @@ repeated as new post-opening changes.
 Accepted SDK #430 squash is `db73613cd34a2c0779da024a71338052e4bbb030`;
 normal carry #431 is `3b4629048d8513af8f8a9d17a5cdf7eb5763d206`. Session
 follow-up #437 was squash accepted as `34dd5febb45193c7c66b649b89b68ef3d90f3675`
-and normal carry #438 is the audited frozen head above; its tree equals the
-carry head `0c69bd35082a10bff445ebf5c5a24de1d948b6ee` that the app RC pins. The complete accepted
+and normal carry #438 is `ad1799272121c18c7391287b9744247f89c04e44`. The final
+coins roll #439 was squash accepted as `ab29d57aa05aa48240ab7430c6d51a4f5e60a579`
+and normal carry #440 is the audited frozen head above; its tree equals the
+carry head `ff43a0bad14577b2f5649fae22233a5fe9fe02c4` that the app RC repins
+to. The complete accepted
 trees matched their tested candidates. Saved qualification includes 16 SDK
 suites (**3,112 passed /14 skipped**), browser/WASM **249 +10 +10**, offline
 bootstrap/repeated generation, seven independently checked archives and a
