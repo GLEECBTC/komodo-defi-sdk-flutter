@@ -47,11 +47,19 @@ This is a candidate record, not publication approval.
   `komodo_wallet_build_transformer` suite passed **125**; hosted checks passed
   **4**. The app RC pins its head `caab72b9` through #3589, with no
   development engine configuration substituted.
+- [x] Notes #436 (`8cae3c91`) adds only changelogs and release docs; all five
+  main-RC checks on #416 passed at that head. The app's main-RC preview of the pinned runtime
+  was rechecked on 4 November: SDK `caab72b9`, and all 13 served
+  config/coin/engine files match the verified inputs.
+- [x] Owner dispositions (4 November): the open KDF review points and the
+  unattributed upstream failures under "Before distribution" ship as known
+  limits with a follow-up after release.
 - [ ] Complete final promotion review/checks, eventual consumer main pin and
   signed consumer installation/upgrade qualification before distribution.
   Keep #416 open until separately authorized; do not tag or publish here.
 
-The dated sections below retain the evidence for their original inputs.
+Unchecked boxes in the dated sections below are historical; the lists above
+and under "Before distribution" are current. The dated sections below retain the evidence for their original inputs.
 No KDF repository tests, version/dependency changes or runtime pin changes are
 part of this documentation update.
 
@@ -187,11 +195,15 @@ WASM/platform builds and hosted CI must still run on final promotion.
 
 ## Before distribution
 
-- [ ] Resolve/review the KDF native bridge-fee restriction, status-error polling,
-  specs review and proxy/backend deployment provenance and recovery evidence.
-- [ ] Attribute upstream failures `validate_dex_fee_invalid_sender_erc`,
+- [x] KDF native bridge-fee restriction, status-error polling and the specs
+  review: the owner accepted them as known limits on 4 November, with a
+  follow-up after release.
+- [ ] Proxy/backend deployment provenance and recovery evidence for the
+  production KDP routes (Decker).
+- [x] Upstream failures `validate_dex_fee_invalid_sender_erc`,
   `firo_lelantus_tx_details`, `test_block_header_utxo_loop` from KDF run
-  `39776341104`. An artifact rebuild does not close them.
+  `39776341104`: the owner accepted them as known limits on 4 November, with a
+  follow-up. An artifact rebuild does not close them.
 - [ ] Validate signed consumer artifacts, fresh install/upgrade, Safari and
   hardware/platform behavior on the final commit, with funded checks operated
   by a person. Rebuild/revalidate all seven targets if KDF changes.
@@ -419,7 +431,8 @@ The historical 29 October record remains unchanged.
   passed **249**, framework **10**, and auth dispatch lease **10**. The core
   gate includes the accepted offer-session and browser persistence regressions.
   Full consumer analysis: zero errors, 55 existing warnings and 2,144 infos.
-- [ ] Focused dev squash and accepted normal-merge carry into `release-0.9.0`.
+- [x] Focused dev squash #430 (`db73613c`) and accepted normal-merge carry #431
+  (`3b462904`) into `release-0.9.0`.
 
 Upstream maintainers independently merged KDF #40 as `f9632e0e`; only
 `CHANGELOG.md` differs from this requested revision. This roll retains `a51d69a`.
