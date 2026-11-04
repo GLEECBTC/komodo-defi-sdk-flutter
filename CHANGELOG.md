@@ -5,7 +5,7 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
-Updated 4 November 2026 against frozen RC `3b462904`. The
+Updated 4 November 2026 against frozen RC `ad179927`. The
 [post-opening audit](docs/RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) covers every
 accepted change since release PR #416 opened at `22e14ac9`. Pending carries
 are tracked separately and are not described as part of this snapshot.
@@ -58,8 +58,10 @@ The harness remains unpublished. All version constraints move together.
   `supportsCustomTokenActivation`. Each asset must match one strategy.
 - Custom `KomodoDefiAuth` / `IAuthService` implementations must provide
   `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
-  It validates the original session before and after taking the auth read
-  lease and retains that lease until dispatch settles. See the
+  It validates the original session before and after taking its engine lease,
+  and holds that lease while the raw request is answered, for at most
+  `dispatchLeaseTimeout`. A custom `IKdfOperations.resetHttpClient` must abort
+  its requests in flight. See the
   [submission-ownership migration](docs/RELEASE_0.9.0.md#submission-ownership).
 - Adopters of interim routed-swap branches must remove `guardMargin`,
   `defaultGuardMargin`, `maxSellFeeMargin`, `maxSellFundingMargin` and
@@ -95,7 +97,7 @@ The harness remains unpublished. All version constraints move together.
   unconfirmed start. Bind cached handles, polling and asynchronous results to
   the authenticated runtime session; revoke them on sign-out, wallet switches
   and same-wallet reauthentication. Direct manager construction requires auth.
-- **Routed offer ownership** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): an offer belongs to the wallet
+- **Routed offer ownership** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427), [#437](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/437), [RC #438](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/438)): an offer belongs to the wallet
   session that priced it, and so do its copies. `start` refuses any other
   offer with `AuthSessionChangedException` before sending anything: one priced
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
@@ -103,7 +105,7 @@ The harness remains unpublished. All version constraints move together.
   private issuance; callers cannot rebind an old offer to a new session.
   Equality is over the numbers alone: an issued offer equals the same offer
   constructed directly, which still cannot start.
-- **Session-owned dispatch** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427)): `runWithSession` leases the engine
+- **Session-owned dispatch** ([@CharlVS], [#426](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/426), [RC #427](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/427), [#437](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/437), [RC #438](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/438)): `runWithSession` leases the engine
   until a raw submission request settles, for at most 10 seconds. Only engine
   stops, starts and transport resets wait for that lease, so identity reads
   never delay a start, recovering from a failed read never aborts one, and
@@ -148,10 +150,13 @@ The harness remains unpublished. All version constraints move together.
 
 ### Engine and build inputs
 
-- The frozen SDK input is accepted normal carry
+- The engine and build inputs were accepted with normal carry
   [`3b462904`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/3b4629048d8513af8f8a9d17a5cdf7eb5763d206)
   ([#430](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/430),
-  [RC #431](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/431)).
+  [RC #431](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/431)). The frozen head
+  [`ad179927`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/ad1799272121c18c7391287b9744247f89c04e44)
+  adds the session follow-ups ([#437](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/437),
+  [RC #438](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/438)) and leaves these inputs unchanged.
   Earlier `35f0bde` and `e40ac2f` preparation inputs are superseded by the
   following exact pins; their dated provenance remains historical evidence.
 - KDF source: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`,

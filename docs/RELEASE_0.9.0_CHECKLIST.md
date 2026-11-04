@@ -5,10 +5,19 @@ This is a candidate record, not publication approval.
 
 ## Current accepted snapshot — 4 November 2026
 
-- Frozen SDK: `3b4629048d8513af8f8a9d17a5cdf7eb5763d206` (normal #431),
-  matching its tested candidate; source #430 squash is
-  `db73613cd34a2c0779da024a71338052e4bbb030`. Main #416 remains open, with
-  automatic merging disabled.
+- Frozen SDK: `ad1799272121c18c7391287b9744247f89c04e44` (normal #438). Its
+  tree equals carry head `0c69bd35082a10bff445ebf5c5a24de1d948b6ee`, which the
+  app RC pins; source #437 squash is `34dd5febb45193c7c66b649b89b68ef3d90f3675`.
+  Engine and coin inputs are unchanged since #430 / #431 (`3b462904`). Main
+  #416 remains open, with automatic merging disabled.
+- [x] Session follow-ups #437 / #438. The dispatch lease is bounded at 10
+  seconds and taken on the engine only, and transport resets wait for it. The
+  local executable's reset aborts pending requests, and its `stop` gives up
+  after 5 seconds. Offers compare by their numbers. On the carry:
+  `komodo_defi_framework` **104**, `komodo_defi_local_auth` **163**,
+  `komodo_defi_sdk` **1,239** (1 skipped), routed-swap harness **60**. Hosted
+  checks passed on both PRs before merging. The changed files equal the
+  source squash except the root changelog, which lacks dev's #434 entry.
 - [x] Audit every accepted change since #416 opened at `22e14ac9`, including
   root/package changelogs and the custom-auth `runWithSession` migration.
   The [coverage record](RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) distinguishes
@@ -16,7 +25,8 @@ This is a candidate record, not publication approval.
 - [x] Recorded current-input SDK qualification: 16 suites, **3,112 passed /
   14 skipped**, Chrome/WASM **249 +10 +10**, stable offline generation and
   independently verified artifacts. All five main-RC hosted checks passed for
-  the accepted frozen head. These results were reused, not rerun for this audit.
+  the previous frozen head `3b462904`. These results were reused, not rerun for
+  this audit; the follow-up suites above were run on the new head.
 - [x] Exact `a51d69a` completed ten platform builds and 17 test jobs. Historical
   29 October failure dispositions below describe the older `e40ac2f` input;
   they do not override this pin's result. Retain original failures/passing
