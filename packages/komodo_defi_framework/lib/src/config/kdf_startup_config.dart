@@ -296,6 +296,8 @@ class KdfStartupConfig {
     if (_memoizedCoins != null) return _memoizedCoins!;
 
     return _memoizedCoins =
-        await StartupCoinsProvider.fetchRawCoinsForStartup();
+        await StartupCoinsProvider.fetchRawCoinsForStartup(
+          refreshBeforeStartup: true,
+        );
   }
 }

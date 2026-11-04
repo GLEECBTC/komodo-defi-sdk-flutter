@@ -18,7 +18,8 @@ class StartupCoinsProvider {
 
   /// Fetches the list of coin configuration maps to be passed to mm2 on start.
   ///
-  /// - Uses only read paths and does not attempt to update or persist assets.
+  /// - When [refreshBeforeStartup] is enabled, checks for and persists an
+  ///   update before creating KDF's immutable startup coin snapshot.
   /// - If local storage already contains assets, returns those.
   /// - Otherwise, falls back to the bundled local asset provider.
   /// - Initializes Hive storage minimally to enable storage reads.
@@ -31,6 +32,7 @@ class StartupCoinsProvider {
     String? appStoragePath,
     String? appName,
     CustomTokenStore? customTokenStorage,
+    bool refreshBeforeStartup = false,
   }) async {
     final resolvedAppName = appName ?? 'komodo_coins';
 
@@ -62,6 +64,10 @@ class StartupCoinsProvider {
       final xform = transformer ?? const CoinConfigTransformer();
       final repository = factory.createRepository(runtimeConfig, xform);
       final localProvider = factory.createLocalProvider(runtimeConfig, xform);
+
+      if (refreshBeforeStartup && runtimeConfig.runtimeUpdatesEnabled) {
+        await _refreshBeforeStartup(repository);
+      }
 
       final sources = <CoinConfigSource>[
         StorageCoinConfigSource(repository: repository),
@@ -99,6 +105,37 @@ class StartupCoinsProvider {
         );
       }
     }
+  }
+
+  /// Updates persisted assets before KDF receives its one-time startup list.
+  ///
+  /// Any failure is deliberately non-fatal: callers can still start from the
+  /// last known storage snapshot or the bundled configuration while offline.
+  static Future<void> _refreshBeforeStartup(
+    CoinConfigRepository repository,
+  ) async {
+    try {
+      await _refreshRepository(repository);
+    } catch (e, s) {
+      _log.warning(
+        'Unable to refresh coin configuration before KDF startup; '
+        'using the last known configuration',
+        e,
+        s,
+      );
+    }
+  }
+
+  static Future<void> _refreshRepository(
+    CoinConfigRepository repository,
+  ) async {
+    if (await repository.isLatestCommit()) {
+      _log.finer('Startup coin configuration is already current');
+      return;
+    }
+
+    await repository.updateCoinConfig();
+    _log.info('Refreshed coin configuration before KDF startup');
   }
 
   static Future<String> _resolveStoragePath({
