@@ -10,6 +10,14 @@ mixin RoutedSwapValue {
 
   static const _equality = DeepCollectionEquality();
 
+  /// Whether [a] and [b] are equal props, for a type whose equality looks
+  /// past a private subclass.
+  static bool equalProps(List<Object?> a, List<Object?> b) =>
+      _equality.equals(a, b);
+
+  /// The hash [equalProps] agrees with.
+  static int hashProps(List<Object?> props) => _equality.hash(props);
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

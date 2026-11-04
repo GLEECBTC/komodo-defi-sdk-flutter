@@ -5,6 +5,61 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
     return _authMutex.protectWrite(operation);
   }
 
+  /// Stops, starts or resets the engine once no dispatched request leases it.
+  Future<T> _lockEngine<T>(Future<T> Function() operation) =>
+      _engineMutex.protectWrite(operation);
+
+  /// Stops KDF and resets the transport before releasing the engine, even
+  /// when the stop fails, so a request still pending, even one still
+  /// connecting, fails before a replacement engine can start.
+  Future<void> _stopEngine() => _lockEngine(() async {
+    try {
+      await _kdfFramework.kdfStop();
+    } finally {
+      _kdfFramework.resetHttpClient();
+    }
+  });
+
+  /// Resets the transport once no dispatch leases the engine.
+  ///
+  /// A reset aborts every request in flight. Outside an engine write, it
+  /// would abort a dispatch another caller is still awaiting.
+  Future<void> _resetTransport() =>
+      _lockEngine(() async => _kdfFramework.resetHttpClient());
+
+  /// [runWithSession] on the engine lease. An ended session is refused before
+  /// and after the wait, and the lease is held while [dispatch] is answered,
+  /// for at most [_dispatchLeaseTimeout].
+  ///
+  /// Past that bound a transition may stop the engine. Stopping it fails an
+  /// unanswered request and resets the HTTP client, so the request never
+  /// reaches the engine that replaces it. The caller still awaits the
+  /// request's own answer and must treat a lost one as unconfirmed.
+  Future<T> _runWithEngineLease<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) async {
+    ensureSessionContextCurrent(expected);
+    await _engineMutex.acquireRead();
+    var leased = true;
+    void release() {
+      if (!leased) return;
+      leased = false;
+      _engineMutex.release();
+    }
+
+    final bound = Timer(_dispatchLeaseTimeout, release);
+    try {
+      // A transition revokes its session before it waits for the engine.
+      // Reject work that was queued behind one.
+      ensureSessionContextCurrent(expected);
+      return await dispatch();
+    } finally {
+      bound.cancel();
+      release();
+    }
+  }
+
   void _startHealthCheck() {
     _healthCheckTimer?.cancel();
     // With shutdown signal streaming in place, health checks serve primarily
