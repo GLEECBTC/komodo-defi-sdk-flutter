@@ -97,13 +97,17 @@ The harness remains unpublished. All version constraints move together.
   constructed directly, which still cannot start.
 - **Session-owned dispatch** ([@CharlVS]): `runWithSession` leases the engine
   until a raw submission request settles, for at most 10 seconds. Only engine
-  stops and starts wait for that lease, so identity reads never delay a start,
-  and wallet switching cannot replace the engine beneath a request in flight.
-  Past the bound, stopping the engine fails the unanswered request, so a
-  stalled engine cannot hold off sign-out. Routed starts recheck caller intent
-  under the lease through `beforeDispatch`; failures before dispatch are
-  rejections, while lost answers after dispatch remain unconfirmed and are
-  never retried.
+  stops, starts and transport resets wait for that lease, so identity reads
+  never delay a start, recovering from a failed read never aborts one, and
+  wallet switching cannot replace the engine beneath a request in flight.
+  Past the bound, stopping the engine fails the unanswered request and resets
+  the transport before a replacement engine can start, so a request the
+  engine never answers cannot hold off sign-out. The remote and
+  local-executable transport now honours that reset: it aborts its requests
+  in flight, including one still connecting, as the native transport does.
+  Routed starts recheck caller intent under the lease through
+  `beforeDispatch`; failures before dispatch are rejections, while lost
+  answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.
