@@ -61,4 +61,23 @@ void main() {
     expect(await operations.version(), 'test-version');
     expect(await operations.version(), 'test-version');
   });
+
+  test('a stop the engine never answers gives up after its timeout', () async {
+    final arrived = Completer<void>();
+    // An engine that takes the stop request and never answers it.
+    server.listen((request) {
+      if (!arrived.isCompleted) arrived.complete();
+    });
+    final bounded = KdfOperationsRemote.create(
+      logCallback: (_) {},
+      rpcUrl: Uri.parse('http://127.0.0.1:${server.port}'),
+      userpass: 'rpc-password-value',
+      stopTimeout: const Duration(milliseconds: 200),
+    );
+
+    final status = await bounded.kdfStop().timeout(const Duration(seconds: 5));
+    expect(arrived.isCompleted, isTrue);
+    expect(status, StopStatus.errorStopping);
+    bounded.resetHttpClient();
+  });
 }
