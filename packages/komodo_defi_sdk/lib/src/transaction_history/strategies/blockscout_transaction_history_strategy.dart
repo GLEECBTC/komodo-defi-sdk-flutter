@@ -48,7 +48,10 @@ class BlockscoutTransactionStrategy extends TransactionHistoryStrategy {
 
   /// Chains whose explorer has been verified to serve the Etherscan-compatible
   /// Blockscout API. Adding a subclass here is a claim that it was checked.
-  static const Set<CoinSubClass> _supportedSubClasses = {CoinSubClass.grc20};
+  static const Set<CoinSubClass> _supportedSubClasses = {
+    CoinSubClass.grc20,
+    CoinSubClass.ethereumClassic,
+  };
 
   /// Rows requested per address. The API caps `offset` server-side, so this is
   /// the practical ceiling on how deep one address's history is read.
@@ -418,6 +421,16 @@ class BlockscoutTransactionStrategy extends TransactionHistoryStrategy {
 
     final base = asset.protocol.explorerPattern.baseUrl;
     if (base == null || !base.hasAuthority) return null;
+
+    if (asset.id.subClass == CoinSubClass.ethereumClassic) {
+      // The pinned coin config still names Blockscout's retired path. Its
+      // canonical ETC deployment serves the account API at this origin.
+      if (base.host == 'blockscout.com' &&
+          _stripTrailingSlash(base.path) == '/etc/mainnet') {
+        return Uri.parse('https://etc.blockscout.com/api');
+      }
+      if (base.host != 'etc.blockscout.com') return null;
+    }
 
     return base.replace(
       path: '${_stripTrailingSlash(base.path)}/api',

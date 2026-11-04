@@ -237,6 +237,12 @@ class CexMarketDataManager
     return price;
   }
 
+  /// A dated price must come from a repository that can serve a past date;
+  /// the Komodo feed, for one, answers with today's price whatever the date.
+  PriceRequestType _priceRequestType(DateTime? priceDate) => priceDate == null
+      ? PriceRequestType.currentPrice
+      : PriceRequestType.priceHistory;
+
   @override
   Decimal? priceIfKnown(
     AssetId assetId, {
@@ -293,7 +299,7 @@ class CexMarketDataManager
     return tryRepositoriesInOrder(
       assetId,
       quoteCurrency,
-      PriceRequestType.currentPrice,
+      _priceRequestType(priceDate),
       (repo) => _fetchAndCachePrice(
         repo,
         assetId,
@@ -329,7 +335,7 @@ class CexMarketDataManager
     return tryRepositoriesInOrderMaybe(
       assetId,
       quoteCurrency,
-      PriceRequestType.currentPrice,
+      _priceRequestType(priceDate),
       (repo) => _fetchAndCachePrice(
         repo,
         assetId,

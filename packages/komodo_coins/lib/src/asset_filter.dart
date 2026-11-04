@@ -48,22 +48,25 @@ class NoAssetFilterStrategy extends AssetFilterStrategy {
 /// activate on Trezor.
 /// ERC20, Arbitrum, and Polygon explicitly do not support Trezor via KDF
 /// at this time, so they are also excluded.
+/// GRC-20 (GLEEC and its tokens) is the only EVM subclass included.
 class TrezorAssetFilterStrategy extends AssetFilterStrategy {
   const TrezorAssetFilterStrategy({this.hiddenAssets = const {}})
     : super('trezor');
+
+  static const Set<CoinSubClass> _supportedSubClasses = {
+    CoinSubClass.utxo,
+    CoinSubClass.smartChain,
+    CoinSubClass.qrc20,
+    CoinSubClass.grc20,
+  };
 
   final Set<String> hiddenAssets;
 
   @override
   bool shouldInclude(Asset asset, JsonMap coinConfig) {
-    final subClass = asset.protocol.subClass;
-
-    // AVAX, BNB, ETH, FTM, etc. currently fail to activate on Trezor,
-    // so we exclude them from the Trezor asset list.
-    final isProtocolSupported =
-        subClass == CoinSubClass.utxo ||
-        subClass == CoinSubClass.smartChain ||
-        subClass == CoinSubClass.qrc20;
+    final isProtocolSupported = _supportedSubClasses.contains(
+      asset.protocol.subClass,
+    );
 
     final hasTrezorCoinField =
         coinConfig['trezor_coin'] is String &&

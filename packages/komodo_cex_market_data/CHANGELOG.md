@@ -1,3 +1,18 @@
+## 0.2.0 (2026-10-28)
+
+ - **BREAKING** **PERF**(coinpaprika): use one bulk tickers response cached
+   for five minutes for spot prices and 24h changes. Custom
+   `ICoinPaprikaProvider` implementations must add `fetchTickers`. Coins
+   absent from the provider's bulk response are unsupported and use fallback
+   repositories; failed bulk requests also cool down for five minutes (#393).
+ - **FIX**(market-data): parse CoinGecko 24h fields and live CoinPaprika
+   markets. `CoinPaprikaMarket.marketUrl` is nullable; decimal quote values
+   accept API numbers (#392).
+ - **FIX**(storage): require `hive_ce` ^2.14.0 for recoverable box-open failures.
+ - **TEST**(prices): replace live, expiring feed expectations with fixed HTTP
+   responses so the package suite is deterministic (#407).
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.1.0+2 (unreleased)
 
  - **FIX**(coinpaprika): return current prices and 24h changes for stablecoin

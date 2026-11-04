@@ -1,3 +1,19 @@
+## 0.5.0 (2026-10-28)
+
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs.
+
+ - **CHORE**(assets): the complete SDK checkout bundles coins revision
+   `efd3a6471709f7e13e0b03277e37548e11840aae`. Added TAR/TAR-segwit and
+   TEL-BASE, removed TEL-KRC20, and updated TEL ERC-20/Polygon contracts and
+   decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data, endpoints and
+   icons. Build-time advancement is disabled; runtime coin updates retain
+   their own policy (#430, RC #431).
+
+ - **FEAT**(assets): list GLEEC and configured GRC-20 tokens for Trezor
+   wallets when `trezor_coin` is present. This does not enable all EVM chains
+   or routed-swap hardware signing (#405).
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.4.0 (unreleased)
 
  - **CHORE**(deps): require `komodo_defi_types` `^0.6.0`, `komodo_coin_updates` `^2.1.1` for SDK 0.8.0;

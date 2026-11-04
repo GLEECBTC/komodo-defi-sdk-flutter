@@ -3,7 +3,8 @@ import 'package:komodo_defi_sdk/src/activation/_activation.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Task-based activation strategy for Tendermint with Trezor hardware wallets.
-/// Uses task::enable_tendermint::init for both platform and token assets when using Trezor.
+/// Uses task::enable_tendermint::init for platform coins, with any tokens
+/// activated in the same task, when using Trezor.
 class TendermintTaskActivationStrategy extends ProtocolActivationStrategy {
   /// Creates a new [TendermintTaskActivationStrategy] with the given client and
   /// private key policy.
@@ -20,6 +21,11 @@ class TendermintTaskActivationStrategy extends ProtocolActivationStrategy {
 
   @override
   bool get supportsBatchActivation => true;
+
+  // KDF takes only platform tickers here; a token added later goes through
+  // enable_tendermint_token.
+  @override
+  Set<AssetRole> get supportedRoles => const {AssetRole.platform};
 
   @override
   bool canHandle(Asset asset) {

@@ -1,26 +1,21 @@
 import 'package:komodo_defi_rpc_methods/src/internal_exports.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:rational/rational.dart';
-import '../../common_structures/primitive/mm2_rational.dart';
-import '../../common_structures/primitive/fraction.dart';
 
 /// Request to get minimum trading volume for a coin
+///
+/// KDF serves `min_trading_vol` only on its legacy dispatcher, which it
+/// reaches only when `mmrpc` is absent, and only for an activated coin.
 class MinTradingVolumeRequest
     extends BaseRequest<MinTradingVolumeResponse, GeneralErrorResponse> {
   MinTradingVolumeRequest({required String rpcPass, required this.coin})
-    : super(
-        method: 'min_trading_vol',
-        rpcPass: rpcPass,
-        mmrpc: RpcVersion.v2_0,
-      );
+    : super(method: 'min_trading_vol', rpcPass: rpcPass, mmrpc: null);
 
   /// Coin ticker to query minimum trading volume for
   final String coin;
 
   @override
-  Map<String, dynamic> toJson() => super.toJson().deepMerge({
-    'params': {'coin': coin},
-  });
+  Map<String, dynamic> toJson() => super.toJson().deepMerge({'coin': coin});
 
   @override
   MinTradingVolumeResponse parse(Map<String, dynamic> json) =>
@@ -40,16 +35,16 @@ class MinTradingVolumeResponse extends BaseResponse {
     final result = json.value<JsonMap>('result');
 
     return MinTradingVolumeResponse(
-      mmrpc: json.value<String>('mmrpc'),
-      amount: result.value<String>('amount'),
+      mmrpc: json.valueOrNull<String>('mmrpc'),
+      amount: result.value<String>('min_trading_vol'),
       amountFraction:
-          result.valueOrNull<JsonMap>('amount_fraction') != null
-              ? Fraction.fromJson(result.value<JsonMap>('amount_fraction'))
-              : null,
+          result.valueOrNull<JsonMap>('min_trading_vol_fraction') != null
+          ? Fraction.fromJson(result.value<JsonMap>('min_trading_vol_fraction'))
+          : null,
       amountRat:
-          result.valueOrNull<List<dynamic>>('amount_rat') != null
-              ? rationalFromMm2(result.value<List<dynamic>>('amount_rat'))
-              : null,
+          result.valueOrNull<List<dynamic>>('min_trading_vol_rat') != null
+          ? rationalFromMm2(result.value<List<dynamic>>('min_trading_vol_rat'))
+          : null,
     );
   }
 
@@ -64,11 +59,12 @@ class MinTradingVolumeResponse extends BaseResponse {
 
   @override
   Map<String, dynamic> toJson() => {
-    'mmrpc': mmrpc,
+    if (mmrpc != null) 'mmrpc': mmrpc,
     'result': {
-      'amount': amount,
-      if (amountFraction != null) 'amount_fraction': amountFraction!.toJson(),
-      if (amountRat != null) 'amount_rat': rationalToMm2(amountRat!),
+      'min_trading_vol': amount,
+      if (amountFraction != null)
+        'min_trading_vol_fraction': amountFraction!.toJson(),
+      if (amountRat != null) 'min_trading_vol_rat': rationalToMm2(amountRat!),
     },
   };
 }

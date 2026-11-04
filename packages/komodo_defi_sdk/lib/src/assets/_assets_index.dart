@@ -10,3 +10,4 @@ export 'asset_lookup.dart';
 export 'asset_manager.dart';
 export 'asset_pubkey_extensions.dart';
 export 'legacy_asset_extensions.dart';
+export 'wallet_asset_selection.dart';

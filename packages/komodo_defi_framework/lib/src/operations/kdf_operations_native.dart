@@ -11,6 +11,7 @@ import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/native/komodo_defi_framework_bindings_generated.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_local_executable.dart';
+import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 IKdfOperations createLocalKdfOperations({
@@ -183,7 +184,7 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
       headers: {'Content-Type': 'application/json'},
     );
     try {
-      final decoded = json.decode(response.body);
+      final decoded = json.decode(kdfResponseBody(response));
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {
       // Never propagate FormatException.source because it contains the raw KDF

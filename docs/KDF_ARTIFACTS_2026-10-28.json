@@ -1,0 +1,93 @@
+{
+  "repository": "GLEECBTC/kdf-internal",
+  "branch": "feat/lifi-integration",
+  "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+  "workflow_run_url": "https://github.com/GLEECBTC/kdf-internal/actions/runs/40668795518",
+  "reason": "Full rebuild replaced published archives for the same source commit. Each downloaded GitHub artifact matched its Actions SHA-256 digest; its inner archive passed ZIP integrity checks and matched the published mirror checksum. No checksum verification bypass is used.",
+  "artifacts": [
+    {
+      "platform": "win-x86-64",
+      "artifact_id": 12808528767,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "308b60097e8693ebd1804def75d65def5eae4c7e0794e711e3b42762fad5ebde",
+      "published_archive_sha256": "0750ed0b87d3d7550a2ac4e1f574c643962a66080ca935ab8b8f9e0ab470355a",
+      "sdk_platform": "windows",
+      "previous_archive_sha256": [
+        "064298f3e743989630321c05ae02dcd1f95dc8df533cfe6c49d26b28464b2d54"
+      ]
+    },
+    {
+      "platform": "android-armv7",
+      "artifact_id": 12808253007,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "db475b367f28657ca0e38938d7df970da73693e069cf941bea9d7fa5bcd4c8a8",
+      "published_archive_sha256": "cd123afeda3fdc98a9d960b71215c8d875317c626eecc43fa84b672534911a35",
+      "sdk_platform": "android-armv7",
+      "previous_archive_sha256": [
+        "f9cfb4efff5112aa674100d6f930f772d2305a0c8c5b8a3dc4d504d4c873fd75"
+      ]
+    },
+    {
+      "platform": "android-aarch64",
+      "artifact_id": 12808098759,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "bae1937038346024d1d67b1fe9dec3e7d1ef0576cc027c7faa870b8e475f1a37",
+      "published_archive_sha256": "7130aac8b03e6ba6c60e684b6b1304f6ea5d40d11bd9fd7f1f75ce6566d6bf3d",
+      "sdk_platform": "android-aarch64",
+      "previous_archive_sha256": [
+        "9073f52b8652b19be34337c9fa9036a195fd104200ba6e0dd5ca5432c071093e"
+      ]
+    },
+    {
+      "platform": "ios-aarch64",
+      "artifact_id": 12808092296,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "067484be53208132c1483e1f8c5febf6e78327b601e5e7573eeb52c2a1e3d908",
+      "published_archive_sha256": "29440a5386054679f87486b3a4014427655122a8979f96fc7e275ca0dae3e2dd",
+      "sdk_platform": "ios",
+      "previous_archive_sha256": [
+        "cb069482dc2c64b0b9915af3bfe87bb967b3df5fd1eea4eccc414602f0efde5c"
+      ]
+    },
+    {
+      "platform": "linux-x86-64",
+      "artifact_id": 12807394740,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "29240dcea850e15245a8be5e0ef7c1e0aa6955eb0bafa6660d82b47567362af7",
+      "published_archive_sha256": "0e85b7c1db4d4865aa1228dcb509e69c83b276afeb4abee551285ce64fa02889",
+      "sdk_platform": "linux",
+      "previous_archive_sha256": [
+        "cf0cdfc90f36481b645ef034d0a7c775eb8380c4e1386aa82fb8c01640c55724"
+      ]
+    },
+    {
+      "platform": "mac-universal",
+      "artifact_id": 12807264550,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "f399053d5463db13408bdcea51f798fb0d95cb44c57c11803228e4a5a4e2ef5f",
+      "published_archive_sha256": "118712f84f5a0888d9fa0237474710a1222be7e49ce0cab22ab4d05afa013c10",
+      "sdk_platform": "macos",
+      "previous_archive_sha256": [
+        "b67d93080bd3dfb87b5614c56cfd7971d3b5463f637f5950d23ed737285e1a17"
+      ]
+    },
+    {
+      "platform": "wasm",
+      "artifact_id": 12806874945,
+      "commit": "35f0bde438eec2cb0471b19642b9d9c4602fa17d",
+      "workflow_run": 40668795518,
+      "github_archive_sha256": "9be4a52d2f7e4fbaeaee6034cc2d0419fbb8c1306ced6b11a24cf33e54f8321d",
+      "published_archive_sha256": "79c3b1b87c8408b2416381c8f62141770e0404bccb5881038504d6e973615f84",
+      "sdk_platform": "web",
+      "previous_archive_sha256": [
+        "0992678b1d320f727f596dbbe3300799008719dedc2dba5d2203959d5bfa8c24"
+      ]
+    }
+  ]
+}

@@ -158,16 +158,14 @@ class VerificationHelpers {
     }
   }
 
-  /// Verifies that fetchCoinTicker was called with expected parameters
-  static void verifyFetchCoinTicker(
+  /// Verifies that fetchTickers was called with expected parameters
+  static void verifyFetchTickers(
     MockCoinPaprikaProvider mockProvider, {
-    String? expectedCoinId,
     List<QuoteCurrency>? expectedQuotes,
     int? expectedCallCount,
   }) {
     final verification = verify(
-      () => mockProvider.fetchCoinTicker(
-        coinId: expectedCoinId ?? any(named: 'coinId'),
+      () => mockProvider.fetchTickers(
         quotes: expectedQuotes ?? any(named: 'quotes'),
       ),
     );
@@ -283,6 +281,24 @@ class VerificationHelpers {
       capturedUri.path,
       equals('${TestConstants.apiVersion}/tickers/$expectedCoinId'),
     );
+
+    // Verify quotes parameter
+    if (expectedQuotes != null) {
+      expect(capturedUri.queryParameters['quotes'], equals(expectedQuotes));
+    }
+  }
+
+  /// Verifies URL format for the bulk tickers endpoint
+  static void verifyTickersUrl(
+    MockHttpClient mockHttpClient, {
+    String? expectedQuotes,
+  }) {
+    final capturedUri =
+        verify(() => mockHttpClient.get(captureAny())).captured.single as Uri;
+
+    // Verify URL structure
+    expect(capturedUri.host, equals(TestConstants.baseUrl));
+    expect(capturedUri.path, equals('${TestConstants.apiVersion}/tickers'));
 
     // Verify quotes parameter
     if (expectedQuotes != null) {

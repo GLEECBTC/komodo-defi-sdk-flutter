@@ -3,6 +3,9 @@
 /// Internal/private classes related to the transaction history of the Komodo DeFi Framework ecosystem.
 library _transaction_history;
 
+export 'history_cache_cipher.dart';
+export 'history_cache_key_provider.dart';
+export 'history_cache_lease.dart';
 export 'hive_transaction_storage.dart';
 export 'strategies/blockscout_transaction_history_strategy.dart';
 export 'strategies/etherscan_transaction_history_strategy.dart';
@@ -11,6 +14,8 @@ export 'strategies/tron_grid_address_codec.dart';
 export 'strategies/tron_grid_cursor_codec.dart';
 export 'strategies/tronscan_transaction_history_strategy.dart';
 export 'strategies/zhtlc_transaction_strategy.dart';
+export 'transaction_cache_retention.dart';
+export 'transaction_history_cache_policy.dart';
 export 'transaction_history_manager.dart';
 export 'transaction_history_strategies.dart';
 export 'transaction_merge_utils.dart';

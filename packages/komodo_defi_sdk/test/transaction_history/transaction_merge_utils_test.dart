@@ -33,6 +33,66 @@ Transaction _perspective({required bool custodyCredit}) {
 }
 
 void main() {
+  test(
+    're-fetching net-only proxy history preserves outgoing direction',
+    () async {
+      final debit = _perspective(custodyCredit: false).copyWith(
+        balanceChanges: BalanceChanges(
+          netChange: Decimal.parse('-12.5'),
+          receivedByMe: Decimal.zero,
+          spentByMe: Decimal.zero,
+          totalAmount: Decimal.parse('12.5'),
+        ),
+      );
+      final reconciler = TransactionListReconciler();
+      var merged = <Transaction>[];
+      for (var i = 0; i < 3; i++) {
+        merged = reconciler.merge(existing: merged, incoming: [debit]);
+        expect(merged, hasLength(1));
+        expect(merged.single.amount, Decimal.parse('-12.5'));
+      }
+      final storage = InMemoryTransactionStorage();
+      const wallet = WalletId(
+        name: 'proxy-wallet',
+        pubkeyHash: 'proxy-wallet-key',
+        authOptions: AuthOptions(derivationMethod: DerivationMethod.iguana),
+      );
+      await storage.storeTransactions([debit], wallet);
+      await storage.storeTransactions([debit], wallet);
+      final page = await storage.getTransactions(debit.assetId, wallet);
+      expect(page.transactions.single.amount, Decimal.parse('-12.5'));
+    },
+  );
+
+  test(
+    'net-only complementary perspectives reconcile a self-transfer once',
+    () {
+      final debit = _perspective(custodyCredit: false);
+      Transaction withoutComponents(Transaction transaction) =>
+          transaction.copyWith(
+            balanceChanges: BalanceChanges(
+              netChange: transaction.amount,
+              receivedByMe: Decimal.zero,
+              spentByMe: Decimal.zero,
+              totalAmount: transaction.balanceChanges.totalAmount,
+            ),
+          );
+      final reconciler = TransactionListReconciler();
+      final first = reconciler.merge(
+        existing: const [],
+        incoming: [withoutComponents(debit)],
+      );
+      final merged = reconciler.merge(
+        existing: first,
+        incoming: [withoutComponents(_perspective(custodyCredit: true))],
+      );
+      expect(merged, hasLength(1));
+      expect(merged.single.amount, Decimal.zero);
+      expect(merged.single.balanceChanges.spentByMe, Decimal.parse('12.5'));
+      expect(merged.single.balanceChanges.receivedByMe, Decimal.parse('12.5'));
+    },
+  );
+
   test('cross-page address perspectives merge without data loss', () {
     final reconciler = TransactionListReconciler();
     final firstPage = reconciler.merge(

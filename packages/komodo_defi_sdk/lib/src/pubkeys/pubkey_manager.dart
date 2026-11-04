@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
+import 'package:komodo_defi_sdk/src/auth/session_user_reader.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkeys_storage.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -100,6 +101,7 @@ class PubkeyManager implements IPubkeyManager {
 
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
+  late final SessionUserReader _sessionUser = SessionUserReader(_auth);
   final SharedActivationCoordinator _activationCoordinator;
   final PubkeysStorage _storage;
 
@@ -118,6 +120,10 @@ class PubkeyManager implements IPubkeyManager {
   final Map<AssetId, Set<String>> _everFundedAddresses = {};
   final Map<AssetId, StreamSubscription<dynamic>> _activeWatchers = {};
   final Map<AssetId, StreamController<AssetPubkeys>> _pubkeysControllers = {};
+
+  /// Last snapshot handed to each asset's watcher stream, so every publisher
+  /// can drop a re-emission subscribers already hold. See [_publishPubkeys].
+  final Map<AssetId, AssetPubkeys> _lastEmittedPubkeys = {};
   // Track the Asset for each AssetId that has an associated controller so that
   // we can restart watchers after auth changes without requiring new listeners
   final Map<AssetId, Asset> _watchedAssets = {};
@@ -216,9 +222,8 @@ class PubkeyManager implements IPubkeyManager {
             final controller = _pubkeysControllers[asset.id];
             if (_isWalletContextCurrentSync(walletContext) &&
                 controller != null &&
-                !controller.isClosed &&
                 fresh != hydrated) {
-              controller.add(fresh);
+              _publishPubkeys(asset.id, fresh, controller);
             }
           })
           .catchError((_) {
@@ -273,7 +278,7 @@ class PubkeyManager implements IPubkeyManager {
     await _requireWalletContextCurrent(walletContext);
     await _activateForContext(asset, walletContext);
     await _requireWalletContextCurrent(walletContext);
-    final strategy = await _resolvePubkeyStrategy(asset);
+    final strategy = await _resolvePubkeyStrategy(asset, walletContext);
     await _requireWalletContextCurrent(walletContext);
     final pubkeys = await strategy.getPubkeys(asset.id, _client);
     await _requireWalletContextCurrent(walletContext);
@@ -299,22 +304,24 @@ class PubkeyManager implements IPubkeyManager {
     final session = await _auth.captureSessionContext();
     _auth.ensureSessionContextCurrent(session);
     await _handleSessionContextChanged(session);
-    final user = await _auth.currentUser;
     _auth.ensureSessionContextCurrent(session);
-    if (user == null) throw AuthException.notSignedIn();
+    // The identity the session last verified. A fresh `currentUser` read here
+    // cost two RPCs on every operation and found nothing the session check
+    // does not already catch.
+    final observed = session.walletId;
 
     final currentWalletId = _currentWalletId;
     late final WalletId operationWalletId;
     if (currentWalletId == null) {
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
-    } else if (isSameStableWallet(currentWalletId, user.walletId)) {
+      _currentWalletId = observed;
+      operationWalletId = observed;
+    } else if (isSameStableWallet(currentWalletId, observed)) {
       operationWalletId = preferEnrichedWalletIdentity(
         currentWalletId,
-        user.walletId,
+        observed,
       );
       _currentWalletId = operationWalletId;
-    } else if (isDegradedWalletIdentity(currentWalletId, user.walletId)) {
+    } else if (isDegradedWalletIdentity(currentWalletId, observed)) {
       // Same wallet, identity RPC temporarily unavailable. See the matching
       // branch in [_handleSessionContextChanged].
       operationWalletId = currentWalletId;
@@ -322,8 +329,8 @@ class PubkeyManager implements IPubkeyManager {
       // Auth streams are asynchronous. Invalidate proactively so a caller
       // cannot observe the prior wallet's cache before the event arrives.
       _walletGeneration++;
-      _currentWalletId = user.walletId;
-      operationWalletId = user.walletId;
+      _currentWalletId = observed;
+      operationWalletId = observed;
       await _resetState();
     }
 
@@ -343,22 +350,13 @@ class PubkeyManager implements IPubkeyManager {
         isSameStableWallet(context.walletId, current);
   }
 
-  Future<bool> _isWalletContextCurrent(WalletOperationContext context) async {
-    if (!_isWalletContextCurrentSync(context)) return false;
-    final currentUser = await _auth.currentUser;
-    // Continues-session, not same-stable: the fresh read can observe the same
-    // wallet degraded to name-only while the identity RPC is down, which
-    // [_captureWalletContext] deliberately admits - rejecting it here would
-    // fail the operation during the exact blip that branch tolerates.
-    return currentUser != null &&
-        _isWalletContextCurrentSync(context) &&
-        walletIdentityContinuesSession(context.walletId, currentUser.walletId);
-  }
-
+  /// Session-scoped, not a fresh identity read: every sign-in, sign-out and
+  /// KDF restart revokes the session synchronously. Re-reading `currentUser`
+  /// here cost two RPCs per checkpoint, about ten times per poll per asset.
   Future<void> _requireWalletContextCurrent(
     WalletOperationContext context,
   ) async {
-    if (await _isWalletContextCurrent(context)) return;
+    if (_isWalletContextCurrentSync(context)) return;
     throw const WalletChangedDisconnectException(
       'Wallet changed while fetching pubkeys',
     );
@@ -369,7 +367,7 @@ class PubkeyManager implements IPubkeyManager {
   Future<PubkeyInfo> createNewPubkey(Asset asset) async {
     final walletContext = await _captureWalletContext();
     await _activateForContext(asset, walletContext);
-    final strategy = await _resolvePubkeyStrategy(asset);
+    final strategy = await _resolvePubkeyStrategy(asset, walletContext);
     await _requireWalletContextCurrent(walletContext);
     if (!strategy.supportsMultipleAddresses) {
       throw UnsupportedError(
@@ -386,7 +384,7 @@ class PubkeyManager implements IPubkeyManager {
   Stream<NewAddressState> watchCreateNewPubkey(Asset asset) async* {
     final walletContext = await _captureWalletContext();
     await _activateForContext(asset, walletContext);
-    final strategy = await _resolvePubkeyStrategy(asset);
+    final strategy = await _resolvePubkeyStrategy(asset, walletContext);
     await _requireWalletContextCurrent(walletContext);
     if (!strategy.supportsMultipleAddresses) {
       yield NewAddressState.error(
@@ -427,11 +425,11 @@ class PubkeyManager implements IPubkeyManager {
     await _requireWalletContextCurrent(walletContext);
   }
 
-  Future<PubkeyStrategy> _resolvePubkeyStrategy(Asset asset) async {
-    final currentUser = await _auth.currentUser;
-    if (currentUser == null) {
-      throw AuthException.notSignedIn();
-    }
+  Future<PubkeyStrategy> _resolvePubkeyStrategy(
+    Asset asset,
+    WalletOperationContext walletContext,
+  ) async {
+    final currentUser = await _sessionUser.read(walletContext);
     return asset.pubkeyStrategy(
       kdfUser: currentUser,
       scanGapLimit: HdGapLimit.resolve(
@@ -458,7 +456,7 @@ class PubkeyManager implements IPubkeyManager {
       await _requireWalletContextCurrent(walletContext);
       await _activateForContext(asset, walletContext);
       await _requireWalletContextCurrent(walletContext);
-      final strategy = await _resolvePubkeyStrategy(asset);
+      final strategy = await _resolvePubkeyStrategy(asset, walletContext);
       await _requireWalletContextCurrent(walletContext);
       await _scanForNewHdAddressesIfNeeded(
         walletContext: walletContext,
@@ -597,6 +595,32 @@ class PubkeyManager implements IPubkeyManager {
 
   // Removed unused non-wallet-stable helpers to avoid confusion
 
+  /// Publishes [pubkeys] on [assetId]'s watcher stream, dropping a snapshot
+  /// subscribers already hold.
+  ///
+  /// Every publisher goes through here - the 30s poll, [precachePubkeys], and
+  /// [getPubkeys]'s background refresh - because a re-emission of an identical
+  /// snapshot carries no information but is not free downstream: the app's
+  /// `CoinAddressesBloc` treats any watcher payload as "these pubkeys were
+  /// replaced", so it blanks the coin page's address list and revokes the
+  /// GasFree custody attestation (swapping the gas-free rail for a "Checking
+  /// availability" banner) until a fresh account-status round trip returns.
+  /// [precachePubkeys] used to bypass the poll's own guard and is called on
+  /// every balance event, which is what turned that into a recurring flicker.
+  ///
+  /// Returns whether the snapshot was published.
+  bool _publishPubkeys(
+    AssetId assetId,
+    AssetPubkeys pubkeys,
+    StreamController<AssetPubkeys> controller,
+  ) {
+    if (controller.isClosed) return false;
+    if (_lastEmittedPubkeys[assetId] == pubkeys) return false;
+    _lastEmittedPubkeys[assetId] = pubkeys;
+    controller.add(pubkeys);
+    return true;
+  }
+
   /// Records addresses currently holding funds into the per-asset ever-funded
   /// set and returns it.
   Set<String> _observeFundedAddresses(
@@ -713,20 +737,9 @@ class PubkeyManager implements IPubkeyManager {
     if (!identical(_pubkeysControllers[asset.id], controller)) return;
     _logger.fine('Starting watcher for ${asset.id.name}');
 
-    // Last value handed to [controller], so the 30s poll below can drop
-    // no-op re-emissions. Addresses change rarely; re-emitting an identical
-    // snapshot every tick made the app's `CoinAddressesBloc` cycle through its
-    // `submitting` state with an empty address list, so the coin page's
-    // addresses section blanked to a spinner twice a minute for no reason.
-    AssetPubkeys? lastEmitted;
-
     void emit(AssetPubkeys pubkeys) {
-      if (controller.isClosed || !_isWalletContextCurrentSync(walletContext)) {
-        return;
-      }
-      if (lastEmitted == pubkeys) return;
-      lastEmitted = pubkeys;
-      controller.add(pubkeys);
+      if (!_isWalletContextCurrentSync(walletContext)) return;
+      _publishPubkeys(asset.id, pubkeys, controller);
     }
 
     try {
@@ -765,7 +778,7 @@ class PubkeyManager implements IPubkeyManager {
       late final StreamSubscription<dynamic> subscription;
       subscription = periodicStream
           .asyncMap<AssetPubkeys?>((_) async {
-            if (!await _isWalletContextCurrent(walletContext)) {
+            if (!_isWalletContextCurrentSync(walletContext)) {
               return null;
             }
 
@@ -773,16 +786,16 @@ class PubkeyManager implements IPubkeyManager {
               bool active = await _activationCoordinator.isAssetActive(
                 asset.id,
               );
-              if (!await _isWalletContextCurrent(walletContext)) return null;
+              if (!_isWalletContextCurrentSync(walletContext)) return null;
               if (!active && activateIfNeeded) {
                 final activationResult = await _activationCoordinator
                     .activateAsset(asset);
-                if (!await _isWalletContextCurrent(walletContext)) return null;
+                if (!_isWalletContextCurrentSync(walletContext)) return null;
                 active = activationResult.isSuccess;
               }
               if (active) {
                 final pubkeys = await _fetchFreshPubkeys(asset, walletContext);
-                if (!await _isWalletContextCurrent(walletContext)) return null;
+                if (!_isWalletContextCurrentSync(walletContext)) return null;
                 _pubkeysCache[asset.id] = pubkeys;
                 return pubkeys;
               }
@@ -851,6 +864,10 @@ class PubkeyManager implements IPubkeyManager {
     if (watcher != null) {
       watcher.cancel();
       _activeWatchers.remove(assetId);
+      // A later watcher must be free to republish this snapshot: the guard
+      // means "subscribers already have this", which stops being true once
+      // the stream they were on is gone.
+      _lastEmittedPubkeys.remove(assetId);
       _logger.fine('Stopped watcher for ${assetId.name}');
     }
   }
@@ -866,10 +883,8 @@ class PubkeyManager implements IPubkeyManager {
       _pubkeysCache[asset.id] = pubkeys;
 
       final controller = _pubkeysControllers[asset.id];
-      if (controller != null &&
-          !controller.isClosed &&
-          _isWalletContextCurrentSync(walletContext)) {
-        controller.add(pubkeys);
+      if (controller != null && _isWalletContextCurrentSync(walletContext)) {
+        _publishPubkeys(asset.id, pubkeys, controller);
       }
     } catch (_) {
       // Fail silently; this is a best-effort cache warm-up
@@ -1008,7 +1023,7 @@ class PubkeyManager implements IPubkeyManager {
       // the interval, or one failure would suppress retries for six hours.
       _hdAddressScanCompletedAt[scanKey] = _now();
     } catch (error, stackTrace) {
-      if (!await _isWalletContextCurrent(walletContext)) {
+      if (!_isWalletContextCurrentSync(walletContext)) {
         throw const WalletChangedDisconnectException(
           'Wallet changed while scanning for pubkeys',
         );
@@ -1039,6 +1054,7 @@ class PubkeyManager implements IPubkeyManager {
     // Clear wallet-owned values before awaiting cancellation. A stale
     // operation keeps its generation token and cannot repopulate these maps.
     _pubkeysCache.clear();
+    _lastEmittedPubkeys.clear();
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();
@@ -1120,6 +1136,7 @@ class PubkeyManager implements IPubkeyManager {
     _walletGeneration++;
     _currentWalletId = null;
     _pubkeysCache.clear();
+    _lastEmittedPubkeys.clear();
     _everFundedAddresses.clear();
     _inFlightPubkeyRequests.clear();
     _hdAddressScanRetryAfter.clear();

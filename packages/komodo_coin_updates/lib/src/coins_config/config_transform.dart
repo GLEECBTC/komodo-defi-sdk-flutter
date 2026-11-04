@@ -3,6 +3,8 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
+import 'evm_fee_model_transform.dart';
+
 /// Defines a transform that can be applied to a single coin configuration.
 ///
 /// Implementations must indicate whether they need to run for a given
@@ -40,6 +42,7 @@ class CoinConfigTransformer {
              ZhtlcLightWalletTransform(),
              TronQuickNodeTransform(),
              ParentCoinTransform(),
+             EvmFeeModelTransform(),
            ];
 
   final List<CoinConfigTransform> _transforms;

@@ -53,11 +53,12 @@ class EthWithTokensActivationStrategy extends ProtocolActivationStrategy {
   bool get supportsBatchActivation => true;
 
   @override
+  Set<AssetRole> get supportedRoles => const {AssetRole.platform};
+
+  @override
   bool canHandle(Asset asset) {
-    // Use eth-with-tokens for platform assets (not trezor)
-    final isPlatformAsset = asset.id.parentId == null;
-    return isPlatformAsset &&
-        privKeyPolicy != const PrivateKeyPolicy.trezor() &&
+    // Use eth-with-tokens unless the wallet is a Trezor
+    return privKeyPolicy != const PrivateKeyPolicy.trezor() &&
         super.canHandle(asset);
   }
 

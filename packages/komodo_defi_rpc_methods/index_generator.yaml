@@ -7,6 +7,10 @@ index_generator:
     - '**.g.dart'
     - '**.freezed.dart'
     - '{_,**/_}*.dart'
+    # These are parts of routed_swap_models.dart, not standalone libraries.
+    - '**/routed_swap_route.dart'
+    - '**/routed_swap_status.dart'
+    - '**/routed_swap_task_errors.dart'
   libraries:
     - directory_path: lib/src/common_structures
       file_name: common_structures

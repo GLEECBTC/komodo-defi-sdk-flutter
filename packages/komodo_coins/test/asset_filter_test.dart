@@ -47,13 +47,10 @@ void main() {
           cdnBranchMirrors: {},
         ),
       );
-      await repo.upsertRawAssets(
-        {
-          'BTC': btcConfig,
-          'NTZ': noTrezorConfig,
-        },
-        'test',
-      );
+      await repo.upsertRawAssets({
+        'BTC': btcConfig,
+        'NTZ': noTrezorConfig,
+      }, 'test');
     });
 
     tearDown(() async {
@@ -108,6 +105,140 @@ void main() {
       const filter = UtxoAssetFilterStrategy();
       expect(asset.protocol.subClass, CoinSubClass.smartChain);
       expect(filter.shouldInclude(asset, asset.protocol.config), isTrue);
+    });
+  });
+
+  group('Trezor filter on the Gleec EVM chain', () {
+    // GLEEC and KMD-GRC20 as coins_config.json lists them, plus the
+    // trezor_coin that Trezor support requires.
+    Map<String, dynamic> gleecConfig({String? trezorCoin = 'Gleec'}) => {
+      'coin': 'GLEEC',
+      'type': 'GRC-20',
+      'name': 'Gleec',
+      'fname': 'Gleec',
+      'is_testnet': false,
+      'mm2': 1,
+      'chain_id': 11169,
+      'required_confirmations': 3,
+      'protocol': {
+        'type': 'ETH',
+        'protocol_data': {'chain_id': 11169},
+      },
+      'derivation_path': "m/44'/60'",
+      'swap_contract_address': '0x51d9EfFc20F6965bc8DFD37E797ac52a72fcdb9D',
+      'fallback_swap_contract': '0x51d9EfFc20F6965bc8DFD37E797ac52a72fcdb9D',
+      'nodes': [
+        {
+          'url': 'https://evm-rpc.gleec.com',
+          'ws_url': 'wss://evm-ws.gleec.com',
+        },
+      ],
+      if (trezorCoin != null) 'trezor_coin': trezorCoin,
+    };
+
+    Map<String, dynamic> grc20Config({
+      String? trezorCoin = 'Komodo (grc20)',
+    }) => {
+      'coin': 'KMD-GRC20',
+      'type': 'GRC-20',
+      'name': 'Komodo',
+      'fname': 'Komodo',
+      'is_testnet': false,
+      'mm2': 1,
+      'chain_id': 11169,
+      'decimals': 18,
+      'required_confirmations': 3,
+      'protocol': {
+        'type': 'ERC20',
+        'protocol_data': {
+          'platform': 'GLEEC',
+          'contract_address': '0x3341acA97C71E12A80D1e01D8c86bE93ba669752',
+        },
+      },
+      'derivation_path': "m/44'/60'",
+      'contract_address': '0x3341acA97C71E12A80D1e01D8c86bE93ba669752',
+      'parent_coin': 'GLEEC',
+      'swap_contract_address': '0x51d9EfFc20F6965bc8DFD37E797ac52a72fcdb9D',
+      'fallback_swap_contract': '0x51d9EfFc20F6965bc8DFD37E797ac52a72fcdb9D',
+      'nodes': [
+        {
+          'url': 'https://evm-rpc.gleec.com',
+          'ws_url': 'wss://evm-ws.gleec.com',
+        },
+      ],
+      if (trezorCoin != null) 'trezor_coin': trezorCoin,
+    };
+
+    ({Asset platform, Asset token}) parse({
+      String? platformTrezorCoin = 'Gleec',
+      String? tokenTrezorCoin = 'Komodo (grc20)',
+    }) {
+      final platform = Asset.fromJson(
+        gleecConfig(trezorCoin: platformTrezorCoin),
+        knownIds: const {},
+      );
+      final token = Asset.fromJson(
+        grc20Config(trezorCoin: tokenTrezorCoin),
+        knownIds: {platform.id},
+      );
+      return (platform: platform, token: token);
+    }
+
+    bool include(Asset asset, [AssetFilterStrategy? filter]) =>
+        (filter ?? const TrezorAssetFilterStrategy()).shouldInclude(
+          asset,
+          asset.protocol.config,
+        );
+
+    test('fixture parses as a GRC-20 platform and its token', () {
+      final (:platform, :token) = parse();
+      expect(platform.protocol.subClass, CoinSubClass.grc20);
+      expect(platform.id.parentId, isNull);
+      expect(token.protocol.subClass, CoinSubClass.grc20);
+      expect(token.id.parentId, platform.id);
+    });
+
+    test('includes GLEEC and a GRC-20 token that name a trezor_coin', () {
+      final (:platform, :token) = parse();
+      expect(include(platform), isTrue);
+      expect(include(token), isTrue);
+    });
+
+    test('excludes GLEEC and a GRC-20 token without a trezor_coin', () {
+      final (:platform, :token) = parse(
+        platformTrezorCoin: null,
+        tokenTrezorCoin: null,
+      );
+      expect(include(platform), isFalse);
+      expect(include(token), isFalse);
+    });
+
+    test('excludes GLEEC and a GRC-20 token with an empty trezor_coin', () {
+      final (:platform, :token) = parse(
+        platformTrezorCoin: '',
+        tokenTrezorCoin: '',
+      );
+      expect(include(platform), isFalse);
+      expect(include(token), isFalse);
+    });
+
+    test('hiddenAssets still hides GLEEC', () {
+      final (:platform, token: _) = parse();
+      const filter = TrezorAssetFilterStrategy(hiddenAssets: {'GLEEC'});
+      expect(include(platform, filter), isFalse);
+    });
+
+    test('keeps every other EVM subclass hidden despite a trezor_coin', () {
+      final others = evmCoinSubClasses.difference({CoinSubClass.grc20});
+      expect(others, isNotEmpty);
+      for (final subClass in others) {
+        final config = gleecConfig(trezorCoin: 'Ethereum')
+          ..['coin'] = 'EVM-${subClass.name}'
+          ..['type'] = subClass.name;
+        final asset = Asset.fromJson(config, knownIds: const {});
+        expect(asset.protocol.subClass, subClass);
+        expect(include(asset), isFalse, reason: '${subClass.name} on Trezor');
+      }
     });
   });
 }

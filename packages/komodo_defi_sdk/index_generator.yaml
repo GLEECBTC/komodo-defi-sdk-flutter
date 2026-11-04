@@ -6,6 +6,9 @@ index_generator:
   exclude:
     - "**.g.dart"
     - "**.freezed.dart"
+    # Export the conditional entrypoints, never both platform implementations.
+    - "**/*_native.dart"
+    - "**/*_web.dart"
 
   libraries:
     # Default index and library name

@@ -5,6 +5,7 @@ library _activation;
 
 export 'activation_exceptions.dart';
 export 'activation_manager.dart';
+export 'activation_policy.dart';
 export 'base_strategies/activation_strategy_base.dart';
 export 'base_strategies/activation_strategy_factory.dart';
 export 'nft_activation_service.dart';

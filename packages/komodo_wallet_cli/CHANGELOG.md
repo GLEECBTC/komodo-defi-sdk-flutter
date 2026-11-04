@@ -1,3 +1,7 @@
+## 0.6.1 (2026-10-28)
+
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.6.0
 
  - **BREAKING** **FEAT**(update-api-config): default to the `main` branch of the

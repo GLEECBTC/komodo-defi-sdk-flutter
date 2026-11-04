@@ -4,5 +4,8 @@
 library _auth;
 
 export 'auth_service.dart';
+export 'auth_session.dart';
 export 'auth_state.dart';
+export 'kdf_startup_failure.dart';
 export 'storage/secure_storage.dart';
+export 'wallet_catalog_lock.dart';

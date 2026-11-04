@@ -1,3 +1,42 @@
+## 0.7.0 (2026-10-28)
+
+
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs and changes.
+
+ - **FIX**(transport): `resetHttpClient()` on the remote and local-executable
+   transport aborts every request in flight, including one still connecting;
+   it was a no-op. A `stop` request the engine never answers gives up after
+   `stopTimeout`, 5 seconds by default (#437, RC #438).
+ - **BUILD**(kdf): freeze all seven SDK targets at validated KDF
+   `a51d69a11ff937ecf9678e9b37632af578252846` (`3.2.0-beta`) with specs
+   `7c388ea7b91cb7c657435d416bc03e5349b46162`. This supersedes the earlier
+   `35f0bde` and `e40ac2f` preparation builds (#419/#420, #430/RC #431).
+   Ten platform builds and all 17 test jobs passed for this exact revision;
+   seven archives match independent artifact digests, ZIP checks and ordinary
+   mirror downloads. Original failures/passing retries remain in the
+   [3 November provenance](../../docs/KDF_ARTIFACTS_2026-11-03.json).
+ - **CHORE**(coins): freeze bundled files/icons at
+   `cc8249e85e54467bc2684c2712857711eab55fd2`, superseding `efd3a647`
+   (#439, RC #440), which superseded `2b0aefb7` (#430, RC #431). Added
+   TAR/TAR-segwit, TEL-BASE and Yenten (YTN); removed TEL-KRC20; set L2 fee
+   models for AVAX, ETH-BASE, MNT and MON; updated TEL ERC-20/Polygon
+   contracts and decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data
+   and endpoints. Build-time advancement stays off; runtime updates retain
+   their independent policy.
+ - **FEAT**(config): serialize optional validated `lifi_integrator` on every
+   startup path; reusable SDK defaults remain unset.
+ - **FEAT**(config): `KdfStartupConfig.lifiProxyUrl`, written as
+   `lifi_proxy_url` only when set; both `generateWithDefaults` and
+   `noAuthStartup` accept it. Reject non-HTTP(S) values, embedded credentials,
+   query/fragment and a proxy combined with `disableP2p: true`: KDF signs
+   proxy requests with its P2P key.
+ - **FIX**(rpc): retain typed MMRPC 2.0 and legacy error bodies from non-200
+   local-executable/remote responses instead of replacing them with a generic
+   HTTP error. Native FFI and WASM error behavior remains unchanged.
+ - **FIX**(rpc): decode native local-executable, FFI and remote HTTP response
+   bytes as UTF-8, including non-ASCII wallet names and error/result text.
+ - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
+
 ## 0.6.1 (2026-09-28)
 
 Patch release for SDK 0.8.1; no migration from 0.6.0.

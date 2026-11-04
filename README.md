@@ -23,6 +23,14 @@ Supported platforms: Android, iOS, macOS, Windows, Linux, and Web (WASM).
 
 See the Komodo DeFi Framework (API) source at `https://github.com/KomodoPlatform/komodo-defi-framework` and a hosted demo at `https://gleec-sdk-playground.web.app`.
 
+## SDK 0.9.0 release candidate
+
+SDK 0.9.0 adds routed swaps, activation fixes and frozen asset builds. Use one
+complete checkout; package versions do not imply pub.dev availability.
+Read the [migration guide](docs/RELEASE_0.9.0.md),
+[release checklist](docs/RELEASE_0.9.0_CHECKLIST.md) and
+[overview](CHANGELOG.md#sdk-090-overview) before repinning.
+
 ## SDK 0.8.1
 
 SDK 0.8.1 is a patch release of 0.8.0 with no migration; see the

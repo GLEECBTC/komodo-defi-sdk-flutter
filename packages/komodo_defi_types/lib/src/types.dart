@@ -23,6 +23,7 @@ export 'auth/kdf_user.dart';
 export 'coin/coin.dart';
 export 'coin_classes/coin_subclasses.dart';
 export 'coin_classes/protocol_class.dart';
+export 'config/lifi_integrator_config.dart';
 export 'constants.dart';
 export 'cryptography/mnemonic.dart';
 export 'errors/sdk_error.dart';

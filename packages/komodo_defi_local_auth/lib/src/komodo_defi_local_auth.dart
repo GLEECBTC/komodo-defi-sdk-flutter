@@ -44,6 +44,28 @@ abstract interface class KomodoDefiAuth {
   void ensureSessionContextCurrent(AuthSessionContext context);
   Stream<AuthSessionContext?> watchSessionContext();
 
+  /// Dispatches one request against [expected]'s engine, holding off for a
+  /// bounded time any authentication transition that would replace it. An
+  /// ended session is rejected before [dispatch] runs, including one revoked
+  /// while waiting for the lease.
+  ///
+  /// [dispatch] must perform only the raw request: it must not call auth APIs,
+  /// acquire another session lease, or include polling/recovery. The lease is
+  /// held until its actual transport settles, for at most a bounded time, and
+  /// only stopping or starting the engine, or resetting its transport, waits
+  /// for it: identity reads never delay a dispatch, and recovering from a
+  /// failed read never aborts one. Past the bound a transition may stop the
+  /// engine, which fails the unanswered request and resets the transport
+  /// before a replacement starts, so a request the engine never answers
+  /// cannot hold off sign-out or wallet switching.
+  ///
+  /// Once [dispatch] begins, a later session change does not prove
+  /// cancellation; callers must preserve uncertainty about acceptance.
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  );
+
   /// Merges metadata atomically after fresh identity verification. Null values
   /// remove keys. Throws [AuthIdentityUnavailableException] for retryable proof
   /// loss and [AuthSessionChangedException] when the original session ended.
@@ -361,12 +383,21 @@ abstract interface class KomodoDefiAuth {
 }
 
 class KomodoDefiLocalAuth implements KomodoDefiAuth {
+  /// [lifiProxyUrl] reaches every KDF start; see
+  /// `KdfStartupConfig.lifiProxyUrl`.
   KomodoDefiLocalAuth({
     required KomodoDefiFramework kdf,
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
+    String? lifiProxyUrl,
+    LifiIntegratorConfig? lifiIntegrator,
   }) : _allowRegistrations = allowRegistrations,
-       _authService = KdfAuthService(kdf, hostConfig) {
+       _authService = KdfAuthService(
+         kdf,
+         hostConfig,
+         lifiProxyUrl: lifiProxyUrl,
+         lifiIntegrator: lifiIntegrator,
+       ) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }
 
@@ -414,6 +445,12 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   @override
   Stream<AuthSessionContext?> watchSessionContext() =>
       _authService.watchSessionContext();
+
+  @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) => _authService.runWithSession(expected, dispatch);
 
   @override
   Future<KdfUser> updateMetadataForSession(

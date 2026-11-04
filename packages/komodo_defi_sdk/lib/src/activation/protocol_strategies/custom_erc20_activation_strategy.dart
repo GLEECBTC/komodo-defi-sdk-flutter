@@ -42,6 +42,14 @@ class CustomErc20ActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool get supportsCustomTokenActivation => true;
 
+  // Both: a custom token read back from storage has no parent until the
+  // asset manager restores it.
+  @override
+  Set<AssetRole> get supportedRoles => const {
+    AssetRole.platform,
+    AssetRole.token,
+  };
+
   @override
   bool get supportsBatchActivation => true;
 

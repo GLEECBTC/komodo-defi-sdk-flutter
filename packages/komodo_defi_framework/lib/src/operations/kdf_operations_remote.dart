@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
+import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 class KdfOperationsRemote implements IKdfOperations {
@@ -15,15 +16,31 @@ class KdfOperationsRemote implements IKdfOperations {
     // required int port,
     required Uri rpcUrl,
     required String userpass,
+    Duration stopTimeout = const Duration(seconds: 5),
   }) {
-    return KdfOperationsRemote._(logCallback, rpcUrl, userpass);
+    return KdfOperationsRemote._(logCallback, rpcUrl, userpass, stopTimeout);
   }
 
-  KdfOperationsRemote._(this._logCallback, this._rpcUrl, this._userpass);
+  KdfOperationsRemote._(
+    this._logCallback,
+    this._rpcUrl,
+    this._userpass,
+    this._stopTimeout,
+  );
   final void Function(String) _logCallback;
   final String _userpass;
 
   final Uri _rpcUrl;
+
+  /// How long [kdfStop] waits for the engine to answer `stop`. A stop runs
+  /// while the auth service holds the engine, so it must not wait for good.
+  final Duration _stopTimeout;
+
+  /// Clients of the requests still awaiting an answer.
+  ///
+  /// Each request keeps its own client, as `http.post` does, so connections
+  /// are never reused. [resetHttpClient] closes them all.
+  final Set<http.Client> _inFlight = {};
 
   Uri get _baseUrl => _safeRpcUrl(_rpcUrl);
 
@@ -107,10 +124,15 @@ class KdfOperationsRemote implements IKdfOperations {
     return versionResult != null ? MainStatus.rpcIsUp : MainStatus.noRpc;
   }
 
+  /// Asks the engine to stop. An engine that takes the request and never
+  /// answers fails it after the stop timeout; the next transport reset aborts
+  /// the request itself.
   @override
   Future<StopStatus> kdfStop() async {
     try {
-      final stopResultResponse = await mm2Rpc({'method': 'stop'});
+      final stopResultResponse = await mm2Rpc({
+        'method': 'stop',
+      }).timeout(_stopTimeout);
 
       _log('KDF stop response received');
 
@@ -155,15 +177,29 @@ class KdfOperationsRemote implements IKdfOperations {
 
     late final http.Response response;
 
+    final client = http.Client();
+    _inFlight.add(client);
     try {
-      response = await http.post(_baseUrl, body: json.encode(request));
+      response = await client.post(_baseUrl, body: json.encode(request));
     } on http.ClientException {
       // ClientException can include a credential-bearing URL. Keep the public
       // failure stable and free of transport internals.
       return ConnectionError('Remote KDF request failed');
+    } finally {
+      _inFlight.remove(client);
+      client.close();
     }
 
+    final body = kdfResponseBody(response);
+
     if (response.statusCode != 200) {
+      // KDF answers errors with a non-200 status: typed MMRPC 2.0 errors
+      // (400-502) and legacy methods' `{"error": ...}` (404, 500). Callers
+      // branch on the error_type or match the legacy text (`No swap with
+      // uuid`), and the FFI and WASM transports already pass both through.
+      // Anything else stays opaque.
+      final kdfError = _kdfError(body);
+      if (kdfError != null) return kdfError;
       return JsonRpcErrorResponse(
         code: response.statusCode,
         error: {
@@ -175,7 +211,7 @@ class KdfOperationsRemote implements IKdfOperations {
     }
 
     try {
-      final decoded = json.decode(response.body);
+      final decoded = json.decode(body);
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {
       // Do not surface FormatException.source: it contains the upstream body.
@@ -213,14 +249,38 @@ class KdfOperationsRemote implements IKdfOperations {
     }
   }
 
+  /// Aborts every request still awaiting an answer, including one still
+  /// connecting, so none of them can reach an engine started afterwards.
+  /// Each aborted request answers [ConnectionError].
   @override
   void resetHttpClient() {
-    // No-op for remote operations - HTTP client is managed by http package
-    _log('resetHttpClient called on remote operations (no-op)');
+    final aborted = _inFlight.toList();
+    _inFlight.clear();
+    for (final client in aborted) {
+      client.close();
+    }
+    _log('Remote KDF transport reset');
   }
 
   @override
   void dispose() {
-    // No-op for remote operations - HTTP client is managed externally
+    // Requests in flight settle on their own. Aborting them here would also
+    // abort the stop request the local executable sends while disposing.
+  }
+
+  /// Returns [body] decoded when it is one of KDF's error envelopes: a typed
+  /// MMRPC 2.0 error, or a legacy method's `{"error": "..."}`.
+  static Map<String, dynamic>? _kdfError(String body) {
+    try {
+      final decoded = json.decode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final typed =
+          decoded['mmrpc'] == '2.0' && decoded['error_type'] is String;
+      final legacy = decoded.length == 1 && decoded['error'] is String;
+      if (typed || legacy) return decoded;
+    } catch (_) {
+      // Not an envelope; handled as an opaque HTTP error.
+    }
+    return null;
   }
 }

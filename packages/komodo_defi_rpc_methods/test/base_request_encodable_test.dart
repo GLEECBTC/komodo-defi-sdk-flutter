@@ -27,6 +27,19 @@ void main() {
       'get_wallet_names': GetWalletNamesRequest('test-pass'),
       'get_enabled_coins': GetEnabledCoinsRequest(rpcPass: 'test-pass'),
       'my_balance': MyBalanceRequest(rpcPass: 'test-pass', coin: 'KMD'),
+      'min_trading_vol': MinTradingVolumeRequest(
+        rpcPass: 'test-pass',
+        coin: 'KMD',
+      ),
+      'max_taker_vol': MaxTakerVolumeRequest(
+        rpcPass: 'test-pass',
+        coin: 'KMD',
+        tradeWith: 'BTC',
+      ),
+      'orderbook_depth': OrderbookDepthRequest(
+        rpcPass: 'test-pass',
+        pairs: [OrderbookPair(base: 'KMD', rel: 'BTC')],
+      ),
     };
 
     requests.forEach((name, request) {

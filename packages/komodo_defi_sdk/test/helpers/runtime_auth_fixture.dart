@@ -12,6 +12,11 @@ mixin RuntimeAuthFixture implements KomodoDefiLocalAuth {
 
   @override
   Future<AuthSessionContext> captureSessionContext() async {
+    // Like `KdfAuthService`: a live session is returned without a read. A
+    // wallet switch reaches it through `runtimeSessions`, as an auth event or
+    // the test's own observe/invalidate, never through this capture.
+    final live = runtimeSessions.current;
+    if (live != null) return live;
     final epoch = runtimeSessions.epoch;
     final previous = runtimeSessions.current;
     final user = await currentUser;
@@ -35,6 +40,15 @@ mixin RuntimeAuthFixture implements KomodoDefiLocalAuth {
     if (!isSessionContextCurrent(context)) {
       throw const AuthSessionChangedException();
     }
+  }
+
+  @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) async {
+    ensureSessionContextCurrent(expected);
+    return dispatch();
   }
 
   @override

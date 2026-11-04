@@ -113,6 +113,27 @@ void main() {
     });
   });
 
+  group('NonNullableDecimalConverter', () {
+    const converter = NonNullableDecimalConverter();
+
+    test('should convert a number', () {
+      expect(converter.fromJson(0.00754), equals(Decimal.parse('0.00754')));
+    });
+
+    test('should convert a string', () {
+      expect(converter.fromJson('123.45'), equals(Decimal.parse('123.45')));
+    });
+
+    test('should throw for null or unparseable input', () {
+      expect(() => converter.fromJson(null), throwsFormatException);
+      expect(() => converter.fromJson('invalid'), throwsFormatException);
+    });
+
+    test('should convert decimal to string', () {
+      expect(converter.toJson(Decimal.parse('-67.89')), equals('-67.89'));
+    });
+  });
+
   group('TimestampConverter', () {
     late TimestampConverter converter;
 

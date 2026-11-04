@@ -29,11 +29,12 @@ class TendermintWithTokensActivationStrategy
   bool get supportsBatchActivation => true;
 
   @override
+  Set<AssetRole> get supportedRoles => const {AssetRole.platform};
+
+  @override
   bool canHandle(Asset asset) {
-    // Use tendermint-with-tokens for platform assets (not trezor)
-    final isPlatformAsset = asset.id.parentId == null;
-    return isPlatformAsset &&
-        privKeyPolicy != const PrivateKeyPolicy.trezor() &&
+    // Use tendermint-with-tokens unless the wallet is a Trezor
+    return privKeyPolicy != const PrivateKeyPolicy.trezor() &&
         super.canHandle(asset);
   }
 

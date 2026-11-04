@@ -9,6 +9,9 @@ part 'coin_market_data.g.dart';
 @freezed
 abstract class CoinMarketData with _$CoinMarketData {
   /// Creates a new instance of [CoinMarketData].
+  // FieldRename.snake would read `priceChange24h` from `price_change24h`, but
+  // CoinGecko sends `price_change_24h`, so fields with a number in their name
+  // set their JSON key explicitly.
   @JsonSerializable(fieldRename: FieldRename.snake)
   const factory CoinMarketData({
     String? id,
@@ -20,12 +23,20 @@ abstract class CoinMarketData with _$CoinMarketData {
     @DecimalConverter() Decimal? marketCapRank,
     @DecimalConverter() Decimal? fullyDilutedValuation,
     @DecimalConverter() Decimal? totalVolume,
-    @DecimalConverter() Decimal? high24h,
-    @DecimalConverter() Decimal? low24h,
-    @DecimalConverter() Decimal? priceChange24h,
-    @DecimalConverter() Decimal? priceChangePercentage24h,
-    @DecimalConverter() Decimal? marketCapChange24h,
-    @DecimalConverter() Decimal? marketCapChangePercentage24h,
+    @JsonKey(name: 'high_24h') @DecimalConverter() Decimal? high24h,
+    @JsonKey(name: 'low_24h') @DecimalConverter() Decimal? low24h,
+    @JsonKey(name: 'price_change_24h')
+    @DecimalConverter()
+    Decimal? priceChange24h,
+    @JsonKey(name: 'price_change_percentage_24h')
+    @DecimalConverter()
+    Decimal? priceChangePercentage24h,
+    @JsonKey(name: 'market_cap_change_24h')
+    @DecimalConverter()
+    Decimal? marketCapChange24h,
+    @JsonKey(name: 'market_cap_change_percentage_24h')
+    @DecimalConverter()
+    Decimal? marketCapChangePercentage24h,
     @DecimalConverter() Decimal? circulatingSupply,
     @DecimalConverter() Decimal? totalSupply,
     @DecimalConverter() Decimal? maxSupply,

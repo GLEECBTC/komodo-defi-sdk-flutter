@@ -1,0 +1,439 @@
+# SDK 0.9.0 release checklist
+
+Prepared 28 October 2026; build-input rolls prepared 29 October and 3 November.
+This is a candidate record, not publication approval.
+
+## Current accepted snapshot — 4 November 2026
+
+- Frozen SDK: `bb5b4187bf49f844c01672799b451b50a5b08808` (normal #435). Its
+  tree equals carry head `caab72b973c3fa74a4b6a11a663e4e67798023e1`, which the app RC pins
+  through #3589; source #434 squash is `1205d305febccd5edd6e45f78fa7b55ceda25b28`.
+  It follows the final coins roll: #439 squash
+  `ab29d57aa05aa48240ab7430c6d51a4f5e60a579` and normal #440 `7636f554c77b0d4bfa02d20dc030f1a95596a755`
+  (carry head `ff43a0ba`). Before that came the session follow-ups: #437 squash `34dd5febb45193c7c66b649b89b68ef3d90f3675`
+  and normal #438 `ad1799272121c18c7391287b9744247f89c04e44`, whose carry head
+  `0c69bd35` the app RC pinned before its coins repin. Engine inputs are
+  unchanged since #430 / #431 (`3b462904`); coins are `cc8249e8`. Main #416
+  remains open, with automatic merging disabled.
+- [x] Final coins roll #439 / #440: coins `cc8249e8` replaces `efd3a647` (22
+  commits, YTN added, no coin removed). The three mapped files and all 446
+  icons match upstream exactly; the local provider parses 737 of 773 coins,
+  with the same 36 omissions. Seven SDK suites passed on the carry, including
+  `komodo_coins` **143** and `komodo_coin_updates` **106**; see the
+  "Final coins roll" section below for the KDF check.
+- [x] Session follow-ups #437 / #438. The dispatch lease is bounded at 10
+  seconds and taken on the engine only, and transport resets wait for it. The
+  local executable's reset aborts pending requests, and its `stop` gives up
+  after 5 seconds. Offers compare by their numbers. On the carry:
+  `komodo_defi_framework` **104**, `komodo_defi_local_auth` **163**,
+  `komodo_defi_sdk` **1,239** (1 skipped), routed-swap harness **60**. Hosted
+  checks passed on both PRs before merging. The changed files equal the
+  source squash except the root changelog, which lacks dev's #434 entry.
+- [x] Audit every accepted change since #416 opened at `22e14ac9`, including
+  root/package changelogs and the custom-auth `runWithSession` migration.
+  The [coverage record](RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) distinguishes
+  superseded input rolls and testing/documentation changes from runtime fixes.
+- [x] Recorded current-input SDK qualification: 16 suites, **3,112 passed /
+  14 skipped**, Chrome/WASM **249 +10 +10**, stable offline generation and
+  independently verified artifacts. All five main-RC hosted checks passed for
+  the previous frozen head `3b462904`. These results were reused, not rerun for
+  this audit; the follow-up suites above were run on the new head.
+- [x] Exact `a51d69a` completed ten platform builds and 17 test jobs. Historical
+  29 October failure dispositions below describe the older `e40ac2f` input;
+  they do not override this pin's result. Retain original failures/passing
+  retries in [the exact-pin provenance](KDF_ARTIFACTS_2026-11-03.json).
+- [x] Logging carry #435: normal merge `bb5b4187bf49f844c01672799b451b50a5b08808` carries #434
+  (squash `1205d305`), its four files identical to the source. The
+  `komodo_wallet_build_transformer` suite passed **125**; hosted checks passed
+  **4**. The app RC pins its head `caab72b9` through #3589, with no
+  development engine configuration substituted.
+- [x] Notes #436 (`8cae3c91`) adds only changelogs and release docs; all five
+  main-RC checks on #416 passed at that head. The app's main-RC preview of the pinned runtime
+  was rechecked on 4 November: SDK `caab72b9`, and all 13 served
+  config/coin/engine files match the verified inputs.
+- [x] Owner dispositions (4 November): the open KDF review points and the
+  unattributed upstream failures under "Before distribution" ship as known
+  limits with a follow-up after release.
+- [ ] Complete final promotion review/checks, eventual consumer main pin and
+  signed consumer installation/upgrade qualification before distribution.
+  Keep #416 open until separately authorized; do not tag or publish here.
+
+Unchecked boxes in the dated sections below are historical; the lists above
+and under "Before distribution" are current. The dated sections below retain the evidence for their original inputs.
+No KDF repository tests, version/dependency changes or runtime pin changes are
+part of this documentation update.
+
+## Scope and immutable inputs
+
+- Integration source: `03a3cb1adf666952a16f0cd80e67b8173076f4c1` (SDK #407),
+  including SDK #405 activation fixes. Initial preparation added release
+  metadata and dependency constraints. Initial runtime freeze fixes are SDK
+  #412 (`97b48556`) and #413 (`56828b91`). Subsequent accepted recovery,
+  Trezor and session-dispatch corrections (#418/#425/#427), transition tests
+  (#429) and input roll (#431) are mapped in the post-opening coverage record.
+- Previous distribution: `a96398ba9ae72efbe654de7c3edc0bfe2b05dda0` (SDK 0.8.1,
+  merged #398). Latest published release: `komodo_defi_sdk-v0.8.0`.
+- Branch strategy: **squash every PR into `dev`**; freeze `release-0.9.0`
+  from the reviewed dev snapshot and use a merge commit for its promotion
+  into `main`. Squash any release reconciliation back into `dev` through a
+  focused PR. Source-branch reconciliation merges do not
+  change this rule. Squashing drops source merge parents, so compare content
+  and record the real squash SHA rather than assuming ancestry is retained.
+- Previous main `a96398ba` and its merge parent `331a6879` have identical trees. The preparation
+  branch's earlier main-history sync is not expected to survive its squash.
+  Review the final promotion diff and merge result instead of requiring that
+  this source-branch sync become an ancestor of `dev`.
+- KDF: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`; specs:
+  `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
+  `cc8249e85e54467bc2684c2712857711eab55fd2` (final roll, 4 November).
+- All seven archive checksums are in the
+  [framework build configuration](../packages/komodo_defi_framework/app_build/build_config.json) with
+  [3 November provenance](KDF_ARTIFACTS_2026-11-03.json). The prior
+  [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
+  historical evidence. Build-time coin
+  advancement is disabled; runtime updates remain enabled.
+- Direct source inspection on 29 October confirms the security fix shipped in
+  wallet 0.9.7-1: [candidate eth.rs, line 5859](https://github.com/GLEECBTC/kdf-internal/blob/e40ac2fb4319d352bf9c93683eb2518ce9f939e0/mm2src/coins/eth.rs#L5859)
+  checks the ERC-20 payment amount outside the watcher-reward branch, as in
+  [KDF 3.1.1-beta](https://github.com/GLEECBTC/kdf-internal/commit/2023112fa67b28cbebc2a7064d22267fed40310f).
+  The branches diverge; this source check does not certify every later main fix.
+
+## Feature defaults and consumer policy — 29 October
+
+These entries record a source audit, not new live-swap or signed-platform
+test results.
+
+- [x] `sdk.routedSwaps` exposes implemented LI.FI exact/Max quotes,
+  cheapest/fastest ordering, approval/execution progress, history, recovery and
+  eligible cancellation without a feature opt-in. Remote engines must support
+  the pinned contract; asset eligibility and runtime execution checks apply.
+- [x] Gleec Wallet registers routed swaps by default. Its integrator flag
+  controls commission configuration and does not enable/disable routing.
+  Native-Max gas headroom remains the wallet's separate quote policy.
+- [x] Legal consent is consumer-owned. Ordinary Gleec builds require available
+  wallet/LI.FI documents before routed Start; their availability bypass defaults
+  to false. Only the isolated manual RC preview has the recorded exception,
+  retaining warnings and refusing to record unavailable terms as accepted.
+- [x] The pinned routed requests support LI.FI and eligible EVM assets and have
+  no external-recipient parameter. Additional provider backends, expanded chain
+  support and hardware signing require implementation or validation. Gleec
+  hardware-wallet trading was wallet-only in 0.9.7-1 and remains so.
+- [x] Gleec Wallet [#3579](https://github.com/GLEECBTC/gleec-wallet/pull/3579)
+  restores the previous atomic EVM-token behavior and describes engine-managed
+  permission in the existing review, with no new modal or confirmation step.
+  The engine may reuse or grant an unlimited allowance after matching. LI.FI
+  token routes retain their separate exact-approval/reset and funding checks.
+- [x] Keep the owner's RC-only KDF failure acceptance separate from production
+  disposition. The wallet's usability/live-fiat deferrals and post-0.10.0 Banxa
+  follow-up are recorded deferrals, not completed execution evidence.
+
+## Preparation gates
+
+- [x] Version every changed library package and dependency-only consumer.
+- [x] Update workspace constraints together; preserve toolchain constraints.
+- [x] Date package changelogs and add overview, API migration and engine limits.
+- [x] Separate SDK Max behavior from the wallet's native gas-reserve policy.
+- [x] Resolve SDK workspace and consumer dependencies offline; consumer lockfile
+  changes only 11 local SDK package version lines; enforce-lockfile succeeds.
+- [x] Run all 16 SDK package suites on prepared versions.
+- [x] App consumer aggregator passed 3,898 tests / four skipped on the prepared
+  runtime and dependency graph, as recorded in app preparation #3560.
+- [x] Full consumer/workspace analysis after dependency setup: zero errors,
+  55 warnings and 2,130 infos in unchanged code. No Dart implementation changed.
+- [x] SDK #405 and #407 squash merged into `dev`; the combined resulting tree
+  exactly matches tested integration `03a3cb1a`.
+- [x] Preparation #409 squash merged into `dev` as `cc9a5855`; generation
+  repair #411 is `6038592a`. Ownership/recovery #412 is `97b48556` and EVM
+  history #413 is `56828b91`. Source-branch and squash content were compared.
+- [x] Resolve the two SDK #410 correlation/session review findings through
+  #412 and add native/browser regressions. Both threads are resolved.
+- [ ] Final `release-0.9.0` → `main` promotion contains this preparation; record its SHA,
+  complete its required CI/review conditions. The promotion is ready for review;
+  its normal merge must still satisfy repository protections.
+
+## Validation record
+
+Fresh preparation results are recorded in the preparation PR. Historical SDK
+#407 evidence on `03a3cb1a`: all 16 package suites, both WASM test steps and both
+previews passed. Those runs are not evidence for the prepared version graph.
+Flutter 3.41.4 / Dart 3.11.1 is the validation toolchain. The all-package runner
+is `.github/workflows/flutter-tests.yml`; it intentionally tests `packages/*`,
+not every sample/product. Historical sample-test exclusions from 0.8.0 remain
+separate; do not silently expand or waive them.
+
+### Fresh preparation results — 28 October 2026
+
+All **16 package suites passed: 3,045 tests, 14 skipped**, using
+`flutter test --no-pub --reporter expanded` from each `packages/*` directory
+with tests. Workspace resolution used the existing offline package cache.
+No Dart source changes were made. No formatting was needed for this metadata
+change. Local Markdown targets, dependency minimums and `git diff --check` pass.
+
+| Package | Passed | Skipped |
+| --- | ---: | ---: |
+| `dragon_charts_flutter` | 17 | 0 |
+| `dragon_logs` | 27 | 0 |
+| `komodo_cex_market_data` | 362 | 6 |
+| `komodo_coin_updates` | 106 | 0 |
+| `komodo_coins` | 143 | 0 |
+| `komodo_defi_framework` | 101 | 0 |
+| `komodo_defi_harness` | 224 | 4 |
+| `komodo_defi_local_auth` | 127 | 0 |
+| `komodo_defi_rpc_methods` | 379 | 0 |
+| `komodo_defi_sdk` | 1200 | 1 |
+| `komodo_defi_types` | 191 | 3 |
+| `komodo_legacy_wallet_migration` | 14 | 0 |
+| `komodo_symbol_converter` | 1 | 0 |
+| `komodo_ui` | 4 | 0 |
+| `komodo_wallet_build_transformer` | 119 | 0 |
+| `komodo_wallet_cli` | 30 | 0 |
+
+Full analysis after resolving both workspaces: **zero errors**, 55 existing
+warnings and 2,130 infos. An earlier pass before SDK test dependency setup
+reported missing dev packages; resolving the SDK removed those setup errors.
+WASM/platform builds and hosted CI must still run on final promotion.
+
+## Before distribution
+
+- [x] KDF native bridge-fee restriction, status-error polling and the specs
+  review: the owner accepted them as known limits on 4 November, with a
+  follow-up after release.
+- [ ] Proxy/backend deployment provenance and recovery evidence for the
+  production KDP routes (Decker).
+- [x] Upstream failures `validate_dex_fee_invalid_sender_erc`,
+  `firo_lelantus_tx_details`, `test_block_header_utxo_loop` from KDF run
+  `39776341104`: the owner accepted them as known limits on 4 November, with a
+  follow-up. An artifact rebuild does not close them.
+- [ ] Validate signed consumer artifacts, fresh install/upgrade, Safari and
+  hardware/platform behavior on the final commit, with funded checks operated
+  by a person. Rebuild/revalidate all seven targets if KDF changes.
+- [ ] Merge reviewed SDK promotion with a merge commit; record final SHA.
+- [ ] Create `komodo_defi_sdk-v0.9.0` and approved package tags on that SHA.
+  Use the reconciled changelog and migration guide for GitHub release notes.
+- [ ] Repin the app to the final SDK `main` commit; review its lockfile and
+  rerun consumer gates. A preparation branch pin is provisional.
+- [ ] If pub.dev is selected later, separately validate publishability and
+  dependency order. This checkout preparation does not certify pub.dev.
+
+No tag, release publication, production deploy, ruleset bypass or merge is
+performed by these preparation changes.
+
+## Dev merge record — 28 October 2026
+
+- SDK #405: squash `50e4ef025692870f759b47d84ab2ba6c079a93f5`.
+- SDK #407: squash `76140abb2312f6c306c3118a2cd619c8985e64a3`.
+- Squashing #405 first created one changelog conflict in #407. Reconciliation
+  `63b3660d` retains the already combined notes; its complete tree matches
+  tested `03a3cb1a`. No runtime implementation or build pin changed.
+- The owner explicitly authorized admin bypass for these dev merges. Review
+  protections and repository settings were not changed. Final distribution
+  gates remain in force on the SDK release PR. The earlier dev-headed #410
+  is replaced by the frozen `release-0.9.0` candidate; its resolved review
+  discussions remain part of the release evidence.
+- The preparation source branch is reconciled with the real dev squash before
+  #409 is retargeted. Its runtime/dependency files remain those tested at
+  `2f6ba724`; subsequent changes only correct the strategy and execution record.
+
+## Melos release validation — 28 October 2026
+
+Workspace Melos 7.8.1 uses Flutter 3.41.4 / Dart 3.11.1. The configured
+`bootstrap` post-hook runs `prepare`, which runs indexes then build runners.
+The generated workspace lockfile remains ignored; release validation uses its
+locked cached dependencies, and consumer lockfile policy stays independent.
+
+```sh
+dart run melos --sdk-path /path/to/flutter-3.41.4 bootstrap --offline --enforce-lockfile
+dart run melos --sdk-path /path/to/flutter-3.41.4 run prepare --no-select
+dart run melos --sdk-path /path/to/flutter-3.41.4 list --json
+dart run melos --sdk-path /path/to/flutter-3.41.4 exec --concurrency=1 \
+  --dir-exists=test --ignore='*_example' --ignore=dex_dungeon \
+  --ignore=komodo_compliance_console -- flutter test --no-pub --reporter expanded
+```
+
+The first bootstrap completed but exposed invalid regenerated indexes: direct
+exports of routed-swap `part of` files and both native/web lock implementations
+caused five analysis errors. Generator exclusions now retain conditional entry
+points and export the owning routed-swap library. Bootstrap passes after the
+fix; repeating `prepare` produces identical output. Melos resolves 22 packages,
+and the test filters select the same 16 package suites as CI. Samples/products
+remain explicitly separate, as in the existing release process.
+
+Regenerated Hive registrars use the generator's current `hive_ce.dart` import.
+One Freezed file changed only four blank-line spaces; that unrelated whitespace
+was restored after generation stability was verified. Formatting changed Dart
+files requires no additional edits. Package versions and dependency constraints
+are unchanged by this generation repair.
+
+Fresh validation after the repair:
+
+- `melos exec` selected all 16 CI package suites: **3,045 passed / 14 skipped**.
+- App aggregator with all four production GasFree defines: **3,898 passed /
+  four skipped**, 4m59s, against the regenerated SDK.
+- Six SDK wallet-isolation/GasFree files: **176 passed in Chrome/WASM**.
+- Two framework WASM transport/diagnostic files: **10 passed**.
+- Auth suite after excluding the internal Trezor password-store helper from
+  the public generated barrel: **127 passed**. Its public export surface is
+  preserved; the service keeps its explicit internal helper import.
+- Full analysis: **zero errors**, 55 warnings and 2,146 infos. Generated ignored
+  web wrappers account for the added informational notices relative to the
+  earliest analysis snapshot. No new changed-line diagnostic remains.
+- Changed-file Dart formatting and diff checks pass. Package versions and the
+  consumer dependency versions do not change. No tag or publication command
+  is needed to validate these already prepared candidate versions.
+
+## Code-freeze validation — runtime `56828b91`
+
+- [x] Enforced offline Melos bootstrap, including index/build-runner hooks,
+  completed after the final runtime fixes with no tracked generation drift.
+- [x] All 16 package suites: **3,056 passed / 14 skipped**. This supersedes the
+  earlier preparation counts above; those remain historical evidence.
+- [x] Nine core Chrome/WASM ownership, wallet/history and GasFree files:
+  **213 passed**. Both framework transport/diagnostic files also passed in
+  [SDK #413 CI](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/413/checks).
+- [x] A temporary real browser/WASM probe confirmed ETC Blockscout account API
+  reads across origins using only the public burn address. The configured
+  proxy ETC route returned 404. Private QA wallet addresses were not sent.
+- [x] SDK history analysis: zero errors, 14 existing informational diagnostics;
+  no new changed-line diagnostic. Changed Dart formatting and diff checks pass.
+- [x] SDK #412 and #413 hosted tests, SDK/playground builds and preview checks
+  passed. The promotion head must independently meet its required checks.
+
+SDK runtime changes are complete for this freeze scope. Freeze the candidate
+on `release-0.9.0` and keep its main promotion open for tester/reviewer feedback.
+The app pins the exact frozen SDK commit during RC testing. Main promotion and
+consumer immutable-main repin remain the ordered distribution steps above;
+they are not prerequisites for freezing the RC source. Tags, public
+publication, upstream operational signoff and signed-platform certification
+retain their separate release gates; no live funds were submitted by an agent.
+
+## Freeze review repair — complete cold-start recovery
+
+The frozen SDK #416 review found that `inFlight(pageSize: 1)` silently omitted
+active swaps after page 20. Recovery now follows every reported page, retains
+the in-flight filter and rejects the entire read on wallet-session revocation,
+including a late response after page 20. The regression covers 99 pages and
+a wallet change while page 21 is pending; the old test that expected truncation
+was replaced and moved into the existing Chrome/WASM-gated ownership suite.
+
+- All 16 Melos package suites: **3,057 passed / 14 skipped**.
+- All nine core Chrome/WASM files: **215 passed**. This supersedes the earlier
+  native/core-WASM counts for runtime `56828b91`; those remain historical.
+- Focused manager/ownership native tests: **17 passed**. Changed-file analysis
+  is clean; full consumer analysis has zero errors and the existing 55 warnings
+  / 2,144 infos. Changed Dart formatting and diff checks pass.
+- KDF/spec/coin inputs, dependency versions and generated outputs are unchanged.
+  Carry the focused dev squash into the frozen SDK branch through a separate
+  release-repair PR; the main promotion remains open for tester/reviewer feedback.
+
+## Merged-dev engine roll — 29 October 2026
+
+This focused update replaces the feature-branch archives with the exact merged
+KDF dev revision `e40ac2fb4319d352bf9c93683eb2518ce9f939e0`. The LI.FI squash
+merge tree equals the prior source pin; only three test/helper files differ
+at the selected dev revision. Runtime/API behavior is unchanged by source.
+
+- Full build [40849114158](https://github.com/GLEECBTC/kdf-internal/actions/runs/40849114158):
+  all ten platform jobs passed; Docker push and deployment-commit mutation disabled.
+- All seven required GitHub artifact outer digests and inner ZIPs were checked;
+  ordinary published URLs match those independently verified archive bytes.
+  ARMv7 was reverified after its incomplete cached response was purged.
+- Canonical CLI `--branch dev --commit e40ac2fb4319d352bf9c93683eb2518ce9f939e0
+  --source mirror --platform all --strict` passed for every platform against the
+  independently seeded hashes. No checksum bypass or coin revision advancement.
+- Reference YAML now equals canonical JSON, including frozen build-time coins.
+- Enforced offline Melos bootstrap and repeated `melos run prepare --no-select`
+  passed without tracked generated-code drift. No Dart source changed.
+- Native read-only LI.FI smoke passed on the verified macOS universal binary:
+  Arbitrum/Base exact quotes, minima, funding, included 2% fee and typed unfunded
+  Max rejection. A fresh unfunded wallet was used; no transaction was submitted.
+- All **16 Melos native package suites passed: 3,057 tests / 14 skipped**.
+  Core Chrome/WASM: **215 passed**; framework Chrome/WASM: **10 passed**.
+  App consumer results are recorded separately in the app pointer PR.
+
+The [provenance record](KDF_ARTIFACTS_2026-10-29.json) names every failed test
+from upstream KDF run `40755486033`, including the session-storage SQLite
+failure and Sia Max balance assertion. One retry of the six failed jobs was
+requested; pending results do not waive the original failures. Merge the dev
+PR with squash, then carry only its reviewed diff into frozen `release-0.9.0`
+through a focused PR after tests and review pass. SDK #416 remains open.
+
+### RC-only acceptance and accepted dev carry
+
+SDK #419 was squash merged into dev as
+`d111063426266e6b967b88f0f7a8598d1017b73e`; its complete tree equals tested
+source `21f64b50`. SDK #420 carries that actual accepted squash into the frozen
+branch. This release-only record adds no runtime or dependency change.
+
+The owner explicitly accepted the documented upstream failures **as-is for RC
+testing** on 29 October. Retry attempt 2 still fails Linux/macOS/Windows
+integration and the Sia Max test; Linux unit/session-storage and Docker ZCoin
+passed on retry. The Sia retry failed a balance assertion at line 110, whereas
+the original failure was its post-withdraw assertion at line 173. This is a
+repeated test failure, not proof that the same withdrawal defect reproduced.
+
+Regression status is **unconfirmed**: production sources equal the previous
+`35f0bde` RC, and that RC's run `39776341104` skipped integration and Docker,
+so there is no passing comparable baseline in that run. The upstream failures
+remain production gates for a fix or explicit final disposition. SDK #416 stays
+open for testers and reviewers; this exception does not approve publication.
+
+A broader comparison against pre-merge dev `6afb05f4` on 17 August
+([run 31990542840](https://github.com/GLEECBTC/kdf-internal/actions/runs/31990542840))
+shows the three Z-coin light activation tests passed on Linux/macOS then and
+fail now. This is a confirmed **CI pass-to-fail regression** since that baseline;
+its code versus infrastructure cause is unassigned. Eighteen of the current
+21 macOS failures and Linux `test_tx_history_segwit` were already failing in
+that earlier dev run. Sia's regression status remains unconfirmed. This does
+not change the absence of a runtime-source delta from the prior RC pin.
+
+## Final coins roll — 4 November 2026
+
+Coins `cc8249e85e54467bc2684c2712857711eab55fd2` (coins master after #2093)
+replaces `efd3a6471709f7e13e0b03277e37548e11840aae`: 22 commits. It adds
+Yenten (YTN); sets L2 fee models for AVAX (`avalanche`), ETH-BASE
+(`op_stack`), MNT (`mantle`) and MON (`monad`); makes the fork-id signature
+version explicit for BCH, XEC, XRG and tBCH; drops signature versions and
+decimals that matched the defaults for CRNC, MAZA and XEP-segwit; and refreshes
+WAM electrums, seed nodes and the generated configs. No coin is removed.
+
+KDF `a51d69a` parses all four fee models (`EthFeeModel` in
+`coins/eth/actual_fee.rs`); they change only how the actual fee is read from a
+receipt. Its signature-version default is fork-id for BCH and fork-id chains,
+otherwise base, and its decimals default is 8, so the dropped values change
+nothing; segwit inputs always sign as WitnessV0. KDF and specs are unchanged.
+
+## Full engine and coins roll — 3 November 2026
+
+Exact KDF `a51d69a11ff937ecf9678e9b37632af578252846` replaces `e40ac2f`;
+coins `efd3a6471709f7e13e0b03277e37548e11840aae` replaces `2b0aefb7`.
+The [immutable record](KDF_ARTIFACTS_2026-11-03.json) includes the source delta,
+archive identities, coin-file/icon checks and original failure dispositions.
+The historical 29 October record remains unchanged.
+
+- [x] Full build [41650681364](https://github.com/GLEECBTC/kdf-internal/actions/runs/41650681364),
+  attempt 9: all ten platform jobs passed; Docker push and deployment commit disabled.
+- [x] Full tests [41650695853](https://github.com/GLEECBTC/kdf-internal/actions/runs/41650695853),
+  attempt 10: all 17 jobs passed. Original Linux
+  `tendermint::tendermint_coin::tests::test_htlc_create_and_claim` timeout and
+  macOS `lp_message_service::telegram::telegram_tests::test_send_message`
+  assertion failure each passed one actual retry. Capacity cancellations
+  acquired no runner; successful jobs were preserved.
+- [x] All seven SDK archives matched independent GitHub artifact digests,
+  ZIP integrity and ordinary primary/fallback mirror downloads. Strict CLI
+  validation against those trusted hashes passed on all seven platforms.
+- [x] Fresh-unfunded native Arbitrum/Base quote, funding, fee and Max smoke
+  passed with engine `3.2.0-beta_a51d69a`; no funds were submitted.
+- [x] Three mapped coin files match exact-commit raw bytes; all 445 icons
+  match published SHA-256. Local provider loads 736/772 versus 734/770,
+  with the same 36 filtered/testnet/unsupported omissions and no new omissions.
+- [x] Enforced offline bootstrap and repeated prepare passed without tracked drift.
+  All 16 native suites passed: **3,112 tests / 14 skipped**. Core Chrome/WASM
+  passed **249**, framework **10**, and auth dispatch lease **10**. The core
+  gate includes the accepted offer-session and browser persistence regressions.
+  Full consumer analysis: zero errors, 55 existing warnings and 2,144 infos.
+- [x] Focused dev squash #430 (`db73613c`) and accepted normal-merge carry #431
+  (`3b462904`) into `release-0.9.0`.
+
+Upstream maintainers independently merged KDF #40 as `f9632e0e`; only
+`CHANGELOG.md` differs from this requested revision. This roll retains `a51d69a`.
+SDK #416 remains open; no main promotion, tag or publication is performed.

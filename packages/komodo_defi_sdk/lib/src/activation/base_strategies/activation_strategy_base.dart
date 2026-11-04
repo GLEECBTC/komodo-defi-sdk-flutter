@@ -17,11 +17,6 @@ abstract class BatchCapableActivator extends AssetActivator {
   const BatchCapableActivator(super.client);
 
   bool get supportsBatchActivation;
-
-  /// Whether the activator supports activation of custom EVM-chain
-  /// tokens that are not part of the live coins configuration.
-  /// Defaults to false.
-  bool get supportsCustomTokenActivation => false;
 }
 
 /// Smart activator that chooses between batch/single methods
@@ -106,13 +101,16 @@ class CompositeAssetActivator extends BatchCapableActivator {
   bool get supportsBatchActivation => true;
 
   ProtocolActivationStrategy _findStrategy(Asset asset) {
-    final strategy = _strategies.firstWhere(
-      (s) => s.canHandle(asset),
-      orElse: () => throw UnsupportedError(
-        'No activation strategy found for ${asset.id}',
-      ),
+    final matches = _strategies.where((s) => s.canHandle(asset)).toList();
+    assert(
+      matches.length <= 1,
+      'Activation strategies overlap on ${asset.id}: '
+      '${matches.map((s) => s.runtimeType).join(', ')}',
     );
-    return strategy;
+    if (matches.isEmpty) {
+      throw UnsupportedError('No activation strategy found for ${asset.id}');
+    }
+    return matches.first;
   }
 
   bool supportsBatchActivationFor(Asset asset) {
@@ -141,22 +139,49 @@ class CompositeAssetActivator extends BatchCapableActivator {
   }
 }
 
-/// Base class for protocol-specific activation implementations
+/// Whether an asset is a platform coin or a token on one.
+enum AssetRole {
+  /// An asset without a parent, such as ETH or ATOM.
+  platform,
+
+  /// A child asset activated on its platform coin, such as an ERC20 token.
+  token;
+
+  /// The role [asset] plays.
+  static AssetRole of(Asset asset) =>
+      asset.id.isChildAsset ? AssetRole.token : AssetRole.platform;
+}
+
+/// Base class for protocol-specific activation implementations.
+///
+/// [canHandle] is a template method over the [supportedProtocols],
+/// [supportedRoles] and [supportsCustomTokenActivation] hooks.
+/// [CompositeAssetActivator] takes the first strategy that can handle an
+/// asset, so the strategies in a chain must not overlap.
 abstract class ProtocolActivationStrategy extends BatchCapableActivator {
   const ProtocolActivationStrategy(super.client);
 
   @override
   bool canHandle(Asset asset) =>
-      // | isCustomToken | supportsCustomTokenActivation | result |
-      // |---------------|------------------------------|--------|
-      // | true          | true                         | true   |
-      // | true          | false                        | false  |
-      // | false         | true                         | true   |
-      // | false         | false                        | false  |
-      (!asset.protocol.isCustomToken || supportsCustomTokenActivation) &&
+      asset.protocol.isCustomToken == supportsCustomTokenActivation &&
+      supportedRoles.contains(AssetRole.of(asset)) &&
       supportedProtocols.contains(asset.protocol.subClass);
 
   Set<CoinSubClass> get supportedProtocols;
+
+  /// Hook: whether this strategy activates platform coins, tokens or both.
+  /// Defaults to both; a protocol whose platform and tokens go to different
+  /// KDF RPCs splits them between strategies.
+  Set<AssetRole> get supportedRoles => const {
+    AssetRole.platform,
+    AssetRole.token,
+  };
+
+  /// Hook: whether this strategy activates custom tokens, the ones a user
+  /// imports that are not in the coins configuration. Such a strategy takes
+  /// only custom tokens, because KDF refuses a custom-token request for a
+  /// configured ticker. Defaults to false.
+  bool get supportsCustomTokenActivation => false;
 
   @protected
   ActivationProgress buildErrorProgress({

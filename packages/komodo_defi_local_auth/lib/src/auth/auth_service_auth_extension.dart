@@ -46,6 +46,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   }
 
   void _emitAuthStateChange(KdfUser? user) {
+    _trackIdentityRecovery(user);
     if (!isAuthTransitionInProgress) _sessions.observe(user);
     if (!_authStateController.isClosed && user != _lastEmittedUser) {
       _lastEmittedUser = user;

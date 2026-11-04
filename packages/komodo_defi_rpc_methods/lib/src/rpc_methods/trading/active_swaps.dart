@@ -80,7 +80,8 @@ class ActiveSwapStatus {
   factory ActiveSwapStatus.fromJson(JsonMap json) {
     return ActiveSwapStatus(
       swapType: json.value<String>('swap_type'),
-      swapData: SwapInfo.fromJson(json.value<JsonMap>('swap_data')),
+      // Pass the whole envelope: the swap inside has no `type` of its own.
+      swapData: SwapInfo.fromJson(json),
     );
   }
 
