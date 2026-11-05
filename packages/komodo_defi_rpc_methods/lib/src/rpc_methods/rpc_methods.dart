@@ -64,6 +64,8 @@ export 'routed_swap/routed_swap_requests.dart';
 export 'routed_swap/routed_swap_rpc_namespace.dart';
 export 'sia/enable_sia.dart';
 export 'sia/sia_rpc_namespace.dart';
+export 'smart_account/smart_account.dart';
+export 'smart_account/smart_account_rpc_namespace.dart';
 export 'streaming/streaming_balance_enable.dart';
 export 'streaming/streaming_common.dart';
 export 'streaming/streaming_disable.dart';
