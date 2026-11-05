@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, dev, feat/**, bugfix/**, hotfix/**]
+    branches: [main, dev, release-*, release/**, hotfix-*, hotfix/**, feat/**, bugfix/**]
   workflow_dispatch:
     inputs:
       package:

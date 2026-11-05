@@ -43,6 +43,10 @@ for the complete SDK workspace. Read the [migration guide](docs/RELEASE_0.8.0.md
 [validation checklist](docs/RELEASE_0.8.0_CHECKLIST.md). This preparation does not
 publish packages to pub.dev or create a release tag.
 
+## Contributing and branch protection
+
+Follow [Gitflow](docs/GITFLOW_BRANCHING.md) and the [branch-protection runbook](docs/BRANCH_PROTECTION.md). PRs into `dev` use squash; main/release/hotfix targets use merge commits.
+
 ## Quick start (SDK)
 
 Add the SDK to your app and initialize it:
