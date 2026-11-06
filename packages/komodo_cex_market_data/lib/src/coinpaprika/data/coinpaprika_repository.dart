@@ -4,6 +4,7 @@ import 'package:komodo_cex_market_data/src/cex_repository.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/data/coinpaprika_cex_provider.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_api_plan.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_ticker.dart';
+import 'package:komodo_cex_market_data/src/common/api_error_parser.dart';
 import 'package:komodo_cex_market_data/src/id_resolution_strategy.dart';
 import 'package:komodo_cex_market_data/src/models/_models_index.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
@@ -117,7 +118,7 @@ class CoinPaprikaRepository implements CexRepository {
 
     // Determine the actual fetchable date range (using UTC)
     var effectiveStartAt = startAt?.toUtc();
-    final effectiveEndAt = endAt ?? DateTime.now().toUtc();
+    final effectiveEndAt = (endAt ?? DateTime.now()).toUtc();
 
     // If no startAt provided, use default based on plan limit or
     // reasonable default
@@ -133,24 +134,14 @@ class CoinPaprikaRepository implements CexRepository {
       }
     }
 
-    // Check if the requested range is entirely before the cutoff date
-    // (only for limited plans)
-    if (!apiPlan.hasUnlimitedOhlcHistory) {
-      final cutoffDate = apiPlan.getHistoricalDataCutoff();
-      if (cutoffDate != null) {
-        // If both start and end dates are before cutoff, return empty data
-        if (effectiveEndAt.isBefore(cutoffDate)) {
-          return const CoinOhlc(ohlc: []);
-        }
-
-        // If start date is before cutoff, adjust it to cutoff date
-        if (effectiveStartAt.isBefore(cutoffDate)) {
-          effectiveStartAt = cutoffDate;
-        }
-      }
+    // The plan's cutoff falls mid-day, but the API reads the date-only start
+    // as that day's midnight, which the plan refuses.
+    final earliestStart = apiPlan.getEarliestStartDate();
+    if (earliestStart != null && effectiveStartAt.isBefore(earliestStart)) {
+      effectiveStartAt = earliestStart;
     }
 
-    // If effective start is after end, return empty data
+    // Also covers a range that ends before the earliest fetchable day.
     if (effectiveStartAt.isAfter(effectiveEndAt)) {
       return const CoinOhlc(ohlc: []);
     }
@@ -206,6 +197,10 @@ class CoinPaprikaRepository implements CexRepository {
   }
 
   /// Fetches OHLC data in multiple requests to handle API plan limitations.
+  ///
+  /// A failed batch is skipped, but if every batch fails the last error is
+  /// rethrown: an empty result would read as success and keep fallback
+  /// repositories from being tried. A rate limit stops the remaining batches.
   Future<CoinOhlc> _fetchMultipleOhlcRequests(
     String tradingSymbol,
     QuoteCurrency quoteCurrency,
@@ -215,6 +210,8 @@ class CoinPaprikaRepository implements CexRepository {
   ) async {
     final allOhlcData = <Ohlc>[];
     var currentStart = startAt;
+    var anyBatchSucceeded = false;
+    (Object, StackTrace)? lastFailure;
 
     while (currentStart.isBefore(endAt)) {
       final batchEnd = currentStart.add(batchDuration);
@@ -244,12 +241,14 @@ class CoinPaprikaRepository implements CexRepository {
         );
 
         allOhlcData.addAll(batchOhlc.ohlc);
-      } catch (e) {
+        anyBatchSucceeded = true;
+      } catch (e, s) {
+        if (e is MarketDataApiException && e.isRateLimited) rethrow;
         _logger.warning(
           'Failed to fetch batch ${currentStart.toIso8601String()} to '
           '${actualEnd.toIso8601String()}: $e',
         );
-        // Continue with next batch instead of failing completely
+        lastFailure = (e, s);
       }
 
       currentStart = actualEnd;
@@ -260,6 +259,10 @@ class CoinPaprikaRepository implements CexRepository {
       }
     }
 
+    final failure = lastFailure;
+    if (!anyBatchSucceeded && failure != null) {
+      Error.throwWithStackTrace(failure.$1, failure.$2);
+    }
     return CoinOhlc(ohlc: allOhlcData);
   }
 

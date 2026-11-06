@@ -1,3 +1,15 @@
+## Unreleased
+
+ - **FIX**(coinpaprika): start history requests at the first UTC midnight the
+   plan accepts. CoinPaprika reads a date-only start as 00:00 UTC, so the
+   first 90-day batch of a year was always refused.
+ - **FIX**(coinpaprika): a 402 "not allowed in this plan" is a plan
+   limitation and any other 402 a rate limit. Errors are thrown as
+   `MarketDataApiException`, which `RepositoryFallbackMixin` backs off from
+   when rate limited. A history request whose batches all fail rethrows the
+   last error instead of returning an empty success; a rate limit stops the
+   remaining batches.
+
 ## 0.2.0 (2026-10-28)
 
  - **BREAKING** **PERF**(coinpaprika): use one bulk tickers response cached

@@ -335,11 +335,13 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     // If no dates provided, assume recent data request (valid)
     if (startDate == null && endDate == null) return;
 
-    final cutoffDate = apiPlan.getHistoricalDataCutoff();
+    // The API's own cutoff, unbuffered: callers that clamp to
+    // [CoinPaprikaApiPlan.getEarliestStartDate] keep the buffer's margin over
+    // it, so a clock read a moment later here cannot reject their start.
+    final cutoffDate = apiPlan.getHistoricalDataCutoff(buffer: Duration.zero);
     if (cutoffDate == null) return; // No limitations
 
-    // Check if any requested date is before the cutoff
-    if (startDate != null && startDate.isBefore(cutoffDate)) {
+    if (startDate != null && _dayReadByApi(startDate).isBefore(cutoffDate)) {
       throw ArgumentError.value(
         startDate,
         'startDate',
@@ -351,7 +353,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
       );
     }
 
-    if (endDate != null && endDate.isBefore(cutoffDate)) {
+    if (endDate != null && _dayReadByApi(endDate).isBefore(cutoffDate)) {
       throw ArgumentError.value(
         endDate,
         'endDate',
@@ -411,6 +413,11 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
         '${date.month.toString().padLeft(2, '0')}-'
         '${date.day.toString().padLeft(2, '0')}';
   }
+
+  /// The instant the API reads for the day [_formatDateForApi] sends: that
+  /// day's 00:00 UTC.
+  DateTime _dayReadByApi(DateTime date) =>
+      DateTime.utc(date.year, date.month, date.day);
 
   /// Converts internal interval format to CoinPaprika API format.
   ///
@@ -489,8 +496,8 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
     FiatCurrency.isk,
   ];
 
-  /// Throws an [ArgumentError] if the response is an API error,
-  /// otherwise throws an [Exception].
+  /// Throws an [ArgumentError] if the plan does not cover the request,
+  /// otherwise throws a [MarketDataApiException].
   ///
   /// [coinId]: The CoinPaprika coin identifier (e.g., "btc-bitcoin")
   /// [operation]: The operation that was performed (e.g., "OHLC data fetch")
@@ -504,9 +511,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
       response.body,
     );
 
-    // Check if this is a CoinPaprika API limitation error
-    if (response.statusCode == 400 &&
-        response.body.contains('is not allowed in this plan')) {
+    if (apiError.errorType == 'plan_limitation') {
       final cutoffDate = apiPlan.getHistoricalDataCutoff();
 
       _logger.warning(
@@ -532,7 +537,7 @@ class CoinPaprikaProvider implements ICoinPaprikaProvider {
       ),
     );
 
-    throw Exception(apiError.message);
+    throw MarketDataApiException(apiError, service: 'CoinPaprika');
   }
 
   /// Helper method to parse CoinPaprika historical ticks JSON into Ohlc format.

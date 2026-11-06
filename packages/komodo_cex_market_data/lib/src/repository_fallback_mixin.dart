@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
+import 'package:komodo_cex_market_data/src/common/api_error_parser.dart';
 import 'package:komodo_cex_market_data/src/models/quote_currency.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -87,6 +88,8 @@ mixin RepositoryFallbackMixin {
 
   /// Checks if an exception indicates a 429 (Too Many Requests) response
   bool _isRateLimitError(Exception exception) {
+    if (exception is MarketDataApiException) return exception.isRateLimited;
+
     final exceptionString = exception.toString().toLowerCase();
 
     // Check for HTTP 429 status code in various exception formats

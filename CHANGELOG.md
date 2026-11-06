@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## Unreleased
+
+### Fixes
+
+- **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests
+  start at the first UTC midnight the plan accepts. CoinPaprika reads a
+  date-only start as 00:00 UTC, so the first 90-day batch of a year was always
+  refused. A 402 "not allowed in this plan" is a plan limitation; any other 402
+  is a rate limit, thrown as a typed `MarketDataApiException` that repository
+  fallback backs off from. A history request whose batches all fail throws
+  instead of returning an empty success, so fallback repositories are tried.
+  `CexMarketDataManager` keeps past days' prices across its five-minute cache
+  rotation, waits an hour before asking again for a past day no repository
+  priced, and prices today with the current price. Repeated
+  `fiatPriceHistory` calls no longer re-request a coin's whole history.
+
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
 
