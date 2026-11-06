@@ -1,3 +1,10 @@
+## Unreleased
+
+ - **FIX**(market-data): `fiatPriceHistory` keeps past days' prices across the
+   five-minute cache rotation, waits an hour before asking again for a past
+   day no repository priced, and prices today with the current price, falling
+   back to history when there is none. Results are sorted by date.
+
 ## 0.9.0 (2026-10-28)
 
  - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart

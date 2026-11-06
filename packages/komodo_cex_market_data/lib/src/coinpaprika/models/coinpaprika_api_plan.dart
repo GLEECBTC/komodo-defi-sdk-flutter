@@ -96,15 +96,30 @@ abstract class CoinPaprikaApiPlan with _$CoinPaprikaApiPlan {
 
   /// Gets the historical data cutoff date based on the plan's limitations.
   /// Returns null if there's no limit.
-  /// Uses UTC time and applies a 1-minute buffer for safer API requests.
-  DateTime? getHistoricalDataCutoff() {
+  /// Uses UTC time and moves the cutoff [buffer] later for safer API requests.
+  DateTime? getHistoricalDataCutoff({
+    Duration buffer = const Duration(minutes: 1),
+  }) {
     if (hasUnlimitedOhlcHistory) return null;
 
-    // Use UTC time and apply 1-minute buffer to be more conservative
-    const buffer = Duration(minutes: 1);
     final limit = ohlcHistoricalDataLimit!;
     final safeWindow = limit > buffer ? (limit - buffer) : Duration.zero;
     return DateTime.now().toUtc().subtract(safeWindow);
+  }
+
+  /// The earliest `start` the API accepts, as a UTC midnight. Returns null if
+  /// there's no limit.
+  ///
+  /// The API reads a date-only `start` as 00:00 UTC, so the buffered cutoff is
+  /// rounded up to the next midnight.
+  DateTime? getEarliestStartDate() {
+    final cutoff = getHistoricalDataCutoff();
+    if (cutoff == null) return null;
+
+    final midnight = DateTime.utc(cutoff.year, cutoff.month, cutoff.day);
+    return midnight == cutoff
+        ? midnight
+        : midnight.add(const Duration(days: 1));
   }
 
   /// Validates if the given interval is supported by this plan.

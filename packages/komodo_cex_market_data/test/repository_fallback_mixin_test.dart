@@ -184,6 +184,59 @@ void main() {
         verify(() => fallbackRepo.getCoinFiatPrice(testAsset)).called(1);
       });
 
+      test('benches a repository whose API error is a rate limit', () async {
+        when(
+          () => mockStrategy.selectRepository(
+            assetId: any(named: 'assetId'),
+            fiatCurrency: any(named: 'fiatCurrency'),
+            requestType: any(named: 'requestType'),
+            availableRepositories: any(named: 'availableRepositories'),
+          ),
+        ).thenAnswer((invocation) async {
+          final available =
+              invocation.namedArguments[#availableRepositories]
+                  as List<CexRepository>;
+          return available.contains(primaryRepo) ? primaryRepo : fallbackRepo;
+        });
+        // No "429" or "rate limit" in the text: only the type says so.
+        when(
+          () => primaryRepo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenThrow(
+          const MarketDataApiException(
+            ApiError(
+              statusCode: 402,
+              message: 'Payment required',
+              isRateLimitError: true,
+            ),
+            service: 'CoinPaprika',
+          ),
+        );
+        when(
+          () => fallbackRepo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenAnswer((_) async => Decimal.parse('49000.0'));
+
+        for (var lookup = 0; lookup < 2; lookup++) {
+          final result = await manager.tryRepositoriesInOrder(
+            testAsset,
+            Stablecoin.usdt,
+            PriceRequestType.currentPrice,
+            (repo) => repo.getCoinFiatPrice(testAsset),
+            'test',
+          );
+          expect(result, equals(Decimal.parse('49000.0')));
+        }
+
+        // A plain failure would leave it healthy for the second lookup.
+        verify(() => primaryRepo.getCoinFiatPrice(testAsset)).called(1);
+        verify(() => fallbackRepo.getCoinFiatPrice(testAsset)).called(2);
+      });
+
       test('throws when all repositories fail', () async {
         // Setup: All repos fail
         when(

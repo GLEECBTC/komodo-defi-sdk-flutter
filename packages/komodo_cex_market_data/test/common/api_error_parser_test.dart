@@ -37,6 +37,27 @@ void main() {
     });
   });
 
+  group('MarketDataApiException', () {
+    test('names the service and reports the rate limit', () {
+      final exception = MarketDataApiException(
+        ApiErrorParser.parseCoinPaprikaError(402, null),
+        service: 'CoinPaprika',
+      );
+
+      expect(exception.isRateLimited, isTrue);
+      expect(exception.toString(), startsWith('CoinPaprika API Error 402: '));
+    });
+
+    test('is not rate limited for other errors', () {
+      final exception = MarketDataApiException(
+        ApiErrorParser.parseCoinPaprikaError(500, null),
+        service: 'CoinPaprika',
+      );
+
+      expect(exception.isRateLimited, isFalse);
+    });
+  });
+
   group('ApiErrorParser.parseCoinPaprikaError', () {
     test('parses 429 rate limit error correctly', () {
       const responseBody = '{"error": "Rate limit exceeded"}';
@@ -53,18 +74,42 @@ void main() {
       expect(error.retryAfter, 60); // Default retry
     });
 
-    test('parses 402 payment required error correctly', () {
-      const responseBody = '{"error": "Payment required"}';
+    test('parses a 402 quota block as a rate limit', () {
+      const responseBody = '{"error": "payment_required"}';
       final error = ApiErrorParser.parseCoinPaprikaError(402, responseBody);
 
       expect(error.statusCode, 402);
       expect(
         error.message,
-        'Payment required. Please upgrade your CoinPaprika plan.',
+        'Rate limit exceeded: CoinPaprika refuses requests until the plan '
+        'quota resets.',
       );
       expect(error.errorType, 'payment_required');
       expect(error.isPaymentRequiredError, true);
+      expect(error.isRateLimitError, true);
+    });
+
+    test('parses a 402 history cutoff as a plan limitation', () {
+      const responseBody =
+          '{"error":"Getting daily historical data before 2025-11-06 '
+          '08:44:51.330733739 +0000 UTC is not allowed in this plan. Check '
+          'plans on coinpaprika.com/api"}';
+      final error = ApiErrorParser.parseCoinPaprikaError(402, responseBody);
+
+      expect(error.statusCode, 402);
+      expect(error.errorType, 'plan_limitation');
+      expect(error.isQuotaExceededError, true);
       expect(error.isRateLimitError, false);
+      expect(error.message, isNot(contains('2025-11-06')));
+    });
+
+    test('parses the daily-history wording on a 400 as well', () {
+      const responseBody =
+          '{"error": "Getting daily historical data before 2024-01-01 is '
+          'not allowed in this plan"}';
+      final error = ApiErrorParser.parseCoinPaprikaError(400, responseBody);
+
+      expect(error.errorType, 'plan_limitation');
     });
 
     test('parses 400 plan limitation error correctly', () {

@@ -91,10 +91,40 @@ class ApiError {
   }
 }
 
+/// An HTTP error from a market data API, classified by [ApiErrorParser].
+class MarketDataApiException implements Exception {
+  const MarketDataApiException(this.error, {required this.service});
+
+  /// The parsed error, which never includes the raw response body.
+  final ApiError error;
+
+  /// The API that answered, e.g. `CoinPaprika`.
+  final String service;
+
+  /// Whether the API refuses further requests for now.
+  bool get isRateLimited => error.isRateLimitError;
+
+  @override
+  String toString() => '$service $error';
+}
+
 /// Utility class for parsing API error responses without exposing raw response bodies.
 class ApiErrorParser {
   /// Parses CoinPaprika API error responses.
   static ApiError parseCoinPaprikaError(int statusCode, String? responseBody) {
+    // CoinPaprika once sent this as 400 and now sends it as 402.
+    if ((statusCode == 400 || statusCode == 402) &&
+        (responseBody?.contains('is not allowed in this plan') ?? false)) {
+      return ApiError(
+        statusCode: statusCode,
+        message:
+            'Historical data access denied for current plan. '
+            'Please request more recent data or upgrade your plan.',
+        errorType: 'plan_limitation',
+        isQuotaExceededError: true,
+      );
+    }
+
     switch (statusCode) {
       case 429:
         return ApiError(
@@ -105,29 +135,20 @@ class ApiErrorParser {
           retryAfter: _parseRetryAfter(responseBody) ?? 60,
         );
 
+      // The free plan answers 402 to every endpoint once its hourly or
+      // monthly quota is used up, until the block expires.
       case 402:
         return ApiError(
           statusCode: statusCode,
-          message: 'Payment required. Please upgrade your CoinPaprika plan.',
+          message:
+              'Rate limit exceeded: CoinPaprika refuses requests until the '
+              'plan quota resets.',
           errorType: 'payment_required',
+          isRateLimitError: true,
           isPaymentRequiredError: true,
         );
 
       case 400:
-        // Check for specific CoinPaprika error messages
-        if (responseBody != null &&
-            responseBody.contains('Getting historical OHLCV data before') &&
-            responseBody.contains('is not allowed in this plan')) {
-          return ApiError(
-            statusCode: statusCode,
-            message:
-                'Historical data access denied for current plan. '
-                'Please request more recent data or upgrade your plan.',
-            errorType: 'plan_limitation',
-            isQuotaExceededError: true,
-          );
-        }
-
         if (responseBody != null && responseBody.contains('Invalid')) {
           return ApiError(
             statusCode: statusCode,
