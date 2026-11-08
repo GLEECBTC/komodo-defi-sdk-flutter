@@ -32,9 +32,6 @@ class _MockFeeManager extends Mock implements FeeManager {}
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
-class _MockLegacyWithdrawalManager extends Mock
-    implements LegacyWithdrawalManager {}
-
 class _MockEventStreamingManager extends Mock
     implements EventStreamingManager {}
 
@@ -508,7 +505,7 @@ void main() {
     late _MockAssetProvider assetProvider;
     late _MockFeeManager feeManager;
     late _MockActivationCoordinator activationCoordinator;
-    late _MockLegacyWithdrawalManager legacyManager;
+    late LegacyWithdrawalManager legacyManager;
     late _MockEventStreamingManager eventStreamingManager;
     late SecurePendingGaslessTransferRepository pendingRepository;
     late Asset trc20Asset;
@@ -520,7 +517,7 @@ void main() {
       assetProvider = _MockAssetProvider();
       feeManager = _MockFeeManager();
       activationCoordinator = _MockActivationCoordinator();
-      legacyManager = _MockLegacyWithdrawalManager();
+      legacyManager = LegacyWithdrawalManager(client);
       eventStreamingManager = _MockEventStreamingManager();
       defaultTraceStreams = <StreamController<KdfEvent>>[];
       pendingRepository = SecurePendingGaslessTransferRepository(
