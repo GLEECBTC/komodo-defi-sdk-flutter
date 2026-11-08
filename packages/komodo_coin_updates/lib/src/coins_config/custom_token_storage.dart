@@ -11,10 +11,13 @@ class CustomTokenStorage implements CustomTokenStore {
   /// [customTokensBoxName] is the name of the Hive box for storing custom tokens.
   /// [customTokensBox] is an optional pre-opened LazyBox for testing/mocking.
   CustomTokenStorage({
-    this.customTokensBoxName = 'custom_tokens',
+    String? customTokensBoxName,
     LazyBox<Asset>? customTokensBox,
     AssetParser assetParser = const AssetParser(),
-  }) : _customTokensBox = customTokensBox,
+  }) : customTokensBoxName =
+           customTokensBoxName ??
+           KomodoCoinUpdater.storageBoxName('custom_tokens'),
+       _customTokensBox = customTokensBox,
        _assetParser = assetParser;
 
   static final Logger _log = Logger('CustomTokenStorage');

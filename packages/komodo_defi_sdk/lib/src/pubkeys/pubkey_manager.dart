@@ -413,7 +413,7 @@ class PubkeyManager implements IPubkeyManager {
     Asset asset,
     WalletOperationContext walletContext,
   ) async {
-    await retry(
+    final activation = await retry(
       () async {
         await _requireWalletContextCurrent(walletContext);
         return _activationCoordinator.activateAsset(asset);
@@ -423,6 +423,7 @@ class PubkeyManager implements IPubkeyManager {
           _isWalletContextCurrentSync(walletContext),
     );
     await _requireWalletContextCurrent(walletContext);
+    activation.throwIfFailed();
   }
 
   Future<PubkeyStrategy> _resolvePubkeyStrategy(

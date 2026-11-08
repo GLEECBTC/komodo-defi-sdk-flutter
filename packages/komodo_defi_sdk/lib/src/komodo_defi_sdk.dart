@@ -162,6 +162,9 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
 
   final IKdfHostConfig? _hostConfig;
   final KomodoDefiSdkConfig _config;
+
+  /// Engine capabilities selected by this SDK instance.
+  SolanaCapabilities get solanaCapabilities => _config.solanaCapabilities;
   KomodoDefiFramework? _kdfFramework;
   late final GetIt _container;
   bool _isInitialized = false;

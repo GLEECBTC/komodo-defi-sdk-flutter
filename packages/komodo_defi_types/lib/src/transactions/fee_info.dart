@@ -26,9 +26,36 @@ sealed class FeeInfo with _$FeeInfo {
   //////////////////////////////////////////////////////////////////////////////
 
   /// Parse a JSON object into one of the [FeeInfo] variants, based on `type`.
-  factory FeeInfo.fromJson(JsonMap json) {
+  factory FeeInfo.fromJson(JsonMap json, {String? feeCoin}) {
     final type = json['type'] as String? ?? '';
     switch (type) {
+      case 'Solana':
+        Decimal parseAmount(String key) {
+          final value = json[key];
+          if (value is! String) {
+            throw FormatException('Solana $key must be a decimal string');
+          }
+          final amount = Decimal.parse(value);
+          if (amount < Decimal.zero) {
+            throw FormatException('Solana $key must not be negative');
+          }
+          return amount;
+        }
+        final feeAmount = parseAmount('fee_amount');
+        final rentAmount = parseAmount('rent_amount');
+        final totalAmount = parseAmount('total_amount');
+        if (totalAmount != feeAmount + rentAmount) {
+          throw const FormatException(
+            'Solana fee total does not equal fee plus rent',
+          );
+        }
+        return FeeInfo.solana(
+          // KDF omits currency; use the asset's platform from the caller.
+          coin: feeCoin ?? json.valueOrNull<String>('coin') ?? '',
+          feeAmount: feeAmount,
+          rentAmount: rentAmount,
+          totalAmount: totalAmount,
+        );
       case 'UtxoFixed' || 'Utxo':
         return FeeInfo.utxoFixed(
           coin: json['coin'] as String? ?? '',
@@ -412,6 +439,15 @@ sealed class FeeInfo with _$FeeInfo {
     required String policy,
   }) = FeeInfoSia;
 
+  /// Solana withdrawal/history fee response. All amounts are in platform SOL,
+  /// including token withdrawals. This is not a custom-fee request type.
+  const factory FeeInfo.solana({
+    required String coin,
+    required Decimal feeAmount,
+    required Decimal rentAmount,
+    required Decimal totalAmount,
+  }) = SolanaFeeInfo;
+
   /// A convenience getter returning the *total fee* in the coin's main units.
   Decimal get totalFee => switch (this) {
     FeeInfoUtxoFixed(:final amount) => amount,
@@ -436,10 +472,17 @@ sealed class FeeInfo with _$FeeInfo {
     // Gasless fee is denominated in the TOKEN, not TRX.
     FeeInfoTronGasless(:final totalTokenFee) => totalTokenFee,
     FeeInfoSia(:final amount) => amount,
+    SolanaFeeInfo(:final totalAmount) => totalAmount,
   };
 
   /// Convert this [FeeInfo] to a JSON object matching the mmRPC 2.0 docs.
   JsonMap toJson() => switch (this) {
+    SolanaFeeInfo(:final feeAmount, :final rentAmount, :final totalAmount) => {
+      'type': 'Solana',
+      'fee_amount': feeAmount.toString(),
+      'rent_amount': rentAmount.toString(),
+      'total_amount': totalAmount.toString(),
+    },
     FeeInfoUtxoFixed(:final coin, :final amount) => {
       'type': 'UtxoFixed',
       'coin': coin,

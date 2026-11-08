@@ -6,6 +6,7 @@ enum PrivateKeyExportCoverageKind {
   offlineHdRange,
   offlineAccount,
   legacyWallet,
+  activeWallet,
 }
 
 class PrivateKeyExportCoverage {

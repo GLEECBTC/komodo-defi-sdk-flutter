@@ -78,7 +78,11 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
            transformer ??
            const CoinConfigTransformer(),
        _dataFactory = dataFactory ?? const DefaultCoinConfigDataFactory(),
-       _loadingStrategy = loadingStrategy ?? StorageFirstLoadingStrategy(),
+       _loadingStrategy =
+           loadingStrategy ??
+           (const String.fromEnvironment('KDF_COINS_STORAGE_NAMESPACE').isEmpty
+               ? StorageFirstLoadingStrategy()
+               : const AssetBundleOnlyLoadingStrategy()),
        _updateStrategy = updateStrategy ?? const BackgroundUpdateStrategy(),
        _customTokenStorage = customTokenStorage;
 
@@ -144,6 +148,8 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       await _initializeHiveStorage();
 
       final runtimeConfig = await _getRuntimeConfig();
+      final updatesEnabled =
+          enableAutoUpdate && runtimeConfig.runtimeUpdatesEnabled;
       final configProviders = await _createConfigSources(runtimeConfig);
       final newAssetsManager = StrategicCoinConfigManager(
         configSources: configProviders,
@@ -163,7 +169,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       );
       final newUpdatesManager = StrategicCoinUpdateManager(
         repository: repository,
-        updateStrategy: enableAutoUpdate ? _updateStrategy : NoUpdateStrategy(),
+        updateStrategy: updatesEnabled ? _updateStrategy : NoUpdateStrategy(),
         fallbackProvider: localProvider,
       );
 
@@ -176,7 +182,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       _initialized = true;
 
       // Start background updates if enabled
-      if (enableAutoUpdate) {
+      if (updatesEnabled) {
         _updatesManager!.startBackgroundUpdates();
       }
       _log.fine('KomodoAssetsUpdateManager initialized successfully');
@@ -192,7 +198,12 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
   /// Initialize Hive storage for coin updates
   Future<void> _initializeHiveStorage() async {
     try {
-      final resolvedAppName = appName ?? 'komodo_coins';
+      const candidateNamespace = String.fromEnvironment(
+        'KDF_COINS_STORAGE_NAMESPACE',
+      );
+      final resolvedAppName =
+          appName ??
+          (candidateNamespace.isEmpty ? 'komodo_coins' : candidateNamespace);
       String storagePath;
       if (kIsWeb) {
         // Web: appName is used as the storage path

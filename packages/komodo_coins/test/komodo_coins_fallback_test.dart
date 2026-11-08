@@ -175,6 +175,30 @@ void main() {
       });
 
       test(
+        'runtime-disabled catalog cannot start or request remote updates',
+        () async {
+          when(() => mockConfigRepository.tryLoad()).thenAnswer(
+            (_) async => const AssetRuntimeUpdateConfig(
+              bundledCoinsRepoCommit: bundledCommitHash,
+              runtimeUpdatesEnabled: false,
+            ),
+          );
+          final coins = KomodoAssetsUpdateManager(
+            configRepository: mockConfigRepository,
+            transformer: mockTransformer,
+            dataFactory: mockDataFactory,
+            updateStrategy: mockUpdateStrategy,
+          );
+          addTearDown(coins.dispose);
+          await coins.init();
+          await coins.updateNow();
+          verifyZeroInteractions(mockUpdateStrategy);
+          verifyNever(() => mockRepo.updateCoinConfig());
+          expect(coins.all[testAsset.id], testAsset);
+        },
+      );
+
+      test(
         'uses local assets and sets correct commit hash when remote update fails',
         () async {
           // Set up remote provider to fail

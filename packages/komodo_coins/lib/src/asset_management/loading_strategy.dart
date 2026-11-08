@@ -16,6 +16,20 @@ abstract class LoadingStrategy {
   });
 }
 
+/// Uses an immutable bundled catalog without falling back to persisted assets.
+/// Candidate builds must not silently replace their verified snapshot with a
+/// cache created by another engine or catalog revision.
+class AssetBundleOnlyLoadingStrategy implements LoadingStrategy {
+  const AssetBundleOnlyLoadingStrategy();
+
+  @override
+  Future<List<CoinConfigSource>> selectSources({
+    required LoadingRequestType requestType,
+    required List<CoinConfigSource> availableSources,
+  }) async =>
+      availableSources.whereType<AssetBundleCoinConfigSource>().toList();
+}
+
 /// Represents a source for coin configuration data
 abstract class CoinConfigSource {
   /// Unique identifier for this source type
@@ -119,10 +133,12 @@ class StorageFirstLoadingStrategy implements LoadingStrategy {
     final sources = <CoinConfigSource>[];
 
     // Find storage and asset bundle sources
-    final storageSource =
-        availableSources.whereType<StorageCoinConfigSource>().firstOrNull;
-    final assetBundleSource =
-        availableSources.whereType<AssetBundleCoinConfigSource>().firstOrNull;
+    final storageSource = availableSources
+        .whereType<StorageCoinConfigSource>()
+        .firstOrNull;
+    final assetBundleSource = availableSources
+        .whereType<AssetBundleCoinConfigSource>()
+        .firstOrNull;
 
     switch (requestType) {
       case LoadingRequestType.initialLoad:
@@ -167,10 +183,12 @@ class AssetBundleFirstLoadingStrategy implements LoadingStrategy {
     final sources = <CoinConfigSource>[];
 
     // Find sources
-    final storageSource =
-        availableSources.whereType<StorageCoinConfigSource>().firstOrNull;
-    final assetBundleSource =
-        availableSources.whereType<AssetBundleCoinConfigSource>().firstOrNull;
+    final storageSource = availableSources
+        .whereType<StorageCoinConfigSource>()
+        .firstOrNull;
+    final assetBundleSource = availableSources
+        .whereType<AssetBundleCoinConfigSource>()
+        .firstOrNull;
 
     // Always prefer asset bundle first
     if (assetBundleSource != null) {

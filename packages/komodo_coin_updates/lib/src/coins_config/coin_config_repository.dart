@@ -1,5 +1,6 @@
 import 'package:hive_ce/hive.dart';
 import 'package:komodo_coin_updates/src/coins_config/_coins_config_index.dart';
+import 'package:komodo_coin_updates/src/komodo_coin_updater.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
@@ -13,12 +14,17 @@ class CoinConfigRepository implements CoinConfigStorage {
   /// (i.e. current commit hash).
   CoinConfigRepository({
     required this.coinConfigProvider,
-    this.assetsBoxName = 'assets',
-    this.settingsBoxName = 'coins_settings',
+    String? assetsBoxName,
+    String? settingsBoxName,
     this.coinsCommitKey = 'coins_commit',
     AssetParser assetParser = const AssetParser(),
     CoinConfigTransformer transformer = const CoinConfigTransformer(),
-  }) : _assetParser = assetParser,
+  }) : assetsBoxName =
+           assetsBoxName ?? KomodoCoinUpdater.storageBoxName('assets'),
+       settingsBoxName =
+           settingsBoxName ??
+           KomodoCoinUpdater.storageBoxName('coins_settings'),
+       _assetParser = assetParser,
        _transformer = transformer;
 
   /// Convenience factory that derives a provider from a runtime config and
@@ -27,11 +33,16 @@ class CoinConfigRepository implements CoinConfigStorage {
     AssetRuntimeUpdateConfig config, {
     String? githubToken,
     CoinConfigTransformer? transformer,
-    this.assetsBoxName = 'assets',
-    this.settingsBoxName = 'coins_settings',
+    String? assetsBoxName,
+    String? settingsBoxName,
     this.coinsCommitKey = 'coins_commit',
     AssetParser assetParser = const AssetParser(),
-  }) : coinConfigProvider = GithubCoinConfigProvider.fromConfig(
+  }) : assetsBoxName =
+           assetsBoxName ?? KomodoCoinUpdater.storageBoxName('assets'),
+       settingsBoxName =
+           settingsBoxName ??
+           KomodoCoinUpdater.storageBoxName('coins_settings'),
+       coinConfigProvider = GithubCoinConfigProvider.fromConfig(
          config,
          githubToken: githubToken,
          transformer: transformer,

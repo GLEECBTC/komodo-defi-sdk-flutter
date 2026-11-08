@@ -32,7 +32,12 @@ class StartupCoinsProvider {
     String? appName,
     CustomTokenStore? customTokenStorage,
   }) async {
-    final resolvedAppName = appName ?? 'komodo_coins';
+    const candidateNamespace = String.fromEnvironment(
+      'KDF_COINS_STORAGE_NAMESPACE',
+    );
+    final resolvedAppName =
+        appName ??
+        (candidateNamespace.isEmpty ? 'komodo_coins' : candidateNamespace);
 
     // Ensure Hive is initialized so storage reads can succeed.
     try {
@@ -70,7 +75,11 @@ class StartupCoinsProvider {
 
       manager = StrategicCoinConfigManager(
         configSources: sources,
-        loadingStrategy: loadingStrategy ?? StorageFirstLoadingStrategy(),
+        loadingStrategy:
+            loadingStrategy ??
+            (candidateNamespace.isEmpty
+                ? StorageFirstLoadingStrategy()
+                : const AssetBundleOnlyLoadingStrategy()),
         customTokenStorage:
             customTokenStorage ?? const NoOpCustomTokenStorage(),
       );
