@@ -251,6 +251,13 @@ abstract interface class KomodoDefiAuth {
     WalletDeletionPermit? permit,
   });
 
+  /// Retries non-secret metadata cleanup after a committed engine deletion.
+  /// Returns false if the name or immutable entry is now owned by another
+  /// wallet. Never deletes credential-vault data or a running engine wallet.
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  );
+
   /// Sets the value of a single key in the active user's metadata.
   ///
   /// This preserves any existing metadata, and overwrites the value only for
@@ -935,6 +942,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       await _authService.deleteWallet(
         walletName: walletName,
         password: password,
+        allowActiveWallet: permit != null,
         beforeDelete: (target) async {
           deleted = target.walletId;
           try {
@@ -963,15 +971,29 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
           }
         },
       );
+    } on WalletDeletionCommittedException {
+      rethrow;
+    } on RpcDispatchRejected {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (e) {
       if (identical(e, reviewError)) rethrow;
       throw AuthException(
-        'An unexpected error occurred while deleting the wallet: $e',
+        'An unexpected error occurred while deleting the wallet',
         type: AuthExceptionType.generalAuthError,
       );
     }
+  }
+
+  @override
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  ) async {
+    await ensureInitialized();
+    return _authService.retryWalletDeletionCleanup(deleted);
   }
 
   @override
