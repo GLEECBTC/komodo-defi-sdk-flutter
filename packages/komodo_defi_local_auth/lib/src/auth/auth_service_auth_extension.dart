@@ -46,6 +46,14 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   }
 
   void _emitAuthStateChange(KdfUser? user) {
+    // A reviewed active-wallet deletion revokes its SDK session immediately,
+    // but its prepared credential-cleanup grant must be consumed before the
+    // app observes sign-out. A newer authenticated user supersedes that event.
+    if (_deferDeletionSignOut && user == null) {
+      _deferredDeletionSignOut = true;
+      return;
+    }
+    if (user != null) _deferredDeletionSignOut = false;
     _trackIdentityRecovery(user);
     if (!isAuthTransitionInProgress) _sessions.observe(user);
     if (!_authStateController.isClosed && user != _lastEmittedUser) {

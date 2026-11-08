@@ -12,13 +12,15 @@ extension KdfAuthServiceOperationsExtension on KdfAuthService {
   /// Stops KDF and resets the transport before releasing the engine, even
   /// when the stop fails, so a request still pending, even one still
   /// connecting, fails before a replacement engine can start.
-  Future<void> _stopEngine() => _lockEngine(() async {
-    try {
-      await _kdfFramework.kdfStop();
-    } finally {
-      _kdfFramework.resetHttpClient();
-    }
-  });
+  Future<void> _stopEngine({void Function()? beforeStop}) =>
+      _lockEngine(() async {
+        beforeStop?.call();
+        try {
+          await _kdfFramework.kdfStop();
+        } finally {
+          _kdfFramework.resetHttpClient();
+        }
+      });
 
   /// Resets the transport once no dispatch leases the engine.
   ///

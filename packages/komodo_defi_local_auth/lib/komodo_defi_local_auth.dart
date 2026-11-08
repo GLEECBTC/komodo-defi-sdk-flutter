@@ -3,7 +3,10 @@
 library komodo_defi_local_auth;
 
 export 'src/auth/_auth_index.dart'
-    show AuthenticationState, AuthenticationStatus;
+    show
+        AuthenticationState,
+        AuthenticationStatus,
+        WalletDeletionCommittedException;
 export 'src/auth/auth_session.dart'
     show
         AuthIdentityUnavailableException,

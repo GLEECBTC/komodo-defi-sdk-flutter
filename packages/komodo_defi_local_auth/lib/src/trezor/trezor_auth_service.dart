@@ -213,17 +213,24 @@ class TrezorAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    bool allowActiveWallet = false,
     Future<void> Function(KdfUser target)? beforeDelete,
     Future<void> Function()? afterDelete,
   }) => _authService.deleteWallet(
     walletName: walletName,
     password: password,
+    allowActiveWallet: allowActiveWallet,
     beforeDelete: beforeDelete,
     afterDelete: afterDelete,
   );
 
   @override
   Future<bool> ensureKdfHealthy() => _authService.ensureKdfHealthy();
+
+  @override
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  ) => _authService.retryWalletDeletionCleanup(deleted);
 
   @override
   Future<KdfUser> signIn({
