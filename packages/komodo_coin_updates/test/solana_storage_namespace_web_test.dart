@@ -21,14 +21,14 @@ void main() {
         }
       });
       final token = Asset.fromJson({
-        'coin': 'CUSTOM-SOL-DEV',
+        'coin': 'CUSTOM-TESTSOL',
         'fname': 'Custom SPL',
         'type': 'SOLANATOKEN',
-        'parent_coin': 'SOL-DEV',
+        'parent_coin': 'TESTSOL',
         'protocol': {
           'type': 'SOLANATOKEN',
           'protocol_data': {
-            'platform': 'SOL-DEV',
+            'platform': 'TESTSOL',
             'mint_address': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
             'program_id': SolanaTokenProtocol.classicTokenProgramId,
             'decimals': 6,

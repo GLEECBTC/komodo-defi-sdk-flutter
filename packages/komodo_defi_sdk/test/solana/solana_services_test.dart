@@ -60,7 +60,7 @@ void main() {
       expect(events.last.isSuccess, isTrue);
       expect(client.requests.single['mmrpc'], '2.0');
       expect(client.requests.single['params'], {
-        'ticker': 'SOL-DEV',
+        'ticker': 'TESTSOL',
         'nodes': [
           {'url': 'https://api.devnet.solana.com'},
         ],

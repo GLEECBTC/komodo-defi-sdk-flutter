@@ -29,7 +29,7 @@ class _Client implements ApiClient {
     switch (request['method']) {
       case 'my_balance':
         return {
-          'coin': 'SOL-DEV',
+          'coin': 'TESTSOL',
           'address': 'WalletBase58',
           'balance': '0',
           'unspendable_balance': '0',
@@ -37,7 +37,7 @@ class _Client implements ApiClient {
       case 'show_priv_key':
         afterDisclosure?.call();
         return {
-          'result': {'coin': 'SOL-DEV', 'priv_key': 'SyntheticFixtureKeypair'},
+          'result': {'coin': 'TESTSOL', 'priv_key': 'SyntheticFixtureKeypair'},
         };
       default:
         throw StateError('Unexpected key export request');

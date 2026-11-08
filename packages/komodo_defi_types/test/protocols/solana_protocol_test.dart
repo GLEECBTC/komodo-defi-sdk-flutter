@@ -4,7 +4,7 @@ import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 Map<String, dynamic> platformConfig() => {
-  'coin': 'SOL-DEV',
+  'coin': 'TESTSOL',
   'type': 'SOLANA',
   'fname': 'Solana Devnet',
   'is_testnet': true,
@@ -18,16 +18,16 @@ Map<String, dynamic> platformConfig() => {
 };
 
 Map<String, dynamic> tokenConfig({String? programId}) => {
-  'coin': 'USDC-SOL-DEV',
+  'coin': 'TESTUSDC-TESTSOL',
   'type': 'SOLANATOKEN',
   'fname': 'USDC Devnet',
-  'parent_coin': 'SOL-DEV',
+  'parent_coin': 'TESTSOL',
   'is_testnet': true,
   'wallet_only': true,
   'protocol': {
     'type': 'SOLANATOKEN',
     'protocol_data': {
-      'platform': 'SOL-DEV',
+      'platform': 'TESTSOL',
       'decimals': 6,
       'mint_address': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       'program_id': programId ?? SolanaTokenProtocol.classicTokenProgramId,
@@ -41,6 +41,10 @@ void main() {
     () {
       final sol = Asset.fromJson(platformConfig());
       final token = Asset.fromJson(tokenConfig(), knownIds: {sol.id});
+      expect(sol.id.symbol.configSymbol, 'TESTSOL');
+      expect(token.id.symbol.configSymbol, 'TESTUSDC');
+      expect(sol.protocol.isTestnet, isTrue);
+      expect(token.protocol.isTestnet, isTrue);
       expect(sol.supportsMessageSigning, isTrue);
       expect(token.supportsMessageSigning, isTrue);
       expect(sol.id.chainId.decimals, 9);
@@ -73,7 +77,7 @@ void main() {
       expect(cached, transaction);
       expect(cached.assetId.parentId, sol.id);
       expect(cached.assetId.chainId.decimals, 6);
-      expect(cached.fee!.coin, 'SOL-DEV');
+      expect(cached.fee!.coin, 'TESTSOL');
       expect(cached.toJson().containsKey('memo'), isFalse);
     },
   );
@@ -98,7 +102,7 @@ void main() {
     final token = ProtocolClass.fromJson(tokenConfig()) as SolanaTokenProtocol;
     expect(sol.decimals, 9);
     expect(sol.requiredConfirmations, 1);
-    expect(token.platform, 'SOL-DEV');
+    expect(token.platform, 'TESTSOL');
     expect(token.decimals, 6);
     expect(
       token.contractAddress,
@@ -168,8 +172,8 @@ void main() {
       'total_amount': '0.001493462',
     };
     test('resolves devnet currency and retains exact wire shape', () {
-      final fee = FeeInfo.fromJson(wire, feeCoin: 'SOL-DEV') as SolanaFeeInfo;
-      expect(fee.coin, 'SOL-DEV');
+      final fee = FeeInfo.fromJson(wire, feeCoin: 'TESTSOL') as SolanaFeeInfo;
+      expect(fee.coin, 'TESTSOL');
       expect(fee.totalFee, Decimal.parse('0.001493462'));
       expect(fee.rentAmount, Decimal.parse('0.00148844'));
       expect(fee.toJson(), wire);

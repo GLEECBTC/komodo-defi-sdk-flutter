@@ -70,7 +70,7 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
 }
 
 Asset _solana() => Asset.fromJson(const {
-  'coin': 'SOL-DEV',
+  'coin': 'TESTSOL',
   'type': 'SOLANA',
   'fname': 'Solana Devnet',
   'is_testnet': true,
@@ -86,15 +86,15 @@ Asset _token({bool token2022 = false}) {
   final platform = _solana();
   return Asset.fromJson(
     {
-      'coin': 'USDC-SOL-DEV',
+      'coin': 'TESTUSDC-TESTSOL',
       'type': 'SOLANATOKEN',
       'fname': 'USDC Devnet',
-      'parent_coin': 'SOL-DEV',
+      'parent_coin': 'TESTSOL',
       'is_testnet': true,
       'protocol': {
         'type': 'SOLANATOKEN',
         'protocol_data': {
-          'platform': 'SOL-DEV',
+          'platform': 'TESTSOL',
           'decimals': 6,
           'mint_address': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
           'program_id': token2022
@@ -123,7 +123,7 @@ WithdrawParameters _params(
 );
 
 WithdrawalPreview _preview({
-  String coin = 'SOL-DEV',
+  String coin = 'TESTSOL',
   String hash = 'AaFreshSignature',
   String hex = 'aabb',
   String amount = '1',
@@ -268,7 +268,7 @@ void main() {
         _preview(coin: token.id.id, rent: '0.00203928'),
         token,
       );
-      expect(preview.fee.coin, 'SOL-DEV');
+      expect(preview.fee.coin, 'TESTSOL');
       expect(
         (preview.fee as SolanaFeeInfo).rentAmount,
         Decimal.parse('0.00203928'),
@@ -313,7 +313,7 @@ void main() {
         );
         final found = await restarted.find(renamed, parameters);
         expect(found?.txHash, 'AaFreshSignature');
-        expect(found?.fee.coin, 'SOL-DEV');
+        expect(found?.fee.coin, 'TESTSOL');
         expect(
           (await restarted.reserve(
             renamed,
@@ -333,13 +333,13 @@ void main() {
       () async {
         final storage = _MemoryStorage();
         final original = WithdrawParameters(
-          asset: 'SOL-DEV',
+          asset: 'TESTSOL',
           toAddress: 'RecipientBase58',
           amount: Decimal.parse('1.000000000'),
           memo: 'CaseSensitive 🌍',
         );
         final equivalent = WithdrawParameters(
-          asset: 'SOL-DEV',
+          asset: 'TESTSOL',
           toAddress: 'RecipientBase58',
           amount: Decimal.one,
           isMax: false,

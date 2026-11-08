@@ -24,7 +24,7 @@ void main() {
   final unknown = Asset.fromJson(
     {
       ...classic.protocol.config,
-      'coin': 'UNKNOWN-SOL-DEV',
+      'coin': 'UNKNOWN-TESTSOL',
       'protocol': {
         'type': 'SOLANATOKEN',
         'protocol_data': {

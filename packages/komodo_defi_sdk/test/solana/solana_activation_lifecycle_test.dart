@@ -38,7 +38,7 @@ void main() {
   final sol = solanaAsset();
   final first = solanaToken(sol);
   final second = Asset.fromJson(
-    {...first.protocol.config, 'coin': 'SECOND-SOL-DEV'},
+    {...first.protocol.config, 'coin': 'SECOND-TESTSOL'},
     knownIds: {sol.id},
   );
 

@@ -34,7 +34,7 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
 }
 
 WithdrawalPreview _preview() => WithdrawResult(
-  coin: 'SOL-DEV',
+  coin: 'TESTSOL',
   txHash: 'FreshSignature',
   txHex: 'aabb',
   from: ['sender'],
@@ -46,7 +46,7 @@ WithdrawalPreview _preview() => WithdrawResult(
     totalAmount: Decimal.one,
   ),
   fee: FeeInfo.solana(
-    coin: 'SOL-DEV',
+    coin: 'TESTSOL',
     feeAmount: Decimal.parse('0.000005'),
     rentAmount: Decimal.zero,
     totalAmount: Decimal.parse('0.000005'),

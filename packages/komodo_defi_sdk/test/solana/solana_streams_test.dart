@@ -45,7 +45,7 @@ void main() {
             : 'TX_HISTORY';
         return {
           'mmrpc': '2.0',
-          'result': {'streamer_id': '$kind:SOL-DEV'},
+          'result': {'streamer_id': '$kind:TESTSOL'},
         };
       });
       final manager = EventStreamingManager(
@@ -60,11 +60,11 @@ void main() {
       });
       final solRows = <TxHistoryEvent>[];
       final tokenRows = <TxHistoryEvent>[];
-      final sol = await manager.subscribeToTxHistory(coin: 'SOL-DEV');
+      final sol = await manager.subscribeToTxHistory(coin: 'TESTSOL');
       sol.onData(solRows.add);
       final token = await manager.subscribeToTxHistory(
-        coin: 'USDC-SOL-DEV',
-        streamerCoin: 'SOL-DEV',
+        coin: 'TESTUSDC-TESTSOL',
+        streamerCoin: 'TESTSOL',
       );
       token.onData(tokenRows.add);
       expect(
@@ -73,14 +73,14 @@ void main() {
       );
       final parsed =
           KdfEvent.parseAll({
-                '_type': 'TX_HISTORY:SOL-DEV',
+                '_type': 'TX_HISTORY:TESTSOL',
                 'message': solanaHistoryRow(),
               }).single
               as TxHistoryEvent;
       history.add(parsed);
       await pumpEventQueue();
       expect(solRows, isEmpty);
-      expect(tokenRows.single.coin, 'USDC-SOL-DEV');
+      expect(tokenRows.single.coin, 'TESTUSDC-TESTSOL');
       expect(
         tokenRows.single.transactions.single.txHash,
         'AbCdeF123Base58Signature',
@@ -93,22 +93,22 @@ void main() {
         requests.where((r) => r['method'] == 'stream::disable'),
         hasLength(1),
       );
-      final solBalance = await manager.subscribeToBalance(coin: 'SOL-DEV');
+      final solBalance = await manager.subscribeToBalance(coin: 'TESTSOL');
       final tokenBalance = await manager.subscribeToBalance(
-        coin: 'USDC-SOL-DEV',
-        streamerCoin: 'SOL-DEV',
+        coin: 'TESTUSDC-TESTSOL',
+        streamerCoin: 'TESTSOL',
       );
       final received = <BalanceEvent>[];
       tokenBalance.onData(received.add);
       for (final event in KdfEvent.parseAll({
-        '_type': 'BALANCE:SOL-DEV',
+        '_type': 'BALANCE:TESTSOL',
         'message': [
           {
-            'ticker': 'SOL-DEV',
+            'ticker': 'TESTSOL',
             'balance': {'spendable': '0.1', 'unspendable': '0'},
           },
           {
-            'ticker': 'USDC-SOL-DEV',
+            'ticker': 'TESTUSDC-TESTSOL',
             'balance': {'spendable': '1.234567', 'unspendable': '0'},
           },
         ],
@@ -134,8 +134,8 @@ void main() {
       await solBalance.cancel();
       await tokenBalance.cancel();
       final reconnected = await manager.subscribeToBalance(
-        coin: 'USDC-SOL-DEV',
-        streamerCoin: 'SOL-DEV',
+        coin: 'TESTUSDC-TESTSOL',
+        streamerCoin: 'TESTSOL',
       );
       expect(
         requests.where((r) => r['method'] == 'stream::balance::enable'),

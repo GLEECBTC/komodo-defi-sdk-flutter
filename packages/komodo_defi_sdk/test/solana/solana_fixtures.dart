@@ -1,7 +1,7 @@
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 Asset solanaAsset() => Asset.fromJson(const {
-  'coin': 'SOL-DEV',
+  'coin': 'TESTSOL',
   'type': 'SOLANA',
   'fname': 'Solana Devnet',
   'is_testnet': true,
@@ -14,7 +14,7 @@ Asset solanaAsset() => Asset.fromJson(const {
 
 Asset solanaToken(Asset parent, {bool token2022 = false}) => Asset.fromJson(
   {
-    'coin': token2022 ? 'TOKEN2022-SOL-DEV' : 'USDC-SOL-DEV',
+    'coin': token2022 ? 'TOKEN2022-TESTSOL' : 'TESTUSDC-TESTSOL',
     'type': 'SOLANATOKEN',
     'fname': 'Solana Token',
     'parent_coin': parent.id.id,
@@ -35,7 +35,7 @@ Asset solanaToken(Asset parent, {bool token2022 = false}) => Asset.fromJson(
   knownIds: {parent.id},
 );
 
-Map<String, dynamic> solanaHistoryRow({String coin = 'USDC-SOL-DEV'}) => {
+Map<String, dynamic> solanaHistoryRow({String coin = 'TESTUSDC-TESTSOL'}) => {
   'coin': coin,
   'tx_hash': 'AbCdeF123Base58Signature',
   'internal_id': 'AbCdeF123Base58Signature',

@@ -16,10 +16,10 @@ class SolanaWalletFixture {
   });
 
   /// Reviewed testnet platform identity.
-  static const platform = 'SOL-DEV';
+  static const platform = 'TESTSOL';
 
   /// Reviewed classic SPL testnet identity.
-  static const token = 'USDC-SOL-DEV';
+  static const token = 'TESTUSDC-TESTSOL';
 
   /// Mixed-case synthetic signature used to detect destructive normalization.
   static const signature = '5SigCaseSensitiveABCabcXYZxyz123';

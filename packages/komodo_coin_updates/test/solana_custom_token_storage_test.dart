@@ -7,7 +7,7 @@ import 'hive/test_harness.dart';
 void main() {
   late HiveTestEnv hive;
   final platform = Asset.fromJson({
-    'coin': 'SOL-DEV',
+    'coin': 'TESTSOL',
     'fname': 'Solana Devnet',
     'type': 'SOLANA',
     'protocol': {'type': 'SOLANA'},
@@ -21,7 +21,7 @@ void main() {
     int decimals = 6,
   }) => Asset.fromJson(
     {
-      'coin': 'CUSTOM-SOL-DEV',
+      'coin': 'CUSTOM-TESTSOL',
       'fname': 'Custom Solana token',
       'type': 'SOLANATOKEN',
       'parent_coin': platform.id.id,

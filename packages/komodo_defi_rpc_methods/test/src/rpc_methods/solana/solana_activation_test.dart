@@ -9,7 +9,7 @@ void main() {
   const tokenProtocol = {
     'type': 'SOLANATOKEN',
     'protocol_data': {
-      'platform': 'SOL-DEV',
+      'platform': 'TESTSOL',
       'decimals': 6,
       'mint_address': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       'program_id': 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -20,27 +20,27 @@ void main() {
     'platform activation has experimental v2 method and only Solana fields',
     () {
       final request = EnableSolanaWithAssetsRequest(
-        ticker: 'SOL-DEV',
+        ticker: 'TESTSOL',
         nodes: nodes,
-        tokensParams: [const SolanaTokenRequest(ticker: 'USDC-SOL-DEV')],
+        tokensParams: [const SolanaTokenRequest(ticker: 'TESTUSDC-TESTSOL')],
       );
       expect(jsonDecode(jsonEncode(request.toJson())), {
         'method': 'experimental::enable_solana_with_assets',
         'mmrpc': '2.0',
         'params': {
-          'ticker': 'SOL-DEV',
+          'ticker': 'TESTSOL',
           'nodes': [
             {'url': 'https://api.devnet.solana.com'},
           ],
           'tokens_params': [
-            {'ticker': 'USDC-SOL-DEV'},
+            {'ticker': 'TESTUSDC-TESTSOL'},
           ],
           'tx_history': true,
         },
       });
       expect(
         (EnableSolanaWithAssetsRequest(
-              ticker: 'SOL-DEV',
+              ticker: 'TESTSOL',
               nodes: nodes,
             ).toJson()['params']
             as Map<String, dynamic>)['tokens_params'],
@@ -53,24 +53,24 @@ void main() {
     'later token activation sends empty params and complete optional protocol',
     () {
       final request = EnableSolanaTokenRequest(
-        ticker: 'USDC-SOL-DEV',
+        ticker: 'TESTUSDC-TESTSOL',
         protocol: tokenProtocol,
       );
       expect(request.toJson(), {
         'method': 'experimental::enable_solana_token',
         'mmrpc': '2.0',
         'params': {
-          'ticker': 'USDC-SOL-DEV',
+          'ticker': 'TESTUSDC-TESTSOL',
           'activation_params': <String, dynamic>{},
           'protocol': tokenProtocol,
         },
       });
       expect(
         const SolanaTokenRequest(
-          ticker: 'USDC-SOL-DEV',
+          ticker: 'TESTUSDC-TESTSOL',
           protocol: tokenProtocol,
         ).toJson(),
-        {'ticker': 'USDC-SOL-DEV', 'protocol': tokenProtocol},
+        {'ticker': 'TESTUSDC-TESTSOL', 'protocol': tokenProtocol},
       );
     },
   );
@@ -100,18 +100,18 @@ void main() {
     final wire = {
       'mmrpc': '2.0',
       'result': {
-        'ticker': 'SOL-DEV',
+        'ticker': 'TESTSOL',
         'address': 'OwnerBase58',
         'current_block': 515768675,
         'balance': balance,
         'tokens_balances': {
-          'USDC-SOL-DEV': {'spendable': '0', 'unspendable': '0'},
+          'TESTUSDC-TESTSOL': {'spendable': '0', 'unspendable': '0'},
         },
       },
     };
     final response = EnableSolanaWithAssetsResponse.parse(wire);
     expect(response.currentBlock, 515768675);
-    expect(response.tokensBalances.keys, ['USDC-SOL-DEV']);
+    expect(response.tokensBalances.keys, ['TESTUSDC-TESTSOL']);
     expect(response.toJson(), wire);
   });
 
@@ -121,7 +121,7 @@ void main() {
       final wire = {
         'mmrpc': '2.0',
         'result': {
-          'ticker': 'USDC-SOL-DEV',
+          'ticker': 'TESTUSDC-TESTSOL',
           'address': 'OwnerBase58',
           'current_block': 515768675,
           'balance': balance,
@@ -132,12 +132,12 @@ void main() {
   );
 
   test('active key export uses legacy request and redacts diagnostics', () {
-    expect(ShowPrivKeyRequest(coin: 'SOL-DEV').toJson(), {
+    expect(ShowPrivKeyRequest(coin: 'TESTSOL').toJson(), {
       'method': 'show_priv_key',
-      'coin': 'SOL-DEV',
+      'coin': 'TESTSOL',
     });
     final response = ShowPrivKeyResponse.parse({
-      'result': {'coin': 'SOL-DEV', 'priv_key': 'test-only-keypair'},
+      'result': {'coin': 'TESTSOL', 'priv_key': 'test-only-keypair'},
     });
     expect(response.privKey, 'test-only-keypair');
     expect(response.toString(), isNot(contains('test-only-keypair')));
@@ -151,14 +151,14 @@ void main() {
       final invalid = {'type': 'SOLANATOKEN', 'protocol_data': data};
       expect(
         () => EnableSolanaTokenRequest(
-          ticker: 'USDC-SOL-DEV',
+          ticker: 'TESTUSDC-TESTSOL',
           protocol: invalid,
         ).toJson(),
         throwsFormatException,
       );
       expect(
         () => SolanaTokenRequest(
-          ticker: 'USDC-SOL-DEV',
+          ticker: 'TESTUSDC-TESTSOL',
           protocol: invalid,
         ).toJson(),
         throwsFormatException,
@@ -170,13 +170,13 @@ void main() {
     expect(
       () => EnableSolanaTokenResponse.parse({
         'mmrpc': '2.0',
-        'result': {'ticker': 'SOL-DEV'},
+        'result': {'ticker': 'TESTSOL'},
       }),
       throwsArgumentError,
     );
     expect(
       () => ShowPrivKeyResponse.parse({
-        'result': {'coin': 'SOL-DEV'},
+        'result': {'coin': 'TESTSOL'},
       }),
       throwsArgumentError,
     );
@@ -185,10 +185,10 @@ void main() {
   test('single-address signing preserves message and signature case', () {
     final params = SignMessageRequest(
       rpcPass: 'fixture',
-      coin: 'SOL-DEV',
+      coin: 'TESTSOL',
       message: 'Solana 🦀',
     ).toJson()['params'];
-    expect(params, {'coin': 'SOL-DEV', 'message': 'Solana 🦀'});
+    expect(params, {'coin': 'TESTSOL', 'message': 'Solana 🦀'});
     final response = SignMessageResponse.parse({
       'mmrpc': '2.0',
       'result': {'signature': 'Base58CaseABCabc'},
