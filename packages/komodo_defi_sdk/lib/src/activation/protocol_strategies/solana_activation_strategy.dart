@@ -85,6 +85,13 @@ class SolanaActivationStrategy extends ProtocolActivationStrategy {
         if (result.ticker != asset.id.id || result.address.isEmpty) {
           throw const FormatException('Invalid Solana activation identity');
         }
+        if ((children ?? <Asset>[]).any(
+          (token) => !result.tokensBalances.containsKey(token.id.id),
+        )) {
+          throw const FormatException(
+            'Solana activation response omitted a requested token',
+          );
+        }
       } else {
         final result = await client.post(
           EnableSolanaTokenRequest(

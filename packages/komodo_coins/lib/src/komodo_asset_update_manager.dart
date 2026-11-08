@@ -69,6 +69,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
     this.enableAutoUpdate = true,
     this.appStoragePath,
     this.appName,
+    this.storageNamespace,
     CustomTokenStore? customTokenStorage,
   }) : _configRepository =
            configRepository ?? AssetRuntimeUpdateConfigRepository(),
@@ -77,10 +78,15 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
            persistenceTransformer ??
            transformer ??
            const CoinConfigTransformer(),
-       _dataFactory = dataFactory ?? const DefaultCoinConfigDataFactory(),
+       _dataFactory =
+           dataFactory ??
+           DefaultCoinConfigDataFactory(storageNamespace: storageNamespace),
        _loadingStrategy =
            loadingStrategy ??
-           (const String.fromEnvironment('KDF_COINS_STORAGE_NAMESPACE').isEmpty
+           ((storageNamespace == null || storageNamespace.isEmpty) &&
+                   const String.fromEnvironment(
+                     'KDF_COINS_STORAGE_NAMESPACE',
+                   ).isEmpty
                ? StorageFirstLoadingStrategy()
                : const AssetBundleOnlyLoadingStrategy()),
        _updateStrategy = updateStrategy ?? const BackgroundUpdateStrategy(),
@@ -97,6 +103,10 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
 
   /// Optional app name used as a subfolder (native) or path (web).
   final String? appName;
+
+  /// Namespace for catalog and custom-token database names on every platform.
+  /// A folder alone does not isolate Hive databases in web builds.
+  final String? storageNamespace;
 
   final AssetRuntimeUpdateConfigRepository _configRepository;
   final CoinConfigTransformer _transformer;
@@ -155,7 +165,9 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
         configSources: configProviders,
         loadingStrategy: _loadingStrategy,
         defaultPriorityTickers: defaultPriorityTickers,
-        customTokenStorage: _customTokenStorage ?? CustomTokenStorage(),
+        customTokenStorage:
+            _customTokenStorage ??
+            CustomTokenStorage(storageNamespace: storageNamespace),
       );
 
       // Initialize update manager

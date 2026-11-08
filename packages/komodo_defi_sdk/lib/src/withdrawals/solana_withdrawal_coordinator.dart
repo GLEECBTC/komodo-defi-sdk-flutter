@@ -1,5 +1,7 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
+import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/gasless_transfer_lock.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_journal.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_support.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -90,6 +92,7 @@ final class SolanaWithdrawalCoordinator {
     }
     final persisted = await journal?.find(wallet.walletId, parameters);
     await requireWalletCurrent(wallet);
+    ensureSessionCurrent(wallet);
     if (persisted != null) throw SolanaWithdrawalSubmissionUnknown(persisted);
     final pending =
         _submissions[(wallet.session, solanaWithdrawalIntentKey(parameters))];
@@ -109,6 +112,7 @@ final class SolanaWithdrawalCoordinator {
       ),
     );
     await requireWalletCurrent(wallet);
+    ensureSessionCurrent(wallet);
     _previews[preview] = _PreparedWithdrawal(parameters, wallet, preview);
     return preview;
   }
@@ -135,6 +139,7 @@ final class SolanaWithdrawalCoordinator {
       throw StateError('Solana sends require durable submission storage');
     }
     await requireWalletCurrent(prepared.wallet);
+    ensureSessionCurrent(prepared.wallet);
     if (prepared.submittedPreview case final WithdrawalPreview previous) {
       throw SolanaWithdrawalSubmissionUnknown(previous);
     }
@@ -153,7 +158,18 @@ final class SolanaWithdrawalCoordinator {
       throw StateError('This Solana withdrawal is already being confirmed');
     }
     _submissions[key] = prepared;
+    GaslessSubmissionLease? intentLease;
     try {
+      // Hold one live intent across refresh and submission. A journal record
+      // alone cannot exclude a second manager whose refresh finishes after
+      // our successful broadcast has already cleared that record.
+      intentLease = await tryAcquireGaslessSubmissionLease(
+        walletStorageNamespace(prepared.wallet.walletId),
+        'solana:${key.$2}',
+      );
+      if (intentLease == null) {
+        throw StateError('This Solana withdrawal is already being confirmed');
+      }
       void ensureCurrent() {
         ensureSessionCurrent(prepared.wallet);
         ensureAllowed(asset);
@@ -199,6 +215,8 @@ final class SolanaWithdrawalCoordinator {
       );
       if (existing != null) {
         prepared.submittedPreview = existing;
+        await requireWalletCurrent(prepared.wallet);
+        ensureSessionCurrent(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(existing);
       }
       // This check is provably before dispatch; a local refusal may release
@@ -245,6 +263,8 @@ final class SolanaWithdrawalCoordinator {
         prepared.submittedPreview = null;
         rethrow;
       } on Object {
+        await requireWalletCurrent(prepared.wallet);
+        ensureSessionCurrent(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(fresh);
       }
       // Keep the durable reservation if the active wallet changed.
@@ -256,8 +276,12 @@ final class SolanaWithdrawalCoordinator {
           fresh.txHash!,
         );
       } on Object {
+        await requireWalletCurrent(prepared.wallet);
+        ensureSessionCurrent(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(fresh);
       }
+      await requireWalletCurrent(prepared.wallet);
+      ensureSessionCurrent(prepared.wallet);
       _submissions.remove(key);
       yield WithdrawalProgress(
         status: WithdrawalStatus.complete,
@@ -273,6 +297,7 @@ final class SolanaWithdrawalCoordinator {
       );
     } finally {
       if (prepared.submittedPreview == null) _submissions.remove(key);
+      await intentLease?.release();
     }
   }
 }

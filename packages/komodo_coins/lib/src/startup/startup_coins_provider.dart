@@ -30,6 +30,7 @@ class StartupCoinsProvider {
     LoadingStrategy? loadingStrategy,
     String? appStoragePath,
     String? appName,
+    String? storageNamespace,
     CustomTokenStore? customTokenStorage,
   }) async {
     const candidateNamespace = String.fromEnvironment(
@@ -63,7 +64,9 @@ class StartupCoinsProvider {
       final runtimeConfig =
           await repo.tryLoad() ?? const AssetRuntimeUpdateConfig();
 
-      final factory = dataFactory ?? const DefaultCoinConfigDataFactory();
+      final factory =
+          dataFactory ??
+          DefaultCoinConfigDataFactory(storageNamespace: storageNamespace);
       final xform = transformer ?? const CoinConfigTransformer();
       final repository = factory.createRepository(runtimeConfig, xform);
       final localProvider = factory.createLocalProvider(runtimeConfig, xform);
@@ -77,7 +80,8 @@ class StartupCoinsProvider {
         configSources: sources,
         loadingStrategy:
             loadingStrategy ??
-            (candidateNamespace.isEmpty
+            (candidateNamespace.isEmpty &&
+                    (storageNamespace == null || storageNamespace.isEmpty)
                 ? StorageFirstLoadingStrategy()
                 : const AssetBundleOnlyLoadingStrategy()),
         customTokenStorage:

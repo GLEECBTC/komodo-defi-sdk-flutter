@@ -49,6 +49,7 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
   bool failWrite = false;
   bool failDelete = false;
   void Function()? beforeWrite;
+  void Function()? beforeDelete;
   @override
   Future<bool> containsKey(String key) async => values.containsKey(key);
   @override
@@ -62,6 +63,7 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
 
   @override
   Future<void> delete(String key) async {
+    beforeDelete?.call();
     if (failDelete) throw StateError('storage delete failed');
     values.remove(key);
   }
@@ -739,6 +741,83 @@ void main() {
       expect(broadcasts, hasLength(1));
     });
     test(
+      'canceling before refresh releases the intent for later confirmation',
+      () async {
+        final preview = await coordinator.previewWithdrawal(
+          _params(asset),
+          asset,
+        );
+        final confirmation = StreamIterator(
+          coordinator.executeWithdrawal(preview, asset),
+        );
+        expect(await confirmation.moveNext(), isTrue);
+        await confirmation.cancel();
+        // Browser Web Lock release callbacks run through the event queue.
+        await Future<void>.delayed(Duration.zero);
+        expect(requests, hasLength(1));
+        expect(broadcasts, isEmpty);
+        expect(storage.values, isEmpty);
+        final progress = await coordinator
+            .executeWithdrawal(preview, asset)
+            .toList();
+        expect(progress.last.status, WithdrawalStatus.complete);
+        expect(requests, hasLength(2));
+        expect(broadcasts, hasLength(1));
+      },
+    );
+    test(
+      'overlapping managers cannot send again after the first succeeds',
+      () async {
+        final other = SolanaWithdrawalCoordinator(
+          capabilities: enabled,
+          journal: SecureSolanaWithdrawalJournal(storage: storage),
+          createPreview: coordinator.createPreview,
+          broadcast: coordinator.broadcast,
+          captureWallet: coordinator.captureWallet,
+          requireWalletCurrent: coordinator.requireWalletCurrent,
+          ensureSessionCurrent: coordinator.ensureSessionCurrent,
+          ensureAllowed: coordinator.ensureAllowed,
+          runWithSession: coordinator.runWithSession,
+        );
+        final firstPreview = await coordinator.previewWithdrawal(
+          _params(asset),
+          asset,
+        );
+        final otherPreview = await other.previewWithdrawal(
+          _params(asset),
+          asset,
+        );
+        final firstRefresh = Completer<WithdrawalPreview>();
+        final otherRefresh = Completer<WithdrawalPreview>();
+        final started = Completer<void>();
+        respond = (_) {
+          if (!started.isCompleted) {
+            started.complete();
+            return firstRefresh.future;
+          }
+          return otherRefresh.future;
+        };
+        final first = coordinator
+            .executeWithdrawal(firstPreview, asset)
+            .toList();
+        await started.future;
+        final overlapping = other
+            .executeWithdrawal(otherPreview, asset)
+            .toList();
+        final refused = expectLater(overlapping, throwsStateError);
+        await Future<void>.delayed(Duration.zero);
+        firstRefresh.complete(_preview());
+        await first;
+        // A late refresh used to reserve after the first success removed the
+        // durable record, then broadcast the same user intent a second time.
+        otherRefresh.complete(_preview());
+        await refused;
+        expect(requests, hasLength(3));
+        expect(broadcasts, hasLength(1));
+        expect(storage.values, isEmpty);
+      },
+    );
+    test(
       'persisted unknown is loaded before a new preview can be signed',
       () async {
         final parameters = _params(asset);
@@ -859,6 +938,49 @@ void main() {
       );
       expect(broadcasts, hasLength(1));
     });
+    test(
+      'wallet changes during an uncertain dispatch do not expose its signature',
+      () async {
+        final parameters = _params(asset);
+        final preview = await coordinator.previewWithdrawal(parameters, asset);
+        submit = (_, __) async {
+          auth.runtimeSessions.invalidate();
+          throw TimeoutException('response lost after wallet changed');
+        };
+        await expectLater(
+          coordinator.executeWithdrawal(preview, asset).toList(),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(
+          (await coordinator.journal!.find(
+            wallet.walletId,
+            parameters,
+          ))?.txHash,
+          'AaFreshSignature',
+        );
+        expect(broadcasts, hasLength(1));
+      },
+    );
+    test(
+      'wallet changes during successful journal cleanup suppress completion',
+      () async {
+        final preview = await coordinator.previewWithdrawal(
+          _params(asset),
+          asset,
+        );
+        storage.beforeDelete = auth.runtimeSessions.invalidate;
+        final progress = <WithdrawalProgress>[];
+        await expectLater(
+          coordinator.executeWithdrawal(preview, asset).forEach(progress.add),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(
+          progress.where((event) => event.status == WithdrawalStatus.complete),
+          isEmpty,
+        );
+        expect(broadcasts, hasLength(1));
+      },
+    );
     test(
       'authorization is rechecked after refresh and before dispatch',
       () async {

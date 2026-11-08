@@ -38,4 +38,25 @@ void main() {
       );
     }
   });
+
+  test('runtime namespaces isolate every default database from production', () {
+    const config = AssetRuntimeUpdateConfig();
+    const transform = CoinConfigTransformer();
+    final production = const DefaultCoinConfigDataFactory(
+      storageNamespace: '',
+    ).createRepository(config, transform);
+    expect(production.assetsBoxName, 'assets');
+    expect(production.settingsBoxName, 'coins_settings');
+    for (final namespace in ['preview-a', 'preview-b']) {
+      final repository = DefaultCoinConfigDataFactory(
+        storageNamespace: namespace,
+      ).createRepository(config, transform);
+      expect(repository.assetsBoxName, '${namespace}_assets');
+      expect(repository.settingsBoxName, '${namespace}_coins_settings');
+      expect(
+        CustomTokenStorage(storageNamespace: namespace).customTokensBoxName,
+        '${namespace}_custom_tokens',
+      );
+    }
+  });
 }

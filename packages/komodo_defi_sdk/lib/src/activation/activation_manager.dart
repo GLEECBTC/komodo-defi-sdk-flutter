@@ -382,6 +382,10 @@ class ActivationManager {
   void ensureActiveAssetAllowed(AssetId assetId) =>
       _activationPolicy.ensureNotBlocked(assetId);
 
+  /// Applies engine capabilities before coordinator/cache fast paths.
+  void ensureAssetSupported(Asset asset) =>
+      SolanaActivationStrategy.ensureSupported(asset, _solanaCapabilities);
+
   /// Retains an SDK service's specialized activation parameters for recovery.
   /// The registration expires at the next runtime session boundary.
   @internal
@@ -661,7 +665,7 @@ class ActivationManager {
     // Apply the deployment gate before even reading an already-active coin:
     // old engines and restored/cached assets must not bypass host capability.
     for (final asset in assets) {
-      SolanaActivationStrategy.ensureSupported(asset, _solanaCapabilities);
+      ensureAssetSupported(asset);
     }
 
     final capturedWallet = await _captureWalletContext();
@@ -1648,7 +1652,9 @@ class _AssetGroup {
 
     for (final asset in assets) {
       final parentId = asset.id.parentId;
-      if (parentId == null || asset.protocol.isCustomToken) {
+      if (parentId == null ||
+          (asset.protocol.isCustomToken &&
+              asset.protocol is! SolanaTokenProtocol)) {
         groups.putIfAbsent(asset.id, () => _AssetGroup(primary: asset));
         continue;
       }

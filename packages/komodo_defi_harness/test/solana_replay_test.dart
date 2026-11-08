@@ -131,6 +131,43 @@ void main() {
       );
 
       test(
+        '${mode.name}: a custom SPL token activates its inactive platform',
+        () async {
+          final harness = await KdfHarness.replayed(
+            script: SolanaWalletFixture().build(),
+            config: _config(),
+          );
+          addTearDown(harness.dispose);
+          await harness.signIn(walletType: mode);
+          final sol = _asset(harness, SolanaWalletFixture.platform);
+          final custom = Asset.fromJson(
+            {...SolanaWalletFixture.tokenConfig(), 'is_custom_token': true},
+            knownIds: {sol.id},
+          );
+          expect((await harness.sdk.activateAsset(custom)).isSuccess, isTrue);
+          expect(
+            harness.script.callsTo('experimental::enable_solana_with_assets'),
+            1,
+          );
+          expect(
+            harness.script.callsTo('experimental::enable_solana_token'),
+            0,
+          );
+          final params =
+              harness.operations.requests.singleWhere(
+                    (request) =>
+                        request['method'] ==
+                        'experimental::enable_solana_with_assets',
+                  )['params']
+                  as Map<String, dynamic>;
+          expect((params['tokens_params'] as List).single, {
+            'ticker': custom.id.id,
+            'protocol': custom.protocol.config['protocol'],
+          });
+        },
+      );
+
+      test(
         '${mode.name}: SPL history keeps case, SOL fees and no invented memo '
         'across restart',
         () async {

@@ -214,6 +214,7 @@ Future<void> bootstrap({
       transformer: coinConfigTransformer,
       enableAutoUpdate: config.assetsAutoUpdate,
       appName: config.assetsStorageNamespace,
+      storageNamespace: config.assetsStorageNamespace,
       configRepository: config.assetsRuntimeUpdateConfig == null
           ? null
           : _ExplicitAssetRuntimeConfigRepository(

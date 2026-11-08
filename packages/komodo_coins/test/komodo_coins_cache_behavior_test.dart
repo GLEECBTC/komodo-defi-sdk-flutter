@@ -195,6 +195,41 @@ void main() {
     });
 
     test(
+      'runtime preview namespace ignores stale catalogs at startup and refresh',
+      () async {
+        when(
+          () => mockRepo.updatedAssetStorageExists(),
+        ).thenAnswer((_) async => true);
+        when(() => mockRepo.getAssets()).thenAnswer((_) async => [ltcAsset]);
+        when(
+          () => mockRepo.getCurrentCommit(),
+        ).thenAnswer((_) async => latestCommit);
+        final startup = await StartupCoinsProvider.fetchRawCoinsForStartup(
+          configRepository: mockConfigRepository,
+          transformer: mockTransformer,
+          dataFactory: mockDataFactory,
+          storageNamespace: 'runtime-preview',
+        );
+        expect(startup.map((asset) => asset['coin']), ['KMD']);
+        final manager = KomodoAssetsUpdateManager(
+          configRepository: mockConfigRepository,
+          transformer: mockTransformer,
+          dataFactory: mockDataFactory,
+          enableAutoUpdate: false,
+          storageNamespace: 'runtime-preview',
+        );
+        addTearDown(manager.dispose);
+        await manager.init();
+        expect(manager.all.keys.map((id) => id.id), ['KMD']);
+        await manager.assets.refreshAssets();
+        expect(manager.all.keys.map((id) => id.id), ['KMD']);
+        expect(await manager.getCurrentCommitHash(), bundledCommit);
+        verifyNever(() => mockRepo.getAssets());
+        verifyNever(() => mockRepo.updateCoinConfig());
+      },
+    );
+
+    test(
       'in-memory assets and commit remain cached after background update',
       () async {
         final coins = KomodoAssetsUpdateManager(
