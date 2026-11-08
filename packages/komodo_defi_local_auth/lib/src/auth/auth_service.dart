@@ -75,6 +75,7 @@ abstract interface class IAuthService {
     required AuthOptions options,
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   });
 
   /// Waits for active operations to complete before signin the user out.
@@ -106,13 +107,26 @@ abstract interface class IAuthService {
     required String? walletPassword,
   });
 
+  /// Verifies a credential against the expected active wallet without exposing
+  /// its mnemonic. This is fresh authorization, unlike [signIn]'s fast path.
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  });
+
   /// Changes the password for the current user.
   ///
   /// Throws [AuthException] if the current password is incorrect or if no user
   /// is signed in.
+  /// Sensitive flows should capture and pass [expectedWalletId] and
+  /// [expectedSession] before their first await. Both are checked under the
+  /// authentication lock before KDF can change any credential.
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   });
 
   /// Deletes the wallet while holding the shared catalog lock.
@@ -220,6 +234,7 @@ class KdfAuthService implements IAuthService {
     }
     return timeout;
   }
+
   final Logger _logger = Logger('KdfAuthService');
 
   final _sessions = AuthSessionTracker();
@@ -520,6 +535,7 @@ class KdfAuthService implements IAuthService {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) => _runAuthTransition(
     () => withWalletCatalogLock(
       () => _register(
@@ -528,6 +544,7 @@ class KdfAuthService implements IAuthService {
         options: options,
         mnemonic: mnemonic,
         initialMetadata: initialMetadata,
+        provisioningId: provisioningId,
       ),
     ),
   );
@@ -540,7 +557,12 @@ class KdfAuthService implements IAuthService {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
+    if (provisioningId != null &&
+        !RegExp(r'^[A-Za-z0-9_-]{16,128}$').hasMatch(provisioningId)) {
+      throw ArgumentError('Invalid wallet provisioning identifier');
+    }
     invalidateAuthSession();
     _logger.info('register: Starting registration for wallet: omitted');
     final registerStopwatch = Stopwatch()..start();
@@ -558,17 +580,75 @@ class KdfAuthService implements IAuthService {
         // A fresh existence check and creation share the auth write lock.
         // UI validation and cached wallet lists cannot enforce uniqueness.
         _invalidateUsersCache();
-        if (await _walletExists(walletName)) {
+        // Query KDF directly: getUsers() repairs missing catalog metadata,
+        // which would assign a different entry ID after an interrupted create.
+        final names = await _runStartupSensitiveRpc(
+          phase: 'registration wallet catalog',
+          operation: () => _client.rpc.wallet.getWalletNames(),
+        );
+        final exists = names.walletNames.contains(walletName);
+        final reservation = await _secureStorage.getProvisioning(walletName);
+        final stored = await _secureStorage.getUser(walletName);
+        final matchesReservation =
+            provisioningId != null &&
+            reservation?['id'] == provisioningId &&
+            reservation?['options'] is Map &&
+            AuthOptions.fromJson(
+                  JsonMap.from(reservation!['options'] as Map),
+                ) ==
+                options;
+        final matchesCompleted =
+            provisioningId != null &&
+            stored?.metadata[walletEntryIdMetadataKey] == provisioningId &&
+            stored?.walletId.authOptions == options;
+        if ((exists && !matchesReservation && !matchesCompleted) ||
+            (reservation != null && !matchesReservation) ||
+            (!exists && stored != null && provisioningId != null)) {
           throw AuthException(
             'Wallet already exists',
             type: AuthExceptionType.walletAlreadyExists,
-            details: {'walletName': walletName},
+            details: {
+              'walletName': walletName,
+              // A caller may choose another display name only before this
+              // operation has reserved or completed any wallet under this one.
+              'canRetryWithDifferentName':
+                  provisioningId != null &&
+                  reservation?['id'] != provisioningId &&
+                  stored?.metadata[walletEntryIdMetadataKey] != provisioningId,
+            },
           );
+        }
+        if (exists &&
+            matchesReservation &&
+            stored != null &&
+            stored.metadata[walletEntryIdMetadataKey] != provisioningId) {
+          // A catalog repair can create a name-only placeholder, but a
+          // previously verified different entry must never be adopted.
+          if (stored.walletId.hasFullIdentity) {
+            throw AuthException(
+              'Wallet entry changed during creation',
+              type: AuthExceptionType.walletAlreadyExists,
+              details: {'canRetryWithDifferentName': false},
+            );
+          }
+        }
+        final reservedMetadata = reservation?['initial_metadata'];
+        final metadata = <String, dynamic>{
+          ...initialMetadata,
+          if (reservedMetadata is Map) ...JsonMap.from(reservedMetadata),
+          if (exists && stored != null) ...stored.metadata,
+        };
+        if (provisioningId != null && !exists && reservation == null) {
+          await _secureStorage.saveProvisioning(walletName, {
+            'id': provisioningId,
+            'options': options.toJson(),
+            'initial_metadata': initialMetadata,
+          });
         }
         final config = await _generateStartupConfig(
           walletName: walletName,
           walletPassword: password,
-          allowRegistrations: true,
+          allowRegistrations: !exists,
           plaintextMnemonic: mnemonic?.plaintextMnemonic,
           hdEnabled: options.derivationMethod == DerivationMethod.hdWallet,
           allowWeakPassword: options.allowWeakPassword,
@@ -582,9 +662,10 @@ class KdfAuthService implements IAuthService {
             config,
             options,
             isImported,
-            initialMetadata,
+            metadata,
+            entryId: provisioningId,
           );
-          if (!isImported) {
+          if (!isImported && !exists) {
             // A wallet created here has no on-chain history by construction:
             // the seed did not exist a moment ago. Recorded per session so the
             // HD gap scan can be told so on this sign-in only.
@@ -600,6 +681,14 @@ class KdfAuthService implements IAuthService {
           '${writePathStopwatch.elapsedMilliseconds}ms',
         );
         final sessionUser = _stampSessionFlags(currentUser)!;
+        if (provisioningId != null) {
+          final persisted = await _secureStorage.getUser(walletName);
+          if (persisted?.walletId != sessionUser.walletId ||
+              persisted?.metadata[walletEntryIdMetadataKey] != provisioningId) {
+            throw StateError('Wallet creation could not be verified');
+          }
+          await _secureStorage.deleteProvisioning(walletName);
+        }
         _emitAuthStateChange(sessionUser);
         _invalidateUsersCache();
         return sessionUser;
@@ -637,19 +726,35 @@ class KdfAuthService implements IAuthService {
 
     final users = await Future.wait(
       walletNames.walletNames.map((name) async {
+        final reservation = await _secureStorage.getProvisioning(name);
+        final reservedId = reservation?['id'];
+        final reservedOptions = reservation?['options'];
+        final reservedMetadata = reservation?['initial_metadata'];
         final updated = await _secureStorage.updateUser(name, (current) {
           final user =
               current ??
               KdfUser(
-                walletId: WalletId.fromName(name, _fallbackAuthOptions),
+                walletId: WalletId.fromName(
+                  name,
+                  reservedOptions is Map
+                      ? AuthOptions.fromJson(JsonMap.from(reservedOptions))
+                      : _fallbackAuthOptions,
+                ),
                 isBip39Seed: true,
+                metadata: {
+                  if (reservedMetadata is Map)
+                    ...JsonMap.from(reservedMetadata),
+                },
               );
           final entryId = user.metadata[walletEntryIdMetadataKey];
           if (entryId is String && entryId.isNotEmpty) return user;
           return user.copyWith(
             metadata: {
               ...user.metadata,
-              walletEntryIdMetadataKey: const Uuid().v4(),
+              walletEntryIdMetadataKey:
+                  reservedId is String && reservedId.isNotEmpty
+                  ? reservedId
+                  : const Uuid().v4(),
             },
           );
         });
@@ -832,11 +937,53 @@ class KdfAuthService implements IAuthService {
   }
 
   @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  }) async {
+    final session = expectedSession ?? await captureSessionContext();
+    ensureSessionContextCurrent(session);
+    await _runAuthenticatedWriteOperation((activeUser) async {
+      ensureSessionContextCurrent(session);
+      _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
+      // KDF currently exposes password verification through get_mnemonic.
+      // Keep that plaintext inside this operation, never in a returned value,
+      // auth state, diagnostic, or credential-verification cache.
+      final mnemonic = await _getMnemonic(
+        encrypted: false,
+        walletPassword: password,
+      );
+      if (mnemonic.plaintextMnemonic?.isNotEmpty != true) {
+        throw AuthException(
+          'Wallet credential verification failed',
+          type: AuthExceptionType.incorrectPassword,
+        );
+      }
+      ensureSessionContextCurrent(session);
+      // KDF may have changed outside this service while the RPC was pending.
+      final verifiedUser = await _getActiveUser();
+      if (verifiedUser == null) throw const AuthSessionChangedException();
+      _ensureMetadataWalletIdentity(expectedWalletId, verifiedUser.walletId);
+      _sessions.observe(verifiedUser);
+      ensureSessionContextCurrent(session);
+    });
+  }
+
+  @override
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async {
-    return _runAuthenticatedWriteOperation((_) async {
+    final session = expectedSession ?? await captureSessionContext();
+    ensureSessionContextCurrent(session);
+    return _runAuthenticatedWriteOperation((activeUser) async {
+      ensureSessionContextCurrent(session);
+      if (expectedWalletId != null) {
+        _ensureMetadataWalletIdentity(expectedWalletId, activeUser.walletId);
+      }
       try {
         await _client.rpc.wallet.changeMnemonicPassword(
           currentPassword: currentPassword,
@@ -847,10 +994,6 @@ class KdfAuthService implements IAuthService {
           throw AuthException(
             'Incorrect current password',
             type: AuthExceptionType.incorrectPassword,
-            details: {
-              'error': _extractRpcErrorMessage(e),
-              'errorType': e.errorType,
-            },
           );
         }
 
@@ -860,16 +1003,14 @@ class KdfAuthService implements IAuthService {
         }
 
         throw AuthException(
-          'Failed to change password: ${_extractRpcErrorMessage(e) ?? e}',
+          'Failed to change password',
           type: AuthExceptionType.generalAuthError,
-          details: {'errorType': e.errorType},
         );
       } on GeneralErrorResponse catch (e) {
         if (_isIncorrectPasswordRpcError(e)) {
           throw AuthException(
             'Incorrect current password',
             type: AuthExceptionType.incorrectPassword,
-            details: {'error': e.error, 'errorType': e.errorType},
           );
         }
 
@@ -879,9 +1020,8 @@ class KdfAuthService implements IAuthService {
         }
 
         throw AuthException(
-          'Failed to change password: ${e.error ?? e}',
+          'Failed to change password',
           type: AuthExceptionType.generalAuthError,
-          details: {'errorType': e.errorType},
         );
       } catch (e) {
         final knownExceptions = _findKnownAuthExceptions(e);
@@ -890,7 +1030,7 @@ class KdfAuthService implements IAuthService {
         }
 
         throw AuthException(
-          'Failed to change password: $e',
+          'Failed to change password',
           type: AuthExceptionType.generalAuthError,
         );
       }

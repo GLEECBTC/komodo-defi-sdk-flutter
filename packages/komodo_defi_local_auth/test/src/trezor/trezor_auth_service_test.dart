@@ -211,6 +211,13 @@ class _FakeAuthService implements IAuthService {
   }) async => throw UnimplementedError();
 
   @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  }) async => throw UnimplementedError();
+
+  @override
   Future<List<KdfUser>> getUsers() async => users;
 
   @override
@@ -264,6 +271,7 @@ class _FakeAuthService implements IAuthService {
     required AuthOptions options,
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
     lastRegisterArgs = (
       walletName: walletName,
@@ -297,6 +305,8 @@ class _FakeAuthService implements IAuthService {
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async => throw UnimplementedError();
 
   @override

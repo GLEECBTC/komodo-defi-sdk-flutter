@@ -27,6 +27,8 @@ class _FakeKdfOperations implements IKdfOperations {
   bool _isRunning = true;
   int stopCount = 0;
   final starts = <Map<String, dynamic>>[];
+  final requests = <Map<String, dynamic>>[];
+  void Function(Map<String, dynamic>)? onStart;
 
   @override
   String get operationsName => 'fake';
@@ -37,6 +39,7 @@ class _FakeKdfOperations implements IKdfOperations {
     int? logLevel,
   }) async {
     starts.add(startParams);
+    onStart?.call(startParams);
     _isRunning = true;
     return KdfStartupResult.ok;
   }
@@ -59,6 +62,7 @@ class _FakeKdfOperations implements IKdfOperations {
 
   @override
   Future<Map<String, dynamic>> mm2Rpc(Map<String, dynamic> request) async {
+    requests.add(request);
     final method = request['method'] as String?;
     if (method == null) {
       return {'mmrpc': '2.0', 'result': <String, dynamic>{}};
@@ -163,6 +167,176 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues(<String, String>{});
+  });
+
+  group('fresh credential verification', () {
+    late KdfAuthService service;
+    late _FakeKdfOperations operations;
+    setUp(() {
+      final user = _verifiedTestUser();
+      FlutterSecureStorage.setMockInitialValues({
+        'user_test-wallet': jsonEncode(user.toJson()),
+      });
+      service = _createService(
+        onOperationsCreated: (value) => operations = value,
+      );
+      addTearDown(service.dispose);
+    });
+
+    test('verifies password through KDF even for the active wallet', () async {
+      final session = await service.captureSessionContext();
+      await service.verifyPassword(
+        password: 'test-only-correct-password',
+        expectedWalletId: session.walletId,
+        expectedSession: session,
+      );
+      final requests = operations.requests.where(
+        (r) => r['method'] == 'get_mnemonic',
+      );
+      expect(requests, hasLength(1));
+      expect(
+        (requests.single['params'] as Map)['password'],
+        'test-only-correct-password',
+      );
+      expect(operations.starts, isEmpty);
+      operations.responsesByMethod['get_mnemonic'] = {
+        'mmrpc': '2.0',
+        'error': 'Error decrypting mnemonic: HMAC error: MAC tag mismatch',
+        'error_type': 'Internal',
+      };
+      await expectLater(
+        service.verifyPassword(
+          password: 'wrong',
+          expectedWalletId: session.walletId,
+        ),
+        throwsA(
+          isA<AuthException>().having(
+            (e) => e.type,
+            'type',
+            AuthExceptionType.incorrectPassword,
+          ),
+        ),
+      );
+    });
+
+    test('rejects a different expected identity before secret RPC', () async {
+      await expectLater(
+        service.verifyPassword(
+          password: 'pw',
+          expectedWalletId: _verifiedTestUser().walletId.copyWith(
+            pubkeyHash: _secondPublicKeyHash,
+          ),
+        ),
+        throwsA(isA<WalletChangedDisconnectException>()),
+      );
+      expect(
+        operations.requests.where((r) => r['method'] == 'get_mnemonic'),
+        isEmpty,
+      );
+    });
+
+    test(
+      'password rotation rejects a different target before dispatch',
+      () async {
+        final session = await service.captureSessionContext();
+        await expectLater(
+          service.updatePassword(
+            currentPassword: 'same-custom-password',
+            newPassword: 'replacement-password',
+            expectedWalletId: session.walletId.copyWith(
+              pubkeyHash: _secondPublicKeyHash,
+            ),
+            expectedSession: session,
+          ),
+          throwsA(isA<WalletChangedDisconnectException>()),
+        );
+        expect(
+          operations.requests.where(
+            (r) => r['method'] == 'change_mnemonic_password',
+          ),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'password rotation rejects a superseded session before dispatch',
+      () async {
+        final session = await service.captureSessionContext();
+        service
+          ..beginAuthTransition()
+          ..endAuthTransition();
+        await expectLater(
+          service.updatePassword(
+            currentPassword: 'same-custom-password',
+            newPassword: 'replacement-password',
+            expectedWalletId: session.walletId,
+            expectedSession: session,
+          ),
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        expect(
+          operations.requests.where(
+            (r) => r['method'] == 'change_mnemonic_password',
+          ),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'password rotation does not expose rejected credential payloads',
+      () async {
+        final session = await service.captureSessionContext();
+        operations.responsesByMethod['change_mnemonic_password'] = {
+          'mmrpc': '2.0',
+          'error': 'rejected SECRET_CREDENTIAL_CANARY',
+          'error_type': 'Internal',
+        };
+        await expectLater(
+          service.updatePassword(
+            currentPassword: 'same-custom-password',
+            newPassword: 'replacement-password',
+            expectedWalletId: session.walletId,
+            expectedSession: session,
+          ),
+          throwsA(
+            isA<AuthException>().having(
+              (error) => error.toString(),
+              'sanitized error',
+              isNot(contains('SECRET_CREDENTIAL_CANARY')),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'logout invalidates a pending successful credential response',
+      () async {
+        final session = await service.captureSessionContext();
+        final reachedRpc = Completer<void>();
+        final response = Completer<Map<String, dynamic>>();
+        operations.responseHandlersByMethod['get_mnemonic'] = () {
+          reachedRpc.complete();
+          return response.future;
+        };
+        final checking = service.verifyPassword(
+          password: 'pw',
+          expectedWalletId: session.walletId,
+          expectedSession: session,
+        );
+        final rejected = expectLater(
+          checking,
+          throwsA(isA<AuthSessionChangedException>()),
+        );
+        await reachedRpc.future;
+        final signingOut = service.signOut();
+        response.complete(operations.responsesByMethod['get_mnemonic']);
+        await rejected;
+        await signingOut;
+      },
+    );
   });
 
   test(
@@ -1867,6 +2041,240 @@ void main() {
   );
 
   group('atomic wallet registration', () {
+    const provisioningId = 'provisioning-test-entry-0001';
+
+    test(
+      'managed creation persists identity and retries without a new seed',
+      () async {
+        late _FakeKdfOperations operations;
+        final names = <String>[];
+        String? active;
+        final service = _createService(
+          walletNamesResponseHandler: () async => {
+            'mmrpc': '2.0',
+            'result': {'wallet_names': names, 'activated_wallet': active},
+          },
+          onOperationsCreated: (value) {
+            operations = value;
+            value.onStart = (params) {
+              active = params['wallet_name'] as String?;
+              if (active != null && params['allow_registrations'] == true) {
+                names.add(active!);
+              }
+            };
+          },
+        );
+        addTearDown(service.dispose);
+        final first = await service.register(
+          walletName: 'new-wallet',
+          password: 'test-password',
+          provisioningId: provisioningId,
+          initialMetadata: {'has_backup': false},
+        );
+        expect(first.metadata[walletEntryIdMetadataKey], provisioningId);
+        expect(
+          await SecureLocalStorage().getProvisioning('new-wallet'),
+          isNull,
+        );
+        final second = await service.register(
+          walletName: 'new-wallet',
+          password: 'test-password',
+          provisioningId: provisioningId,
+          initialMetadata: {'has_backup': true},
+        );
+        expect(second.walletId, first.walletId);
+        expect(second.metadata['has_backup'], isFalse);
+        expect(names, ['new-wallet']);
+        expect(
+          operations.starts.where((p) => p['allow_registrations'] == true),
+          hasLength(1),
+        );
+        expect(operations.starts.last['allow_registrations'], isFalse);
+      },
+    );
+
+    test(
+      'resumes engine wallet after initial user record write failed',
+      () async {
+        var failUserSave = true;
+        final storage = SecureLocalStorage.withStorage(
+          _ObservedFlutterSecureStorage(
+            beforeWrite: (key, _) async {
+              if (key == 'user_new-wallet' && failUserSave) {
+                failUserSave = false;
+                throw StateError('simulated storage interruption');
+              }
+            },
+          ),
+        );
+        final names = <String>[];
+        String? active;
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          secureStorage: storage,
+          walletNamesResponseHandler: () async => {
+            'mmrpc': '2.0',
+            'result': {'wallet_names': names, 'activated_wallet': active},
+          },
+          onOperationsCreated: (value) {
+            operations = value;
+            value.onStart = (params) {
+              active = params['wallet_name'] as String?;
+              if (active != null && params['allow_registrations'] == true) {
+                names.add(active!);
+              }
+            };
+          },
+        );
+        addTearDown(service.dispose);
+        await expectLater(
+          service.register(
+            walletName: 'new-wallet',
+            password: 'test-password',
+            provisioningId: provisioningId,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(names, ['new-wallet']);
+        expect(
+          (await storage.getProvisioning('new-wallet'))?['id'],
+          provisioningId,
+        );
+        // The normal startup wallet list may repair the incomplete catalog
+        // before the creation coordinator resumes. Preserve its reserved ID.
+        final discovered = await service.getUsers();
+        expect(
+          discovered.single.metadata[walletEntryIdMetadataKey],
+          provisioningId,
+        );
+        final resumed = await service.register(
+          walletName: 'new-wallet',
+          password: 'test-password',
+          provisioningId: provisioningId,
+        );
+        expect(resumed.metadata[walletEntryIdMetadataKey], provisioningId);
+        expect(
+          operations.starts.where((p) => p['allow_registrations'] == true),
+          hasLength(1),
+        );
+        expect(await storage.getProvisioning('new-wallet'), isNull);
+      },
+    );
+
+    test(
+      'reservation persistence failure never starts wallet creation',
+      () async {
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          secureStorage: SecureLocalStorage.withStorage(
+            _ObservedFlutterSecureStorage(
+              beforeWrite: (key, _) async {
+                if (key.startsWith('wallet_provisioning_')) {
+                  throw StateError('simulated reservation failure');
+                }
+              },
+            ),
+          ),
+          onOperationsCreated: (value) => operations = value,
+        );
+        addTearDown(service.dispose);
+        await expectLater(
+          service.register(
+            walletName: 'new-wallet',
+            password: 'test-password',
+            provisioningId: provisioningId,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(
+          operations.starts.where((p) => p['allow_registrations'] == true),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'another provisioning operation cannot take a reserved name',
+      () async {
+        await SecureLocalStorage().saveProvisioning('new-wallet', {
+          'id': provisioningId,
+          'options': _testUser().walletId.authOptions.toJson(),
+          'initial_metadata': <String, dynamic>{},
+        });
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          onOperationsCreated: (value) => operations = value,
+        );
+        addTearDown(service.dispose);
+        for (final id in [null, 'other-provisioning-entry-0002']) {
+          await expectLater(
+            service.register(
+              walletName: 'new-wallet',
+              password: 'different-password',
+              provisioningId: id,
+            ),
+            throwsA(
+              isA<AuthException>()
+                  .having(
+                    (e) => e.type,
+                    'type',
+                    AuthExceptionType.walletAlreadyExists,
+                  )
+                  .having(
+                    (e) => e.details?['canRetryWithDifferentName'],
+                    'can choose another name before owning a reservation',
+                    id != null,
+                  ),
+            ),
+          );
+        }
+        expect(
+          operations.starts.where((p) => p['allow_registrations'] == true),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'missing engine wallet with completed identity is never regenerated',
+      () async {
+        await SecureLocalStorage().saveUser(
+          KdfUser(
+            walletId: WalletId.withPubkeyHash(
+              'new-wallet',
+              _testUser().walletId.authOptions,
+              _publicKeyHash,
+            ),
+            isBip39Seed: true,
+            metadata: const {walletEntryIdMetadataKey: provisioningId},
+          ),
+        );
+        late _FakeKdfOperations operations;
+        final service = _createService(
+          onOperationsCreated: (value) => operations = value,
+        );
+        addTearDown(service.dispose);
+        await expectLater(
+          service.register(
+            walletName: 'new-wallet',
+            password: 'test-password',
+            provisioningId: provisioningId,
+          ),
+          throwsA(
+            isA<AuthException>().having(
+              (e) => e.details?['canRetryWithDifferentName'],
+              'completed entry cannot choose another name',
+              false,
+            ),
+          ),
+        );
+        expect(
+          operations.starts.where((p) => p['allow_registrations'] == true),
+          isEmpty,
+        );
+      },
+    );
+
     test(
       'initial metadata is persisted before publishing the authenticated user',
       () async {
@@ -1978,11 +2386,31 @@ void main() {
         lifiFeeBps: 22,
       );
       late _FakeKdfOperations operations;
+      final createdNames = <String>{};
       final service = _createService(
         lifiProxyUrl: url,
         lifiIntegrator: commission,
-        onOperationsCreated: (created) =>
-            (operations = created)._isRunning = false,
+        onOperationsCreated: (created) {
+          operations = created;
+          created._isRunning = false;
+          created.onStart = (params) {
+            final name = params['wallet_name'] as String?;
+            if (name != null && params['allow_registrations'] == true) {
+              createdNames.add(name);
+            }
+            created.responsesByMethod['get_wallet_names'] = {
+              'mmrpc': '2.0',
+              'result': {
+                'wallet_names': createdNames.toList(),
+                'activated_wallet': params['wallet_name'],
+              },
+            };
+          };
+          created.responsesByMethod['get_wallet_names'] = {
+            'mmrpc': '2.0',
+            'result': {'wallet_names': <String>[], 'activated_wallet': null},
+          };
+        },
       );
       addTearDown(service.dispose);
 

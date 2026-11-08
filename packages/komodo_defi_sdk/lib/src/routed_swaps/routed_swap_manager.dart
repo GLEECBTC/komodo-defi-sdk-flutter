@@ -355,6 +355,9 @@ class RoutedSwapManager {
           provider: offer.provider,
         );
       });
+    } on RpcDispatchRejected {
+      // A local authorization check failed before transport dispatch.
+      rethrow;
     } on rpc.RoutedSwapRpcException {
       // A typed rejection comes back before any task exists.
       rethrow;

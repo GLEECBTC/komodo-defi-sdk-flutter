@@ -44,6 +44,20 @@ void main() {
   File script(String body) =>
       File('${sandbox.path}/kdf')..writeAsStringSync('#!/bin/sh\n$body\n');
 
+  for (final key in ['wallet_password', 'rpc_password', 'passphrase']) {
+    test('rejects $key before locating or launching an executable', () async {
+      var lookedUp = false;
+      final result = await operations(() async {
+        lookedUp = true;
+        return null;
+      }).kdfMain({..._params, key: 'SECRET_CANARY'});
+      expect(result, KdfStartupResult.spawnError);
+      expect(lookedUp, isFalse);
+      expect(logs.join('\n'), isNot(contains('SECRET_CANARY')));
+      expect(logs.join('\n'), contains('type=configurationError'));
+    });
+  }
+
   Future<void> exitCleanup() async {
     for (var i = 0; i < 100; i++) {
       if (logs.contains('Temporary directory deleted successfully.')) return;

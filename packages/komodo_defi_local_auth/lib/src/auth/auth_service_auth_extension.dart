@@ -61,8 +61,9 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     KdfStartupConfig config,
     AuthOptions authOptions,
     bool isImported,
-    Map<String, dynamic> initialMetadata,
-  ) async {
+    Map<String, dynamic> initialMetadata, {
+    String? entryId,
+  }) async {
     _logger.info('_registerNewUser: Restarting KDF for omitted');
     final restartStopwatch = Stopwatch()..start();
     await _restartKdf(config);
@@ -94,7 +95,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
         metadata: {
           ...initialMetadata,
           'isImported': isImported,
-          walletEntryIdMetadataKey: const Uuid().v4(),
+          walletEntryIdMetadataKey: entryId ?? const Uuid().v4(),
         },
       ),
       persist: false,

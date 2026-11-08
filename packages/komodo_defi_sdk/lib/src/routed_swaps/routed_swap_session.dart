@@ -334,6 +334,8 @@ class _RoutedSwapSession {
       _manager._requireCurrent(walletSession);
       await _manager._client.rpc.routedSwap.cancel(taskId);
       _manager._requireCurrent(walletSession);
+    } on RpcDispatchRejected {
+      rethrow;
     } on RoutedSwapNotCancellableException {
       rethrow;
     } on rpc.RoutedSwapTaskAlreadyBroadcastException {

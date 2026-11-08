@@ -15,124 +15,17 @@ A new Flutter FFI plugin project.
   s.source_files = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
 
-  s.resource_bundles = {
-    'kdf_resources' => ['lib/*.dylib'].select { |f| Dir.exist?(File.dirname(f)) }
-  }
-
-  # s.preserve_paths = ['bin/kdf']
-
+  # The build transformer extracts verified archive contents into macos/bin.
+  # CocoaPods embeds/signs this dynamic library in the application's Frameworks
+  # directory. An executable-only archive cannot satisfy native FFI startup.
+  s.vendored_libraries = 'bin/libkdflib.dylib'
+  s.preserve_paths = ['bin/*', 'bin/.api_last_updated_macos', 'validate_native_library.rb']
   s.script_phase = {
-    :name => 'Install kdf executable and/or dylib',
+    :name => 'Validate bundled native KDF library',
     :execution_position => :before_compile,
-    :script => <<-SCRIPT
-      # Get the application support directory for macOS
-      APP_SUPPORT_DIR="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Library/Application Support"
-      FRAMEWORKS_DIR="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Frameworks"
-      HELPERS_DIR="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
-      
-      # Create all required directories in one go
-      mkdir -p "$APP_SUPPORT_DIR" "$FRAMEWORKS_DIR" "$HELPERS_DIR"
-      
-      # Track if we found at least one of the required files
-      FOUND_REQUIRED_FILE=0
-  
-      # Check if the kdf executable exists and copy it
-      if [ -f "${PODS_TARGET_SRCROOT}/bin/kdf" ]; then
-        echo "kdf executable found, copying..."
-        cp "${PODS_TARGET_SRCROOT}/bin/kdf" "$APP_SUPPORT_DIR/kdf"
-        chmod +x "$APP_SUPPORT_DIR/kdf"
-        FOUND_REQUIRED_FILE=1
-      else
-        echo "Warning: kdf executable not found in bin/kdf"
-      fi
-      
-      # Check if the dylib exists and copy it
-      if [ -f "${PODS_TARGET_SRCROOT}/lib/libkdflib.dylib" ]; then
-        echo "libkdflib.dylib found, copying..."
-        cp "${PODS_TARGET_SRCROOT}/lib/libkdflib.dylib" "$FRAMEWORKS_DIR/libkdflib.dylib"
-        install_name_tool -id "@rpath/libkdflib.dylib" "$FRAMEWORKS_DIR/libkdflib.dylib"
-        FOUND_REQUIRED_FILE=1
-      else
-        echo "Warning: libkdflib.dylib not found in lib/libkdflib.dylib"
-      fi
-      
-      # Prune binary slices to match $ARCHS (preserve universals) in Release builds only
-      case "$CONFIGURATION" in
-        Release*)
-          TARGET_ARCHS="${ARCHS:-$(arch)}"
-
-          thin_binary_to_archs() {
-            file="$1"
-            keep_archs="$2"
-
-            [ -f "$file" ] || return 0
-
-            # Only act on fat files (multi-arch)
-            if ! lipo -info "$file" | grep -q 'Architectures in the fat file'; then
-              return 0
-            fi
-
-            bin_archs="$(lipo -archs "$file" 2>/dev/null || true)"
-            [ -n "$bin_archs" ] || return 0
-
-            dir="$(dirname "$file")"
-            base="$(basename "$file")"
-            work="$file"
-
-            for arch in $bin_archs; do
-              echo "$keep_archs" | tr ' ' '\n' | grep -qx "$arch" && continue
-              echo "Removing architecture $arch from $base"
-              next="$(mktemp "$dir/.${base}.XXXXXX")"
-              lipo "$work" -remove "$arch" -output "$next"
-              [ "$work" != "$file" ] && rm -f "$work"
-              work="$next"
-            done
-
-            if [ "$work" != "$file" ]; then
-              mv -f "$work" "$file"
-            fi
-          }
-
-          thin_binary_to_archs "$APP_SUPPORT_DIR/kdf" "$TARGET_ARCHS"
-          if [ -f "$APP_SUPPORT_DIR/kdf" ]; then chmod +x "$APP_SUPPORT_DIR/kdf"; fi
-
-          thin_binary_to_archs "$FRAMEWORKS_DIR/libkdflib.dylib" "$TARGET_ARCHS"
-          if [ -f "$FRAMEWORKS_DIR/libkdflib.dylib" ]; then install_name_tool -id "@rpath/libkdflib.dylib" "$FRAMEWORKS_DIR/libkdflib.dylib"; fi
-      esac
-
-      # Signs a framework with the provided identity
-      code_sign_if_enabled() {
-        if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" -a "${CODE_SIGNING_REQUIRED:-}" != "NO" -a "${CODE_SIGNING_ALLOWED}" != "NO" ]; then
-          # Use the current code_sign_identity
-          echo "Code Signing $1 with Identity ${EXPANDED_CODE_SIGN_IDENTITY_NAME}"
-          local code_sign_cmd="/usr/bin/codesign --force --sign ${EXPANDED_CODE_SIGN_IDENTITY} ${OTHER_CODE_SIGN_FLAGS:-} --preserve-metadata=identifier,entitlements '$1'"
-
-          if [ "${COCOAPODS_PARALLEL_CODE_SIGN}" == "true" ]; then
-            code_sign_cmd="$code_sign_cmd &"
-          fi
-          echo "$code_sign_cmd"
-          eval "$code_sign_cmd"
-        else
-          echo "Code Signing DISABLED. Is this correct for your configuration?"
-        fi
-      }
-
-      # Resign the code if required by the build settings to avoid unstable apps
-      code_sign_if_enabled "$APP_SUPPORT_DIR/kdf" || true
-      # Helpers in komodo_defi_framework is now the ONLY place where KdfExecutableFinder.findExecutable() 
-      # will look for the kdf binary on macOS. The APP_SUPPORT_DIR copy is redundant but kept for 
-      # backward compatibility with older builds.
-      if [ -f "$APP_SUPPORT_DIR/kdf" ]; then cp "$APP_SUPPORT_DIR/kdf" "$HELPERS_DIR/kdf"; fi
-      code_sign_if_enabled "$FRAMEWORKS_DIR/libkdflib.dylib" || true
-
-      # Fail if neither file was found
-      if [ $FOUND_REQUIRED_FILE -eq 0 ]; then
-        echo "Error: Neither kdf executable nor libkdflib.dylib was found. At least one is required."
-        exit 1
-      fi
-    SCRIPT
+    :script => 'ruby "${PODS_TARGET_SRCROOT}/validate_native_library.rb" "${PODS_TARGET_SRCROOT}"'
   }
-  
+
   # Configuration for macOS build
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

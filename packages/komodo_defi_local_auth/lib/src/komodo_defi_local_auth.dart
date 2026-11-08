@@ -125,7 +125,8 @@ abstract interface class KomodoDefiAuth {
   });
 
   /// Creates a new wallet and saves [initialMetadata] before publishing it.
-  /// Existing names always fail with [AuthExceptionType.walletAlreadyExists].
+  /// Existing names fail with [AuthExceptionType.walletAlreadyExists] unless
+  /// resuming the same [provisioningId].
   ///
   /// By default, the system will launch in HD mode (enabled in the [AuthOptions]),
   /// which may differ from the non-HD mode used in other areas of the KDF API.
@@ -134,6 +135,15 @@ abstract interface class KomodoDefiAuth {
   ///
   /// Throws [AuthException] if registration is disabled or if an error occurs
   /// during registration.
+  ///
+  /// [provisioningId] is a caller-persisted random identifier (16–128 URL-safe
+  /// characters) for one recoverable creation. Persist its password first and
+  /// reuse the same name, password and options on retry. A matching operation
+  /// resumes an existing engine wallet without generating another seed; all
+  /// other collisions still fail. It also becomes the immutable entry ID.
+  /// A collision permits choosing a different name only when the exception's
+  /// `canRetryWithDifferentName` detail is explicitly true. Otherwise preserve
+  /// the pending operation: it may already own the wallet under its old name.
   Future<KdfUser> register({
     required String walletName,
     required String password,
@@ -142,6 +152,7 @@ abstract interface class KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   });
 
   /// Creates a new wallet and saves [initialMetadata] before publishing it.
@@ -209,16 +220,28 @@ abstract interface class KomodoDefiAuth {
   /// is signed in.
   Future<Mnemonic> getMnemonicPlainText(String walletPassword);
 
+  /// Freshly verifies [password] for this exact wallet and runtime session.
+  /// Does not return or publish the decrypted mnemonic.
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  });
+
   /// Changes the password used to encrypt/decrypt the mnemonic.
   ///
   /// This is used to change the password that protects the wallet's seed phrase.
   /// Both the current and new passwords must be provided.
+  /// Capture and pass [expectedWalletId] and [expectedSession] before awaiting
+  /// authorization or durable journal writes to reject a switched wallet.
   ///
   /// Throws [AuthException] if the current password is incorrect or if no user
   /// is signed in.
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   });
 
   /// Deletes the specified wallet.
@@ -587,6 +610,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) => _runAuthTransition(
     () => _register(
       walletName: walletName,
@@ -594,6 +618,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       options: options,
       mnemonic: mnemonic,
       initialMetadata: initialMetadata,
+      provisioningId: provisioningId,
     ),
   );
 
@@ -605,9 +630,16 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
     await ensureInitialized();
-    await _assertAuthState(false);
+    // An interrupted creation can leave its own engine session running. Only
+    // that same target may resume; the service still verifies the reservation
+    // and password under its catalog/write locks.
+    if (provisioningId == null ||
+        (await _authService.getActiveUser())?.walletId.name != walletName) {
+      await _assertAuthState(false);
+    }
 
     if (!_allowRegistrations) {
       throw AuthException(
@@ -631,6 +663,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       options: options,
       mnemonic: mnemonic,
       initialMetadata: initialMetadata,
+      provisioningId: provisioningId,
     );
 
     return user;
@@ -830,9 +863,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  }) async {
+    await ensureInitialized();
+    await _authService.verifyPassword(
+      password: password,
+      expectedWalletId: expectedWalletId,
+      expectedSession: expectedSession,
+    );
+  }
+
+  @override
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async {
     await ensureInitialized();
     await _assertAuthState(true);
@@ -841,12 +890,18 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       await _authService.updatePassword(
         currentPassword: currentPassword,
         newPassword: newPassword,
+        expectedWalletId: expectedWalletId,
+        expectedSession: expectedSession,
       );
+    } on AuthSessionChangedException {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while changing the password: $e',
+        'An unexpected error occurred while changing the password',
         type: AuthExceptionType.generalAuthError,
       );
     }
