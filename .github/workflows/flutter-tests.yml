@@ -94,6 +94,20 @@ jobs:
           echo "packages=${with_tests[*]}" >> "$GITHUB_OUTPUT"
           echo "Found packages with tests: ${with_tests[*]}"
 
+      - name: Install Linux native packaging test tools
+        if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_framework')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake clang lld binutils python3
+          for tool in cmake clang ld.lld readelf python3; do
+            command -v "$tool"
+          done
+          # Exercise GNU readelf in CI alongside local LLVM readelf coverage.
+          /usr/bin/readelf --version
+          echo "GLEEC_READELF=/usr/bin/readelf" >> "$GITHUB_ENV"
+
       - name: Install dependencies for all packages
         if: steps.discover.outputs.packages != ''
         shell: bash
