@@ -129,7 +129,8 @@ class KdfWalletFixture {
   void hang(String method) => _hangingMethods.add(method);
 
   KdfScript build() {
-    var walletActivated = walletExists;
+    var walletPresent = walletExists;
+    var walletActivated = false;
 
     final script = KdfScript()
       ..reply('version', {'result': 'harness-replay'})
@@ -137,22 +138,22 @@ class KdfWalletFixture {
         'mmrpc': '2.0',
         'result': {'streamer_id': 'SHUTDOWN'},
       })
-      // KDF answers this differently before and after the wallet is activated:
-      // registration requires it absent, the post-sign-in identity check
-      // requires it present. A constant answer cannot satisfy both.
+      // The catalog survives a no-auth restart; the active wallet does not.
+      // Registration adds the wallet, while an existing wallet can be listed
+      // before any sign-in has happened in this engine session.
       ..on('get_wallet_names', (_) {
         return {
           'mmrpc': '2.0',
           'result': {
-            'wallet_names': walletActivated ? [walletName] : <String>[],
+            'wallet_names': walletPresent ? [walletName] : <String>[],
             'activated_wallet': walletActivated ? walletName : null,
           },
         };
       })
       ..onKdfStart = ((startParams) {
-        if ((startParams['wallet_name'] as String?)?.isNotEmpty ?? false) {
-          walletActivated = true;
-        }
+        walletActivated =
+            (startParams['wallet_name'] as String?)?.isNotEmpty ?? false;
+        if (walletActivated) walletPresent = true;
       })
       ..reply('get_public_key_hash', {
         'mmrpc': '2.0',
