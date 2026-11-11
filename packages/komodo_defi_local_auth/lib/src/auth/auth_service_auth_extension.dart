@@ -46,6 +46,14 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
   }
 
   void _emitAuthStateChange(KdfUser? user) {
+    // A reviewed active-wallet deletion revokes its SDK session immediately,
+    // but its prepared credential-cleanup grant must be consumed before the
+    // app observes sign-out. A newer authenticated user supersedes that event.
+    if (_deferDeletionSignOut && user == null) {
+      _deferredDeletionSignOut = true;
+      return;
+    }
+    if (user != null) _deferredDeletionSignOut = false;
     _trackIdentityRecovery(user);
     if (!isAuthTransitionInProgress) _sessions.observe(user);
     if (!_authStateController.isClosed && user != _lastEmittedUser) {
@@ -61,8 +69,9 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
     KdfStartupConfig config,
     AuthOptions authOptions,
     bool isImported,
-    Map<String, dynamic> initialMetadata,
-  ) async {
+    Map<String, dynamic> initialMetadata, {
+    String? entryId,
+  }) async {
     _logger.info('_registerNewUser: Restarting KDF for omitted');
     final restartStopwatch = Stopwatch()..start();
     await _restartKdf(config);
@@ -94,7 +103,7 @@ extension KdfAuthServiceAuthExtension on KdfAuthService {
         metadata: {
           ...initialMetadata,
           'isImported': isImported,
-          walletEntryIdMetadataKey: const Uuid().v4(),
+          walletEntryIdMetadataKey: entryId ?? const Uuid().v4(),
         },
       ),
       persist: false,

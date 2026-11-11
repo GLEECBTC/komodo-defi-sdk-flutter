@@ -10,6 +10,7 @@ import 'package:komodo_defi_framework/src/js/js_error_utils.dart';
 import 'package:komodo_defi_framework/src/js/js_interop_utils.dart';
 import 'package:komodo_defi_framework/src/js/js_result_mappers.dart' as js_maps;
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart' show RpcDispatchGuard;
 import 'package:mutex/mutex.dart';
 
 const _kdfAsstsPath = 'kdf';
@@ -270,6 +271,8 @@ class KdfOperationsWasm implements IKdfOperations {
       throw const FormatException('KDF RPC request could not be encoded');
     }
     final js_interop.JSPromise<js_interop.JSAny?>? jsPromise;
+    final method = request['method'];
+    if (method is String) RpcDispatchGuard.ensureCurrent(method);
     try {
       jsPromise = _kdfModule!.mm2Rpc(jsRequest);
     } catch (_) {

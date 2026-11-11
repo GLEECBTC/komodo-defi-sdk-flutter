@@ -3370,6 +3370,99 @@ void main() {
       },
     );
 
+    for (final gasless in [false, true]) {
+      test('${gasless ? 'GasFree' : 'standard'} send rejects authorization '
+          'revoked during transport setup', () async {
+        var allowed = true;
+        var dispatched = false;
+        final transportPreparing = Completer<void>();
+        final releaseTransport = Completer<void>();
+        when(() => client.executeRpc(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.single as Map<String, dynamic>;
+          expect(request['method'], 'send_raw_transaction');
+          transportPreparing.complete();
+          await releaseTransport.future;
+          RpcDispatchGuard.ensureCurrent('send_raw_transaction');
+          dispatched = true;
+          return {'tx_hash': 'should-not-be-sent'};
+        });
+
+        final operation = makeManager()
+            .executeWithdrawal(
+              gasless ? _gaslessPreview() : _standardPreview(),
+              _coin,
+              beforeBroadcast: () {
+                if (!allowed) throw StateError('Application locked');
+              },
+            )
+            .toList();
+        final rejected = expectLater(
+          operation,
+          throwsA(
+            isA<SdkError>().having(
+              (error) => error.source,
+              'source',
+              isA<RpcDispatchRejected>(),
+            ),
+          ),
+        );
+        await transportPreparing.future;
+        allowed = false;
+        releaseTransport.complete();
+        await rejected;
+        expect(dispatched, isFalse);
+        expect(await pendingRepository.list(_wallet), isEmpty);
+      });
+    }
+
+    test(
+      'queued send rejects authorization revoked after progress event',
+      () async {
+        var allowed = true;
+        final progress = StreamIterator(
+          makeManager().executeWithdrawal(
+            _standardPreview(),
+            _coin,
+            beforeBroadcast: () {
+              if (!allowed) throw StateError('Application locked');
+            },
+          ),
+        );
+        expect(await progress.moveNext(), isTrue);
+        allowed = false;
+        await expectLater(progress.moveNext(), throwsA(isA<SdkError>()));
+        await progress.cancel();
+        verifyNever(() => client.executeRpc(any()));
+      },
+    );
+
+    test(
+      'accepted broadcast completes after application authorization expires',
+      () async {
+        var allowed = true;
+        var sends = 0;
+        when(() => client.executeRpc(any())).thenAnswer((_) async {
+          RpcDispatchGuard.ensureCurrent('send_raw_transaction');
+          sends++;
+          allowed = false;
+          await Future<void>.value();
+          return {'tx_hash': 'accepted-transaction'};
+        });
+        final progress = await makeManager()
+            .executeWithdrawal(
+              _standardPreview(),
+              _coin,
+              beforeBroadcast: () {
+                if (!allowed) throw StateError('Application locked');
+              },
+            )
+            .toList();
+        expect(sends, 1);
+        expect(progress.last.status, WithdrawalStatus.complete);
+      },
+    );
+
     test('standard withdrawal remains on the native broadcast rail', () async {
       Map<String, dynamic>? request;
       when(() => client.executeRpc(any())).thenAnswer((invocation) async {

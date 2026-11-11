@@ -41,6 +41,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
 
+      - name: Verify deployment privacy
+        run: |
+          python3 .github/scripts/test_firebase_hosting_deploy.py
+          bash .github/scripts/test_hosting_deploy_url.sh
+
       - name: Discover packages
         id: discover
         shell: bash

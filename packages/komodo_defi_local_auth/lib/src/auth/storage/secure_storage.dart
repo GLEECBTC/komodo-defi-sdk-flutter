@@ -31,6 +31,26 @@ class SecureLocalStorage {
 
   static const _userPrefix = 'user_';
   static const String _lastActiveWalletNameKey = 'lastActiveWalletName';
+  static const _provisioningPrefix = 'wallet_provisioning_';
+
+  /// Non-secret reservation, used only while the caller holds the catalog lock.
+  Future<JsonMap?> getProvisioning(String walletName) async {
+    final encoded = await _storage.read(key: '$_provisioningPrefix$walletName');
+    return encoded == null ? null : jsonFromString(encoded);
+  }
+
+  /// A failed/ambiguous write must not be followed by wallet creation.
+  Future<void> saveProvisioning(String walletName, JsonMap reservation) async {
+    final key = '$_provisioningPrefix$walletName';
+    final encoded = reservation.toJsonString();
+    await _storage.write(key: key, value: encoded);
+    if (await _storage.read(key: key) != encoded) {
+      throw StateError('Wallet provisioning could not be persisted');
+    }
+  }
+
+  Future<void> deleteProvisioning(String walletName) =>
+      _storage.delete(key: '$_provisioningPrefix$walletName');
 
   /// Save user data
   Future<void> saveUser(KdfUser user) =>
@@ -67,9 +87,10 @@ class SecureLocalStorage {
   }
 
   /// Delete user data
-  Future<void> deleteUser(String walletName) => withWalletRecordLock(
-    () => _storage.delete(key: '$_userPrefix$walletName'),
-  );
+  Future<void> deleteUser(String walletName) => withWalletRecordLock(() async {
+    await _storage.delete(key: '$_userPrefix$walletName');
+    await deleteProvisioning(walletName);
+  });
 
   /// Save the last active wallet name
   Future<void> saveLastActiveWalletName(String? walletName) async {
