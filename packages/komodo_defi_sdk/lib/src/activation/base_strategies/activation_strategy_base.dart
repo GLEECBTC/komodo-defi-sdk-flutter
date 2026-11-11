@@ -68,9 +68,29 @@ class SmartAssetActivator extends BatchCapableActivator {
       // Parent active + has children = activate children individually
       for (final child in children!) {
         if (!await _isAssetActive(child)) {
-          yield* _activator.activate(child);
+          var completed = false;
+          await for (final progress in _activator.activate(child)) {
+            if (progress.isComplete) {
+              if (!progress.isSuccess) {
+                yield progress;
+                return;
+              }
+              completed = true;
+              break;
+            }
+            yield progress;
+          }
+          if (!completed) {
+            yield ActivationProgress.error(
+              message: 'Token activation ended without a terminal result',
+            );
+            return;
+          }
         }
       }
+      // Callers stop at the first terminal event. A child's success must not
+      // publish the whole group as active before the remaining children run.
+      yield ActivationProgress.success();
     } else {
       // Single asset activation
       yield* _activator.activate(asset);

@@ -22,7 +22,12 @@ import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/gasless_transfer_lock.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_coordinator.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_support.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_journal.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+export 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_support.dart';
 
 /// Shared fee-estimation strategy classification used by withdrawal flows.
 enum FeeEstimationSupport {
@@ -136,7 +141,11 @@ class WithdrawalManager {
     PendingGaslessTransferRepository? pendingGaslessTransfers,
     EventStreamingManager? eventStreamingManager,
     Future<Set<String>> Function(Asset asset)? freshSourceAddressResolver,
+    SolanaCapabilities solanaCapabilities = const SolanaCapabilities(),
+    SolanaWithdrawalJournal? solanaWithdrawalJournal,
   }) : _auth = auth,
+       _solanaCapabilities = solanaCapabilities,
+       _solanaWithdrawalJournal = solanaWithdrawalJournal,
        _gaslessCapabilities =
            gaslessCapabilities ?? GaslessCapabilityRegistry(),
        _pendingGaslessTransfers = pendingGaslessTransfers,
@@ -175,6 +184,25 @@ class WithdrawalManager {
   final SharedActivationCoordinator _activationCoordinator;
   final FeeManager _feeManager;
   final LegacyWithdrawalManager _legacyManager;
+  final SolanaCapabilities _solanaCapabilities;
+  final SolanaWithdrawalJournal? _solanaWithdrawalJournal;
+  late final _solanaWithdrawals = SolanaWithdrawalCoordinator(
+    capabilities: _solanaCapabilities,
+    journal: _solanaWithdrawalJournal,
+    runWithSession: <T>(context, dispatch) =>
+        _auth.runWithSession<T>(context.session, dispatch),
+    createPreview: _legacyManager.previewWithdrawal,
+    broadcast: (coin, txHex) =>
+        _client.rpc.withdraw.sendRawTransaction(coin: coin, txHex: txHex),
+    captureWallet: _captureWalletContext,
+    requireWalletCurrent: _requireWalletContextCurrent,
+    ensureAllowed: (asset) =>
+        _activationCoordinator.ensureActiveAssetAllowed(asset.id),
+    ensureSessionCurrent: (context) {
+      _requireNotDisposed();
+      _auth.ensureSessionContextCurrent(context.session);
+    },
+  );
   final GaslessCapabilityRegistry _gaslessCapabilities;
   final PendingGaslessTransferRepository? _pendingGaslessTransfers;
   final EventStreamingManager? _eventStreamingManager;
@@ -284,6 +312,7 @@ class WithdrawalManager {
     final existing = _disposeFuture;
     if (existing != null) return existing;
     _isDisposed = true;
+    _solanaWithdrawals.clearSession();
     _walletGeneration++;
     _disposeSignal.add(null);
     final owners = _activeGaslessSubmissions.values
@@ -401,6 +430,7 @@ class WithdrawalManager {
       return false;
     }
     _runtimeSession = session;
+    _solanaWithdrawals.clearSession();
     _walletGeneration++;
     _currentWalletId = session?.walletId;
     _gaslessCapabilities.ensureWalletSession(session?.walletId.pubkeyHash);
@@ -1112,6 +1142,9 @@ class WithdrawalManager {
       final asset = _assetProvider
           .findAssetsByConfigId(parameters.asset)
           .single;
+      if (isSolanaWithdrawalAsset(asset)) {
+        return await _solanaWithdrawals.previewWithdrawal(parameters, asset);
+      }
       final isGasless = parameters.feeMethod == WithdrawalFeeMethod.gasless;
       if (isGasless) _validateGaslessRequestOptions(parameters);
       final walletContext = isGasless ? await _captureWalletContext() : null;
@@ -1206,12 +1239,9 @@ class WithdrawalManager {
 
   /// Executes a withdrawal from a previously generated preview.
   ///
-  /// This method broadcasts a transaction that was already signed during the
-  /// preview phase. This is the ONLY recommended way to execute withdrawals,
-  /// as it ensures:
-  /// - The transaction is signed only once
-  /// - The user sees and confirms the exact transaction that will be broadcast
-  /// - No risk of parameters changing between preview and execution
+  /// Broadcasts the reviewed signed transaction. Solana refreshes its expiring
+  /// blockhash using the original parameters, and requires another confirmation
+  /// if any recipient, amount, fee, deposit or memo detail changes.
   ///
   /// **Workflow:**
   /// 1. Call [previewWithdrawal] to generate and sign the transaction
@@ -1257,6 +1287,14 @@ class WithdrawalManager {
     var relayInvocationBegan = false;
     try {
       final asset = _assetProvider.findAssetsByConfigId(assetId).single;
+      if (isSolanaWithdrawalAsset(asset)) {
+        yield* _solanaWithdrawals.executeWithdrawal(
+          preview,
+          asset,
+          beforeBroadcast: beforeBroadcast,
+        );
+        return;
+      }
       _rejectInconsistentGaslessRailShape(preview);
       final isGasless = _isGaslessPreview(preview);
       final walletContext = isGasless ? await _captureWalletContext() : null;
@@ -3156,6 +3194,24 @@ class WithdrawalManager {
     required String operation,
     String? assetId,
   }) {
+    if (error is SolanaWithdrawalReviewChanged ||
+        error is SolanaWithdrawalSubmissionUnknown) {
+      final changed = error is SolanaWithdrawalReviewChanged;
+      return SdkError(
+        code: SdkErrorCode.general,
+        category: changed
+            ? SdkErrorCategory.validation
+            : SdkErrorCategory.network,
+        messageKey: changed
+            ? 'withdrawSolanaReviewChanged'
+            : 'withdrawSolanaSubmissionUnknown',
+        fallbackMessage: changed
+            ? 'The transfer details changed. Review them before confirming again.'
+            : 'The transfer may have been submitted. Check its transaction status before sending again.',
+        context: SdkErrorContext(operation: operation, assetId: assetId),
+        source: error,
+      );
+    }
     return _errorMapper.map(
       error,
       context: SdkErrorContext(operation: operation, assetId: assetId),

@@ -1,12 +1,14 @@
-# The Flutter tooling requires that developers have a version of Visual Studio
-# installed that includes CMake 3.14 or later. You should not increase this
-# version, as doing so will cause the plugin to fail to compile for some
-# customers of the plugin.
+# Keep compatible with the minimum CMake version supported by this plugin.
 cmake_minimum_required(VERSION 3.15)
 
 # Project-level configuration.
 set(PROJECT_NAME "komodo_defi_framework")
 project(${PROJECT_NAME} LANGUAGES CXX)
+
+# Production uses only a verified shared library. Fail before packaging when
+# the pinned release is executable-only or its extracted bytes are stale.
+set(KDF_FRAMEWORK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+include("${CMAKE_CURRENT_SOURCE_DIR}/validate_native_library.cmake")
 
 set(PLUGIN_NAME "${PROJECT_NAME}_plugin")
 
@@ -28,33 +30,14 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
-# Copy kdf binary to $HOME/.local/bin/kdf to make it accessible
-set(FINAL_INSTALL_DIR "$ENV{HOME}/.local/bin")
-set(KDF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/bin/kdf")
-
-add_custom_command(
-    TARGET ${PLUGIN_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${KDF_PATH} 
-        "${FINAL_INSTALL_DIR}/kdf"
-)
-
-# List of absolute paths to libraries that should be bundled with the plugin
-set(mm2_bundled_libraries
-    "${CMAKE_CURRENT_SOURCE_DIR}/libmm2.so"
-    PARENT_SCOPE
-)
-
-set(KDF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/bin/kdf")
-
 # List of absolute paths to libraries that should be bundled with the plugin.
-# This list could contain prebuilt libraries, or libraries created by an
-# external build triggered from this build file.
+# Flutter installs these under the relocatable application's lib/ directory.
+# No executable is installed, either into the app or the user's home directory.
 set(komodo_defi_framework_bundled_libraries
 
   # Defined in ../src/CMakeLists.txt.
   # This can be changed to accommodate different builds.
   $<TARGET_FILE:komodo_defi_framework>
-  ${KDF_PATH}
+  ${KDF_LINUX_LIBRARIES}
   PARENT_SCOPE
 )

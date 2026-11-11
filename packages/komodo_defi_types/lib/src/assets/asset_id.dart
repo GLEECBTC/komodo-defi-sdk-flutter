@@ -18,14 +18,30 @@ class AssetId extends Equatable {
   factory AssetId.parse(JsonMap json, {required Set<AssetId>? knownIds}) {
     final subClass = resolveProtocolSubClassFromConfig(json);
 
-    final parentCoinTicker = json.valueOrNull<String>('parent_coin');
-    final maybeParent = parentCoinTicker == null
+    final parentCoinTicker =
+        json.valueOrNull<String>('parent_coin') ??
+        (subClass == CoinSubClass.solanaToken
+            ? json.valueOrNull<String>('protocol', 'protocol_data', 'platform')
+            : null);
+    var maybeParent = parentCoinTicker == null
         ? null
         : knownIds?.singleWhere(
             (parent) =>
                 parent.id == parentCoinTicker &&
                 parent.subClass.canBeParentOf(subClass),
           );
+    // Persist the explicit Solana platform identity for cached token history.
+    // A ticker alone is insufficient to reconstruct its network and decimals.
+    final storedParent = json.valueOrNull<JsonMap>('parent_id');
+    if (subClass == CoinSubClass.solanaToken &&
+        maybeParent == null &&
+        storedParent != null) {
+      maybeParent = AssetId.parse(storedParent, knownIds: null);
+      if (maybeParent.id != parentCoinTicker ||
+          maybeParent.subClass != CoinSubClass.solana) {
+        throw const FormatException('Invalid persisted Solana platform');
+      }
+    }
 
     return AssetId(
       id: json.value<String>('coin'),
@@ -80,6 +96,12 @@ class AssetId extends Equatable {
     'derivation_path': derivationPath,
     'type': subClass.formatted,
     if (parentId != null) 'parent_coin': parentId!.id,
+    if (solanaCoinSubClasses.contains(subClass)) ...{
+      'decimals': chainId.decimals,
+      if (parentId != null) 'parent_id': parentId!.toJson(),
+      if (subClass == CoinSubClass.solanaToken && chainId is SolanaChainId)
+        'parent_coin': (chainId as SolanaChainId).platform,
+    },
   };
 
   @override
@@ -123,6 +145,11 @@ extension AssetIdCacheKeyPrefix on AssetId {
 
 abstract class ChainId with EquatableMixin {
   static ChainId parse(JsonMap json) {
+    final type = json.valueOrNull<String>('type');
+    if (type != null &&
+        solanaCoinSubClasses.contains(CoinSubClass.tryParse(type))) {
+      return SolanaChainId.fromConfig(json);
+    }
     final chainParseAttempts = [
       () => parseOrNull(() => AssetChainId.fromConfig(json)),
       () => parseOrNull(() => TendermintChainId.fromConfig(json)),
@@ -149,6 +176,39 @@ abstract class ChainId with EquatableMixin {
       return null;
     }
   }
+}
+
+/// Explicit catalog platform identity for Solana networks, without requiring
+/// RPC nodes or a live protocol object when restoring cached transactions.
+class SolanaChainId extends ChainId {
+  SolanaChainId({required this.platform, required this.decimalsValue});
+
+  factory SolanaChainId.fromConfig(JsonMap json) {
+    final isToken =
+        resolveProtocolSubClassFromConfig(json) == CoinSubClass.solanaToken;
+    return SolanaChainId(
+      platform: isToken
+          ? json.valueOrNull<String>('parent_coin') ??
+                json.value<String>('protocol', 'protocol_data', 'platform')
+          : json.value<String>('coin'),
+      decimalsValue: isToken
+          ? json.valueOrNull<int>('protocol', 'protocol_data', 'decimals') ??
+                json.value<int>('decimals')
+          : 9,
+    );
+  }
+
+  final String platform;
+  final int decimalsValue;
+
+  @override
+  String get formattedChainId => 'solana:$platform';
+
+  @override
+  int get decimals => decimalsValue;
+
+  @override
+  List<Object?> get props => [platform, decimalsValue];
 }
 
 class AssetChainId extends ChainId {

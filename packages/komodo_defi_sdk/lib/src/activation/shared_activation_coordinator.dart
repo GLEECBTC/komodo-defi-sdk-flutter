@@ -147,6 +147,8 @@ class SharedActivationCoordinator {
       throw StateError('SharedActivationCoordinator has been disposed');
     }
 
+    _activationManager.ensureAssetSupported(asset);
+
     final session = await _auth.captureSessionContext();
     _auth.ensureSessionContextCurrent(session);
     _handleSessionChanged(session);

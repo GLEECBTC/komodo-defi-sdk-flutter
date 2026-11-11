@@ -234,7 +234,11 @@ class StrategicCoinConfigManager
       return;
     }
 
-    for (final source in _configSources) {
+    final sources = await _loadingStrategy.selectSources(
+      requestType: LoadingRequestType.initialLoad,
+      availableSources: _configSources,
+    );
+    for (final source in sources) {
       try {
         final commit = await source.getCurrentCommitHash();
         if (commit != null && commit.isNotEmpty) {

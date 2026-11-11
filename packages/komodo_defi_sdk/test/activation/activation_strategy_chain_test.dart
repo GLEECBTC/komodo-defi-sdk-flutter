@@ -1,5 +1,6 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/_activation.dart';
+import 'package:komodo_defi_sdk/src/activation/protocol_strategies/solana_activation_strategy.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart'
     show ActivationConfigService;
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
@@ -7,6 +8,8 @@ import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
+
+import '../solana/solana_fixtures.dart';
 
 const _ethSwapContract = '0x61EEC68Cf64d1b31e41EA713356De2563fB6D3F1';
 
@@ -216,7 +219,10 @@ void main() {
 
   // Asset, then the strategy that activates it for a ContextPrivKey wallet
   // and for a Trezor wallet.
+  final solana = solanaAsset();
   final routes = <(Asset, Type, Type)>[
+    (solana, SolanaActivationStrategy, SolanaActivationStrategy),
+    (solanaToken(solana), SolanaActivationStrategy, SolanaActivationStrategy),
     (eth, EthWithTokensActivationStrategy, EthTaskActivationStrategy),
     (
       Asset.fromJson(

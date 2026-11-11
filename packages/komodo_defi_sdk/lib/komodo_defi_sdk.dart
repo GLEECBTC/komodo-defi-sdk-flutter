@@ -103,6 +103,7 @@ export 'package:komodo_defi_types/komodo_defi_types.dart'
         PrivateKeyExportFailure,
         PrivateKeyExportOutcome,
         PrivateKeyExportResult,
+        SolanaCapabilities,
         WithdrawalSubmission,
         WithdrawalSubmissionType;
 
@@ -160,6 +161,8 @@ export 'src/withdrawals/pending_gasless_transfer_repository.dart'
         PendingGaslessTransferRepository,
         SecureGaslessTransferStorage,
         SecurePendingGaslessTransferRepository;
+export 'src/withdrawals/solana_withdrawal_support.dart'
+    show SolanaWithdrawalReviewChanged, SolanaWithdrawalSubmissionUnknown;
 export 'src/zcash_params/models/download_progress.dart';
 export 'src/zcash_params/models/download_result.dart';
 export 'src/zcash_params/zcash_params_downloader.dart';

@@ -11,10 +11,19 @@ class CustomTokenStorage implements CustomTokenStore {
   /// [customTokensBoxName] is the name of the Hive box for storing custom tokens.
   /// [customTokensBox] is an optional pre-opened LazyBox for testing/mocking.
   CustomTokenStorage({
-    this.customTokensBoxName = 'custom_tokens',
+    String? customTokensBoxName,
+    String? storageNamespace,
     LazyBox<Asset>? customTokensBox,
     AssetParser assetParser = const AssetParser(),
-  }) : _customTokensBox = customTokensBox,
+  }) : customTokensBoxName =
+           customTokensBoxName ??
+           (storageNamespace == null
+               ? KomodoCoinUpdater.storageBoxName('custom_tokens')
+               : KomodoCoinUpdater.storageBoxName(
+                   'custom_tokens',
+                   namespace: storageNamespace,
+                 )),
+       _customTokensBox = customTokensBox,
        _assetParser = assetParser;
 
   static final Logger _log = Logger('CustomTokenStorage');
@@ -245,6 +254,15 @@ class CustomTokenStorage implements CustomTokenStore {
       return false;
     }
 
+    if (existingAsset.protocol case final SolanaTokenProtocol existing) {
+      final requested = requestedAsset.protocol;
+      return requested is SolanaTokenProtocol &&
+          existing.platform == requested.platform &&
+          existing.mintAddress == requested.mintAddress &&
+          existing.programId == requested.programId &&
+          existing.decimals == requested.decimals;
+    }
+
     final existingContractAddress = existingAsset.protocol.contractAddress;
     final requestedContractAddress = requestedAsset.protocol.contractAddress;
     if (existingContractAddress == null || requestedContractAddress == null) {
@@ -274,6 +292,10 @@ class CustomTokenStorage implements CustomTokenStore {
     return switch (protocol) {
       final Erc20Protocol p => p.copyWith(isCustomToken: true),
       final Trc20Protocol p => p.copyWith(isCustomToken: true),
+      final SolanaTokenProtocol p => SolanaTokenProtocol.fromJson({
+        ...p.config,
+        'is_custom_token': true,
+      }),
       _ => throw UnsupportedError(
         'Unsupported custom token protocol: ${protocol.runtimeType}',
       ),

@@ -126,10 +126,15 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
   final TransactionHistoryStrategyFactory _strategyFactory;
 
   // Streaming capability helpers based on asset properties
-  bool _supportsBalanceStreaming(Asset asset) => asset.supportsBalanceStreaming;
+  bool _supportsBalanceStreaming(Asset asset) =>
+      asset.supportsBalanceStreaming || _isSolanaToken(asset);
+
+  bool _isSolanaToken(Asset asset) =>
+      asset.id.subClass == CoinSubClass.solanaToken &&
+      asset.id.parentId?.subClass == CoinSubClass.solana;
 
   bool _supportsTxHistoryStreaming(Asset asset) =>
-      asset.supportsTxHistoryStreaming;
+      asset.supportsTxHistoryStreaming || _isSolanaToken(asset);
 
   void _handleSessionContextChanged(AuthSessionContext? session) {
     if (_isDisposed) return;
@@ -800,7 +805,12 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
         return;
       }
       final txHistoryStreamSubscription = await _eventStreamingManager
-          .subscribeToTxHistory(coin: asset.id.id);
+          .subscribeToTxHistory(
+            coin: asset.id.id,
+            streamerCoin: asset.id.subClass == CoinSubClass.solanaToken
+                ? asset.id.parentId?.id
+                : null,
+          );
       if (!_isWalletContextCurrentSync(walletContext)) {
         await txHistoryStreamSubscription.cancel();
         return;
@@ -1119,7 +1129,10 @@ class TransactionHistoryManager implements _TransactionHistoryManager {
       }
 
       final balanceSubscription = await _eventStreamingManager
-          .subscribeToBalance(coin: asset.id.id);
+          .subscribeToBalance(
+            coin: asset.id.id,
+            streamerCoin: _isSolanaToken(asset) ? asset.id.parentId?.id : null,
+          );
       if (!_isWalletContextCurrentSync(walletContext)) {
         await balanceSubscription.cancel();
         return;

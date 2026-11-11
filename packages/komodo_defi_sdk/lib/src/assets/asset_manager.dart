@@ -1,5 +1,5 @@
 import 'dart:async' show StreamSubscription;
-import 'dart:collection' show UnmodifiableMapView, UnmodifiableSetView;
+import 'dart:collection' show UnmodifiableSetView;
 
 import 'package:flutter/foundation.dart' show ValueGetter;
 import 'package:komodo_coins/komodo_coins.dart';
@@ -7,6 +7,7 @@ import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/_internal_exports.dart';
 import 'package:komodo_defi_sdk/src/sdk/komodo_defi_sdk_config.dart';
+import 'package:komodo_defi_sdk/src/sdk/solana_catalog_policy.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
 /// Manages the lifecycle and state of crypto assets in the Komodo DeFi Framework.
@@ -152,8 +153,23 @@ class AssetManager implements IAssetProvider {
   /// with [AssetId] equality, so exposing one directly silently misses on ids
   /// that are `==` a stored key but stringify differently.
   @override
-  Map<AssetId, Asset> get available =>
-      UnmodifiableMapView(_coins.filteredAssets(_currentFilterStrategy));
+  Map<AssetId, Asset> get available => _capabilityFilteredAssets;
+
+  Map<AssetId, Asset>? _capabilitySource;
+  Map<AssetId, Asset>? _capabilityView;
+
+  // Custom tokens merge after catalog transforms. Apply the same policy to
+  // that final snapshot without rewriting or deleting their stored metadata.
+  Map<AssetId, Asset> get _capabilityFilteredAssets {
+    final source = _coins.filteredAssets(_currentFilterStrategy);
+    if (identical(source, _capabilitySource)) return _capabilityView!;
+    final policy = SolanaCatalogPolicy(_config.solanaCapabilities);
+    _capabilitySource = source;
+    return _capabilityView = Map.unmodifiable({
+      for (final entry in source.entries)
+        if (policy.allows(entry.value)) entry.key: entry.value,
+    });
+  }
 
   /// Returns currently activated assets for the signed-in user.
   ///
@@ -206,7 +222,7 @@ class AssetManager implements IAssetProvider {
   _AssetIndexes? _cachedIndexes;
 
   _AssetIndexes get _indexes {
-    final source = _coins.filteredAssets(_currentFilterStrategy);
+    final source = _capabilityFilteredAssets;
     final cached = _cachedIndexes;
     if (cached != null && identical(cached.source, source)) return cached;
 

@@ -66,9 +66,10 @@ class Asset extends Equatable {
 
   /// Whether this asset supports message signing.
   ///
-  /// Determined by the presence of the `sign_message_prefix` field in the
-  /// coin config.
-  bool get supportsMessageSigning => signMessagePrefix != null;
+  /// Solana signs Ed25519 messages without a Bitcoin-style message prefix.
+  /// Other protocols use the configured `sign_message_prefix` capability.
+  bool get supportsMessageSigning =>
+      protocol.isSolana || signMessagePrefix != null;
 
   /// Creates a copy of this Asset with optionally modified fields.
   Asset copyWith({

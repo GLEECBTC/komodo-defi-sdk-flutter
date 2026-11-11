@@ -25,7 +25,9 @@ class Transaction extends Equatable {
     id: json.value<String>('id'),
     internalId: json.value<String>('internal_id'),
     assetId: AssetId.parse(json.value<JsonMap>('asset_id'), knownIds: null),
-    balanceChanges: BalanceChanges.fromJson(json),
+    balanceChanges: BalanceChanges.fromJson(
+      json.valueOrNull<JsonMap>('balance_changes') ?? json,
+    ),
     timestamp: DateTime.parse(json.value<String>('timestamp')),
     confirmations: json.value<int>('confirmations'),
     blockHeight: json.value<int>('block_height'),
@@ -33,7 +35,12 @@ class Transaction extends Equatable {
     to: List<String>.from(json.value('to')),
     txHash: json.valueOrNull<String>('tx_hash'),
     fee: json.containsKey('fee') || json.containsKey('fee_details')
-        ? FeeInfo.fromJson(json.valueOrNull('fee') ?? json.value('fee_details'))
+        ? FeeInfo.fromJson(
+            json.valueOrNull('fee') ?? json.value('fee_details'),
+            feeCoin:
+                json.valueOrNull<String>('asset_id', 'parent_coin') ??
+                json.valueOrNull<String>('asset_id', 'coin'),
+          )
         : null,
     memo: json.valueOrNull<String>('memo'),
   );
@@ -145,7 +152,15 @@ extension TransactionInfoExtension on TransactionInfo {
       from: from,
       to: to,
       txHash: txHash,
-      fee: feeDetails,
+      fee: switch (feeDetails) {
+        final SolanaFeeInfo fee => fee.copyWith(
+          coin: switch (assetId.chainId) {
+            final SolanaChainId chain => chain.platform,
+            _ => assetId.parentId?.id ?? assetId.id,
+          },
+        ),
+        final fee => fee,
+      },
       memo: memo,
     );
   }

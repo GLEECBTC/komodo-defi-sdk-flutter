@@ -7,6 +7,15 @@ import 'package:logging/logging.dart';
 class KomodoCoinUpdater {
   static final Logger _log = Logger('KomodoCoinUpdater');
 
+  /// Hive's web backend ignores filesystem paths. Prefix the database names
+  /// as well so a candidate cannot open production catalog or custom-token data.
+  static String storageBoxName(
+    String name, {
+    String namespace = const String.fromEnvironment(
+      'KDF_COINS_STORAGE_NAMESPACE',
+    ),
+  }) => namespace.isEmpty ? name : '${namespace}_$name';
+
   /// Initializes the Hive adapters for the Komodo Coin Updates package.
   ///
   /// This method is used to initialize the Hive adapters for the Komodo Coin
