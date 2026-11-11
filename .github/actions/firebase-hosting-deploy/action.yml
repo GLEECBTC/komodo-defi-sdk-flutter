@@ -1,0 +1,54 @@
+name: "Deploy Firebase Hosting"
+description: "Deploys Firebase Hosting with a pinned Firebase CLI and handles the current-active-version false positive"
+
+inputs:
+  firebaseServiceAccount:
+    description: "Firebase service account JSON"
+    required: true
+  channelId:
+    description: "Firebase Hosting channel ID. Use live for production deploys."
+    required: true
+  target:
+    description: "Firebase Hosting target or site"
+    required: false
+    default: ""
+  expires:
+    description: "Preview channel expiration"
+    required: false
+    default: "7d"
+  projectId:
+    description: "Firebase project ID"
+    required: true
+  firebaseToolsVersion:
+    description: "firebase-tools version to use"
+    required: false
+    default: "15.22.3"
+
+  entryPoint:
+    description: "Project directory containing firebase.json"
+    required: false
+    default: "."
+
+outputs:
+  details_url:
+    description: "Deployed Hosting URL"
+    value: ${{ steps.deploy.outputs.details_url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Deploy Firebase Hosting
+      id: deploy
+      shell: bash
+      working-directory: ${{ inputs.entryPoint }}
+      env:
+        FIREBASE_SERVICE_ACCOUNT: ${{ inputs.firebaseServiceAccount }}
+        CHANNEL_ID: ${{ inputs.channelId }}
+        TARGET: ${{ inputs.target }}
+        EXPIRES: ${{ inputs.expires }}
+        PROJECT_ID: ${{ inputs.projectId }}
+        FIREBASE_TOOLS_VERSION: ${{ inputs.firebaseToolsVersion }}
+        DEPLOY_SCRIPT: ${{ github.action_path }}/../../scripts/firebase_hosting_deploy.sh
+        URL_READER: ${{ github.action_path }}/../../scripts/hosting_deploy_url.sh
+      run: |
+        bash "$DEPLOY_SCRIPT"
