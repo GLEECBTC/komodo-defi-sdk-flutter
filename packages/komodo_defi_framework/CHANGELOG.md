@@ -1,20 +1,20 @@
 ## 0.7.0 (2026-10-28)
 
 
-Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC inputs and changes.
+Unpublished SDK 0.9.0 candidate; updated 13 November 2026 for the official main engine build.
 
  - **FIX**(transport): `resetHttpClient()` on the remote and local-executable
    transport aborts every request in flight, including one still connecting;
    it was a no-op. A `stop` request the engine never answers gives up after
    `stopTimeout`, 5 seconds by default (#437, RC #438).
- - **BUILD**(kdf): freeze all seven SDK targets at validated KDF
-   `a51d69a11ff937ecf9678e9b37632af578252846` (`3.2.0-beta`) with specs
-   `7c388ea7b91cb7c657435d416bc03e5349b46162`. This supersedes the earlier
-   `35f0bde` and `e40ac2f` preparation builds (#419/#420, #430/RC #431).
-   Ten platform builds and all 17 test jobs passed for this exact revision;
-   seven archives match independent artifact digests, ZIP checks and ordinary
-   mirror downloads. Original failures/passing retries remain in the
-   [3 November provenance](../../docs/KDF_ARTIFACTS_2026-11-03.json).
+ - **BUILD**(kdf): freeze all seven SDK targets at published KDF main
+   `f9632e0ec771668a6f21b37aede01a30110141cb` (`3.2.0-beta`, #433), carrying
+   its reviewed JSON/YAML manifests onto SDK main. RPC specs remain
+   `7c388ea7b91cb7c657435d416bc03e5349b46162`. Only KDF's changelog differs
+   from `a51d69a`; all seven archive checksums change together. See the
+   [13 November artifact record](../../docs/KDF_ARTIFACTS_2026-11-13.json).
+   Earlier `35f0bde`, `e40ac2f` and `a51d69a` preparation evidence retains its
+   own revisions in the [3 November record](../../docs/KDF_ARTIFACTS_2026-11-03.json).
  - **CHORE**(coins): freeze bundled files/icons at
    `cc8249e85e54467bc2684c2712857711eab55fd2`, superseding `efd3a647`
    (#439, RC #440), which superseded `2b0aefb7` (#430, RC #431). Added

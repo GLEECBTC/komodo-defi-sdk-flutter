@@ -3,7 +3,29 @@
 Prepared 28 October 2026; build-input rolls prepared 29 October and 3 November.
 This is a candidate record, not publication approval.
 
-## Current accepted snapshot — 4 November 2026
+## Official main-build carry — 13 November 2026
+
+The owner authorized completion of SDK 0.9.0 as a prerequisite for the wallet
+0.10.0 draft, selecting KDF main `f9632e0ec771668a6f21b37aede01a30110141cb`.
+Carry only SDK #433's JSON/YAML API pin and seven checksums onto main, preserving
+coins `cc8249e8`, RPC specs and all package versions. The runtime source delta
+from `a51d69a` is empty; only KDF's changelog differs.
+
+The [fresh artifact record](KDF_ARTIFACTS_2026-11-13.json) supplies independent
+release digests, mirror/sidecar verification, archive contents and the native
+version. Run current SDK package/build-transformer and hosted checks before
+merging, then tag `komodo_defi_sdk-v0.9.0` on that accepted main commit. The
+app must pin that exact main commit and pass its SDK tag/version/ancestry
+preflight before promotion. Hosted results and accepted SHAs are recorded in
+the focused carry PR; this document cannot contain its own commit hash.
+
+The dated sections below retain their original pins and dispositions. Their
+old open-PR and authorization statements are historical. SDK #416 is merged
+as `09bde8c6`; this carry is the subsequent, separately authorized preparation.
+Signed consumer installs, upgrades and fee-collection checks remain publication
+gates. This step creates the required SDK tag, not a public GitHub SDK release.
+
+## Accepted snapshot — 4 November 2026 (historical)
 
 - Frozen SDK: `bb5b4187bf49f844c01672799b451b50a5b08808` (normal #435). Its
   tree equals carry head `caab72b973c3fa74a4b6a11a663e4e67798023e1`, which the app RC pins
