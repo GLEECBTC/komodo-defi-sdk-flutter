@@ -5,10 +5,25 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
-Updated 4 November 2026 against frozen RC `bb5b4187`. The
+Updated 13 November 2026 for the official KDF main build. The
 [post-opening audit](docs/RC_0.9.0_CHANGELOG_AUDIT_2026-11-04.md) covers every
-accepted change since release PR #416 opened at `22e14ac9`. No SDK carry was
-pending at this snapshot.
+accepted change since release PR #416 opened at `22e14ac9`. The official-engine carry below follows that historical snapshot.
+
+### Official engine carry — 13 November 2026
+
+The release owner selected published KDF `main`
+`f9632e0ec771668a6f21b37aede01a30110141cb` (`3.2.0-beta`) for wallet
+0.10.0. This carries the reviewed manifest-only change from
+[#433](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/pull/433) onto SDK
+main after #416. Both manifests and all seven archive checksum allowlists move
+together; coins `cc8249e8`, RPC specs, package versions and runtime policy stay
+unchanged. The KDF source comparison changes only `CHANGELOG.md`.
+
+The [fresh artifact record](docs/KDF_ARTIFACTS_2026-11-13.json) records release
+asset digests, downloaded mirror bytes, archive contents and native version.
+Earlier qualification remains evidence for its stated revision. Create
+`komodo_defi_sdk-v0.9.0` only on the validated SDK main merge; this preparation
+does not publish a GitHub SDK release or any package to pub.dev.
 
 ### SDK 0.9.0 overview
 
@@ -166,12 +181,11 @@ The harness remains unpublished. All version constraints move together.
   [`bb5b4187`](https://github.com/GLEECBTC/komodo-defi-sdk-flutter/commit/bb5b4187bf49f844c01672799b451b50a5b08808).
   Earlier `35f0bde` and `e40ac2f` preparation inputs are superseded by the
   following exact pins; their dated provenance remains historical evidence.
-- KDF source: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`,
-  engine `3.2.0-beta`; the two commits since `e40ac2f` bump the version and
-  stabilize CI fixtures, shared-wallet tests, endpoints and development/test
-  proving performance. All ten platform builds and 17 test jobs passed.
-  [Artifact provenance](docs/KDF_ARTIFACTS_2026-11-03.json) records seven
-  independently verified archives and the original failures/passing retries.
+- KDF source: `f9632e0ec771668a6f21b37aede01a30110141cb` on `main`,
+  engine `3.2.0-beta`, published as `v3.2.0-beta`. Only `CHANGELOG.md` differs
+  from the preceding `a51d69a` pin. The [current artifact record](docs/KDF_ARTIFACTS_2026-11-13.json)
+  records this build. The [3 November qualification](docs/KDF_ARTIFACTS_2026-11-03.json)
+  retains the ten builds, 17 test jobs and retries for the previous exact pin.
 - Bundled coins: `cc8249e85e54467bc2684c2712857711eab55fd2`;
   `update_commit_on_build: false`; runtime updates remain enabled. Adds TAR,
   TAR-segwit, TEL-BASE and Yenten (YTN), removes TEL-KRC20, updates TEL

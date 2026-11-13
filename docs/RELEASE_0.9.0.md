@@ -1,6 +1,6 @@
 # Adopting SDK 0.9.0
 
-This candidate is distributed as a complete GitHub checkout/submodule. Keep
+SDK 0.9.0 is distributed as a complete GitHub checkout/submodule. Keep
 every SDK package at one reviewed commit and retain consumer path overrides.
 SDK 0.8.1 is the previous distribution commit (`a96398ba`); the last published
 GitHub release is 0.8.0. This document does not announce publication.
@@ -121,20 +121,24 @@ The proxy owns its API key. Leave it unset to use KDF's public provider path.
 Optional `LifiIntegratorConfig` sets validated global commission at startup;
 the SDK default is unset. Preserve it through registration, sign-in and restart.
 
-Use the seven-platform KDF manifest at exact `dev` source `a51d69a` and the
-contract at specs `7c388ea`. A remote KDF must implement that contract too.
-The frozen coins pin is `cc8249e8`; runtime coin updates remain enabled and
-build-time revision advancement stays disabled. Never replace a checksum
-without independent artifact provenance. The [3 November roll record](KDF_ARTIFACTS_2026-11-03.json)
-compares all seven archives with GitHub artifact digests and ordinary mirrors.
+Use the seven-platform KDF manifest at exact `main` source
+`f9632e0ec771668a6f21b37aede01a30110141cb` and the contract at specs `7c388ea`.
+A remote KDF must implement that contract too. The frozen coins pin is
+`cc8249e8`; runtime coin updates remain enabled and build-time revision
+advancement stays disabled. Never replace a checksum without independent
+artifact provenance. The [13 November record](KDF_ARTIFACTS_2026-11-13.json)
+compares all seven archives with the published v3.2.0-beta release digests and
+ordinary mirror sidecars, checks archive contents and records the native
+version. The owner selected this official build on 13 November; SDK #433's
+reviewed manifest delta is carried onto main without unrelated dev changes.
 
 The two KDF commits after `e40ac2f` bump the engine to `3.2.0-beta` and repair
 CI fixtures, shared-wallet test races, test endpoints and proving performance
 in development/test profiles. All ten platform builds and all 17 test jobs
 passed. The original Linux Tendermint timeout and macOS Telegram assertion
 failure remain recorded alongside their passing retries. The upstream main
-merge later changed only `CHANGELOG.md`; this pin retains the exact requested
-and validated revision.
+merge changed only `CHANGELOG.md`; the current pin selects that official build.
+The preceding test results describe `a51d69a`, not a new run on `f9632e0`.
 
 The coins bundle adds TAR, TAR-segwit and TEL-BASE, removes TEL-KRC20 and
 updates TEL ERC-20/Polygon contracts and decimals. It also refreshes GLEEC/GRC-20
