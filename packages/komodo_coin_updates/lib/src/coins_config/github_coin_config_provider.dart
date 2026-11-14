@@ -30,6 +30,7 @@ class GithubCoinConfigProvider implements CoinConfigProvider {
     required this.coinsConfigPath,
     this.cdnBranchMirrors,
     this.githubToken,
+    this.requestTimeout = const Duration(seconds: 10),
     CoinConfigTransformer? transformer,
     http.Client? httpClient,
   }) : _client = httpClient ?? http.Client(),
@@ -87,6 +88,12 @@ class GithubCoinConfigProvider implements CoinConfigProvider {
   /// the risk of rate limiting.
   final String? githubToken;
 
+  /// Upper bound for an individual remote request.
+  ///
+  /// Startup refreshes rely on this to fall back to the last known coin list
+  /// rather than delaying KDF indefinitely while offline.
+  final Duration requestTimeout;
+
   /// Optional mapping of branch name to CDN base URL that directly hosts
   /// the repository contents for that branch (without an extra branch
   /// segment in the path). When present and the current [branch] is found
@@ -103,7 +110,7 @@ class GithubCoinConfigProvider implements CoinConfigProvider {
   @override
   Future<List<Asset>> getAssetsForCommit(String commit) async {
     final url = _contentUri(coinsConfigPath, branchOrCommit: commit);
-    final response = await _client.get(url);
+    final response = await _client.get(url).timeout(requestTimeout);
     if (response.statusCode != 200) {
       final body = response.body;
       final preview = body.length > 1024 ? '${body.substring(0, 1024)}…' : body;
@@ -163,7 +170,9 @@ class GithubCoinConfigProvider implements CoinConfigProvider {
     }
 
     _log.fine('Fetching latest commit for branch $effectiveBranch');
-    final response = await _client.get(url, headers: header);
+    final response = await _client
+        .get(url, headers: header)
+        .timeout(requestTimeout);
 
     if (response.statusCode != 200) {
       _log.warning(
