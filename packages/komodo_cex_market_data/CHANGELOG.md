@@ -1,3 +1,16 @@
+## Unreleased
+
+ - **FIX**(coinpaprika): start history requests at the first UTC midnight the
+   plan accepts. CoinPaprika reads a date-only start as 00:00 UTC, so the
+   first 90-day batch of a year was always refused.
+ - **FIX**(coinpaprika): a 402 "not allowed in this plan" is a plan
+   limitation and any other 402 a rate limit. Errors are thrown as
+   `MarketDataApiException`, which `RepositoryFallbackMixin` backs off from
+   when rate limited. Failed history batches rethrow so transient gaps cannot
+   be mistaken for unavailable dates; a rate limit stops the remaining batches.
+ - **FIX**(fallback): try each healthy provider after health changes reorder
+   the list, and allow incomplete history results to continue to fallback.
+
 ## 0.2.0 (2026-10-28)
 
  - **BREAKING** **PERF**(coinpaprika): use one bulk tickers response cached
