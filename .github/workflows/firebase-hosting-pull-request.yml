@@ -64,9 +64,9 @@ jobs:
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cd playground && flutter build web --release
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - uses: ./.github/actions/firebase-hosting-deploy
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          channelId: pull-${{ github.event.pull_request.number }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KOMODO_PLAYGROUND }}
           projectId: komodo-playground
           entryPoint: ./playground
@@ -96,9 +96,9 @@ jobs:
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cd packages/komodo_defi_sdk/example && flutter build web --release
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - uses: ./.github/actions/firebase-hosting-deploy
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          channelId: pull-${{ github.event.pull_request.number }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KOMODO_DEFI_SDK }}
           projectId: komodo-defi-sdk
           entryPoint: ./packages/komodo_defi_sdk/example

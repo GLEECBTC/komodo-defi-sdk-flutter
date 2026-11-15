@@ -68,7 +68,7 @@ class GithubApiProvider {
     if (fileContentResponse.statusCode != 200) {
       throw Exception(
         'Failed to fetch remote file metadata at $fileMetadataUrl: '
-        '${fileContentResponse.statusCode} ${fileContentResponse.reasonPhrase}',
+        'HTTP ${fileContentResponse.statusCode}',
       );
     }
 
@@ -99,13 +99,12 @@ class GithubApiProvider {
       _log
         ..severe(
           'GitHub API request failed: '
-          '${response.statusCode} ${response.reasonPhrase}',
+          'HTTP ${response.statusCode}',
         )
-        ..severe('Response body: ${response.body}')
         ..severe('Using authentication: ${hasToken ? 'yes' : 'no'}');
       throw Exception(
         'Failed to retrieve latest commit hash: $branch'
-        '[${response.statusCode}]: ${response.reasonPhrase}',
+        '[HTTP ${response.statusCode}]',
       );
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -131,7 +130,7 @@ class GithubApiProvider {
     if (response.statusCode != 200) {
       throw Exception(
         'Failed to retrieve directory contents: $repoPath'
-        '[${response.statusCode}]: ${response.reasonPhrase}',
+        '[HTTP ${response.statusCode}]',
       );
     }
 
@@ -161,7 +160,7 @@ class GithubApiProvider {
     if (response.statusCode != 200) {
       throw Exception(
         'Failed to retrieve latest release tag: '
-        '[${response.statusCode}]: ${response.reasonPhrase}',
+        '[HTTP ${response.statusCode}]',
       );
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -176,7 +175,7 @@ class GithubApiProvider {
     if (response.statusCode != 200) {
       throw Exception(
         'Failed to retrieve releases: '
-        '[${response.statusCode}]: ${response.reasonPhrase}',
+        '[HTTP ${response.statusCode}]',
       );
     }
     final data = jsonDecode(response.body) as List<dynamic>;
