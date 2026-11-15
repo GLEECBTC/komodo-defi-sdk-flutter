@@ -35,25 +35,31 @@ void main() {
 
     /// Runs [call] against an API that refuses every request the way GitHub
     /// does once the rate limit is used up, and returns the exception thrown.
-    Future<Exception> rateLimited(Future<Object?> Function() call) =>
-        http.runWithClient(
-          () async {
-            try {
-              await call();
-            } on Exception catch (error) {
-              return error;
-            }
-            fail('Expected the request to fail');
-          },
-          () => MockClient((request) async {
-            sentRequests.add(request);
-            return http.Response(
-              '{"message":"API rate limit exceeded"}',
-              403,
-              reasonPhrase: 'rate limit exceeded',
-            );
-          }),
+    Future<Exception> rateLimited(
+      Future<Object?> Function() call, {
+      bool echoCredentials = false,
+    }) => http.runWithClient(
+      () async {
+        try {
+          await call();
+        } on Exception catch (error) {
+          return error;
+        }
+        fail('Expected the request to fail');
+      },
+      () => MockClient((request) async {
+        sentRequests.add(request);
+        return http.Response(
+          echoCredentials
+              ? '{"message":"Rejected Authorization: Bearer $token"}'
+              : '{"message":"API rate limit exceeded"}',
+          403,
+          reasonPhrase: echoCredentials
+              ? 'Rejected Authorization: Bearer $token'
+              : 'rate limit exceeded',
         );
+      }),
+    );
 
     String loggedText() =>
         records.map((record) => '${record.message} ${record.error}').join('\n');
@@ -87,6 +93,16 @@ void main() {
           expect(sentRequests.single.headers['Authorization'], 'Bearer $token');
           expect(loggedText(), isNot(contains(token)));
           expect(error.toString(), isNot(contains(token)));
+        },
+      );
+      test(
+        '$name withholds credentials echoed in provider diagnostics',
+        () async {
+          final error = await rateLimited(call, echoCredentials: true);
+
+          expect(loggedText(), isNot(contains(token)));
+          expect(error.toString(), isNot(contains(token)));
+          expect(error.toString(), contains('403'));
         },
       );
     }
