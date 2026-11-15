@@ -344,17 +344,26 @@ class RoutedSwapManager {
         // The lease holds off a wallet switch while the transport connects.
         // Past its bound, the switch stops KDF and resets the transport
         // before a replacement starts, which aborts this request first.
+        // A transport still preparing to dispatch must also recheck the
+        // session: it may not have a pending request for reset to abort yet.
         dispatched = true;
-        return _client.rpc.routedSwap.init(
-          from: offer.from.id,
-          to: offer.to.id,
-          amount: offer.sellAmount.toString(),
-          minToAmount: offer.guaranteedReceive.toString(),
-          slippage: offer.slippage,
-          order: offer.order,
-          provider: offer.provider,
+        return RpcDispatchGuard.run(
+          () => _requireCurrent(context),
+          () => _client.rpc.routedSwap.init(
+            from: offer.from.id,
+            to: offer.to.id,
+            amount: offer.sellAmount.toString(),
+            minToAmount: offer.guaranteedReceive.toString(),
+            slippage: offer.slippage,
+            order: offer.order,
+            provider: offer.provider,
+          ),
+          methods: const {'task::routed_swap::init'},
         );
       });
+    } on RpcDispatchRejected {
+      // A local authorization check failed before transport dispatch.
+      rethrow;
     } on rpc.RoutedSwapRpcException {
       // A typed rejection comes back before any task exists.
       rethrow;

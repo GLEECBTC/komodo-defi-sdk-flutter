@@ -9,6 +9,7 @@ export 'activation/asset_activation_state.dart';
 export 'addresses/address_conversion_result.dart';
 export 'addresses/address_validation.dart';
 export 'api/api_client.dart';
+export 'api/rpc_dispatch_guard.dart';
 export 'assets/asset.dart';
 export 'assets/asset_cache_key.dart';
 export 'assets/asset_id.dart';

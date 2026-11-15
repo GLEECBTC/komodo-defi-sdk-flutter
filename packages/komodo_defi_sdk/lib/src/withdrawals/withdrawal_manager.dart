@@ -1247,8 +1247,9 @@ class WithdrawalManager {
   /// ```
   Stream<WithdrawalProgress> executeWithdrawal(
     WithdrawalPreview preview,
-    String assetId,
-  ) async* {
+    String assetId, {
+    void Function()? beforeBroadcast,
+  }) async* {
     if (_isDisposed) throw StateError('WithdrawalManager has been disposed');
     WalletOperationContext? operationContext;
     PendingGaslessTransfer? operationPending;
@@ -1266,8 +1267,11 @@ class WithdrawalManager {
       // Tendermint assets are not yet supported by the task-based API
       if (isTendermintProtocol || isSiaProtocol) {
         // This branch skips the activation that enforces restrictions below.
-        void ensureAllowed() =>
-            _activationCoordinator.ensureActiveAssetAllowed(asset.id);
+        void ensureAllowed() {
+          _activationCoordinator.ensureActiveAssetAllowed(asset.id);
+          beforeBroadcast?.call();
+        }
+
         ensureAllowed();
         yield* _legacyManager.executeWithdrawal(
           preview,
@@ -1360,29 +1364,41 @@ class WithdrawalManager {
       // progress event above since. Before the relay flag, so a rejection
       // still clears the GasFree reservation.
       _activationCoordinator.ensureActiveAssetAllowed(asset.id);
+      // App authorization may have changed while activation, journal writes or
+      // the progress consumer were suspended. Reject before marking a relay as
+      // invoked so a local cancellation does not become an ambiguous transfer.
+      beforeBroadcast?.call();
 
       // Broadcast the pre-signed transaction (or relay the gas-free payload).
       final SendRawTransactionResponse response;
       try {
         relayInvocationBegan = true;
-        Future<SendRawTransactionResponse> submit() =>
-            _client.rpc.withdraw.sendRawTransaction(
-              coin: assetId,
-              txHex: preview.txHex,
-              // Submit the exact payload snapshot that passed validation. The
-              // caller-owned preview map may otherwise be mutated while secure
-              // persistence and stream registration are awaiting completion.
-              gaslessRelayPayload: validated?.relay,
-              // Raw transaction JSON is reserved for non-GasFree platform
-              // transactions. GasFree always crosses this boundary as the typed
-              // payload that passed validation above.
-              txJson: validated == null ? preview.txJson : null,
-            );
+        Future<SendRawTransactionResponse> submit() => RpcDispatchGuard.run(
+          () => beforeBroadcast?.call(),
+          () => _client.rpc.withdraw.sendRawTransaction(
+            coin: assetId,
+            txHex: preview.txHex,
+            // Submit the exact payload snapshot that passed validation. The
+            // caller-owned preview map may otherwise be mutated while secure
+            // persistence and stream registration are awaiting completion.
+            gaslessRelayPayload: validated?.relay,
+            // Raw transaction JSON is reserved for non-GasFree platform
+            // transactions. GasFree always crosses this boundary as the typed
+            // payload that passed validation above.
+            txJson: validated == null ? preview.txJson : null,
+          ),
+          methods: const {'send_raw_transaction'},
+        );
         response = prepared == null
             ? await submit()
             : await _untilDisposed(
                 () => submit().timeout(const Duration(seconds: 30)),
               );
+      } on RpcDispatchRejected {
+        // The transport checked after its own asynchronous setup and proved
+        // nothing was sent. The outer cleanup may release this reservation.
+        relayInvocationBegan = false;
+        rethrow;
       } on _WithdrawalManagerDisposed {
         // The remote relay may still finish. Preserve the existing durable
         // unresolved reservation. Disposal cancels only local continuation.

@@ -8,11 +8,13 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart';
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
+import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 import 'package:komodo_defi_framework/src/native/komodo_defi_framework_bindings_generated.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
-import 'package:komodo_defi_framework/src/operations/kdf_operations_local_executable.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart' show RpcDispatchGuard;
+import 'package:path/path.dart' as path;
 
 IKdfOperations createLocalKdfOperations({
   required void Function(String) logCallback,
@@ -23,13 +25,15 @@ IKdfOperations createLocalKdfOperations({
       logCallback: logCallback,
       config: config,
     );
-  } catch (e) {
-    final executable = KdfOperationsLocalExecutable.create(
-      logCallback: logCallback,
-      config: config,
+  } catch (_) {
+    // The executable transport places startup parameters in process arguments.
+    // Never silently move production credentials to that transport when a
+    // native library is missing or incompatible.
+    throw KdfException(
+      'The bundled wallet engine could not be loaded. '
+      'Reinstall or update the app.',
+      type: KdfExceptionType.configurationError,
     );
-
-    return executable;
   }
 }
 
@@ -45,12 +49,15 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     required LocalConfig config,
   }) {
     final log = logCallback ?? print;
+    // Resolve the library before allocating a callback that keeps its isolate
+    // alive. A missing bundled library must fail without leaking that callback.
+    final bindings = KomodoDefiFrameworkBindings(_library);
     final nativeLogCallback = ffi.NativeCallable<LogCallbackFunction>.listener(
       (ffi.Pointer<Utf8> messagePtr) => _logNativeLogMessage(messagePtr, log),
     );
 
     return KdfOperationsNativeLibrary._(
-      KomodoDefiFrameworkBindings(_library),
+      bindings,
       nativeLogCallback,
       config,
       log,
@@ -100,16 +107,27 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
         .toJsonString()
         .toNativeUtf8()
         .cast<Utf8>();
+    final startParamsBytes = startParamsPtr.length + 1;
     // TODO: Implement log level
 
     final timer = Stopwatch()..start();
-    final result = await compute(
-      _kdfMainIsolate,
-      _KdfMainParams(
-        startParamsPtr.address,
-        _logCallback.nativeFunction.address,
-      ),
-    ).whenComplete(() => calloc.free(startParamsPtr));
+    final result =
+        await compute(
+          _kdfMainIsolate,
+          _KdfMainParams(
+            startParamsPtr.address,
+            _logCallback.nativeFunction.address,
+          ),
+        ).whenComplete(() {
+          // mm2_main consumed this owned startup allocation before returning.
+          // This clears our native copy; it cannot erase Dart strings or KDF's
+          // own live signing material.
+          startParamsPtr
+              .cast<ffi.Uint8>()
+              .asTypedList(startParamsBytes)
+              .fillRange(0, startParamsBytes, 0);
+          calloc.free(startParamsPtr);
+        });
 
     if (kDebugMode) _log('KDF started in ${timer.elapsedMilliseconds}ms');
 
@@ -178,6 +196,8 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
     }
 
     request['userpass'] = _config.rpcPassword;
+    final method = request['method'];
+    if (method is String) RpcDispatchGuard.ensureCurrent(method);
     final response = await _client.post(
       _url,
       body: json.encode(request),
@@ -286,7 +306,7 @@ ffi.DynamicLibrary _loadLibrary() {
 
 List<String> _getLibraryPaths() {
   if (Platform.isMacOS) {
-    return ['kdf', 'mm2', 'libkdflib.dylib', 'PROCESS', 'EXECUTABLE'];
+    return macOsKdfLibraryPaths(Platform.resolvedExecutable);
   } else if (Platform.isIOS) {
     return ['libkdflib.dylib', 'PROCESS', 'EXECUTABLE'];
   } else if (Platform.isAndroid) {
@@ -301,15 +321,34 @@ List<String> _getLibraryPaths() {
       'PROCESS',
     ];
   } else if (Platform.isWindows) {
-    // Temporary solution to resolve the isssue where Rust libraries built for
-    // Windows will crash for devices using Nvidia GPUs. When no libraries are
-    // found, the SDK will attempt to use the KDF executable if present.
-    return [];
+    return windowsKdfLibraryPaths(Platform.resolvedExecutable);
   } else if (Platform.isLinux) {
     return ['libkdflib.so', 'libkdflib_static.so'];
   } else {
     throw UnsupportedError('Unsupported platform or KDF library not found');
   }
 }
+
+/// The verified Windows archive bundles kdflib.dll next to the application.
+/// Resolve it from that directory, never the working directory or DLL search
+/// path. Incompatible/missing libraries fail without executable transport.
+@visibleForTesting
+List<String> windowsKdfLibraryPaths(String executablePath) => [
+  path.windows.join(path.windows.dirname(executablePath), 'kdflib.dll'),
+];
+
+/// CocoaPods embeds the verified library in the application's Frameworks
+/// directory. Process symbols support builds that explicitly link KDF in;
+/// Mach-O executables from the old subprocess backend are not dylibs.
+@visibleForTesting
+List<String> macOsKdfLibraryPaths(String executablePath) => [
+  path.posix.join(
+    path.posix.dirname(path.posix.dirname(executablePath)),
+    'Frameworks',
+    'libkdflib.dylib',
+  ),
+  'PROCESS',
+  'EXECUTABLE',
+];
 
 ffi.DynamicLibrary get _library => _loadLibrary();

@@ -150,9 +150,24 @@ class TrezorAuthService implements IAuthService {
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) => _authService.updatePassword(
     currentPassword: currentPassword,
     newPassword: newPassword,
+    expectedWalletId: expectedWalletId,
+    expectedSession: expectedSession,
+  );
+
+  @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  }) => _authService.verifyPassword(
+    password: password,
+    expectedWalletId: expectedWalletId,
+    expectedSession: expectedSession,
   );
 
   @override
@@ -198,17 +213,24 @@ class TrezorAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    bool allowActiveWallet = false,
     Future<void> Function(KdfUser target)? beforeDelete,
     Future<void> Function()? afterDelete,
   }) => _authService.deleteWallet(
     walletName: walletName,
     password: password,
+    allowActiveWallet: allowActiveWallet,
     beforeDelete: beforeDelete,
     afterDelete: afterDelete,
   );
 
   @override
   Future<bool> ensureKdfHealthy() => _authService.ensureKdfHealthy();
+
+  @override
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  ) => _authService.retryWalletDeletionCleanup(deleted);
 
   @override
   Future<KdfUser> signIn({
@@ -248,7 +270,13 @@ class TrezorAuthService implements IAuthService {
     required AuthOptions options,
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
+    if (provisioningId != null) {
+      throw ArgumentError(
+        'Managed creation is only supported for software wallets',
+      );
+    }
     // Throw exception if PrivateKeyPolicy is NOT trezor
     if (options.privKeyPolicy != const PrivateKeyPolicy.trezor()) {
       throw AuthException(

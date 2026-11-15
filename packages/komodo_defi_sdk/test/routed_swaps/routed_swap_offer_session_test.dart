@@ -27,7 +27,7 @@ const _b = KdfUser(
 
 /// An engine that prices every quote on the default route and starts
 /// anything it is asked to.
-ScriptedKdf _engine() => ScriptedKdf()
+ScriptedKdf _engine() => _DelayedDispatchKdf()
   ..always(
     'routed_swap::quote',
     (_) => ok({
@@ -39,6 +39,28 @@ ScriptedKdf _engine() => ScriptedKdf()
     'task::routed_swap::status',
     (_) => ok(inProgress(uuidOf(1), 'Signing')),
   );
+
+/// Models asynchronous transport preparation (including WASM module loading).
+/// Real transports check the scoped authorization immediately before dispatch.
+class _DelayedDispatchKdf extends ScriptedKdf {
+  String? delayedMethod;
+  bool delayOnlyForget = false;
+  final dispatchEntered = Completer<void>();
+  final dispatchGate = Completer<void>();
+
+  @override
+  Future<Map<String, dynamic>> executeRpc(Map<String, dynamic> request) async {
+    final method = request['method'] as String;
+    if (method == delayedMethod &&
+        (!delayOnlyForget ||
+            (request['params'] as Map?)?['forget_if_finished'] == true)) {
+      if (!dispatchEntered.isCompleted) dispatchEntered.complete();
+      await dispatchGate.future;
+    }
+    RpcDispatchGuard.ensureCurrent(method);
+    return super.executeRpc(request);
+  }
+}
 
 /// Ends [auth]'s session and starts another for [user], as signing out and
 /// in again does.
@@ -157,6 +179,86 @@ void main() {
     expect(handle.uuid, uuidOf(1));
     expect(kdf.calls('task::routed_swap::init'), 1);
   });
+
+  test(
+    'an init delayed in transport refuses a revoked wallet session',
+    () async {
+      final offer = await quoted();
+      final delayed = kdf as _DelayedDispatchKdf
+        ..delayedMethod = 'task::routed_swap::init';
+      final rejected = expectLater(
+        manager.start(offer),
+        throwsA(isA<RpcDispatchRejected>()),
+      );
+      await delayed.dispatchEntered.future;
+      _signIn(auth, _b);
+      delayed.dispatchGate.complete();
+
+      await rejected;
+      expect(kdf.calls('task::routed_swap::init'), 0);
+    },
+  );
+
+  test(
+    'a cancel delayed in transport refuses a revoked wallet session',
+    () async {
+      final handle = await manager.start(await quoted());
+      final delayed = kdf as _DelayedDispatchKdf
+        ..delayedMethod = 'task::routed_swap::cancel'
+        ..always('task::routed_swap::cancel', (_) => ok({}));
+      final rejected = expectLater(
+        handle.cancel(),
+        throwsA(isA<RpcDispatchRejected>()),
+      );
+      await delayed.dispatchEntered.future;
+      _signIn(auth, _b);
+      delayed.dispatchGate.complete();
+
+      await rejected;
+      expect(kdf.calls('task::routed_swap::cancel'), 0);
+    },
+  );
+
+  test(
+    'a cancel awaiting a lease rejects definitely after a wallet switch',
+    () async {
+      final handle = await manager.start(await quoted());
+      auth.leaseGate = Completer<void>();
+      final rejected = expectLater(
+        handle.cancel(),
+        throwsA(isA<AuthSessionChangedException>()),
+      );
+      await pumpEventQueue();
+      _signIn(auth, _b);
+      auth.leaseGate!.complete();
+
+      await rejected;
+      expect(kdf.calls('task::routed_swap::cancel'), 0);
+    },
+  );
+
+  test(
+    'finished-task cleanup cannot cross a wallet switch in transport',
+    () async {
+      final delayed = kdf as _DelayedDispatchKdf
+        ..delayedMethod = 'task::routed_swap::status'
+        ..delayOnlyForget = true
+        ..always('task::routed_swap::status', (_) => ok(completed(uuidOf(1))))
+        ..always('routed_swap::history', (_) => historyAnswer([]));
+      await manager.start(await quoted());
+      await delayed.dispatchEntered.future;
+      _signIn(auth, _b);
+      delayed.dispatchGate.complete();
+      await pumpEventQueue();
+
+      expect(
+        kdf
+            .paramsFor('task::routed_swap::status')
+            .where((params) => params['forget_if_finished'] == true),
+        isEmpty,
+      );
+    },
+  );
 
   for (final next in [_b, _a]) {
     test('an offer priced before signing in to '

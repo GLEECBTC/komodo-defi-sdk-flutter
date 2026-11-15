@@ -43,6 +43,9 @@ class ProcessKdfOperations implements IKdfOperations {
       logCallback: _log,
       config: config,
       startupTimeout: startupTimeout,
+      // This measurement harness uses unfunded, synthetic fixture wallets.
+      // Production credential-bearing starts require the bundled library.
+      allowUnsafeTestCredentials: true,
       // The binary's location is known exactly; the framework's finder searches
       // an app bundle layout that does not exist under `flutter test`.
       executableFinder: _FixedExecutableFinder(binary, _log),
