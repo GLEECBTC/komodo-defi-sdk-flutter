@@ -130,17 +130,19 @@ void main() {
       expect(requestedStarts(), hasLength(1));
     });
 
-    test('keeps the batches that succeed when one fails', () async {
-      var call = 0;
-      whenFetch().thenAnswer((_) async {
-        if (call++ == 0) throw Exception('CoinPaprika server error');
-        return [TestFixtures.createMockOhlc()];
-      });
+    test(
+      'does not report failed batches as unavailable historical dates',
+      () async {
+        var call = 0;
+        whenFetch().thenAnswer((_) async {
+          if (call++ == 0) throw Exception('CoinPaprika server error');
+          return [TestFixtures.createMockOhlc()];
+        });
 
-      final result = await fetchSinceLastYear();
-
-      expect(result.ohlc, hasLength(4));
-    });
+        await expectLater(fetchSinceLastYear(), throwsA(isA<Exception>()));
+        expect(requestedStarts(), hasLength(5));
+      },
+    );
   });
 
   test('prices a year of history without a request the plan refuses', () async {

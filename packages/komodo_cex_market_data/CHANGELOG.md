@@ -6,9 +6,10 @@
  - **FIX**(coinpaprika): a 402 "not allowed in this plan" is a plan
    limitation and any other 402 a rate limit. Errors are thrown as
    `MarketDataApiException`, which `RepositoryFallbackMixin` backs off from
-   when rate limited. A history request whose batches all fail rethrows the
-   last error instead of returning an empty success; a rate limit stops the
-   remaining batches.
+   when rate limited. Failed history batches rethrow so transient gaps cannot
+   be mistaken for unavailable dates; a rate limit stops the remaining batches.
+ - **FIX**(fallback): try each healthy provider after health changes reorder
+   the list, and allow incomplete history results to continue to fallback.
 
 ## 0.2.0 (2026-10-28)
 

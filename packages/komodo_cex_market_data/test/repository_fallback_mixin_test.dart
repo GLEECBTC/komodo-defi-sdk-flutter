@@ -1,5 +1,4 @@
 import 'package:decimal/decimal.dart';
-import 'package:http/http.dart' as http;
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
@@ -228,6 +227,7 @@ void main() {
             PriceRequestType.currentPrice,
             (repo) => repo.getCoinFiatPrice(testAsset),
             'test',
+            maxTotalAttempts: 2,
           );
           expect(result, equals(Decimal.parse('49000.0')));
         }

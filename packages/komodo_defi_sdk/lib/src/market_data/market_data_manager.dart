@@ -192,9 +192,10 @@ class CexMarketDataManager
   void _cacheDatedPrice(
     String cacheKey,
     DateTime normalizedDate,
-    Decimal price,
-  ) {
-    if (!normalizedDate.isBefore(_utcToday())) {
+    Decimal price, {
+    required DateTime requestDay,
+  }) {
+    if (!normalizedDate.isBefore(requestDay)) {
       _priceCache[cacheKey] = price;
       return;
     }
@@ -271,6 +272,7 @@ class CexMarketDataManager
     DateTime? priceDate,
     QuoteCurrency quoteCurrency = Stablecoin.usdt,
   }) async {
+    final requestDay = _utcToday();
     final price = await repo.getCoinFiatPrice(
       assetId,
       priceDate: priceDate,
@@ -280,7 +282,12 @@ class CexMarketDataManager
       _priceCache[cacheKey] = price;
       _lastKnownCurrentPriceCache[cacheKey] = price;
     } else {
-      _cacheDatedPrice(cacheKey, _normalizeDate(priceDate), price);
+      _cacheDatedPrice(
+        cacheKey,
+        _normalizeDate(priceDate),
+        price,
+        requestDay: requestDay,
+      );
     }
     _logger.finer(
       'Fetched price from ${repo.runtimeType} for '
@@ -453,11 +460,12 @@ class CexMarketDataManager
     final missingDates = <DateTime>[];
 
     for (final date in {for (final date in dates) _normalizeDate(date)}) {
+      if (date.isAfter(today)) continue;
       final cacheKey = cacheKeyFor(date);
       final cachedPrice = _getCachedPrice(cacheKey);
       if (cachedPrice != null) {
         prices[date] = cachedPrice;
-      } else if (!date.isBefore(today)) {
+      } else if (date == today) {
         currentDays.add(date);
       } else if (!_isKnownUnpriced(cacheKey)) {
         missingDates.add(date);
@@ -481,25 +489,55 @@ class CexMarketDataManager
     }
 
     if (missingDates.isNotEmpty) {
+      final accumulated = <DateTime, Decimal>{};
+      var hadFailure = false;
       final fetched = await tryRepositoriesInOrder(
         assetId,
         quoteCurrency,
         PriceRequestType.priceHistory,
-        (repo) => repo.getCoinFiatPrices(
-          assetId,
-          missingDates,
-          fiatCurrency: quoteCurrency,
-        ),
+        (repo) async {
+          final remaining = missingDates
+              .where((date) => !accumulated.containsKey(date))
+              .toList();
+          final remainingSet = remaining.toSet();
+          try {
+            final result = await repo.getCoinFiatPrices(
+              assetId,
+              remaining,
+              fiatCurrency: quoteCurrency,
+            );
+            for (final entry in result.entries) {
+              final date = _normalizeDate(entry.key);
+              if (remainingSet.contains(date)) accumulated[date] = entry.value;
+            }
+          } catch (_) {
+            hadFailure = true;
+            rethrow;
+          }
+          return accumulated;
+        },
         'fiatPriceHistory',
+        maxTotalAttempts: priceRepositories.length > 3
+            ? priceRepositories.length
+            : 3,
+        isComplete: (result) => missingDates.every(result.containsKey),
       );
 
       fetched.forEach((date, price) {
         final normalizedDate = _normalizeDate(date);
-        _cacheDatedPrice(cacheKeyFor(normalizedDate), normalizedDate, price);
+        _cacheDatedPrice(
+          cacheKeyFor(normalizedDate),
+          normalizedDate,
+          price,
+          requestDay: today,
+        );
         prices[normalizedDate] = price;
       });
       for (final date in missingDates) {
-        if (!prices.containsKey(date) && date.isBefore(today)) {
+        if (!hadFailure &&
+            !hasUnavailableRepositories &&
+            !prices.containsKey(date) &&
+            date.isBefore(today)) {
           _unpricedPastDays[cacheKeyFor(date)] = _clock();
         }
       }

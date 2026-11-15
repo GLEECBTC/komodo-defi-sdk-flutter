@@ -12,12 +12,15 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   date-only start as 00:00 UTC, so the first 90-day batch of a year was always
   refused. A 402 "not allowed in this plan" is a plan limitation; any other 402
   is a rate limit, thrown as a typed `MarketDataApiException` that repository
-  fallback backs off from. A history request whose batches all fail throws
-  instead of returning an empty success, so fallback repositories are tried.
+  fallback backs off from. Failed history batches throw so fallback
+  repositories are tried and temporary gaps are not cached as unavailable.
   `CexMarketDataManager` keeps past days' prices across its five-minute cache
   rotation, waits an hour before asking again for a past day no repository
   priced, and prices today with the current price. Repeated
   `fiatPriceHistory` calls no longer re-request a coin's whole history.
+  Partial history is completed from other providers; rate-limit reordering
+  does not skip healthy providers. Future dates remain unavailable, and a
+  request spanning midnight cannot permanently cache an unfinished day.
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 

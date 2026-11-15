@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
 import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart';
@@ -6,6 +8,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 class _MockRepository extends Mock implements CexRepository {}
+
+class _FallbackRepository extends Mock implements CexRepository {}
 
 final _btc = AssetId(
   id: 'BTC',
@@ -155,6 +159,238 @@ void main() {
     ]);
 
     expect(prices.keys, [_daysAgo(3), _daysAgo(2), _daysAgo(1)]);
+  });
+
+  test(
+    'fills partial history from the next provider before caching gaps',
+    () async {
+      final fallback = _FallbackRepository();
+      when(
+        () => fallback.supports(any(), any(), any()),
+      ).thenAnswer((_) async => true);
+      when(
+        () => repo.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async => {_daysAgo(1): Decimal.one});
+      when(
+        () => fallback.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async => {_daysAgo(2): Decimal.fromInt(2)});
+      await manager.dispose();
+      manager = CexMarketDataManager(
+        priceRepositories: [repo, fallback],
+        clock: () => now,
+      );
+      await manager.init();
+
+      final prices = await manager.fiatPriceHistory(_btc, [
+        _daysAgo(2),
+        _daysAgo(1),
+      ]);
+
+      expect(prices, {
+        _daysAgo(2): Decimal.fromInt(2),
+        _daysAgo(1): Decimal.one,
+      });
+      verify(() => fallback.getCoinFiatPrices(_btc, [_daysAgo(2)])).called(1);
+      await manager.fiatPriceHistory(_btc, [_daysAgo(2), _daysAgo(1)]);
+      expect(historyRequests(), [
+        [_daysAgo(2), _daysAgo(1)],
+      ]);
+      verifyNever(
+        () => fallback.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      );
+    },
+  );
+
+  test(
+    'future dates are unavailable rather than assigned the current price',
+    () async {
+      when(
+        () => repo.getCoinFiatPrice(
+          any(),
+          priceDate: any(named: 'priceDate'),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async => Decimal.fromInt(5));
+
+      expect(
+        await manager.fiatPriceHistory(_btc, [
+          _today.add(const Duration(days: 1)),
+        ]),
+        isEmpty,
+      );
+      verifyNoHistoryRequest();
+      verifyNever(
+        () => repo.getCoinFiatPrice(
+          any(),
+          priceDate: any(named: 'priceDate'),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      );
+    },
+  );
+
+  test(
+    'a request crossing midnight does not permanently cache an unfinished day',
+    () async {
+      final started = Completer<void>();
+      final response = Completer<Decimal>();
+      var calls = 0;
+      when(
+        () => repo.getCoinFiatPrice(
+          any(),
+          priceDate: any(named: 'priceDate'),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async {
+        if (calls++ == 0) {
+          started.complete();
+          return response.future;
+        }
+        return Decimal.fromInt(2);
+      });
+      now = _today.add(const Duration(hours: 23, minutes: 59));
+      final pending = manager.fiatPrice(_btc, priceDate: _today);
+      await started.future;
+      now = _today.add(const Duration(days: 1));
+      response.complete(Decimal.one);
+      expect(await pending, Decimal.one);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(
+        await manager.fiatPrice(_btc, priceDate: _today),
+        Decimal.fromInt(2),
+      );
+      expect(calls, 2);
+    },
+  );
+
+  test('a provider outage does not negative-cache missing dates', () async {
+    final fallback = _FallbackRepository();
+    var recovering = false;
+    when(
+      () => fallback.supports(any(), any(), any()),
+    ).thenAnswer((_) async => true);
+    when(
+      () => repo.getCoinFiatPrices(
+        any(),
+        any(),
+        fiatCurrency: any(named: 'fiatCurrency'),
+      ),
+    ).thenAnswer((_) async => {_daysAgo(1): Decimal.one});
+    when(
+      () => fallback.getCoinFiatPrices(
+        any(),
+        any(),
+        fiatCurrency: any(named: 'fiatCurrency'),
+      ),
+    ).thenAnswer((_) async {
+      if (!recovering) throw Exception('temporary provider outage');
+      return {_daysAgo(2): Decimal.fromInt(2)};
+    });
+    await manager.dispose();
+    manager = CexMarketDataManager(
+      priceRepositories: [repo, fallback],
+      clock: () => now,
+    );
+    await manager.init();
+
+    expect(await manager.fiatPriceHistory(_btc, [_daysAgo(2), _daysAgo(1)]), {
+      _daysAgo(1): Decimal.one,
+    });
+    recovering = true;
+    expect(await manager.fiatPriceHistory(_btc, [_daysAgo(2), _daysAgo(1)]), {
+      _daysAgo(2): Decimal.fromInt(2),
+      _daysAgo(1): Decimal.one,
+    });
+  });
+
+  test(
+    'a skipped rate-limited provider does not make gaps definitive',
+    () async {
+      final fallback = _FallbackRepository();
+      when(() => repo.supports(any(), any(), any())).thenAnswer(
+        (invocation) async =>
+            invocation.positionalArguments[2] == PriceRequestType.priceHistory,
+      );
+      when(
+        () => fallback.supports(any(), any(), any()),
+      ).thenAnswer((_) async => true);
+      when(
+        () => repo.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async => {});
+      when(
+        () => fallback.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer((_) async => {_daysAgo(1): Decimal.one});
+      when(
+        () => fallback.getCoinFiatPrice(
+          any(),
+          priceDate: any(named: 'priceDate'),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenThrow(Exception('429 rate limit'));
+      await manager.dispose();
+      manager = CexMarketDataManager(
+        priceRepositories: [repo, fallback],
+        clock: () => now,
+      );
+      await manager.init();
+      expect(await manager.maybeFiatPrice(_btc), isNull);
+      expect(await manager.fiatPriceHistory(_btc, [_daysAgo(1)]), isEmpty);
+
+      manager.clearRepositoryHealthData();
+      expect(await manager.fiatPriceHistory(_btc, [_daysAgo(1)]), {
+        _daysAgo(1): Decimal.one,
+      });
+    },
+  );
+
+  test('tries all history providers before declaring a date absent', () async {
+    final repositories = List.generate(4, (_) => _MockRepository());
+    for (final repository in repositories) {
+      when(
+        () => repository.supports(any(), any(), any()),
+      ).thenAnswer((_) async => true);
+      when(
+        () => repository.getCoinFiatPrices(
+          any(),
+          any(),
+          fiatCurrency: any(named: 'fiatCurrency'),
+        ),
+      ).thenAnswer(
+        (_) async =>
+            repository == repositories.last ? {_daysAgo(1): Decimal.one} : {},
+      );
+    }
+    await manager.dispose();
+    manager = CexMarketDataManager(
+      priceRepositories: repositories,
+      clock: () => now,
+    );
+    await manager.init();
+
+    expect(await manager.fiatPriceHistory(_btc, [_daysAgo(1)]), {
+      _daysAgo(1): Decimal.one,
+    });
   });
 
   test('evicts the oldest past-day price beyond 25,000', () async {

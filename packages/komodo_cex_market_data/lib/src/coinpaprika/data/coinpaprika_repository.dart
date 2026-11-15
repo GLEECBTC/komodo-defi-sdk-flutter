@@ -198,9 +198,8 @@ class CoinPaprikaRepository implements CexRepository {
 
   /// Fetches OHLC data in multiple requests to handle API plan limitations.
   ///
-  /// A failed batch is skipped, but if every batch fails the last error is
-  /// rethrown: an empty result would read as success and keep fallback
-  /// repositories from being tried. A rate limit stops the remaining batches.
+  /// Failed batches are rethrown so fallback can distinguish a provider outage
+  /// from dates with no prices. A rate limit stops the remaining batches.
   Future<CoinOhlc> _fetchMultipleOhlcRequests(
     String tradingSymbol,
     QuoteCurrency quoteCurrency,
@@ -210,7 +209,6 @@ class CoinPaprikaRepository implements CexRepository {
   ) async {
     final allOhlcData = <Ohlc>[];
     var currentStart = startAt;
-    var anyBatchSucceeded = false;
     (Object, StackTrace)? lastFailure;
 
     while (currentStart.isBefore(endAt)) {
@@ -241,7 +239,6 @@ class CoinPaprikaRepository implements CexRepository {
         );
 
         allOhlcData.addAll(batchOhlc.ohlc);
-        anyBatchSucceeded = true;
       } catch (e, s) {
         if (e is MarketDataApiException && e.isRateLimited) rethrow;
         _logger.warning(
@@ -260,7 +257,7 @@ class CoinPaprikaRepository implements CexRepository {
     }
 
     final failure = lastFailure;
-    if (!anyBatchSucceeded && failure != null) {
+    if (failure != null) {
       Error.throwWithStackTrace(failure.$1, failure.$2);
     }
     return CoinOhlc(ohlc: allOhlcData);
@@ -278,13 +275,6 @@ class CoinPaprikaRepository implements CexRepository {
       final maxPlanBatch = planLimit - bufferDuration;
       return maxPlanBatch.inDays > 90 ? const Duration(days: 90) : maxPlanBatch;
     }
-  }
-
-  /// Formats a DateTime to the format expected by logging and error messages.
-  String _formatDateForApi(DateTime date) {
-    return '${date.year.toString().padLeft(4, '0')}-'
-        '${date.month.toString().padLeft(2, '0')}-'
-        '${date.day.toString().padLeft(2, '0')}';
   }
 
   @override

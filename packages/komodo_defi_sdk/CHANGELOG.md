@@ -4,6 +4,10 @@
    five-minute cache rotation, waits an hour before asking again for a past
    day no repository priced, and prices today with the current price, falling
    back to history when there is none. Results are sorted by date.
+ - **FIX**(market-data): combine partial history from fallback providers before
+   caching absent dates, preserving retries after provider failures or backoff.
+   Future dates remain unpriced, and requests crossing UTC midnight cannot
+   permanently cache an unfinished daily price.
 
 ## 0.9.0 (2026-10-28)
 
