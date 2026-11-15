@@ -855,10 +855,9 @@ packages:
   json_editor_flutter:
     dependency: transitive
     description:
-      name: json_editor_flutter
-      sha256: "851a6adbfb6ee794809a941d82dde0c9f8b6c2fcadabcbde386f1cb6bf27466a"
-      url: "https://pub.dev"
-    source: hosted
+      path: "playground/third_party/json_editor_flutter"
+      relative: true
+    source: path
     version: "1.4.2"
   json_serializable:
     dependency: transitive

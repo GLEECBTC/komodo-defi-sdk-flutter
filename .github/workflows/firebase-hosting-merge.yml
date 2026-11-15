@@ -52,6 +52,9 @@ jobs:
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cd playground && flutter build web --release --no-pub || echo "Dry build completed (failure expected)"
+      - name: Test playground JSON editor compatibility
+        working-directory: playground
+        run: flutter test --no-pub test/json_editor_compatibility_test.dart
       - name: Build playground web
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

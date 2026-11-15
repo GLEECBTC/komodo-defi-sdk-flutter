@@ -14,7 +14,7 @@ fvm flutter --version
 fvm flutter pub get --enforce-lockfile
 ```
 
-The package manifests require Dart `>=3.14.0 <4.0.0`; Flutter packages require
+The workspace package manifests require Dart `>=3.14.0 <4.0.0`; Flutter packages require
 Flutter `>=3.50.0 <4.0.0`. These are the supported development baseline, including
 the workspace examples and products. Historical release checklists retain the
 toolchains used to produce their recorded results.
@@ -57,7 +57,7 @@ Validated locally with Flutter 3.50.0 / Dart 3.14.0:
 - Chrome WebAssembly CI cases: **215 passed** for SDK wallet isolation and
   GasFree races; **10 passed** for framework transport errors and diagnostics.
 - `flutter pub get --enforce-lockfile` passed.
-- Full `flutter analyze --no-pub`: **0 errors, 45 warnings, 2,000 infos**.
+- Final full `flutter analyze --no-pub`: **0 errors, 45 warnings, 2,017 infos**.
   The default analyzer command remains nonzero because of those diagnostics;
   this is not a clean-analysis claim. The final changed Trezor test analyzed
   without issues.
@@ -70,3 +70,19 @@ after the coin and KDF assets were generated. The results above describe those
 completed runs. The initial Trezor test timing failure was fixed by waiting for
 the actual stream subscription and completion instead of millisecond delays;
 the full local-auth suite then passed all 163 tests.
+
+The playground's release web build exposed a separate compatibility issue in
+`json_editor_flutter` 1.4.2: its Dart 2.17 language version cannot evaluate
+Flutter 3.50's const enum comparison. The playground now uses an isolated
+[compatibility copy](../playground/third_party/json_editor_flutter/README.md)
+with unchanged upstream source and license and only the package's Dart lower
+bound raised to 3.0. The provenance, hashes, and removal condition are documented
+alongside that copy. SDK public packages do not depend on it.
+
+After that fix, `flutter build web --release --no-pub` passed in the playground,
+the JSON editor popup insertion/text editing test passed, and lockfile
+enforcement passed again. Both playground hosting workflows run the regression
+test before their final release build. Playground analysis reported **0 errors,
+0 warnings, 9 infos**; the full workspace counts above include the final test
+and generated KDF wrappers present after browser verification. The web build's
+existing `JSAny` WebAssembly dry-run diagnostic did not fail the release build.

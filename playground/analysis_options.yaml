@@ -10,6 +10,8 @@
 analyzer:
   exclude:
     - build/**
+    # Preserve the upstream dependency source; compile and exercise it in tests.
+    - third_party/**
     - android/**
     - ios/**
     - web/**
