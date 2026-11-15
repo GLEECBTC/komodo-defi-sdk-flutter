@@ -9,6 +9,10 @@ import 'package:mutex/mutex.dart';
 
 /// Durable reservations prevent rebuilding a possibly submitted Solana send.
 abstract interface class SolanaWithdrawalJournal {
+  /// Durable revision of this intent, advanced after a confirmed submission.
+  /// Reviews from any manager or browser context retain the revision they saw.
+  Future<int> revision(WalletId wallet, WithdrawParameters parameters);
+
   /// Looks up an unresolved intent for this authenticated wallet.
   Future<WithdrawalPreview?> find(
     WalletId wallet,
@@ -19,15 +23,17 @@ abstract interface class SolanaWithdrawalJournal {
   Future<WithdrawalPreview?> reserve(
     WalletId wallet,
     WithdrawParameters parameters,
-    WithdrawalPreview preview,
-  );
+    WithdrawalPreview preview, {
+    int? expectedRevision,
+  });
 
   /// Clears only the matching signature after a conclusive dispatch result.
   Future<void> clear(
     WalletId wallet,
     WithdrawParameters parameters,
-    String signature,
-  );
+    String signature, {
+    bool submitted = false,
+  });
 }
 
 /// Encrypted wallet-scoped reservations, shared by native and browser builds.
@@ -53,6 +59,22 @@ final class SecureSolanaWithdrawalJournal implements SolanaWithdrawalJournal {
 
   Future<T> _protect<T>(Future<T> Function() action) =>
       _mutex.protect(() => withGaslessTransferLock(action));
+
+  Future<int> _revision(String key) async {
+    final revisionKey = '${key}_revision';
+    final exists = await _storage.containsKey(revisionKey);
+    final value = await _storage.read(revisionKey);
+    if (value == null && !exists) return 0;
+    final revision = int.tryParse(value ?? '');
+    if (revision == null || revision < 0 || revision >= 0x1fffffffffffff) {
+      throw StateError('Solana submission revision is invalid');
+    }
+    return revision;
+  }
+
+  @override
+  Future<int> revision(WalletId wallet, WithdrawParameters parameters) =>
+      _protect(() => _revision(_key(wallet, parameters)));
 
   Future<WithdrawalPreview?> _read(String key) async {
     final exists = await _storage.containsKey(key);
@@ -102,9 +124,13 @@ final class SecureSolanaWithdrawalJournal implements SolanaWithdrawalJournal {
   Future<WithdrawalPreview?> reserve(
     WalletId wallet,
     WithdrawParameters parameters,
-    WithdrawalPreview preview,
-  ) => _protect(() async {
+    WithdrawalPreview preview, {
+    int? expectedRevision,
+  }) => _protect(() async {
     final key = _key(wallet, parameters);
+    if (expectedRevision != null && await _revision(key) != expectedRevision) {
+      throw StateError('This Solana withdrawal was already submitted');
+    }
     final existing = await _read(key);
     if (existing != null) return existing;
     final details = preview.toJson()
@@ -129,9 +155,18 @@ final class SecureSolanaWithdrawalJournal implements SolanaWithdrawalJournal {
   Future<void> clear(
     WalletId wallet,
     WithdrawParameters parameters,
-    String signature,
-  ) => _protect(() async {
+    String signature, {
+    bool submitted = false,
+  }) => _protect(() async {
     final key = _key(wallet, parameters);
-    if ((await _read(key))?.txHash == signature) await _storage.delete(key);
+    if ((await _read(key))?.txHash != signature) return;
+    if (submitted) {
+      final next = await _revision(key) + 1;
+      await _storage.write('${key}_revision', '$next');
+      if (await _revision(key) != next) {
+        throw StateError('Solana submission revision was not verified');
+      }
+    }
+    await _storage.delete(key);
   });
 }

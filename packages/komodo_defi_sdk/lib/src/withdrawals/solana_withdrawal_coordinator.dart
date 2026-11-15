@@ -90,12 +90,17 @@ final class SolanaWithdrawalCoordinator {
         const PrivateKeyPolicy.contextPrivKey()) {
       throw UnsupportedError('Solana requires an active software wallet');
     }
+    final key = (
+      wallet.session as Object,
+      solanaWithdrawalIntentKey(parameters),
+    );
+    final generation =
+        await journal?.revision(wallet.walletId, parameters) ?? 0;
     final persisted = await journal?.find(wallet.walletId, parameters);
     await requireWalletCurrent(wallet);
     ensureSessionCurrent(wallet);
     if (persisted != null) throw SolanaWithdrawalSubmissionUnknown(persisted);
-    final pending =
-        _submissions[(wallet.session, solanaWithdrawalIntentKey(parameters))];
+    final pending = _submissions[key];
     if (pending?.submittedPreview case final WithdrawalPreview previous) {
       throw SolanaWithdrawalSubmissionUnknown(previous);
     }
@@ -113,7 +118,18 @@ final class SolanaWithdrawalCoordinator {
     );
     await requireWalletCurrent(wallet);
     ensureSessionCurrent(wallet);
-    _previews[preview] = _PreparedWithdrawal(parameters, wallet, preview);
+    if ((await journal?.revision(wallet.walletId, parameters) ?? 0) !=
+        generation) {
+      throw StateError('This Solana withdrawal was already submitted');
+    }
+    await requireWalletCurrent(wallet);
+    ensureSessionCurrent(wallet);
+    _previews[preview] = _PreparedWithdrawal(
+      parameters,
+      wallet,
+      preview,
+      generation,
+    );
     return preview;
   }
 
@@ -150,6 +166,10 @@ final class SolanaWithdrawalCoordinator {
       prepared.wallet.session as Object,
       solanaWithdrawalIntentKey(prepared.parameters),
     );
+    if (await journal.revision(prepared.wallet.walletId, prepared.parameters) !=
+        prepared.generation) {
+      throw StateError('This Solana withdrawal was already submitted');
+    }
     final pending = _submissions[key];
     if (pending?.submittedPreview case final WithdrawalPreview previous) {
       throw SolanaWithdrawalSubmissionUnknown(previous);
@@ -202,6 +222,7 @@ final class SolanaWithdrawalCoordinator {
           prepared.parameters,
           prepared.wallet,
           fresh,
+          prepared.generation,
         );
         prepared.replacement = fresh;
         throw SolanaWithdrawalReviewChanged(fresh);
@@ -212,6 +233,7 @@ final class SolanaWithdrawalCoordinator {
         prepared.wallet.walletId,
         prepared.parameters,
         fresh,
+        expectedRevision: prepared.generation,
       );
       if (existing != null) {
         prepared.submittedPreview = existing;
@@ -274,6 +296,7 @@ final class SolanaWithdrawalCoordinator {
           prepared.wallet.walletId,
           prepared.parameters,
           fresh.txHash!,
+          submitted: true,
         );
       } on Object {
         await requireWalletCurrent(prepared.wallet);
@@ -303,12 +326,17 @@ final class SolanaWithdrawalCoordinator {
 }
 
 final class _PreparedWithdrawal {
-  _PreparedWithdrawal(this.parameters, this.wallet, WithdrawalPreview preview)
-    : review = SolanaWithdrawalReview(preview);
+  _PreparedWithdrawal(
+    this.parameters,
+    this.wallet,
+    WithdrawalPreview preview,
+    this.generation,
+  ) : review = SolanaWithdrawalReview(preview);
 
   final WithdrawParameters parameters;
   final WalletOperationContext wallet;
   final SolanaWithdrawalReview review;
+  final int generation;
   WithdrawalPreview? replacement;
   WithdrawalPreview? submittedPreview;
 }

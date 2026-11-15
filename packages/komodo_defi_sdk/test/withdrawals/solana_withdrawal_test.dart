@@ -413,6 +413,32 @@ void main() {
       );
       await expectLater(journal.find(unknown, parameters), throwsStateError);
     });
+    test('reservation atomically refuses a superseded review', () async {
+      final storage = _MemoryStorage();
+      final journal = SecureSolanaWithdrawalJournal(storage: storage);
+      final parameters = _params(_solana());
+      final preview = contextualizeSolanaWithdrawal(_preview(), _solana());
+      final revision = await journal.revision(wallet, parameters);
+      await journal.reserve(
+        wallet,
+        parameters,
+        preview,
+        expectedRevision: revision,
+      );
+      await journal.clear(wallet, parameters, preview.txHash!, submitted: true);
+      final restarted = SecureSolanaWithdrawalJournal(storage: storage);
+      await expectLater(
+        restarted.reserve(
+          wallet,
+          parameters,
+          preview,
+          expectedRevision: revision,
+        ),
+        throwsStateError,
+      );
+      expect(await restarted.find(wallet, parameters), isNull);
+      expect(await restarted.revision(wallet, parameters), revision + 1);
+    });
     test('concurrent reservations preserve one signature', () async {
       final storage = _MemoryStorage();
       final journal = SecureSolanaWithdrawalJournal(storage: storage);
@@ -814,7 +840,90 @@ void main() {
         await refused;
         expect(requests, hasLength(3));
         expect(broadcasts, hasLength(1));
-        expect(storage.values, isEmpty);
+        expect(
+          await coordinator.journal!.find(wallet.walletId, _params(asset)),
+          isNull,
+        );
+        expect(
+          await coordinator.journal!.revision(wallet.walletId, _params(asset)),
+          1,
+        );
+      },
+    );
+    test(
+      'another manager cannot submit an older review after success',
+      () async {
+        final other = SolanaWithdrawalCoordinator(
+          capabilities: enabled,
+          journal: SecureSolanaWithdrawalJournal(storage: storage),
+          createPreview: coordinator.createPreview,
+          broadcast: coordinator.broadcast,
+          captureWallet: coordinator.captureWallet,
+          requireWalletCurrent: coordinator.requireWalletCurrent,
+          ensureSessionCurrent: coordinator.ensureSessionCurrent,
+          ensureAllowed: coordinator.ensureAllowed,
+          runWithSession: coordinator.runWithSession,
+        );
+        final parameters = _params(asset);
+        final first = await coordinator.previewWithdrawal(parameters, asset);
+        final older = await other.previewWithdrawal(parameters, asset);
+        await coordinator.executeWithdrawal(first, asset).toList();
+        await expectLater(
+          other.executeWithdrawal(older, asset).toList(),
+          throwsStateError,
+        );
+        expect(requests, hasLength(3));
+        expect(broadcasts, hasLength(1));
+        expect(await other.journal!.find(wallet.walletId, parameters), isNull);
+        expect(await other.journal!.revision(wallet.walletId, parameters), 1);
+
+        // An explicit new review observes the durable revision and can send.
+        final next = await other.previewWithdrawal(parameters, asset);
+        await other.executeWithdrawal(next, asset).toList();
+        expect(broadcasts, hasLength(2));
+        expect(await other.journal!.revision(wallet.walletId, parameters), 2);
+      },
+    );
+    test(
+      'successful sends invalidate earlier reviews of the same intent',
+      () async {
+        final parameters = _params(asset);
+        final first = await coordinator.previewWithdrawal(parameters, asset);
+        final second = await coordinator.previewWithdrawal(parameters, asset);
+        await coordinator.executeWithdrawal(first, asset).toList();
+
+        await expectLater(
+          coordinator.executeWithdrawal(second, asset).toList(),
+          throwsStateError,
+        );
+        expect(broadcasts, hasLength(1));
+        expect(requests, hasLength(3));
+
+        // A deliberate new transfer with identical fields remains possible.
+        final next = await coordinator.previewWithdrawal(parameters, asset);
+        await coordinator.executeWithdrawal(next, asset).toList();
+        expect(broadcasts, hasLength(2));
+      },
+    );
+    test(
+      'a preview still signing when the same intent is submitted is discarded',
+      () async {
+        final parameters = _params(asset);
+        final first = await coordinator.previewWithdrawal(parameters, asset);
+        final signing = Completer<WithdrawalPreview>();
+        final started = Completer<void>();
+        respond = (_) {
+          started.complete();
+          return signing.future;
+        };
+        final second = coordinator.previewWithdrawal(parameters, asset);
+        final rejected = expectLater(second, throwsStateError);
+        await started.future;
+        respond = (_) async => _preview();
+        await coordinator.executeWithdrawal(first, asset).toList();
+        signing.complete(_preview());
+        await rejected;
+        expect(broadcasts, hasLength(1));
       },
     );
     test(
