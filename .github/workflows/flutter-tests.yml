@@ -25,19 +25,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Flutter (stable)
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: "3.41.4"
-          architecture: x64
+        uses: ./.github/actions/setup-flutter
 
       - name: Cache pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-            **/.dart_tool
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          key: ${{ runner.os }}-pub-${{ hashFiles('.fvmrc', '**/pubspec.yaml', '**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
 
@@ -92,26 +87,16 @@ jobs:
           echo "packages=${with_tests[*]}" >> "$GITHUB_OUTPUT"
           echo "Found packages with tests: ${with_tests[*]}"
 
-      - name: Install dependencies for all packages
+      - name: Install locked workspace dependencies
         if: steps.discover.outputs.packages != ''
-        shell: bash
-        run: |
-          packages="${{ steps.discover.outputs.packages }}"
-          if [ -n "$packages" ]; then
-            for pkg in $packages; do
-              echo "Installing dependencies for $pkg..."
-              cd "$pkg"
-              flutter pub get
-              cd - > /dev/null
-            done
-          fi
+        run: flutter pub get --enforce-lockfile
 
       - name: Run dry web build to generate assets (expected to fail)
         if: steps.discover.outputs.packages != ''
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: packages/komodo_defi_sdk/example
-        run: flutter build web --release || echo "Dry build completed (failure expected)"
+        run: flutter build web --release --no-pub || echo "Dry build completed (failure expected)"
 
       - name: Test wallet isolation and GasFree races in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_sdk')
@@ -176,7 +161,7 @@ jobs:
             # pipefail preserves the test exit code while tee retains the full
             # output, including failures before the final summary lines.
             log_file="$log_dir/${pkg##*/}.log"
-            if flutter test -r expanded 2>&1 | tee "$log_file"; then
+            if flutter test --no-pub -r expanded 2>&1 | tee "$log_file"; then
               test_results["$pkg"]="✅ PASS"
               test_outputs["$pkg"]="Tests passed successfully"
               echo "✅ $pkg: PASSED"

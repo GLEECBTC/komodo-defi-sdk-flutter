@@ -20,10 +20,15 @@ class _DummyApiClient implements ApiClient {
 }
 
 class _FakeTrezorRepository extends TrezorRepository {
-  _FakeTrezorRepository() : super(_DummyApiClient());
+  _FakeTrezorRepository() : super(_DummyApiClient()) {
+    _controller = StreamController<TrezorInitializationState>.broadcast(
+      onListen: () {
+        if (!_listening.isCompleted) _listening.complete();
+      },
+    );
+  }
 
-  final StreamController<TrezorInitializationState> _controller =
-      StreamController<TrezorInitializationState>.broadcast();
+  late final StreamController<TrezorInitializationState> _controller;
 
   final Map<int, String> providedPassphrases = {};
   final Map<int, String> providedPins = {};
@@ -43,10 +48,7 @@ class _FakeTrezorRepository extends TrezorRepository {
   Stream<TrezorInitializationState> initializeDevice({
     String? devicePubkey,
     Duration pollingInterval = const Duration(seconds: 1),
-  }) async* {
-    if (!_listening.isCompleted) _listening.complete();
-    yield* _controller.stream;
-  }
+  }) => _controller.stream;
 
   @override
   Future<void> providePassphrase(int taskId, String passphrase) async {
@@ -393,31 +395,27 @@ void main() {
           ),
         );
 
-        // Drive the repo stream after a brief delay to ensure listeners
-        // are attached
         const taskId = 1;
-        // ignore: discarded_futures
-        Future<void>.delayed(const Duration(milliseconds: 5), () {
-          repo
-            ..emit(
-              const TrezorInitializationState(
-                status: AuthenticationStatus.initializing,
-                taskId: taskId,
-              ),
-            )
-            ..emit(
-              const TrezorInitializationState(
-                status: AuthenticationStatus.passphraseRequired,
-                taskId: taskId,
-              ),
-            )
-            ..emit(
-              const TrezorInitializationState(
-                status: AuthenticationStatus.completed,
-                taskId: taskId,
-              ),
-            );
-        });
+        await repo.listening;
+        repo
+          ..emit(
+            const TrezorInitializationState(
+              status: AuthenticationStatus.initializing,
+              taskId: taskId,
+            ),
+          )
+          ..emit(
+            const TrezorInitializationState(
+              status: AuthenticationStatus.passphraseRequired,
+              taskId: taskId,
+            ),
+          )
+          ..emit(
+            const TrezorInitializationState(
+              status: AuthenticationStatus.completed,
+              taskId: taskId,
+            ),
+          );
 
         final user = await future;
 
@@ -466,36 +464,32 @@ void main() {
           passwordGenerator: (_) => 'gen',
         );
 
-        final states = <AuthenticationState>[];
-        final sub = service
+        final statesFuture = service
             .signInStreamed(
               options: const AuthOptions(
                 derivationMethod: DerivationMethod.hdWallet,
                 privKeyPolicy: PrivateKeyPolicy.trezor(),
               ),
             )
-            .listen(states.add);
+            .toList();
 
         const taskId = 2;
-        Future<void>.delayed(const Duration(milliseconds: 5), () {
-          repo
-            ..emit(
-              const TrezorInitializationState(
-                status: AuthenticationStatus.initializing,
-                taskId: taskId,
-              ),
-            )
-            ..emit(
-              const TrezorInitializationState(
-                status: AuthenticationStatus.completed,
-                taskId: taskId,
-              ),
-            );
-        });
+        await repo.listening;
+        repo
+          ..emit(
+            const TrezorInitializationState(
+              status: AuthenticationStatus.initializing,
+              taskId: taskId,
+            ),
+          )
+          ..emit(
+            const TrezorInitializationState(
+              status: AuthenticationStatus.completed,
+              taskId: taskId,
+            ),
+          );
 
-        // Allow stream to process
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-        await sub.cancel();
+        final states = await statesFuture;
 
         expect(
           states.map((e) => e.status),
@@ -530,15 +524,14 @@ void main() {
         ),
       );
 
-      Future<void>.delayed(const Duration(milliseconds: 5), () {
-        repo.emit(
-          const TrezorInitializationState(
-            status: AuthenticationStatus.error,
-            message: 'boom',
-            taskId: 3,
-          ),
-        );
-      });
+      await repo.listening;
+      repo.emit(
+        const TrezorInitializationState(
+          status: AuthenticationStatus.error,
+          message: 'boom',
+          taskId: 3,
+        ),
+      );
 
       await expectLater(future, throwsA(isA<AuthException>()));
       // Active user should be cleared by signOut in error path
