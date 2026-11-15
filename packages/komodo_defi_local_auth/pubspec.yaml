@@ -12,8 +12,8 @@ topics:
   - wallet
 
 environment:
-  sdk: ">=3.9.0 <4.0.0"
-  flutter: ">=3.35.0"
+  sdk: ">=3.14.0 <4.0.0"
+  flutter: ">=3.50.0 <4.0.0"
 
 resolution: workspace
 
@@ -39,7 +39,7 @@ dev_dependencies:
   build_runner: ^2.4.14
   flutter_test:
     sdk: flutter
-  freezed: ^3.0.4
+  freezed: ^4.0.3
   index_generator: ^4.0.1
   mocktail: ^1.0.4
   very_good_analysis: ^9.0.0

@@ -9,3 +9,5 @@ analyzer:
     # Teardown and probe paths deliberately swallow anything: a failure while
     # cleaning up must never mask the assertion that actually failed.
     avoid_catches_without_on_clauses: ignore
+  exclude:
+    - build/**

@@ -149,6 +149,6 @@ A new Flutter FFI plugin project.
   # Ensure dylibs are properly linked
   s.libraries = ['c++', 'resolv']
 
-  s.platform = :osx, '10.14'
+  s.platform = :osx, '12.0'
   s.swift_version = '5.0'
 end

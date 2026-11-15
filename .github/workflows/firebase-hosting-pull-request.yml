@@ -16,11 +16,8 @@ jobs:
       # Pinned, not floating. `channel: stable` alone takes whatever Flutter
       # stable is that day, so a Flutter release breaks the build on a branch
       # nobody touched -- which is what happened on 2026-08-24 (3.44.8 -> 3.47.1).
-      # Keep this equal to the wallet app's pin (.fvmrc / .github/actions/flutter-deps).
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-          flutter-version: "3.41.4"
+      # The local setup action reads the SDK's .fvmrc pin.
+      - uses: ./.github/actions/setup-flutter
       # Disabled melos generation due to circular dependency issues caused by komodo_defi_rpc_methods
       # and komodo_defi_types packages. This will be revisited in the future.
       # The app should already have the necessary generated files committed to the repository. If
@@ -34,10 +31,9 @@ jobs:
       #   with:
       #     path: |
       #       ~/.pub-cache
-      #       **/.dart_tool
       #       **/.flutter-plugins
       #       **/.flutter-plugins-dependencies
-      #     key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+      #     key: ${{ runner.os }}-pub-${{ hashFiles('.fvmrc', '**/pubspec.yaml', '**/pubspec.lock') }}
       #     restore-keys: |
       #       ${{ runner.os }}-pub-
 
@@ -47,23 +43,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-          flutter-version: "3.41.4"
+      - uses: ./.github/actions/setup-flutter
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos
       # - name: Bootstrap workspace
       #   run: melos bootstrap
+      - name: Install locked workspace dependencies
+        run: flutter pub get --enforce-lockfile
       - name: Run dry web build to generate assets (expected to fail)
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cd playground && flutter build web --release || echo "Dry build completed (failure expected)"
+        run: cd playground && flutter build web --release --no-pub || echo "Dry build completed (failure expected)"
+      - name: Test playground JSON editor compatibility
+        working-directory: playground
+        run: flutter test --no-pub test/json_editor_compatibility_test.dart
       - name: Build playground web
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cd playground && flutter build web --release
+        run: cd playground && flutter build web --release --no-pub
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -79,23 +77,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-          flutter-version: "3.41.4"
+      - uses: ./.github/actions/setup-flutter
       # See Melos comment above
       # - name: Install Melos
       #   run: dart pub global activate melos
       # - name: Bootstrap workspace
       #   run: melos bootstrap
+      - name: Install locked workspace dependencies
+        run: flutter pub get --enforce-lockfile
       - name: Run dry web build to generate assets (expected to fail)
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cd packages/komodo_defi_sdk/example && flutter build web --release || echo "Dry build completed (failure expected)"
+        run: cd packages/komodo_defi_sdk/example && flutter build web --release --no-pub || echo "Dry build completed (failure expected)"
       - name: Build SDK example web
         env:
           GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cd packages/komodo_defi_sdk/example && flutter build web --release
+        run: cd packages/komodo_defi_sdk/example && flutter build web --release --no-pub
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

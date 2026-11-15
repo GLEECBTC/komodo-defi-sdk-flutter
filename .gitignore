@@ -1,6 +1,6 @@
 # First-party related
 # As per Dart guidelines, we should ignore pubspec.lock files for packages.
-packages/**/pubspec.lock # TODO: Get this to work.
+packages/**/pubspec.lock
 
 # Miscellaneous
 *.class
@@ -30,8 +30,8 @@ migrate_working_dir/
 .firebase/
 
 # Flutter/Dart/Pub related
-# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
-/pubspec.lock
+# Individual libraries do not publish lockfiles. The private workspace's root
+# pubspec.lock is tracked so CI and generator runs resolve the same toolchain.
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/

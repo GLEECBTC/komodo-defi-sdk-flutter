@@ -1,4 +1,6 @@
 analyzer:
   errors:
     public_member_api_docs: ignore
+  exclude:
+    - build/**
 include: package:very_good_analysis/analysis_options.6.0.0.yaml
