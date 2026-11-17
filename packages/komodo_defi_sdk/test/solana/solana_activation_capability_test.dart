@@ -41,9 +41,8 @@ void main() {
       'already-active ${asset.id.id} cannot bypass its engine gate',
       () async {
         final auth = _Auth();
-        when(
-          () => auth.authStateChanges,
-        ).thenAnswer((_) => const Stream<KdfUser?>.empty());
+        when(() => auth.authStateChanges)
+            .thenAnswer((_) => const Stream<KdfUser?>.empty());
         when(() => auth.currentUser).thenAnswer(
           (_) async => const KdfUser(
             walletId: WalletId(

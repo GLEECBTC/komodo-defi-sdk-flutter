@@ -68,40 +68,36 @@ void main() {
     expect(verified2022.allows(unknown), isFalse);
   });
 
-  test(
-    'final available and ticker views gate restored custom tokens without deleting storage',
-    () async {
-      final auth = _Auth();
-      when(
-        () => auth.authStateChanges,
-      ).thenAnswer((_) => const Stream<KdfUser?>.empty());
-      final coins = _Coins();
-      var snapshot = {
-        sol.id: sol,
-        classic.id: classic,
-        token2022.id: token2022,
-        unknown.id: unknown,
-      };
-      when(() => coins.isInitialized).thenReturn(true);
-      when(() => coins.filteredAssets(any())).thenAnswer((_) => snapshot);
-      final manager = AssetManager(
-        auth,
-        const KomodoDefiSdkConfig(
-          solanaCapabilities: SolanaCapabilities(enabled: true),
-        ),
-        () => throw StateError('activation not needed'),
-        coins,
-        () => _Cache(),
-      );
-      addTearDown(manager.dispose);
-      expect(manager.available.keys, [sol.id, classic.id]);
-      expect(manager.findAssetsByConfigId(token2022.id.id), isEmpty);
-      expect(manager.childAssetsOf(sol.id), {classic});
-      expect(identical(manager.available, manager.available), isTrue);
-      expect(snapshot, hasLength(4));
-      snapshot = {sol.id: sol, token2022.id: token2022};
-      expect(manager.available.keys, [sol.id]);
-      expect(manager.findAssetsByConfigId(classic.id.id), isEmpty);
-    },
-  );
+  test('final available and ticker views gate restored custom tokens without deleting storage', () async {
+    final auth = _Auth();
+    when(() => auth.authStateChanges)
+        .thenAnswer((_) => const Stream<KdfUser?>.empty());
+    final coins = _Coins();
+    var snapshot = {
+      sol.id: sol,
+      classic.id: classic,
+      token2022.id: token2022,
+      unknown.id: unknown,
+    };
+    when(() => coins.isInitialized).thenReturn(true);
+    when(() => coins.filteredAssets(any())).thenAnswer((_) => snapshot);
+    final manager = AssetManager(
+      auth,
+      const KomodoDefiSdkConfig(
+        solanaCapabilities: SolanaCapabilities(enabled: true),
+      ),
+      () => throw StateError('activation not needed'),
+      coins,
+      () => _Cache(),
+    );
+    addTearDown(manager.dispose);
+    expect(manager.available.keys, [sol.id, classic.id]);
+    expect(manager.findAssetsByConfigId(token2022.id.id), isEmpty);
+    expect(manager.childAssetsOf(sol.id), {classic});
+    expect(identical(manager.available, manager.available), isTrue);
+    expect(snapshot, hasLength(4));
+    snapshot = {sol.id: sol, token2022.id: token2022};
+    expect(manager.available.keys, [sol.id]);
+    expect(manager.findAssetsByConfigId(classic.id.id), isEmpty);
+  });
 }

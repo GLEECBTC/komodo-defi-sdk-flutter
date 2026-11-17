@@ -34,9 +34,8 @@ class GithubApiProvider {
     String? token,
   }) : _branch = branch,
        _baseUrl = baseUrl {
-    final repoMatch = RegExp(
-      r'^https://api\.github\.com/repos/([^/]+)/([^/]+)',
-    ).firstMatch(baseUrl);
+    final repoMatch = RegExp(r'^https://api\.github\.com/repos/([^/]+)/([^/]+)')
+        .firstMatch(baseUrl);
     assert(repoMatch != null, 'Invalid GitHub repository URL: $baseUrl');
 
     if (token != null) {

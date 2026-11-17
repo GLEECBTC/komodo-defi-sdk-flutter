@@ -40,9 +40,8 @@ void main() {
     now = _today.add(const Duration(hours: 9));
     repo = _MockRepository();
     when(repo.getCoinList).thenAnswer((_) async => []);
-    when(
-      () => repo.supports(any(), any(), any()),
-    ).thenAnswer((_) async => true);
+    when(() => repo.supports(any(), any(), any()))
+        .thenAnswer((_) async => true);
     when(
       () => repo.getCoinFiatPrices(
         any(),
@@ -165,9 +164,8 @@ void main() {
     'fills partial history from the next provider before caching gaps',
     () async {
       final fallback = _FallbackRepository();
-      when(
-        () => fallback.supports(any(), any(), any()),
-      ).thenAnswer((_) async => true);
+      when(() => fallback.supports(any(), any(), any()))
+          .thenAnswer((_) async => true);
       when(
         () => repo.getCoinFiatPrices(
           any(),
@@ -279,9 +277,8 @@ void main() {
   test('a provider outage does not negative-cache missing dates', () async {
     final fallback = _FallbackRepository();
     var recovering = false;
-    when(
-      () => fallback.supports(any(), any(), any()),
-    ).thenAnswer((_) async => true);
+    when(() => fallback.supports(any(), any(), any()))
+        .thenAnswer((_) async => true);
     when(
       () => repo.getCoinFiatPrices(
         any(),
@@ -324,9 +321,8 @@ void main() {
         (invocation) async =>
             invocation.positionalArguments[2] == PriceRequestType.priceHistory,
       );
-      when(
-        () => fallback.supports(any(), any(), any()),
-      ).thenAnswer((_) async => true);
+      when(() => fallback.supports(any(), any(), any()))
+          .thenAnswer((_) async => true);
       when(
         () => repo.getCoinFiatPrices(
           any(),
@@ -367,9 +363,8 @@ void main() {
   test('tries all history providers before declaring a date absent', () async {
     final repositories = List.generate(4, (_) => _MockRepository());
     for (final repository in repositories) {
-      when(
-        () => repository.supports(any(), any(), any()),
-      ).thenAnswer((_) async => true);
+      when(() => repository.supports(any(), any(), any()))
+          .thenAnswer((_) async => true);
       when(
         () => repository.getCoinFiatPrices(
           any(),

@@ -196,9 +196,9 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
   ActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
     int? gapLimit,
-  }) => ActivationParams.fromConfigJson(
-    config,
-  ).genericCopyWith(privKeyPolicy: privKeyPolicy);
+  }) =>
+      ActivationParams.fromConfigJson(config)
+          .genericCopyWith(privKeyPolicy: privKeyPolicy);
 
   String? get contractAddress =>
       config.valueOrNull<String>('contract_address') ??

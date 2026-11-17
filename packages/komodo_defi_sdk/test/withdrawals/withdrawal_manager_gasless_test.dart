@@ -544,20 +544,17 @@ void main() {
       );
       expect(recorded, isTrue);
 
-      when(
-        () => assetProvider.findAssetsByConfigId(_coin),
-      ).thenReturn({trc20Asset});
+      when(() => assetProvider.findAssetsByConfigId(_coin))
+          .thenReturn({trc20Asset});
       when(() => assetProvider.fromId(trxParent.id)).thenReturn(trxParent);
-      when(
-        () => activationCoordinator.activateAsset(trc20Asset),
-      ).thenAnswer((_) async => ActivationResult.success(trc20Asset.id));
-      when(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).thenAnswer((_) async {
-        final stream = StreamController<KdfEvent>();
-        defaultTraceStreams.add(stream);
-        return stream.stream.listen(null);
-      });
+      when(() => activationCoordinator.activateAsset(trc20Asset))
+          .thenAnswer((_) async => ActivationResult.success(trc20Asset.id));
+      when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .thenAnswer((_) async {
+            final stream = StreamController<KdfEvent>();
+            defaultTraceStreams.add(stream);
+            return stream.stream.listen(null);
+          });
     });
 
     tearDown(() async {
@@ -683,12 +680,11 @@ void main() {
         final timeline = <String>[];
         final requests = <Map<String, dynamic>>[];
 
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) async {
-          timeline.add('stream');
-          return events.stream.listen(null);
-        });
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) async {
+              timeline.add('stream');
+              return events.stream.listen(null);
+            });
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.single as Map<String, dynamic>;
@@ -710,9 +706,9 @@ void main() {
         });
 
         final preview = _gaslessPreview();
-        final progressFuture = makeManager(
-          streams: eventStreamingManager,
-        ).executeWithdrawal(preview, _coin).toList();
+        final progressFuture = makeManager(streams: eventStreamingManager)
+            .executeWithdrawal(preview, _coin)
+            .toList();
 
         await traceQuerySeen.future;
         events
@@ -785,9 +781,8 @@ void main() {
           pendingRepository,
         );
         var traceQueries = 0;
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) async => events.stream.listen(null));
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.single as Map<String, dynamic>;
@@ -874,9 +869,8 @@ void main() {
         'unavailable', () async {
       final events = StreamController<KdfEvent>();
       var traceQueries = 0;
-      when(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).thenAnswer((_) async => events.stream.listen(null));
+      when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .thenAnswer((_) async => events.stream.listen(null));
       when(() => client.executeRpc(any())).thenAnswer((invocation) async {
         final request =
             invocation.positionalArguments.single as Map<String, dynamic>;
@@ -930,9 +924,8 @@ void main() {
         final events = StreamController<KdfEvent>();
         final firstTraceQuerySeen = Completer<void>();
         var traceQueries = 0;
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) async => events.stream.listen(null));
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.single as Map<String, dynamic>;
@@ -954,9 +947,9 @@ void main() {
           };
         });
 
-        final progressFuture = makeManager(
-          streams: eventStreamingManager,
-        ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+        final progressFuture = makeManager(streams: eventStreamingManager)
+            .executeWithdrawal(_gaslessPreview(), _coin)
+            .toList();
         await firstTraceQuerySeen.future;
         events.add(
           const GaslessTraceEvent(
@@ -982,9 +975,8 @@ void main() {
       'plain-string relay failure becomes durable unknown without guessing',
       () async {
         final events = StreamController<KdfEvent>();
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) async => events.stream.listen(null));
         when(() => client.executeRpc(any())).thenAnswer((invocation) async {
           final request =
               invocation.positionalArguments.single as Map<String, dynamic>;
@@ -994,9 +986,9 @@ void main() {
           throw StateError('Unexpected RPC ${request['method']}');
         });
 
-        final progress = await makeManager(
-          streams: eventStreamingManager,
-        ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+        final progress = await makeManager(streams: eventStreamingManager)
+            .executeWithdrawal(_gaslessPreview(), _coin)
+            .toList();
         await events.close();
 
         final unknown = progress.last;
@@ -1022,9 +1014,9 @@ void main() {
       'missing trace manager blocks before relay and clears reserve',
       () async {
         await expectLater(
-          makeManager(
-            includeStreams: false,
-          ).executeWithdrawal(_gaslessPreview(), _coin).toList(),
+          makeManager(includeStreams: false)
+              .executeWithdrawal(_gaslessPreview(), _coin)
+              .toList(),
           throwsA(
             isA<SdkError>().having(
               (error) => error.source,
@@ -1052,14 +1044,13 @@ void main() {
     );
 
     test('stream attachment failure blocks before relay', () async {
-      when(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).thenThrow(StateError('streaming is unavailable'));
+      when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .thenThrow(StateError('streaming is unavailable'));
 
       await expectLater(
-        makeManager(
-          streams: eventStreamingManager,
-        ).executeWithdrawal(_gaslessPreview(), _coin).toList(),
+        makeManager(streams: eventStreamingManager)
+            .executeWithdrawal(_gaslessPreview(), _coin)
+            .toList(),
         throwsA(
           isA<SdkError>().having(
             (error) => error.source,
@@ -1076,9 +1067,8 @@ void main() {
         ),
       );
 
-      verify(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).called(1);
+      verify(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .called(1);
       verifyNever(() => client.executeRpc(any()));
       expect(await pendingRepository.list(_wallet), isEmpty);
     });
@@ -1123,19 +1113,18 @@ void main() {
       test(
         'maps exact trace-stream enable error ${fixture.type.wireValue}',
         () async {
-          when(
-            () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-          ).thenThrow(
-            GaslessTraceStreamingRequestException(
-              type: fixture.type,
-              message: 'KDF trace-stream enable error',
-            ),
-          );
+          when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+              .thenThrow(
+                GaslessTraceStreamingRequestException(
+                  type: fixture.type,
+                  message: 'KDF trace-stream enable error',
+                ),
+              );
 
           await expectLater(
-            makeManager(
-              streams: eventStreamingManager,
-            ).executeWithdrawal(_gaslessPreview(), _coin).toList(),
+            makeManager(streams: eventStreamingManager)
+                .executeWithdrawal(_gaslessPreview(), _coin)
+                .toList(),
             throwsA(
               isA<SdkError>().having(
                 (error) => error.source,
@@ -1175,12 +1164,11 @@ void main() {
     test('stream disconnect before relay blocks and clears reserve', () async {
       final events = StreamController<KdfEvent>();
       var streamAttached = false;
-      when(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).thenAnswer((_) async {
-        streamAttached = true;
-        return events.stream.listen(null);
-      });
+      when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .thenAnswer((_) async {
+            streamAttached = true;
+            return events.stream.listen(null);
+          });
 
       Future<WalletId?> walletResolver() async {
         if (streamAttached && !events.isClosed) {
@@ -1210,18 +1198,16 @@ void main() {
         ),
       );
 
-      verify(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).called(1);
+      verify(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .called(1);
       verifyNever(() => client.executeRpc(any()));
       expect(await pendingRepository.list(_wallet), isEmpty);
     });
 
     test('fixed KDF failure reason remains internal to progress', () async {
       final events = StreamController<KdfEvent>();
-      when(
-        () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-      ).thenAnswer((_) async => events.stream.listen(null));
+      when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+          .thenAnswer((_) async => events.stream.listen(null));
       when(() => client.executeRpc(any())).thenAnswer((invocation) async {
         final request =
             invocation.positionalArguments.single as Map<String, dynamic>;
@@ -1239,9 +1225,9 @@ void main() {
         };
       });
 
-      final progress = await makeManager(
-        streams: eventStreamingManager,
-      ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+      final progress = await makeManager(streams: eventStreamingManager)
+          .executeWithdrawal(_gaslessPreview(), _coin)
+          .toList();
       await events.close();
 
       final failure = progress.last;
@@ -1423,9 +1409,9 @@ void main() {
           };
         });
 
-        await makeManager(
-          repository: repository,
-        ).executeWithdrawal(_gaslessPreview(), _coin).toList();
+        await makeManager(repository: repository)
+            .executeWithdrawal(_gaslessPreview(), _coin)
+            .toList();
 
         expect(repository.resolved, isTrue);
         expect(repository.resurrected, isFalse);
@@ -1671,12 +1657,11 @@ void main() {
         final registration = Completer<StreamSubscription<KdfEvent>>();
         final cancelled = Completer<void>();
         final events = StreamController<KdfEvent>(onCancel: cancelled.complete);
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) {
-          registrationStarted.complete();
-          return registration.future;
-        });
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) {
+              registrationStarted.complete();
+              return registration.future;
+            });
         final manager = makeManager();
         final execution = manager
             .executeWithdrawal(_gaslessPreview(), _coin)
@@ -1699,12 +1684,11 @@ void main() {
       () async {
         final activationStarted = Completer<void>();
         final activation = Completer<ActivationResult>();
-        when(() => activationCoordinator.activateAsset(trc20Asset)).thenAnswer((
-          _,
-        ) {
-          activationStarted.complete();
-          return activation.future;
-        });
+        when(() => activationCoordinator.activateAsset(trc20Asset))
+            .thenAnswer((_) {
+              activationStarted.complete();
+              return activation.future;
+            });
         final manager = makeManager();
         final execution = manager
             .executeWithdrawal(_gaslessPreview(), _coin)
@@ -1734,9 +1718,8 @@ void main() {
             return remoteDisable.future;
           },
         );
-        when(
-          () => eventStreamingManager.subscribeToGaslessTrace(coin: _coin),
-        ).thenAnswer((_) async => events.stream.listen(null));
+        when(() => eventStreamingManager.subscribeToGaslessTrace(coin: _coin))
+            .thenAnswer((_) async => events.stream.listen(null));
         when(() => client.executeRpc(any())).thenAnswer((_) {
           relayStarted.complete();
           return relayResponse.future;
@@ -2013,9 +1996,8 @@ void main() {
       'trace timeout only advertises status reconciliation as retryable',
       () async {
         await pendingRepository.upsert(_wallet, _pending());
-        when(
-          () => client.executeRpc(any()),
-        ).thenThrow(TimeoutException('trace status timed out'));
+        when(() => client.executeRpc(any()))
+            .thenThrow(TimeoutException('trace status timed out'));
 
         final progress = await makeManager()
             .resumePendingGaslessTransfer('trace-recovery')
@@ -2041,9 +2023,8 @@ void main() {
           _wallet,
           _pending(state: GaslessTransferState.confirming),
         );
-        when(
-          () => client.executeRpc(any()),
-        ).thenThrow(Exception('trace status temporarily unavailable'));
+        when(() => client.executeRpc(any()))
+            .thenThrow(Exception('trace status temporarily unavailable'));
 
         final progress = await makeManager()
             .resumePendingGaslessTransfer('trace-recovery')
@@ -2141,9 +2122,8 @@ void main() {
         final repository = _MockPendingGaslessTransferRepository();
         final pending = _pending();
         Map<String, Set<String>>? ownershipProof;
-        when(
-          () => repository.listAmbiguousLegacyTransfers(_wallet),
-        ).thenAnswer((_) async => [pending]);
+        when(() => repository.listAmbiguousLegacyTransfers(_wallet))
+            .thenAnswer((_) async => [pending]);
         when(
           () => repository.resolveAmbiguousLegacyTransfers(
             _wallet,
@@ -2189,9 +2169,8 @@ void main() {
       'legacy journal remains blocked when fresh ownership proof fails',
       () async {
         final repository = _MockPendingGaslessTransferRepository();
-        when(
-          () => repository.listAmbiguousLegacyTransfers(_wallet),
-        ).thenAnswer((_) async => [_pending()]);
+        when(() => repository.listAmbiguousLegacyTransfers(_wallet))
+            .thenAnswer((_) async => [_pending()]);
 
         await expectLater(
           makeManager(
@@ -2221,9 +2200,8 @@ void main() {
         final resolverStarted = Completer<void>();
         final resolverResult = Completer<Set<String>>();
         var currentWallet = _wallet;
-        when(
-          () => repository.listAmbiguousLegacyTransfers(_wallet),
-        ).thenAnswer((_) async => [_pending()]);
+        when(() => repository.listAmbiguousLegacyTransfers(_wallet))
+            .thenAnswer((_) async => [_pending()]);
         final result = makeManager(
           repository: repository,
           walletResolver: () async => currentWallet,
@@ -2260,9 +2238,8 @@ void main() {
         final resolverStarted = Completer<void>();
         final resolverResult = Completer<Set<String>>();
         final auth = WithdrawalAuthFixture(walletResolver: () async => _wallet);
-        when(
-          () => repository.listAmbiguousLegacyTransfers(_wallet),
-        ).thenAnswer((_) async => [_pending()]);
+        when(() => repository.listAmbiguousLegacyTransfers(_wallet))
+            .thenAnswer((_) async => [_pending()]);
         final manager = makeManager(
           auth: auth,
           repository: repository,
@@ -2526,9 +2503,8 @@ void main() {
       test(
         'maps exact account-status error ${fixture.type.wireValue}',
         () async {
-          when(
-            () => client.executeRpc(any()),
-          ).thenAnswer((_) async => _errorEnvelope(fixture.type.wireValue));
+          when(() => client.executeRpc(any()))
+              .thenAnswer((_) async => _errorEnvelope(fixture.type.wireValue));
 
           await expectLater(
             makeManager().gaslessAccountStatus(trc20Asset.id),

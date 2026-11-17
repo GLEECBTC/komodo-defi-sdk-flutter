@@ -51,9 +51,8 @@ class FeeInfoDisplay extends StatelessWidget {
               if (fee.isHighFee)
                 Text(
                   'Warning: High gas price',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               Text(
                 'Estimated Time: ${fee.estimatedTime}',
@@ -86,9 +85,8 @@ class FeeInfoDisplay extends StatelessWidget {
               if (_isEip1559HighFee(fee))
                 Text(
                   'Warning: High gas price',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               Text(
                 'Estimated Time: ${_getEip1559EstimatedTime(fee)}',
@@ -284,9 +282,8 @@ class FeeInfoDisplay extends StatelessWidget {
         if (feeInfo.isHighFee)
           Text(
             'Warning: This fee seems unusually high',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.error,
-            ),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
           ),
       ],
     );

@@ -84,9 +84,8 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
        _loadingStrategy =
            loadingStrategy ??
            ((storageNamespace == null || storageNamespace.isEmpty) &&
-                   const String.fromEnvironment(
-                     'KDF_COINS_STORAGE_NAMESPACE',
-                   ).isEmpty
+                   const String.fromEnvironment('KDF_COINS_STORAGE_NAMESPACE')
+                       .isEmpty
                ? StorageFirstLoadingStrategy()
                : const AssetBundleOnlyLoadingStrategy()),
        _updateStrategy = updateStrategy ?? const BackgroundUpdateStrategy(),

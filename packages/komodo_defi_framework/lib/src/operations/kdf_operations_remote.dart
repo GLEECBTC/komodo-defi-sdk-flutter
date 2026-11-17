@@ -131,9 +131,8 @@ class KdfOperationsRemote implements IKdfOperations {
   @override
   Future<StopStatus> kdfStop() async {
     try {
-      final stopResultResponse = await mm2Rpc({
-        'method': 'stop',
-      }).timeout(_stopTimeout);
+      final stopResultResponse = await mm2Rpc({'method': 'stop'})
+          .timeout(_stopTimeout);
 
       _log('KDF stop response received');
 

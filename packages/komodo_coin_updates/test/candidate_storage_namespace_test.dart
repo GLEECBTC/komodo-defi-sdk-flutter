@@ -42,9 +42,8 @@ void main() {
   test('runtime namespaces isolate every default database from production', () {
     const config = AssetRuntimeUpdateConfig();
     const transform = CoinConfigTransformer();
-    final production = const DefaultCoinConfigDataFactory(
-      storageNamespace: '',
-    ).createRepository(config, transform);
+    final production = const DefaultCoinConfigDataFactory(storageNamespace: '')
+        .createRepository(config, transform);
     expect(production.assetsBoxName, 'assets');
     expect(production.settingsBoxName, 'coins_settings');
     for (final namespace in ['preview-a', 'preview-b']) {

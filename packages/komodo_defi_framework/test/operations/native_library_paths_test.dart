@@ -45,16 +45,13 @@ void main() {
       );
     });
 
-    test(
-      'macOS preserves an app moved to a different installation directory',
-      () {
-        expect(
-          macOsKdfLibraryPaths(
-            '/Volumes/External Apps/Gleec.app/Contents/MacOS/Gleec',
-          ).first,
-          '/Volumes/External Apps/Gleec.app/Contents/Frameworks/libkdflib.dylib',
-        );
-      },
-    );
+    test('macOS preserves an app moved to a different installation directory', () {
+      expect(
+        macOsKdfLibraryPaths(
+          '/Volumes/External Apps/Gleec.app/Contents/MacOS/Gleec',
+        ).first,
+        '/Volumes/External Apps/Gleec.app/Contents/Frameworks/libkdflib.dylib',
+      );
+    });
   });
 }

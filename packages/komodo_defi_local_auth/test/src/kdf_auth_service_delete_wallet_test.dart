@@ -1279,9 +1279,8 @@ void main() {
         };
         expect(await service.retryWalletDeletionCleanup(committed), isFalse);
         expect(
-          (await SecureLocalStorage().getUser(
-            'test-wallet',
-          ))!.metadata[walletEntryIdMetadataKey],
+          (await SecureLocalStorage().getUser('test-wallet'))!
+              .metadata[walletEntryIdMetadataKey],
           'replacement-entry',
         );
       },
@@ -2303,9 +2302,8 @@ void main() {
         );
         expect(service.isSessionContextCurrent(context), isTrue);
         expect(
-          (await SecureLocalStorage().getUser(
-            'test-wallet',
-          ))!.metadata['has_backup'],
+          (await SecureLocalStorage().getUser('test-wallet'))!
+              .metadata['has_backup'],
           isTrue,
         );
         operations.responsesByMethod['get_public_key_hash'] = {
@@ -2384,9 +2382,8 @@ void main() {
           throwsA(isA<AuthSessionChangedException>()),
         );
         expect(
-          (await SecureLocalStorage().getUser(
-            'replacement',
-          ))!.metadata['has_backup'],
+          (await SecureLocalStorage().getUser('replacement'))!
+              .metadata['has_backup'],
           isFalse,
         );
       },
@@ -2524,9 +2521,8 @@ void main() {
           throwsA(isA<AuthSessionChangedException>()),
         );
         expect(
-          (await SecureLocalStorage().getUser(
-            'test-wallet',
-          ))!.metadata['has_backup'],
+          (await SecureLocalStorage().getUser('test-wallet'))!
+              .metadata['has_backup'],
           isNull,
         );
       },

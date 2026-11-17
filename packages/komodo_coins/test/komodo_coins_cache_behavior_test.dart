@@ -131,48 +131,40 @@ void main() {
       );
 
       // factory returns our single repo and separate local providers
-      when(
-        () => mockDataFactory.createRepository(any(), any()),
-      ).thenReturn(mockRepo);
+      when(() => mockDataFactory.createRepository(any(), any()))
+          .thenReturn(mockRepo);
       var localProviderCallCount = 0;
-      when(
-        () => mockDataFactory.createLocalProvider(any(), mockTransformer),
-      ).thenAnswer((_) {
-        localProviderCallCount++;
-        return localProviderCallCount == 1
-            ? mockLocalProvider
-            : mockFallbackProvider; // for update manager fallback
-      });
+      when(() => mockDataFactory.createLocalProvider(any(), mockTransformer))
+          .thenAnswer((_) {
+            localProviderCallCount++;
+            return localProviderCallCount == 1
+                ? mockLocalProvider
+                : mockFallbackProvider; // for update manager fallback
+          });
 
       // repository wiring
       when(() => mockRepo.coinConfigProvider).thenReturn(mockRemoteProvider);
 
       // storage does not exist at cold boot; will flip to true after update
       var storageExists = false;
-      when(
-        () => mockRepo.updatedAssetStorageExists(),
-      ).thenAnswer((_) async => storageExists);
+      when(() => mockRepo.updatedAssetStorageExists())
+          .thenAnswer((_) async => storageExists);
 
       // local provider returns bundled asset + commit
-      when(
-        () => mockLocalProvider.getAssets(),
-      ).thenAnswer((_) async => [kmdAsset]);
-      when(
-        () => mockLocalProvider.getLatestCommit(),
-      ).thenAnswer((_) async => bundledCommit);
+      when(() => mockLocalProvider.getAssets())
+          .thenAnswer((_) async => [kmdAsset]);
+      when(() => mockLocalProvider.getLatestCommit())
+          .thenAnswer((_) async => bundledCommit);
 
       // fallback (for update manager) mirrors bundled
-      when(
-        () => mockFallbackProvider.getAssets(),
-      ).thenAnswer((_) async => [kmdAsset]);
-      when(
-        () => mockFallbackProvider.getLatestCommit(),
-      ).thenAnswer((_) async => bundledCommit);
+      when(() => mockFallbackProvider.getAssets())
+          .thenAnswer((_) async => [kmdAsset]);
+      when(() => mockFallbackProvider.getLatestCommit())
+          .thenAnswer((_) async => bundledCommit);
 
       // remote provides a newer commit
-      when(
-        () => mockRemoteProvider.getLatestCommit(),
-      ).thenAnswer((_) async => latestCommit);
+      when(() => mockRemoteProvider.getLatestCommit())
+          .thenAnswer((_) async => latestCommit);
       // current commit initially unknown; after update we'll return latest
       when(() => mockRepo.getCurrentCommit()).thenAnswer((_) async => null);
       when(() => mockRepo.isLatestCommit()).thenAnswer((_) async => false);
@@ -180,12 +172,10 @@ void main() {
       when(() => mockRepo.updateCoinConfig()).thenAnswer((_) async {
         storageExists = true;
         // After update, repository reads return updated state
-        when(
-          () => mockRepo.getCurrentCommit(),
-        ).thenAnswer((_) async => latestCommit);
-        when(
-          () => mockRepo.getAssets(),
-        ).thenAnswer((_) async => [kmdAsset, ltcAsset]);
+        when(() => mockRepo.getCurrentCommit())
+            .thenAnswer((_) async => latestCommit);
+        when(() => mockRepo.getAssets())
+            .thenAnswer((_) async => [kmdAsset, ltcAsset]);
         when(() => mockRepo.isLatestCommit()).thenAnswer((_) async => true);
         // Signal completion for deterministic test synchronization
         if (!updateCompleter.isCompleted) {
@@ -197,13 +187,11 @@ void main() {
     test(
       'runtime preview namespace ignores stale catalogs at startup and refresh',
       () async {
-        when(
-          () => mockRepo.updatedAssetStorageExists(),
-        ).thenAnswer((_) async => true);
+        when(() => mockRepo.updatedAssetStorageExists())
+            .thenAnswer((_) async => true);
         when(() => mockRepo.getAssets()).thenAnswer((_) async => [ltcAsset]);
-        when(
-          () => mockRepo.getCurrentCommit(),
-        ).thenAnswer((_) async => latestCommit);
+        when(() => mockRepo.getCurrentCommit())
+            .thenAnswer((_) async => latestCommit);
         final startup = await StartupCoinsProvider.fetchRawCoinsForStartup(
           configRepository: mockConfigRepository,
           transformer: mockTransformer,
@@ -252,9 +240,8 @@ void main() {
 
         // Allow background update to run deterministically
         await updateCompleter.future.timeout(const Duration(seconds: 2));
-        verify(
-          () => mockRepo.updateCoinConfig(),
-        ).called(greaterThanOrEqualTo(1));
+        verify(() => mockRepo.updateCoinConfig())
+            .called(greaterThanOrEqualTo(1));
 
         // Even after update, in-memory cache should remain from initial load
         expect(coins.all.length, 1);
@@ -301,9 +288,8 @@ void main() {
 
         // Allow background update to run deterministically
         await updateCompleter.future.timeout(const Duration(seconds: 2));
-        verify(
-          () => mockRepo.updateCoinConfig(),
-        ).called(greaterThanOrEqualTo(1));
+        verify(() => mockRepo.updateCoinConfig())
+            .called(greaterThanOrEqualTo(1));
 
         // After update, instance getters should still return cached values
         expect(coins.all.values.first.id.id, 'KMD');
@@ -341,9 +327,8 @@ void main() {
 
         // Allow background update to run deterministically (which flips storage state in the repo mock)
         await updateCompleter.future.timeout(const Duration(seconds: 2));
-        verify(
-          () => mockRepo.updateCoinConfig(),
-        ).called(greaterThanOrEqualTo(1));
+        verify(() => mockRepo.updateCoinConfig())
+            .called(greaterThanOrEqualTo(1));
 
         // Before refresh, filtered view remains cached and unchanged
         final stillCached = coins.filteredAssets(noFilter);
@@ -371,62 +356,57 @@ void main() {
       },
     );
 
-    test(
-      'end-to-end: startup fetch -> init -> cached view -> updateNow -> refreshed view',
-      () async {
-        // 1) Static startup fetch uses asset bundle, no updates, storage clean
-        final startupList = await StartupCoinsProvider.fetchRawCoinsForStartup(
-          configRepository: mockConfigRepository,
-          transformer: mockTransformer,
-          dataFactory: mockDataFactory,
-          loadingStrategy: AssetBundleFirstLoadingStrategy(),
-          appName: 'test_app',
-          appStoragePath: '/tmp',
-        );
-        expect(startupList, isNotEmpty);
-        expect(startupList.length, equals(1)); // only bundled KMD
-        verifyNever(() => mockRepo.updateCoinConfig());
-        // Storage check: repository reports no storage initially
-        expect(await mockRepo.updatedAssetStorageExists(), isFalse);
+    test('end-to-end: startup fetch -> init -> cached view -> updateNow -> refreshed view', () async {
+      // 1) Static startup fetch uses asset bundle, no updates, storage clean
+      final startupList = await StartupCoinsProvider.fetchRawCoinsForStartup(
+        configRepository: mockConfigRepository,
+        transformer: mockTransformer,
+        dataFactory: mockDataFactory,
+        loadingStrategy: AssetBundleFirstLoadingStrategy(),
+        appName: 'test_app',
+        appStoragePath: '/tmp',
+      );
+      expect(startupList, isNotEmpty);
+      expect(startupList.length, equals(1)); // only bundled KMD
+      verifyNever(() => mockRepo.updateCoinConfig());
+      // Storage check: repository reports no storage initially
+      expect(await mockRepo.updatedAssetStorageExists(), isFalse);
 
-        // 2) Instance init triggers background update (which flips storageExists)
-        final coins = KomodoAssetsUpdateManager(
-          configRepository: mockConfigRepository,
-          transformer: mockTransformer,
-          dataFactory: mockDataFactory,
-          // Use immediate update strategy for deterministic testing
-          updateStrategy: const ImmediateUpdateStrategy(
-            updateInterval: Duration.zero,
-          ),
-        );
-        await coins.init();
-        await updateCompleter.future.timeout(const Duration(seconds: 2));
-        verify(
-          () => mockRepo.updateCoinConfig(),
-        ).called(greaterThanOrEqualTo(1));
-        // After background update, storage should now exist
-        expect(await mockRepo.updatedAssetStorageExists(), isTrue);
+      // 2) Instance init triggers background update (which flips storageExists)
+      final coins = KomodoAssetsUpdateManager(
+        configRepository: mockConfigRepository,
+        transformer: mockTransformer,
+        dataFactory: mockDataFactory,
+        // Use immediate update strategy for deterministic testing
+        updateStrategy: const ImmediateUpdateStrategy(
+          updateInterval: Duration.zero,
+        ),
+      );
+      await coins.init();
+      await updateCompleter.future.timeout(const Duration(seconds: 2));
+      verify(() => mockRepo.updateCoinConfig()).called(greaterThanOrEqualTo(1));
+      // After background update, storage should now exist
+      expect(await mockRepo.updatedAssetStorageExists(), isTrue);
 
-        // 3) Cached view still from asset bundle
-        expect(coins.all.length, equals(1));
+      // 3) Cached view still from asset bundle
+      expect(coins.all.length, equals(1));
 
-        // 4) Cached commit still bundled
-        final cachedCommit = await coins.getCurrentCommitHash();
-        expect(cachedCommit, equals(bundledCommit));
+      // 4) Cached commit still bundled
+      final cachedCommit = await coins.getCurrentCommitHash();
+      expect(cachedCommit, equals(bundledCommit));
 
-        // 5) Force immediate update and then refresh assets to reflect storage
-        //    (assets manager intentionally caches until refreshed)
-        final updateResult = await coins.updateNow();
-        expect(updateResult.success, isTrue);
-        await coins.assets.refreshAssets();
+      // 5) Force immediate update and then refresh assets to reflect storage
+      //    (assets manager intentionally caches until refreshed)
+      final updateResult = await coins.updateNow();
+      expect(updateResult.success, isTrue);
+      await coins.assets.refreshAssets();
 
-        // After refresh, we should see the updated storage assets and commit
-        expect(coins.all.length, equals(2)); // KMD + LTC after repo update
-        final updatedCommit = await coins.getCurrentCommitHash();
-        expect(updatedCommit, equals(latestCommit));
+      // After refresh, we should see the updated storage assets and commit
+      expect(coins.all.length, equals(2)); // KMD + LTC after repo update
+      final updatedCommit = await coins.getCurrentCommitHash();
+      expect(updatedCommit, equals(latestCommit));
 
-        await coins.dispose();
-      },
-    );
+      await coins.dispose();
+    });
   });
 }

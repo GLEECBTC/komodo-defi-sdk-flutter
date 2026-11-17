@@ -35,45 +35,39 @@ void main() {
   final token = solanaToken(sol);
   const verified = SolanaCapabilities(enabled: true);
 
-  test(
-    'batch activation retains complete mint metadata and permits zero ATA balance',
-    () async {
-      final client = _Client()
-        ..response = {
-          'mmrpc': '2.0',
-          'result': {
-            'ticker': sol.id.id,
-            'address': 'WalletBase58',
-            'current_block': 42,
-            'balance': {'spendable': '0', 'unspendable': '0'},
-            'tokens_balances': {
-              token.id.id: {'spendable': '0', 'unspendable': '0'},
-            },
+  test('batch activation retains complete mint metadata and permits zero ATA balance', () async {
+    final client = _Client()
+      ..response = {
+        'mmrpc': '2.0',
+        'result': {
+          'ticker': sol.id.id,
+          'address': 'WalletBase58',
+          'current_block': 42,
+          'balance': {'spendable': '0', 'unspendable': '0'},
+          'tokens_balances': {
+            token.id.id: {'spendable': '0', 'unspendable': '0'},
           },
-        };
-      final strategy = SolanaActivationStrategy(
-        client,
-        const PrivateKeyPolicy.contextPrivKey(),
-        verified,
-      );
-      final events = await strategy.activate(sol, [token]).toList();
-      expect(events.last.isSuccess, isTrue);
-      expect(client.requests.single['mmrpc'], '2.0');
-      expect(client.requests.single['params'], {
-        'ticker': 'TESTSOL',
-        'nodes': [
-          {'url': 'https://api.devnet.solana.com'},
-        ],
-        'tokens_params': [
-          {
-            'ticker': token.id.id,
-            'protocol': token.protocol.config['protocol'],
-          },
-        ],
-        'tx_history': true,
-      });
-    },
-  );
+        },
+      };
+    final strategy = SolanaActivationStrategy(
+      client,
+      const PrivateKeyPolicy.contextPrivKey(),
+      verified,
+    );
+    final events = await strategy.activate(sol, [token]).toList();
+    expect(events.last.isSuccess, isTrue);
+    expect(client.requests.single['mmrpc'], '2.0');
+    expect(client.requests.single['params'], {
+      'ticker': 'TESTSOL',
+      'nodes': [
+        {'url': 'https://api.devnet.solana.com'},
+      ],
+      'tokens_params': [
+        {'ticker': token.id.id, 'protocol': token.protocol.config['protocol']},
+      ],
+      'tx_history': true,
+    });
+  });
 
   test('later token activation sends a complete protocol override', () async {
     final client = _Client()

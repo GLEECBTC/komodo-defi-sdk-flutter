@@ -38,12 +38,11 @@ void main() {
       final stores = <CustomTokenStorage>[];
       for (final namespace in ['', 'preview-a', 'preview-b']) {
         final repository =
-            DefaultCoinConfigDataFactory(
-              storageNamespace: namespace,
-            ).createRepository(
-              const AssetRuntimeUpdateConfig(),
-              const CoinConfigTransformer(),
-            );
+            DefaultCoinConfigDataFactory(storageNamespace: namespace)
+                .createRepository(
+                  const AssetRuntimeUpdateConfig(),
+                  const CoinConfigTransformer(),
+                );
         final store = CustomTokenStorage(storageNamespace: namespace);
         stores.add(store);
         names.addAll([
@@ -68,21 +67,19 @@ void main() {
       await Hive.close();
       for (final namespace in ['', 'preview-a', 'preview-b']) {
         final repository =
-            DefaultCoinConfigDataFactory(
-              storageNamespace: namespace,
-            ).createRepository(
-              const AssetRuntimeUpdateConfig(),
-              const CoinConfigTransformer(),
-            );
+            DefaultCoinConfigDataFactory(storageNamespace: namespace)
+                .createRepository(
+                  const AssetRuntimeUpdateConfig(),
+                  const CoinConfigTransformer(),
+                );
         final settings = await Hive.openBox<String>(repository.settingsBoxName);
         expect(
           settings.get('commit'),
           namespace.isEmpty ? 'production' : namespace,
         );
       }
-      final restored = await CustomTokenStorage(
-        storageNamespace: 'preview-a',
-      ).getCustomToken(token.id);
+      final restored = await CustomTokenStorage(storageNamespace: 'preview-a')
+          .getCustomToken(token.id);
       expect(restored!.protocol.isCustomToken, isTrue);
       expect(restored.protocol.contractAddress, token.protocol.contractAddress);
     },

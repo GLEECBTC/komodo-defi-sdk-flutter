@@ -72,9 +72,8 @@ void main() {
     );
     assets = _Assets();
     when(() => assets.fromId(any())).thenReturn(asset);
-    when(
-      () => assets.getActivatedAssets(),
-    ).thenAnswer((_) async => active ? [asset] : []);
+    when(() => assets.getActivatedAssets())
+        .thenAnswer((_) async => active ? [asset] : []);
     client = _Client();
     manager = SecurityManager(
       client,
@@ -86,26 +85,23 @@ void main() {
   });
   tearDown(() => manager.dispose());
 
-  test(
-    'active HD wallet exports one keypair without offline derivation or selectors',
-    () async {
-      final result = await manager.exportPrivateKeys(
-        request: PrivateKeyExportRequest(assets: [asset.id]),
-      );
-      expect(result.isComplete, isTrue);
-      final outcome = result.outcomes.single;
-      expect(outcome.coverage!.kind, PrivateKeyExportCoverageKind.activeWallet);
-      expect(outcome.keys.single.hdInfo, isNull);
-      expect(outcome.keys.single.publicKeySecp256k1, isEmpty);
-      expect(outcome.keys.single.publicKeyAddress, 'WalletBase58');
-      expect(client.requests.map((r) => r['method']), [
-        'my_balance',
-        'show_priv_key',
-      ]);
-      expect(client.requests.last['coin'], asset.id.id);
-      expect(client.requests.last, isNot(contains('params')));
-    },
-  );
+  test('active HD wallet exports one keypair without offline derivation or selectors', () async {
+    final result = await manager.exportPrivateKeys(
+      request: PrivateKeyExportRequest(assets: [asset.id]),
+    );
+    expect(result.isComplete, isTrue);
+    final outcome = result.outcomes.single;
+    expect(outcome.coverage!.kind, PrivateKeyExportCoverageKind.activeWallet);
+    expect(outcome.keys.single.hdInfo, isNull);
+    expect(outcome.keys.single.publicKeySecp256k1, isEmpty);
+    expect(outcome.keys.single.publicKeyAddress, 'WalletBase58');
+    expect(client.requests.map((r) => r['method']), [
+      'my_balance',
+      'show_priv_key',
+    ]);
+    expect(client.requests.last['coin'], asset.id.id);
+    expect(client.requests.last, isNot(contains('params')));
+  });
 
   test(
     'explicit HD ranges and inactive assets refuse without activation',

@@ -501,14 +501,13 @@ class CoinPaprikaRepository implements CexRepository {
   ) {
     return cache.inFlight ??=
         Result.capture(
-          Future.sync(
-            () => coinPaprikaProvider.fetchTickers(quotes: [quote]),
-          ).then((tickers) {
-            if (tickers.isEmpty) {
-              throw StateError('CoinPaprika returned no tickers');
-            }
-            return {for (final t in tickers) t.id.toLowerCase(): t};
-          }),
+          Future.sync(() => coinPaprikaProvider.fetchTickers(quotes: [quote]))
+              .then((tickers) {
+                if (tickers.isEmpty) {
+                  throw StateError('CoinPaprika returned no tickers');
+                }
+                return {for (final t in tickers) t.id.toLowerCase(): t};
+              }),
         ).then((result) {
           cache.inFlight = null;
           final error = result.asError;

@@ -84,9 +84,8 @@ void main() {
         // Arrange
         final provider = CoinPaprikaProvider(httpClient: mockHttpClient);
 
-        when(
-          () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-        ).thenAnswer((_) async => http.Response('[]', 200));
+        when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+            .thenAnswer((_) async => http.Response('[]', 200));
 
         // Act
         await provider.fetchCoinList();
@@ -114,9 +113,8 @@ void main() {
           httpClient: mockHttpClient,
         );
 
-        when(
-          () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-        ).thenAnswer((_) async => http.Response('[]', 200));
+        when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+            .thenAnswer((_) async => http.Response('[]', 200));
 
         // Act
         await provider.fetchCoinList();
@@ -143,9 +141,8 @@ void main() {
         httpClient: mockHttpClient,
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act
       await provider.fetchCoinList();
@@ -171,21 +168,18 @@ void main() {
         httpClient: mockHttpClient,
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act - test multiple API methods
       await provider.fetchCoinList();
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
       await provider.fetchCoinMarkets(coinId: 'btc-bitcoin');
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('{"quotes":{}}', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('{"quotes":{}}', 200));
       await provider.fetchCoinTicker(coinId: 'btc-bitcoin');
 
       // Assert - verify all requests include Bearer token
@@ -210,9 +204,8 @@ void main() {
         apiPlan: const CoinPaprikaApiPlan.ultimate(),
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act
       await provider.fetchHistoricalOhlc(
@@ -242,9 +235,8 @@ void main() {
       mockHttpClient = MockHttpClient();
       registerFallbackValue(Uri());
       provider = CoinPaprikaProvider(httpClient: mockHttpClient);
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
     });
 
     test('rejects a start on the cutoff day without a request', () async {

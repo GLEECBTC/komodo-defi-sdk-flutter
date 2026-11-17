@@ -473,9 +473,8 @@ void main() {
           walletResolver: () async => walletId,
         );
         final assets = _ManagerAssets();
-        when(
-          () => assets.findAssetsByConfigId(asset.id.id),
-        ).thenReturn({asset});
+        when(() => assets.findAssetsByConfigId(asset.id.id))
+            .thenReturn({asset});
         final client = _ManagerClient();
         final journal = SecureSolanaWithdrawalJournal(
           storage: _MemoryStorage(),

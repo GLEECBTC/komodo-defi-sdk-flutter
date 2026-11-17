@@ -3,6 +3,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 
 part 'fee_info.freezed.dart';
+
 // We are doing manual fromJson/toJson, so no need for part 'fee_info.g.dart';
 
 /// A union representing the possible fee types:

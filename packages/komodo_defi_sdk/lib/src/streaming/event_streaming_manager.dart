@@ -77,15 +77,13 @@ class EventStreamingManager {
     _log('Waiting for KDF event-client registration...');
     _eventService.connectIfNeeded();
     final generationChanged = _generationChanged.future;
-    await Future.any<void>([
-      _eventService.firstByteReceived,
-      generationChanged,
-    ]).timeout(
-      _firstByteTimeout,
-      onTimeout: () {
-        throw TimeoutException('KDF event-client registration timed out');
-      },
-    );
+    await Future.any<void>([_eventService.firstByteReceived, generationChanged])
+        .timeout(
+          _firstByteTimeout,
+          onTimeout: () {
+            throw TimeoutException('KDF event-client registration timed out');
+          },
+        );
     if (expectedGeneration != _connectionGeneration ||
         !_eventService.isConnected) {
       throw StateError('KDF event connection changed before stream readiness');
