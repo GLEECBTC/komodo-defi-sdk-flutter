@@ -619,10 +619,12 @@ class KdfAuthService implements IAuthService {
                   JsonMap.from(reservation!['options'] as Map),
                 ) ==
                 options;
+        // The SDK-owned entry id alone identifies a creation this operation
+        // completed. The stored options are rewritten by every password
+        // sign-in, so comparing them would refuse to resume forever.
         final matchesCompleted =
             provisioningId != null &&
-            stored?.metadata[walletEntryIdMetadataKey] == provisioningId &&
-            stored?.walletId.authOptions == options;
+            stored?.metadata[walletEntryIdMetadataKey] == provisioningId;
         if ((exists && !matchesReservation && !matchesCompleted) ||
             (reservation != null && !matchesReservation) ||
             (!exists && stored != null && provisioningId != null)) {
@@ -704,12 +706,21 @@ class KdfAuthService implements IAuthService {
         );
         final sessionUser = _stampSessionFlags(currentUser)!;
         if (provisioningId != null) {
-          final persisted = await _secureStorage.getUser(walletName);
-          if (persisted?.walletId != sessionUser.walletId ||
-              persisted?.metadata[walletEntryIdMetadataKey] != provisioningId) {
-            throw StateError('Wallet creation could not be verified');
+          try {
+            final persisted = await _secureStorage.getUser(walletName);
+            if (persisted?.walletId != sessionUser.walletId ||
+                persisted?.metadata[walletEntryIdMetadataKey] !=
+                    provisioningId) {
+              throw StateError('Wallet creation could not be verified');
+            }
+            await _secureStorage.deleteProvisioning(walletName);
+          } catch (_) {
+            // The engine is already signed in to the new wallet. Left running,
+            // the next identity read would publish the unverified creation as
+            // a session.
+            await _clearFailedAuthenticatedKdfWithinWriteLock();
+            rethrow;
           }
-          await _secureStorage.deleteProvisioning(walletName);
         }
         _emitAuthStateChange(sessionUser);
         _invalidateUsersCache();
@@ -932,10 +943,18 @@ class KdfAuthService implements IAuthService {
         activeUserResolutionCompleted = true;
         if (activeUser == null) throw AuthException.notSignedIn();
         return operation(activeUser);
-      } catch (_) {
-        if (!activeUserResolutionCompleted) {
-          await _clearFailedAuthenticatedKdfWithinWriteLock();
+      } catch (error) {
+        if (activeUserResolutionCompleted) rethrow;
+        // As in [getActiveUser]: not having been able to ask who is signed in
+        // proves nothing about the session, so it must survive to be retried.
+        // The retry wrapper's details can carry response text; keep the type.
+        if (_isKdfUnreachable(error)) {
+          throw AuthException(
+            'KDF is not available. Please try again.',
+            type: AuthExceptionType.apiConnectionError,
+          );
         }
+        await _clearFailedAuthenticatedKdfWithinWriteLock();
         rethrow;
       }
     });
@@ -1011,6 +1030,10 @@ class KdfAuthService implements IAuthService {
           currentPassword: currentPassword,
           newPassword: newPassword,
         );
+      } on RpcDispatchRejected {
+        // The caller must be able to tell "definitely not sent" from a
+        // failure that may have changed the password.
+        rethrow;
       } on MmRpcException catch (e) {
         if (_isIncorrectPasswordRpcError(e)) {
           throw AuthException(
@@ -1151,12 +1174,15 @@ class KdfAuthService implements IAuthService {
                 ownsTransition = true;
                 transitionGeneration = authGeneration;
                 _deferDeletionSignOut = true;
-                _deferredDeletionSignOut = true;
                 await _stopKdfWithinTransition(
                   invalidateSession: false,
                   beforeStop: () {
                     ensureTransitionCurrent();
                     RpcDispatchGuard.ensureCurrent('delete_wallet');
+                    // Only now is the session ending: even a stop that fails
+                    // must publish sign-out, while a refusal above leaves the
+                    // engine authenticated and must publish nothing.
+                    _deferredDeletionSignOut = true;
                   },
                 );
                 ensureTransitionCurrent();
@@ -1171,15 +1197,15 @@ class KdfAuthService implements IAuthService {
             }
             try {
               if (allowActiveWallet) ensureTransitionCurrent();
-              await RpcDispatchGuard.run(
-                () {
+              await _deleteEngineWallet(
+                walletName: walletName,
+                password: password,
+                ensureAuthorized: () {
                   if (allowActiveWallet) ensureTransitionCurrent();
                 },
-                () => _client.rpc.wallet.deleteWallet(
-                  walletName: walletName,
-                  password: password,
-                ),
-                methods: const {'delete_wallet'},
+                // Only a reviewed target was listed by the engine under this
+                // catalog lock; an unreviewed name may never have existed.
+                listedBefore: target != null,
               );
               engineDeletionCommitted = true;
               _walletsGeneratedThisSession.removeWhere(
@@ -1569,12 +1595,19 @@ class KdfAuthService implements IAuthService {
     // Name-only identities can compare equal after a wallet is recreated with
     // a different seed. Both identities must include a verified public-key
     // hash; the caller's expected identity cannot be recovered from storage.
-    if (!(expectedWalletId.pubkeyHash?.trim().isNotEmpty ?? false) ||
-        !(activeWalletId.pubkeyHash?.trim().isNotEmpty ?? false) ||
-        activeWalletId != expectedWalletId) {
+    final proofMissing =
+        !(expectedWalletId.pubkeyHash?.trim().isNotEmpty ?? false) ||
+        !(activeWalletId.pubkeyHash?.trim().isNotEmpty ?? false);
+    // A missing proof is not evidence of another wallet: the identity RPC can
+    // fail while the same wallet stays signed in, and the caller may retry.
+    if (proofMissing &&
+        activeWalletId.name == expectedWalletId.name &&
+        activeWalletId.authOptions == expectedWalletId.authOptions) {
+      throw const AuthIdentityUnavailableException();
+    }
+    if (proofMissing || activeWalletId != expectedWalletId) {
       throw const WalletChangedDisconnectException(
-        'Wallet identity is unavailable or changed '
-        'before updating wallet metadata',
+        'Active wallet identity does not match the expected wallet',
       );
     }
   }
