@@ -34,6 +34,13 @@ Local combined-tree validation:
   release the transition and reset transport; session revocation stays intact.
   The SDK workflow now runs these browser regressions explicitly.
 - Browser log-storage privacy: 12 passed under real WebAssembly.
+- Complete types: 214 passed, three existing skips. The encrypted mnemonic
+  parser accepts integral versions represented as JS doubles and retains hex
+  and decimal string compatibility. Fractional/non-finite values remain
+  rejected, and malformed values never appear in the parser's error payload.
+- KDF WebAssembly transport/privacy: 11 passed, including an encrypted-mnemonic
+  response crossing the real JS boundary. That regression reproduced the
+  second full-app onboarding failure before the parser correction.
 
 The package tests used cached assets, with the source coin-config fixture
 available to authentication tests. Separate native asset generation must run

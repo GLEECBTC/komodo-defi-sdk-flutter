@@ -1,8 +1,7 @@
 import 'package:komodo_defi_types/src/utils/json_type_utils.dart';
 
 class Mnemonic {
-  // TODO! Consider if the RPC parsing is appropriate here or if it should be
-  // moved to the RPC package.
+  // Authentication and RPC response models share this parser.
 
   /// Factory method to create Mnemonic from a RPC response
   factory Mnemonic.fromRpcJson(JsonMap result) {
@@ -30,19 +29,15 @@ class Mnemonic {
     }
   }
 
-  Mnemonic._({
-    this.format,
-    this.plaintextMnemonic,
-    this.encryptedMnemonic,
-  });
+  Mnemonic._({this.format, this.plaintextMnemonic, this.encryptedMnemonic});
 
   Mnemonic.plaintext(this.plaintextMnemonic)
-      : format = 'plaintext',
-        encryptedMnemonic = null;
+    : format = 'plaintext',
+      encryptedMnemonic = null;
 
   Mnemonic.encrypted(this.encryptedMnemonic)
-      : format = 'encrypted',
-        plaintextMnemonic = null;
+    : format = 'encrypted',
+      plaintextMnemonic = null;
 
   final String? format;
   final String? plaintextMnemonic;
@@ -126,7 +121,8 @@ class EncryptedMnemonicData {
       },
     },
     'iv': 'CyGHB/PJWa4Tp+j+F6FKxQ==',
-    'ciphertext': '8XEB114+1hNhpsVfWrBakDYjjIoKu+W5T7CQVT6FImNS4Y2Y3BVTU677+'
+    'ciphertext':
+        '8XEB114+1hNhpsVfWrBakDYjjIoKu+W5T7CQVT6FImNS4Y2Y3BVTU677+'
         'bYPuGc59qt8ZSXeqpM0cQh2NGJYQ2qRY5WZTEOcqqUakNah3Jg=',
     'tag': '3P5vvw0+aid9VbCGmo8VyOZZn5vkGxFnTUFFeH51NJ0=',
   };
@@ -165,7 +161,7 @@ class Argon2Details {
 
     return Argon2Details(
       algorithm: argon2Params.value<String>('algorithm'),
-      version: int.parse(argon2Params['version'].toString()),
+      version: _parseVersion(argon2Params['version']),
       mCost: argon2Params.value<int>('m_cost'),
       tCost: argon2Params.value<int>('t_cost'),
       pCost: argon2Params.value<int>('p_cost'),
@@ -181,6 +177,22 @@ class Argon2Details {
   final int pCost;
   final String saltAes;
   final String saltHmac;
+
+  static int _parseVersion(Object? value) {
+    // dartify represents JS numbers as doubles on Wasm. Preserve integral
+    // versions without relying on the platform's numeric string formatting.
+    final parsed = switch (value) {
+      int() => value,
+      double() when value.isFinite && value == value.truncateToDouble() =>
+        int.tryParse(value.toStringAsFixed(0)),
+      String() => int.tryParse(value),
+      _ => null,
+    };
+    if (parsed == null) {
+      throw const FormatException('Invalid Argon2 version');
+    }
+    return parsed;
+  }
 
   // Convert Argon2Details to JSON
   JsonMap toJson() {
