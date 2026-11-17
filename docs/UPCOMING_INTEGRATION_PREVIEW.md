@@ -42,6 +42,10 @@ Local combined-tree validation:
   response crossing the real JS boundary. That regression reproduced the
   second full-app onboarding failure before the parser correction.
 
+The playground JSON-editor test also runs the framework asset hook. Preview CI
+now supplies the same ephemeral GitHub read token to that test step as its
+adjacent builds, avoiding unauthenticated metadata requests and HTTP 403s.
+
 The package tests used cached assets, with the source coin-config fixture
 available to authentication tests. Separate native asset generation must run
 serially: concurrent transformers share framework output paths. Complete
