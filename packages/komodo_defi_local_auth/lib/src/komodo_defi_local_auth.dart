@@ -217,11 +217,19 @@ abstract interface class KomodoDefiAuth {
   ///
   /// A [walletPassword] must be provided to decrypt the mnemonic.
   /// Throws [AuthException] if an error occurs during retrieval or if no user
-  /// is signed in.
+  /// is signed in, and [RpcDispatchRejected] when the caller's dispatch guard
+  /// refused the request, which was then never sent.
   Future<Mnemonic> getMnemonicPlainText(String walletPassword);
 
   /// Freshly verifies [password] for this exact wallet and runtime session.
   /// Does not return or publish the decrypted mnemonic.
+  ///
+  /// Throws [AuthIdentityUnavailableException] when the same wallet's identity
+  /// proof is missing and the call may be retried, the base
+  /// [WalletChangedDisconnectException] for a different wallet, and
+  /// [RpcDispatchRejected] when the caller's dispatch guard refused the
+  /// request. An engine that could not be reached leaves the session signed in
+  /// and throws [AuthException] with [AuthExceptionType.apiConnectionError].
   Future<void> verifyPassword({
     required String password,
     required WalletId expectedWalletId,
@@ -236,7 +244,9 @@ abstract interface class KomodoDefiAuth {
   /// authorization or durable journal writes to reject a switched wallet.
   ///
   /// Throws [AuthException] if the current password is incorrect or if no user
-  /// is signed in.
+  /// is signed in. [RpcDispatchRejected] means the caller's dispatch guard
+  /// refused the request and the password is unchanged; identity failures are
+  /// reported as for [verifyPassword].
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
@@ -301,9 +311,11 @@ abstract interface class KomodoDefiAuth {
 
   /// [expectedWalletId] must be the verified identity captured when the
   /// operation began, before any asynchronous work whose result is being saved.
-  /// A missing public-key hash in either identity, or a mismatch with the
-  /// freshly resolved active wallet, throws [WalletChangedDisconnectException]
-  /// before metadata is changed. Do not retry against a replacement wallet.
+  /// A mismatch with the freshly resolved active wallet throws
+  /// [WalletChangedDisconnectException] before metadata is changed, and a
+  /// missing public-key hash in either identity of the same wallet throws its
+  /// retryable subtype [AuthIdentityUnavailableException]. Do not retry against
+  /// a replacement wallet.
   Future<void> setOrRemoveActiveUserKeyValue(
     String key,
     dynamic value, {
@@ -839,6 +851,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         encrypted: true,
         walletPassword: null,
       );
+    } on RpcDispatchRejected {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (_) {
@@ -859,6 +873,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         encrypted: false,
         walletPassword: walletPassword,
       );
+    } on RpcDispatchRejected {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (_) {
@@ -900,6 +916,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         expectedWalletId: expectedWalletId,
         expectedSession: expectedSession,
       );
+    } on RpcDispatchRejected {
+      rethrow;
     } on AuthSessionChangedException {
       rethrow;
     } on WalletChangedDisconnectException {
