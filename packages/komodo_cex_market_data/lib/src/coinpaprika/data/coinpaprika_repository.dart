@@ -5,6 +5,7 @@ import 'package:komodo_cex_market_data/src/coinpaprika/data/coinpaprika_cex_prov
 import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_api_plan.dart';
 import 'package:komodo_cex_market_data/src/coinpaprika/models/coinpaprika_ticker.dart';
 import 'package:komodo_cex_market_data/src/common/api_error_parser.dart';
+import 'package:komodo_cex_market_data/src/common/shared_fetch.dart';
 import 'package:komodo_cex_market_data/src/id_resolution_strategy.dart';
 import 'package:komodo_cex_market_data/src/models/_models_index.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
@@ -40,7 +41,11 @@ class CoinPaprikaRepository implements CexRepository {
   }) : _idResolutionStrategy = CoinPaprikaIdResolutionStrategy(),
        _enableMemoization = enableMemoization,
        _ownsProvider = ownsProvider,
-       _clock = clock;
+       _clock = clock,
+       _coinList = RetryingMemoizer(
+         name: 'CoinPaprika coin list',
+         clock: clock,
+       );
 
   /// The CoinPaprika provider to use for fetching data.
   final ICoinPaprikaProvider coinPaprikaProvider;
@@ -49,7 +54,9 @@ class CoinPaprikaRepository implements CexRepository {
   final bool _ownsProvider;
   final DateTime Function() _clock;
 
-  final AsyncMemoizer<List<CexCoin>> _coinListMemoizer = AsyncMemoizer();
+  /// Keeps only a successful fetch, so an app started offline is not left
+  /// without CoinPaprika history for the whole session.
+  final RetryingMemoizer<List<CexCoin>> _coinList;
   Set<String>? _cachedQuoteCurrencies;
 
   final Map<QuoteCurrency, _TickersCache> _tickers = {};
@@ -70,7 +77,7 @@ class CoinPaprikaRepository implements CexRepository {
   @override
   Future<List<CexCoin>> getCoinList() async {
     if (_enableMemoization) {
-      return _coinListMemoizer.runOnce(_fetchCoinListInternal);
+      return _coinList.runOnce(_fetchCoinListInternal);
     } else {
       return _fetchCoinListInternal();
     }
@@ -198,8 +205,10 @@ class CoinPaprikaRepository implements CexRepository {
 
   /// Fetches OHLC data in multiple requests to handle API plan limitations.
   ///
-  /// Failed batches are rethrown so fallback can distinguish a provider outage
-  /// from dates with no prices. A rate limit stops the remaining batches.
+  /// The first failed batch ends the fetch and is rethrown: the result is
+  /// either complete or an error, so fallback can tell a provider outage from
+  /// dates with no prices, and a failing API is not asked for the remaining
+  /// batches of a result that would be discarded anyway.
   Future<CoinOhlc> _fetchMultipleOhlcRequests(
     String tradingSymbol,
     QuoteCurrency quoteCurrency,
@@ -209,7 +218,6 @@ class CoinPaprikaRepository implements CexRepository {
   ) async {
     final allOhlcData = <Ohlc>[];
     var currentStart = startAt;
-    (Object, StackTrace)? lastFailure;
 
     while (currentStart.isBefore(endAt)) {
       final batchEnd = currentStart.add(batchDuration);
@@ -239,13 +247,14 @@ class CoinPaprikaRepository implements CexRepository {
         );
 
         allOhlcData.addAll(batchOhlc.ohlc);
-      } catch (e, s) {
-        if (e is MarketDataApiException && e.isRateLimited) rethrow;
-        _logger.warning(
-          'Failed to fetch batch ${currentStart.toIso8601String()} to '
-          '${actualEnd.toIso8601String()}: $e',
-        );
-        lastFailure = (e, s);
+      } catch (e) {
+        if (e is! MarketDataApiException || !e.isRateLimited) {
+          _logger.warning(
+            'Failed to fetch batch ${currentStart.toIso8601String()} to '
+            '${actualEnd.toIso8601String()}: $e',
+          );
+        }
+        rethrow;
       }
 
       currentStart = actualEnd;
@@ -256,10 +265,6 @@ class CoinPaprikaRepository implements CexRepository {
       }
     }
 
-    final failure = lastFailure;
-    if (failure != null) {
-      Error.throwWithStackTrace(failure.$1, failure.$2);
-    }
     return CoinOhlc(ohlc: allOhlcData);
   }
 
