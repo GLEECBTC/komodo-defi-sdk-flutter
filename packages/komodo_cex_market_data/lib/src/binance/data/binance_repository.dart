@@ -4,9 +4,9 @@
 // TODO: look into custom exception types or justifying the current approach.
 // ignore_for_file: avoid_catches_without_on_clauses
 
-import 'package:async/async.dart';
 import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
+import 'package:komodo_cex_market_data/src/common/shared_fetch.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:logging/logging.dart';
 
@@ -24,9 +24,11 @@ class BinanceRepository implements CexRepository {
   BinanceRepository({
     required IBinanceProvider binanceProvider,
     bool enableMemoization = true,
+    DateTime Function() clock = DateTime.now,
   }) : _binanceProvider = binanceProvider,
        _idResolutionStrategy = BinanceIdResolutionStrategy(),
-       _enableMemoization = enableMemoization;
+       _enableMemoization = enableMemoization,
+       _coinList = RetryingMemoizer(name: 'Binance coin list', clock: clock);
 
   final IBinanceProvider _binanceProvider;
   final IdResolutionStrategy _idResolutionStrategy;
@@ -50,7 +52,9 @@ class BinanceRepository implements CexRepository {
     'FEI', // Fei USD
   ];
 
-  final AsyncMemoizer<List<CexCoin>> _coinListMemoizer = AsyncMemoizer();
+  /// Keeps only a successful fetch, so an app started offline is not left
+  /// without Binance for the whole session.
+  final RetryingMemoizer<List<CexCoin>> _coinList;
 
   /// Get the USD stablecoin priority configuration
   /// Returns a list of USD stablecoins ordered by preference for fallback selection
@@ -60,7 +64,7 @@ class BinanceRepository implements CexRepository {
   @override
   Future<List<CexCoin>> getCoinList() async {
     if (_enableMemoization) {
-      return _coinListMemoizer.runOnce(_fetchCoinListInternal);
+      return _coinList.runOnce(_fetchCoinListInternal);
     } else {
       // Warning: Direct API calls without memoization can lead to API
       // rate limiting and unnecessary network requests. Use this mode sparingly
@@ -77,8 +81,15 @@ class BinanceRepository implements CexRepository {
         final exchangeInfo = await _binanceProvider.fetchExchangeInfoReduced(
           baseUrl: baseUrl,
         );
-        return _convertSymbolsToCoins(exchangeInfo);
+        final coins = _convertSymbolsToCoins(exchangeInfo);
+        // A geo-blocked endpoint (HTTP 451) answers with no symbols; the next
+        // endpoint may still serve this user.
+        if (coins.isEmpty) {
+          throw Exception('Binance lists no tradable symbols at $baseUrl');
+        }
+        return coins;
       } catch (e) {
+        _logger.fine('No Binance coin list from $baseUrl: $e');
         lastException = e is Exception ? e : Exception(e.toString());
       }
     }
