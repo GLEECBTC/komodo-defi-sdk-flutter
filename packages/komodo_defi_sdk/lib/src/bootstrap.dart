@@ -19,10 +19,12 @@ import 'package:komodo_defi_sdk/src/market_data/market_data_manager.dart'
     show CexMarketDataManager, MarketDataManager;
 import 'package:komodo_defi_sdk/src/message_signing/message_signing_manager.dart';
 import 'package:komodo_defi_sdk/src/pubkeys/pubkey_manager.dart';
+import 'package:komodo_defi_sdk/src/sdk/solana_catalog_policy.dart';
 import 'package:komodo_defi_sdk/src/storage/secure_rpc_password_mixin.dart';
 import 'package:komodo_defi_sdk/src/streaming/event_streaming_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/legacy_withdrawal_manager.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/pending_gasless_transfer_repository.dart';
+import 'package:komodo_defi_sdk/src/withdrawals/solana_withdrawal_journal.dart';
 import 'package:komodo_defi_sdk/src/withdrawals/withdrawal_manager.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -93,6 +95,15 @@ final class _SdkAssetConfigTransform implements CoinConfigTransform {
   JsonMap transform(JsonMap config) => _transform(JsonMap.unmodifiable(config));
 }
 
+final class _ExplicitAssetRuntimeConfigRepository
+    extends AssetRuntimeUpdateConfigRepository {
+  _ExplicitAssetRuntimeConfigRepository(this.config);
+  final AssetRuntimeUpdateConfig config;
+
+  @override
+  Future<AssetRuntimeUpdateConfig> load() async => config;
+}
+
 Future<void> _ensureActivationConfigHiveInitialized() async {
   if (_activationConfigHiveInitialized) return;
   await Hive.initFlutter();
@@ -125,8 +136,18 @@ Future<void> bootstrap({
       pinnedProviderAddress: config.tronGaslessProvider?.serviceProvider,
     ),
   );
+  container.registerSingleton<GaslessTransferKeyValueStorage>(
+    SecureGaslessTransferStorage(),
+  );
   container.registerSingleton<PendingGaslessTransferRepository>(
-    SecurePendingGaslessTransferRepository(),
+    SecurePendingGaslessTransferRepository(
+      storage: container<GaslessTransferKeyValueStorage>(),
+    ),
+  );
+  container.registerSingleton<SolanaWithdrawalJournal>(
+    SecureSolanaWithdrawalJournal(
+      storage: container<GaslessTransferKeyValueStorage>(),
+    ),
   );
 
   final rpcPassword = await SecureRpcPasswordMixin().ensureRpcPassword();
@@ -181,16 +202,25 @@ Future<void> bootstrap({
   // Asset history storage singletons
   container.registerLazySingleton(AssetHistoryStorage.new);
   final assetConfigTransform = config.assetConfigTransform;
-  final coinConfigTransformer = assetConfigTransform == null
-      ? const CoinConfigTransformer()
-      : CoinConfigTransformer(
-          additionalTransforms: [
-            _SdkAssetConfigTransform(assetConfigTransform),
-          ],
-        );
+  final coinConfigTransformer = CoinConfigTransformer(
+    additionalTransforms: [
+      if (assetConfigTransform != null)
+        _SdkAssetConfigTransform(assetConfigTransform),
+      SolanaCatalogPolicy(config.solanaCapabilities),
+    ],
+  );
   container.registerSingletonAsync<KomodoAssetsUpdateManager>(
     () async => KomodoAssetsUpdateManager(
       transformer: coinConfigTransformer,
+      enableAutoUpdate: config.assetsAutoUpdate,
+      appName: config.assetsStorageNamespace,
+      storageNamespace: config.assetsStorageNamespace,
+      configRepository: config.assetsRuntimeUpdateConfig == null
+          ? null
+          : _ExplicitAssetRuntimeConfigRepository(
+              config.assetsRuntimeUpdateConfig!,
+            ),
+      dataFactory: config.assetsDataFactory,
       // Application policy is a transient registry view. Persist only the
       // normalized upstream config so changing provider/build policy cannot
       // leave stale token enrollment in Hive.
@@ -281,6 +311,7 @@ Future<void> bootstrap({
         container<KomodoAssetsUpdateManager>(),
         activatedAssetsCache,
         tronGaslessProvider: config.tronGaslessProvider,
+        solanaCapabilities: config.solanaCapabilities,
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
         activationPolicy: container<ActivationPolicy>(),
       );
@@ -373,8 +404,12 @@ Future<void> bootstrap({
   );
 
   container.registerSingletonAsync<MessageSigningManager>(
-    () async => MessageSigningManager(await container.getAsync<ApiClient>()),
-    dependsOn: [ApiClient],
+    () async => MessageSigningManager(
+      await container.getAsync<ApiClient>(),
+      solanaCapabilities: config.solanaCapabilities,
+      auth: await container.getAsync<KomodoDefiLocalAuth>(),
+    ),
+    dependsOn: [ApiClient, KomodoDefiLocalAuth],
   );
 
   container.registerSingletonAsync<MarketDataManager>(() async {
@@ -514,6 +549,8 @@ Future<void> bootstrap({
         activationCoordinator,
         legacyManager,
         auth: auth,
+        solanaCapabilities: config.solanaCapabilities,
+        solanaWithdrawalJournal: container<SolanaWithdrawalJournal>(),
         gaslessCapabilities: container<GaslessCapabilityRegistry>(),
         pendingGaslessTransfers: container<PendingGaslessTransferRepository>(),
         eventStreamingManager: eventStreamingManager,
@@ -547,6 +584,7 @@ Future<void> bootstrap({
         auth,
         assetProvider,
         activationCoordinator,
+        solanaCapabilities: config.solanaCapabilities,
       );
     },
     dependsOn: [

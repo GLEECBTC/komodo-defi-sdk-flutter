@@ -5,8 +5,9 @@ permissions:
 on:
   push:
     branches: [main]
+  # Pull request branch filters apply to the base, including integration bases
+  # such as auth/instant-wallet-access. Every base must receive the same gates.
   pull_request:
-    branches: [main, dev, feat/**, bugfix/**, hotfix/**]
   workflow_dispatch:
     inputs:
       package:
@@ -20,6 +21,7 @@ jobs:
   test-all:
     name: Flutter tests (all packages)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -97,6 +99,20 @@ jobs:
           echo "packages=${with_tests[*]}" >> "$GITHUB_OUTPUT"
           echo "Found packages with tests: ${with_tests[*]}"
 
+      - name: Install Linux native packaging test tools
+        if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_framework')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake clang lld binutils python3
+          for tool in cmake clang ld.lld readelf python3; do
+            command -v "$tool"
+          done
+          # Exercise GNU readelf in CI alongside local LLVM readelf coverage.
+          /usr/bin/readelf --version
+          echo "GLEEC_READELF=/usr/bin/readelf" >> "$GITHUB_ENV"
+
       - name: Install dependencies for all packages
         if: steps.discover.outputs.packages != ''
         shell: bash
@@ -118,7 +134,7 @@ jobs:
         working-directory: packages/komodo_defi_sdk/example
         run: flutter build web --release || echo "Dry build completed (failure expected)"
 
-      - name: Test wallet isolation and GasFree races in WebAssembly
+      - name: Test wallet isolation, GasFree races and Solana in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_sdk')
         timeout-minutes: 10
         working-directory: packages/komodo_defi_sdk
@@ -131,11 +147,30 @@ jobs:
           test/transaction_history/transaction_history_manager_wallet_race_test.dart
           test/transaction_history/transaction_merge_utils_test.dart
           test/transaction_history/blockscout_transaction_history_strategy_test.dart
+          test/transaction_history/hive_transaction_cache_web_test.dart
+          test/transaction_history/history_cache_platform_key_web_test.dart
           test/withdrawals/pending_gasless_transfer_repository_test.dart
           test/withdrawals/withdrawal_manager_gasless_test.dart
           test/withdrawals/gasless_submission_lock_web_test.dart
           test/withdrawals/pending_gasless_transfer_repository_web_test.dart
+          test/withdrawals/solana_withdrawal_test.dart
+          test/withdrawals/solana_submission_lock_web_test.dart
+          test/solana/solana_catalog_test.dart
+          test/solana/solana_streams_test.dart
           test/routed_swaps/routed_swap_ownership_test.dart
+
+      - name: Test candidate catalog storage isolation in WebAssembly
+        if: contains(steps.discover.outputs.packages, 'packages/komodo_coin_updates')
+        timeout-minutes: 10
+        working-directory: packages/komodo_coin_updates
+        env:
+          CHROME_EXECUTABLE: ${{ github.workspace }}/tool/flutter_test_chrome.sh
+          GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          flutter test --no-pub --platform chrome --wasm --reporter expanded
+          --dart-define=KDF_COINS_STORAGE_NAMESPACE=solana-preview-ci
+          test/candidate_storage_namespace_test.dart
+          test/solana_storage_namespace_web_test.dart
 
       - name: Test the KDF web transport in WebAssembly
         if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_framework')
@@ -181,7 +216,9 @@ jobs:
             # pipefail preserves the test exit code while tee retains the full
             # output, including failures before the final summary lines.
             log_file="$log_dir/${pkg##*/}.log"
-            if flutter test -r expanded 2>&1 | tee "$log_file"; then
+            # Bound each package so a hanging suite is reported and the
+            # remaining packages can still run before the job deadline.
+            if timeout --signal=TERM --kill-after=30s 15m flutter test -r expanded 2>&1 | tee "$log_file"; then
               test_results["$pkg"]="✅ PASS"
               test_outputs["$pkg"]="Tests passed successfully"
               echo "✅ $pkg: PASSED"

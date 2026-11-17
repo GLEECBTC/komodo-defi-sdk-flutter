@@ -253,16 +253,20 @@ class EventStreamingManager {
 
   /// Enable transaction history stream for a specific coin.
   ///
+  /// [streamerCoin] shares a platform registration between its assets while
+  /// filtering payloads by [coin]. KDF emits Solana token rows on SOL's stream.
+  ///
   /// Returns a [StreamSubscription] that can be used to listen to transaction
   /// history events and cancel the subscription.
   Future<StreamSubscription<TxHistoryEvent>> subscribeToTxHistory({
     required String coin,
+    String? streamerCoin,
   }) => _subscribeToStream<TxHistoryEvent>(
-    key: 'tx_history:$coin',
+    key: 'tx_history:${streamerCoin ?? coin}',
     streamType: 'tx_history',
-    coin: coin,
+    coin: streamerCoin ?? coin,
     enableStream: () => _rpcMethods.streaming.enableTxHistory(
-      coin: coin,
+      coin: streamerCoin ?? coin,
       clientId: _defaultClientId,
     ),
     eventStream: _eventService.txHistoryEvents.where((e) => e.coin == coin),

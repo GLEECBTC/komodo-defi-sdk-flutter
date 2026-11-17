@@ -323,11 +323,20 @@ List<String> _getLibraryPaths() {
   } else if (Platform.isWindows) {
     return windowsKdfLibraryPaths(Platform.resolvedExecutable);
   } else if (Platform.isLinux) {
-    return ['libkdflib.so', 'libkdflib_static.so'];
+    return linuxKdfLibraryPaths(Platform.resolvedExecutable);
   } else {
     throw UnsupportedError('Unsupported platform or KDF library not found');
   }
 }
+
+/// Flutter installs the verified Linux libraries in the bundle's lib directory.
+/// Resolve against the running executable, never the working directory or the
+/// system library search path. Both names refer to shared ELF libraries.
+@visibleForTesting
+List<String> linuxKdfLibraryPaths(String executablePath) => [
+  for (final name in ['libkdflib.so', 'libkdflib_static.so'])
+    path.posix.join(path.posix.dirname(executablePath), 'lib', name),
+];
 
 /// The verified Windows archive bundles kdflib.dll next to the application.
 /// Resolve it from that directory, never the working directory or DLL search
