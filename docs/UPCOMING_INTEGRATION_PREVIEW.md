@@ -27,6 +27,13 @@ Local combined-tree validation:
 - Local authentication: 196 passed.
 - Market data: 374 passed, six opt-in live-provider skips.
 - Deployment privacy: 27 passed; preview-URL parser: eight fixtures passed.
+- Real WebAssembly auth transitions: two passed. A new focused test reproduced
+  the full app's wallet-creation trap in the nested engine-stop callback. An
+  explicit zero-argument call avoids the optional-named extension tear-off
+  adaptation that traps on this toolchain. Success and stop-failure paths both
+  release the transition and reset transport; session revocation stays intact.
+  The SDK workflow now runs these browser regressions explicitly.
+- Browser log-storage privacy: 12 passed under real WebAssembly.
 
 The package tests used cached assets, with the source coin-config fixture
 available to authentication tests. Separate native asset generation must run

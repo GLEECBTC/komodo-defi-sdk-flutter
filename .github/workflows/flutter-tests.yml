@@ -169,6 +169,17 @@ jobs:
           test/operations/kdf_operations_wasm_errors_test.dart
           test/operations/kdf_operations_wasm_diagnostics_test.dart
 
+      - name: Test nested authentication transitions in WebAssembly
+        if: contains(steps.discover.outputs.packages, 'packages/komodo_defi_local_auth')
+        timeout-minutes: 5
+        working-directory: packages/komodo_defi_local_auth
+        env:
+          CHROME_EXECUTABLE: ${{ github.workspace }}/tool/flutter_test_chrome.sh
+          GITHUB_API_PUBLIC_READONLY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          flutter test --no-pub --platform chrome --wasm --reporter expanded
+          test/src/auth_transition_web_test.dart
+
       - name: Run tests for all packages
         if: steps.discover.outputs.packages != ''
         env:

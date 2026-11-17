@@ -214,7 +214,12 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
-  Future<void> _stopKdf() => _runAuthTransition(_stopKdfWithinTransition);
+  // Dart2Wasm traps when adapting this optional-named extension tear-off to
+  // the zero-argument transition callback. Keep the call shape explicit.
+  Future<void> _stopKdf() => _runAuthTransition(
+    // ignore: unnecessary_lambdas
+    () => _stopKdfWithinTransition(),
+  );
 
   Future<void> _stopKdfWithinTransition({
     bool invalidateSession = true,
