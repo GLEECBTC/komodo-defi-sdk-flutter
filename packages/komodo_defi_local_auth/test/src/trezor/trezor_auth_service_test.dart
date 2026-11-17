@@ -194,9 +194,15 @@ class _FakeAuthService implements IAuthService {
   Future<void> deleteWallet({
     required String walletName,
     required String password,
+    bool allowActiveWallet = false,
     Future<void> Function(KdfUser target)? beforeDelete,
     Future<void> Function()? afterDelete,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  ) async => throw UnimplementedError();
 
   @override
   Future<void> dispose() async {
@@ -210,6 +216,13 @@ class _FakeAuthService implements IAuthService {
   Future<Mnemonic> getMnemonic({
     required bool encrypted,
     required String? walletPassword,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async => throw UnimplementedError();
 
   @override
@@ -266,6 +279,7 @@ class _FakeAuthService implements IAuthService {
     required AuthOptions options,
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
     lastRegisterArgs = (
       walletName: walletName,
@@ -299,6 +313,8 @@ class _FakeAuthService implements IAuthService {
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async => throw UnimplementedError();
 
   @override
@@ -473,8 +489,8 @@ void main() {
             )
             .toList();
 
+        await repo.listening.timeout(const Duration(seconds: 5));
         const taskId = 2;
-        await repo.listening;
         repo
           ..emit(
             const TrezorInitializationState(
@@ -488,8 +504,7 @@ void main() {
               taskId: taskId,
             ),
           );
-
-        final states = await statesFuture;
+        final states = await statesFuture.timeout(const Duration(seconds: 5));
 
         expect(
           states.map((e) => e.status),

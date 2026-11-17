@@ -103,6 +103,7 @@ extension FeeInfoPatterns on FeeInfo {
     TResult Function(FeeInfoTron value)? tron,
     TResult Function(FeeInfoTronGasless value)? tronGasless,
     TResult Function(FeeInfoSia value)? sia,
+    TResult Function(SolanaFeeInfo value)? solana,
     required TResult orElse(),
   }) {
     final _that = this;
@@ -127,6 +128,8 @@ extension FeeInfoPatterns on FeeInfo {
         return tronGasless(_that);
       case FeeInfoSia() when sia != null:
         return sia(_that);
+      case SolanaFeeInfo() when solana != null:
+        return solana(_that);
       case _:
         return orElse();
     }
@@ -157,6 +160,7 @@ extension FeeInfoPatterns on FeeInfo {
     required TResult Function(FeeInfoTron value) tron,
     required TResult Function(FeeInfoTronGasless value) tronGasless,
     required TResult Function(FeeInfoSia value) sia,
+    required TResult Function(SolanaFeeInfo value) solana,
   }) {
     final _that = this;
     switch (_that) {
@@ -180,6 +184,8 @@ extension FeeInfoPatterns on FeeInfo {
         return tronGasless(_that);
       case FeeInfoSia():
         return sia(_that);
+      case SolanaFeeInfo():
+        return solana(_that);
     }
   }
 
@@ -207,6 +213,7 @@ extension FeeInfoPatterns on FeeInfo {
     TResult? Function(FeeInfoTron value)? tron,
     TResult? Function(FeeInfoTronGasless value)? tronGasless,
     TResult? Function(FeeInfoSia value)? sia,
+    TResult? Function(SolanaFeeInfo value)? solana,
   }) {
     final _that = this;
     switch (_that) {
@@ -230,6 +237,8 @@ extension FeeInfoPatterns on FeeInfo {
         return tronGasless(_that);
       case FeeInfoSia() when sia != null:
         return sia(_that);
+      case SolanaFeeInfo() when solana != null:
+        return solana(_that);
       case _:
         return null;
     }
@@ -297,6 +306,13 @@ extension FeeInfoPatterns on FeeInfo {
     )?
     tronGasless,
     TResult Function(String coin, Decimal amount, String policy)? sia,
+    TResult Function(
+      String coin,
+      Decimal feeAmount,
+      Decimal rentAmount,
+      Decimal totalAmount,
+    )?
+    solana,
     required TResult orElse(),
   }) {
     final _that = this;
@@ -349,6 +365,13 @@ extension FeeInfoPatterns on FeeInfo {
         );
       case FeeInfoSia() when sia != null:
         return sia(_that.coin, _that.amount, _that.policy);
+      case SolanaFeeInfo() when solana != null:
+        return solana(
+          _that.coin,
+          _that.feeAmount,
+          _that.rentAmount,
+          _that.totalAmount,
+        );
       case _:
         return orElse();
     }
@@ -419,6 +442,13 @@ extension FeeInfoPatterns on FeeInfo {
     )
     tronGasless,
     required TResult Function(String coin, Decimal amount, String policy) sia,
+    required TResult Function(
+      String coin,
+      Decimal feeAmount,
+      Decimal rentAmount,
+      Decimal totalAmount,
+    )
+    solana,
   }) {
     final _that = this;
     switch (_that) {
@@ -470,6 +500,13 @@ extension FeeInfoPatterns on FeeInfo {
         );
       case FeeInfoSia():
         return sia(_that.coin, _that.amount, _that.policy);
+      case SolanaFeeInfo():
+        return solana(
+          _that.coin,
+          _that.feeAmount,
+          _that.rentAmount,
+          _that.totalAmount,
+        );
     }
   }
 
@@ -535,6 +572,13 @@ extension FeeInfoPatterns on FeeInfo {
     )?
     tronGasless,
     TResult? Function(String coin, Decimal amount, String policy)? sia,
+    TResult? Function(
+      String coin,
+      Decimal feeAmount,
+      Decimal rentAmount,
+      Decimal totalAmount,
+    )?
+    solana,
   }) {
     final _that = this;
     switch (_that) {
@@ -586,6 +630,13 @@ extension FeeInfoPatterns on FeeInfo {
         );
       case FeeInfoSia() when sia != null:
         return sia(_that.coin, _that.amount, _that.policy);
+      case SolanaFeeInfo() when solana != null:
+        return solana(
+          _that.coin,
+          _that.feeAmount,
+          _that.rentAmount,
+          _that.totalAmount,
+        );
       case _:
         return null;
     }
@@ -1692,6 +1743,113 @@ class _$FeeInfoSiaCopyWithImpl<$Res> implements $FeeInfoSiaCopyWith<$Res> {
             ? _self.policy
             : policy // ignore: cast_nullable_to_non_nullable
                   as String,
+      ),
+    );
+  }
+}
+
+/// @nodoc
+
+class SolanaFeeInfo extends FeeInfo {
+  const SolanaFeeInfo({
+    required this.coin,
+    required this.feeAmount,
+    required this.rentAmount,
+    required this.totalAmount,
+  }) : super._();
+
+  @override
+  final String coin;
+  final Decimal feeAmount;
+  final Decimal rentAmount;
+  final Decimal totalAmount;
+
+  /// Create a copy of FeeInfo
+  /// with the given fields replaced by the non-null parameter values.
+  @override
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @pragma('vm:prefer-inline')
+  $SolanaFeeInfoCopyWith<SolanaFeeInfo> get copyWith =>
+      _$SolanaFeeInfoCopyWithImpl<SolanaFeeInfo>(this, _$identity);
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is SolanaFeeInfo &&
+            (identical(other.coin, coin) || other.coin == coin) &&
+            (identical(other.feeAmount, feeAmount) ||
+                other.feeAmount == feeAmount) &&
+            (identical(other.rentAmount, rentAmount) ||
+                other.rentAmount == rentAmount) &&
+            (identical(other.totalAmount, totalAmount) ||
+                other.totalAmount == totalAmount));
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(runtimeType, coin, feeAmount, rentAmount, totalAmount);
+  }
+
+  @override
+  String toString() {
+    return 'FeeInfo.solana(coin: $coin, feeAmount: $feeAmount, rentAmount: $rentAmount, totalAmount: $totalAmount)';
+  }
+}
+
+/// @nodoc
+abstract mixin class $SolanaFeeInfoCopyWith<$Res>
+    implements $FeeInfoCopyWith<$Res> {
+  factory $SolanaFeeInfoCopyWith(
+    SolanaFeeInfo value,
+    $Res Function(SolanaFeeInfo) _then,
+  ) = _$SolanaFeeInfoCopyWithImpl;
+  @override
+  @useResult
+  $Res call({
+    String coin,
+    Decimal feeAmount,
+    Decimal rentAmount,
+    Decimal totalAmount,
+  });
+}
+
+/// @nodoc
+class _$SolanaFeeInfoCopyWithImpl<$Res>
+    implements $SolanaFeeInfoCopyWith<$Res> {
+  _$SolanaFeeInfoCopyWithImpl(this._self, this._then);
+
+  final SolanaFeeInfo _self;
+  final $Res Function(SolanaFeeInfo) _then;
+
+  /// Create a copy of FeeInfo
+  /// with the given fields replaced by the non-null parameter values.
+  @override
+  @pragma('vm:prefer-inline')
+  $Res call({
+    Object? coin = null,
+    Object? feeAmount = null,
+    Object? rentAmount = null,
+    Object? totalAmount = null,
+  }) {
+    return _then(
+      SolanaFeeInfo(
+        coin: null == coin
+            ? _self.coin
+            : coin // ignore: cast_nullable_to_non_nullable
+                  as String,
+        feeAmount: null == feeAmount
+            ? _self.feeAmount
+            : feeAmount // ignore: cast_nullable_to_non_nullable
+                  as Decimal,
+        rentAmount: null == rentAmount
+            ? _self.rentAmount
+            : rentAmount // ignore: cast_nullable_to_non_nullable
+                  as Decimal,
+        totalAmount: null == totalAmount
+            ? _self.totalAmount
+            : totalAmount // ignore: cast_nullable_to_non_nullable
+                  as Decimal,
       ),
     );
   }

@@ -1,15 +1,6 @@
 part of 'auth_service.dart';
 
 extension KdfExtensions on KdfAuthService {
-  Future<bool> _walletExists(String walletName) async {
-    if (!await _kdfFramework.isRunning()) return false;
-
-    // The caller owns the auth write lock. Avoid re-entering the public
-    // lock-protected API from the registration transaction.
-    final users = await _getUsersWithinAuthLock();
-    return users.any((user) => user.walletId.name == walletName);
-  }
-
   Future<KdfUser?> _getActiveUser() async {
     if (!await _kdfFramework.isRunning()) {
       return null;
@@ -225,10 +216,13 @@ extension KdfExtensions on KdfAuthService {
 
   Future<void> _stopKdf() => _runAuthTransition(_stopKdfWithinTransition);
 
-  Future<void> _stopKdfWithinTransition() async {
+  Future<void> _stopKdfWithinTransition({
+    bool invalidateSession = true,
+    void Function()? beforeStop,
+  }) async {
     // Invalidate pending exports before cancellation or shutdown can suspend.
     // This also covers restarts and shutdown failures with an unchanged user.
-    invalidateAuthSession();
+    if (invalidateSession) invalidateAuthSession();
     await _shutdownSubscription?.cancel();
     _shutdownSubscription = null;
     // Every authenticated session ends through here, and "generated this
@@ -236,7 +230,7 @@ extension KdfExtensions on KdfAuthService {
     // must not keep telling the HD gap scan there is nothing to find. A later
     // sign-in to the same wallet gets the standard gap.
     _walletsGeneratedThisSession.clear();
-    await _stopEngine();
+    await _stopEngine(beforeStop: beforeStop);
     _emitAuthStateChange(null);
   }
 

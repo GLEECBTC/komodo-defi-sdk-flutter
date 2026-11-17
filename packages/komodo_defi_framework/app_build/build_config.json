@@ -31,10 +31,9 @@
         "path": "ios"
       },
       "macos": {
-        "matching_pattern": "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$",
-        "matching_preference": ["kdf-macos-universal2-", "mac-universal"],
+        "matching_pattern": "^kdf-macos-universal2-[a-f0-9]{40}-native-v1\\.zip$",
         "valid_zip_sha256_checksums": [
-          "6dfc9149ac7b1017e518163788fe8c8a6d45c1270aae66cc74b83f8e20d34835"
+          "a77a26c9814008c958b4f57d928ef59ca01b04b3d0c2710ea49ed8a707cfabd8"
         ],
         "path": "macos/bin"
       },
@@ -53,9 +52,9 @@
         "path": "android/app/src/main/cpp/libs/arm64-v8a"
       },
       "linux": {
-        "matching_pattern": "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$",
+        "matching_pattern": "^kdf_[a-f0-9]{40}-linux-x86-64-native-v1\\.zip$",
         "valid_zip_sha256_checksums": [
-          "dac943647d2f307204a6a01a6a5c34e33c00e8695b88e1ceaf2a7893eba50ff2"
+          "beb961fe98dbb3d0b1542fb530c749317ecd573b57f94d63b720f4908841d899"
         ],
         "path": "linux/bin"
       },

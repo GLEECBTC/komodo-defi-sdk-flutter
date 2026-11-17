@@ -30,9 +30,11 @@ class SecurityManager {
     this._client,
     this._auth,
     this._assetProvider,
-    this._activationCoordinator,
-  );
+    this._activationCoordinator, {
+    SolanaCapabilities solanaCapabilities = const SolanaCapabilities(),
+  }) : _solanaCapabilities = solanaCapabilities;
 
+  final SolanaCapabilities _solanaCapabilities;
   final ApiClient _client;
   final KomodoDefiLocalAuth _auth;
   final IAssetProvider _assetProvider;
@@ -168,6 +170,9 @@ class SecurityManager {
         'TRX and TRC20 private key export is unavailable until KDF supports it',
       );
     }
+    if (targets.any(_isSolana)) {
+      throw UnsupportedError('Solana supports active-wallet export only');
+    }
     if (targets.isEmpty) return {};
     final response = await _guarded(
       session,
@@ -240,6 +245,8 @@ class SecurityManager {
             id,
             PrivateKeyExportFailure.assetUnavailable,
           );
+        } else if (_isSolana(id)) {
+          outcomes[index] = await _activeSolana(asset, request, mode, context);
         } else {
           outcomes[index] = await _offline(asset, request, mode, context);
         }
@@ -345,6 +352,86 @@ class SecurityManager {
           endIndex: mode == KeyExportMode.hd && !shielded
               ? request.endIndex ?? (request.startIndex ?? 0) + 10
               : null,
+        ),
+      );
+    } on PrivateKeyExportSessionChangedException {
+      rethrow;
+    } on FormatException {
+      return _unavailable(asset.id, PrivateKeyExportFailure.invalidResponse);
+    } on Object {
+      return _unavailable(asset.id, PrivateKeyExportFailure.rpcFailed);
+    }
+  }
+
+  bool _isSolana(AssetId id) =>
+      id.subClass == CoinSubClass.solana ||
+      id.subClass == CoinSubClass.solanaToken;
+
+  Future<PrivateKeyExportOutcome> _activeSolana(
+    Asset asset,
+    PrivateKeyExportRequest request,
+    KeyExportMode mode,
+    PrivateKeyExportSession session,
+  ) async {
+    final protocol = asset.protocol;
+    if (!_solanaCapabilities.enabled ||
+        session.walletId.authOptions.privKeyPolicy !=
+            const PrivateKeyPolicy.contextPrivKey() ||
+        (protocol is SolanaTokenProtocol &&
+            protocol.programId != SolanaTokenProtocol.classicTokenProgramId &&
+            protocol.programId != SolanaTokenProtocol.token2022ProgramId) ||
+        (protocol is SolanaTokenProtocol &&
+            protocol.isToken2022 &&
+            !_solanaCapabilities.token2022Enabled) ||
+        request.hasExplicitRange ||
+        (mode == KeyExportMode.hd) != session.walletId.isHd) {
+      return _unavailable(
+        asset.id,
+        PrivateKeyExportFailure.unsupportedProtocol,
+      );
+    }
+    try {
+      final active = await _guarded(session, _assetProvider.getActivatedAssets);
+      if (!active.any((candidate) => candidate.id == asset.id)) {
+        return _unavailable(asset.id, PrivateKeyExportFailure.assetUnavailable);
+      }
+      final balance = await _guarded(
+        session,
+        () => _client.rpc.wallet.myBalance(coin: asset.id.id),
+      );
+      final authSession = await _auth.captureSessionContext();
+      await ensureExportSessionCurrent(session);
+      final response = await _guarded(
+        session,
+        () => RpcDispatchGuard.run(
+          () => _checkGeneration(session),
+          () => _auth.runWithSession(
+            authSession,
+            () => _client.post(ShowPrivKeyRequest(coin: asset.id.id)),
+          ),
+          methods: const {'show_priv_key'},
+        ),
+      );
+      if (response.coin != asset.id.id ||
+          response.privKey.isEmpty ||
+          balance.address.isEmpty ||
+          balance.coin != asset.id.id) {
+        return _unavailable(asset.id, PrivateKeyExportFailure.invalidResponse);
+      }
+      // KDF returns an Ed25519 keypair. No secp256k1 key or HD address range
+      // exists here; do not invent either in the shared recovery model.
+      return PrivateKeyExportOutcome.success(
+        assetId: asset.id,
+        keys: [
+          PrivateKey(
+            assetId: asset.id,
+            publicKeySecp256k1: '',
+            publicKeyAddress: balance.address,
+            privateKey: response.privKey,
+          ),
+        ],
+        coverage: const PrivateKeyExportCoverage(
+          kind: PrivateKeyExportCoverageKind.activeWallet,
         ),
       );
     } on PrivateKeyExportSessionChangedException {

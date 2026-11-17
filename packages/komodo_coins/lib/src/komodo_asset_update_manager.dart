@@ -69,6 +69,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
     this.enableAutoUpdate = true,
     this.appStoragePath,
     this.appName,
+    this.storageNamespace,
     CustomTokenStore? customTokenStorage,
   }) : _configRepository =
            configRepository ?? AssetRuntimeUpdateConfigRepository(),
@@ -77,8 +78,17 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
            persistenceTransformer ??
            transformer ??
            const CoinConfigTransformer(),
-       _dataFactory = dataFactory ?? const DefaultCoinConfigDataFactory(),
-       _loadingStrategy = loadingStrategy ?? StorageFirstLoadingStrategy(),
+       _dataFactory =
+           dataFactory ??
+           DefaultCoinConfigDataFactory(storageNamespace: storageNamespace),
+       _loadingStrategy =
+           loadingStrategy ??
+           ((storageNamespace == null || storageNamespace.isEmpty) &&
+                   const String.fromEnvironment(
+                     'KDF_COINS_STORAGE_NAMESPACE',
+                   ).isEmpty
+               ? StorageFirstLoadingStrategy()
+               : const AssetBundleOnlyLoadingStrategy()),
        _updateStrategy = updateStrategy ?? const BackgroundUpdateStrategy(),
        _customTokenStorage = customTokenStorage;
 
@@ -93,6 +103,10 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
 
   /// Optional app name used as a subfolder (native) or path (web).
   final String? appName;
+
+  /// Namespace for catalog and custom-token database names on every platform.
+  /// A folder alone does not isolate Hive databases in web builds.
+  final String? storageNamespace;
 
   final AssetRuntimeUpdateConfigRepository _configRepository;
   final CoinConfigTransformer _transformer;
@@ -144,12 +158,16 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       await _initializeHiveStorage();
 
       final runtimeConfig = await _getRuntimeConfig();
+      final updatesEnabled =
+          enableAutoUpdate && runtimeConfig.runtimeUpdatesEnabled;
       final configProviders = await _createConfigSources(runtimeConfig);
       final newAssetsManager = StrategicCoinConfigManager(
         configSources: configProviders,
         loadingStrategy: _loadingStrategy,
         defaultPriorityTickers: defaultPriorityTickers,
-        customTokenStorage: _customTokenStorage ?? CustomTokenStorage(),
+        customTokenStorage:
+            _customTokenStorage ??
+            CustomTokenStorage(storageNamespace: storageNamespace),
       );
 
       // Initialize update manager
@@ -163,7 +181,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       );
       final newUpdatesManager = StrategicCoinUpdateManager(
         repository: repository,
-        updateStrategy: enableAutoUpdate ? _updateStrategy : NoUpdateStrategy(),
+        updateStrategy: updatesEnabled ? _updateStrategy : NoUpdateStrategy(),
         fallbackProvider: localProvider,
       );
 
@@ -176,7 +194,7 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
       _initialized = true;
 
       // Start background updates if enabled
-      if (enableAutoUpdate) {
+      if (updatesEnabled) {
         _updatesManager!.startBackgroundUpdates();
       }
       _log.fine('KomodoAssetsUpdateManager initialized successfully');
@@ -192,7 +210,12 @@ class KomodoAssetsUpdateManager implements AssetsUpdateManager {
   /// Initialize Hive storage for coin updates
   Future<void> _initializeHiveStorage() async {
     try {
-      final resolvedAppName = appName ?? 'komodo_coins';
+      const candidateNamespace = String.fromEnvironment(
+        'KDF_COINS_STORAGE_NAMESPACE',
+      );
+      final resolvedAppName =
+          appName ??
+          (candidateNamespace.isEmpty ? 'komodo_coins' : candidateNamespace);
       String storagePath;
       if (kIsWeb) {
         // Web: appName is used as the storage path

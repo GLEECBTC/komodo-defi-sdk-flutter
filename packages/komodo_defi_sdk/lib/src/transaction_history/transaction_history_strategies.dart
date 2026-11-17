@@ -69,24 +69,28 @@ class V2TransactionStrategy extends TransactionHistoryStrategy {
     // HD mode is part of the session's wallet identity; `currentUser` would
     // re-verify it against KDF with two RPCs on every page fetched.
     final isHdWallet = (await _auth.captureSessionContext()).walletId.isHd;
+    final isSolana =
+        asset.id.subClass == CoinSubClass.solana ||
+        asset.id.subClass == CoinSubClass.solanaToken;
+    final target = isSolana
+        ? null
+        : isHdWallet
+        ? const HdHistoryTarget.accountId(0)
+        : IguanaHistoryTarget();
 
     return switch (pagination) {
       final PagePagination p => client.rpc.transactionHistory.myTxHistory(
         coin: asset.id.id,
         limit: p.itemsPerPage,
         pagingOptions: Pagination(pageNumber: p.pageNumber),
-        target: isHdWallet
-            ? const HdHistoryTarget.accountId(0)
-            : IguanaHistoryTarget(),
+        target: target,
       ),
       final TransactionBasedPagination t =>
         client.rpc.transactionHistory.myTxHistory(
           coin: asset.id.id,
           limit: t.itemCount,
           pagingOptions: Pagination(fromId: t.fromId),
-          target: isHdWallet
-              ? const HdHistoryTarget.accountId(0)
-              : IguanaHistoryTarget(),
+          target: target,
         ),
       _ => throw UnsupportedError(
         'Pagination mode ${pagination.runtimeType} not supported',
@@ -98,6 +102,8 @@ class V2TransactionStrategy extends TransactionHistoryStrategy {
     UtxoProtocol,
     QtumProtocol,
     TendermintProtocol,
+    SolanaProtocol,
+    SolanaTokenProtocol,
   ];
 
   @override

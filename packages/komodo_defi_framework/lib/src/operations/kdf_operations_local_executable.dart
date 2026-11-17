@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 import 'package:komodo_defi_framework/src/native/kdf_executable_finder.dart';
@@ -19,9 +20,11 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
     KdfExecutableFinder? executableFinder,
     this.executableName = 'kdf',
     JsonMap Function(JsonMap params)? startParamsTransform,
+    bool allowUnsafeTestCredentials = false,
   }) : _startupTimeout = startupTimeout,
        _temporaryDirectory = temporaryDirectory,
        _startParamsTransform = startParamsTransform,
+       _allowUnsafeTestCredentials = allowUnsafeTestCredentials,
        _executableFinder =
            executableFinder ?? KdfExecutableFinder(logCallback: _logCallback);
 
@@ -54,7 +57,13 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
     KdfExecutableFinder? executableFinder,
     Future<Directory> Function()? temporaryDirectory,
     JsonMap Function(JsonMap params)? startParamsTransform,
+    bool allowUnsafeTestCredentials = false,
   }) {
+    if (allowUnsafeTestCredentials && kReleaseMode) {
+      throw ArgumentError(
+        'Unsafe test credentials are unavailable in release builds',
+      );
+    }
     return KdfOperationsLocalExecutable._(
       logCallback,
       KdfOperationsRemote.create(
@@ -67,6 +76,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       executableFinder: executableFinder,
       temporaryDirectory: temporaryDirectory ?? getTemporaryDirectory,
       startParamsTransform: startParamsTransform,
+      allowUnsafeTestCredentials: allowUnsafeTestCredentials,
     );
   }
 
@@ -77,6 +87,9 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
   final String executableName;
   final Future<Directory> Function() _temporaryDirectory;
   final JsonMap Function(JsonMap params)? _startParamsTransform;
+  // Only unfunded, synthetic test harnesses may opt into argument transport.
+  // This is never enabled by the production native backend factory.
+  final bool _allowUnsafeTestCredentials;
 
   /// The spawned process, or null when KDF is not running.
   ///
@@ -110,6 +123,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
   }
 
   Future<Process> _startKdf(JsonMap params) async {
+    _rejectProductionCredentials(params);
     final executablePath = (await _executableFinder.findExecutable(
       executableName: executableName,
     ))?.absolute.path;
@@ -139,6 +153,7 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
       var sensitiveArgs = JsonMap.of(params)..remove('coins');
       final transform = _startParamsTransform;
       if (transform != null) sensitiveArgs = transform(sensitiveArgs);
+      _rejectProductionCredentials(sensitiveArgs);
 
       // Store the coins list in a temp file to avoid command line argument and
       // environment variable value size limits (varies from 4-128 KB).
@@ -179,6 +194,21 @@ class KdfOperationsLocalExecutable implements IKdfOperations {
         rethrow;
       }
       throw _LaunchFailure(e, stackTrace);
+    }
+  }
+
+  void _rejectProductionCredentials(JsonMap params) {
+    if (_allowUnsafeTestCredentials) return;
+    if (const [
+      'wallet_password',
+      'rpc_password',
+      'passphrase',
+    ].any((key) => params[key] != null)) {
+      throw KdfException(
+        'Executable startup cannot transport wallet credentials. '
+        'Use the bundled native library.',
+        type: KdfExceptionType.configurationError,
+      );
     }
   }
 
