@@ -68,6 +68,112 @@ void main() {
     expect(verified2022.allows(unknown), isFalse);
   });
 
+  group('gate follows the protocol an entry resolves to', () {
+    const disabled = SolanaCatalogPolicy(SolanaCapabilities());
+    const enabled = SolanaCatalogPolicy(SolanaCapabilities(enabled: true));
+    const with2022 = SolanaCatalogPolicy(
+      SolanaCapabilities(enabled: true, token2022Enabled: true),
+    );
+
+    for (final type in ['SOLANA', 'Solana', 'solana', 'SOL', 'sol']) {
+      for (final (shape, protocol) in <(String, Map<String, dynamic>?)>[
+        ('the same protocol type', {'type': type}),
+        ('no protocol', null),
+        ('a foreign protocol type', {'type': 'UTXO'}),
+      ]) {
+        test('platform spelled "$type" with $shape', () {
+          final config = {...sol.protocol.config, 'type': type};
+          if (protocol == null) {
+            config.remove('protocol');
+          } else {
+            config['protocol'] = protocol;
+          }
+          // The resolver lists this entry as Solana, so the gate must agree.
+          final asset = Asset.fromJson(config);
+          expect(asset.protocol, isA<SolanaProtocol>());
+          expect(disabled.allowsConfig(config), isFalse);
+          expect(disabled.needsTransform(config), isTrue);
+          expect(disabled.transform(config)['excluded'], isTrue);
+          expect(disabled.allows(asset), isFalse);
+          expect(enabled.allowsConfig(config), isTrue);
+          expect(enabled.allows(asset), isTrue);
+        });
+      }
+    }
+
+    for (final type in [
+      'SOLANATOKEN',
+      'SolanaToken',
+      'Solana Token',
+      'solana_token',
+      'SPL',
+      'spl',
+      'SPL Token',
+      'SPL-Token',
+    ]) {
+      test('token spelled "$type"', () {
+        for (final (token, classicProgram) in [
+          (classic, true),
+          (token2022, false),
+        ]) {
+          final config = {...token.protocol.config, 'type': type};
+          final asset = Asset.fromJson(config, knownIds: {sol.id});
+          expect(asset.protocol, isA<SolanaTokenProtocol>());
+          expect(disabled.allowsConfig(config), isFalse);
+          expect(disabled.allows(asset), isFalse);
+          expect(enabled.allowsConfig(config), classicProgram);
+          expect(enabled.allows(asset), classicProgram);
+          expect(with2022.allowsConfig(config), isTrue);
+          expect(with2022.allows(asset), isTrue);
+        }
+        final unverified = {...unknown.protocol.config, 'type': type};
+        expect(with2022.allowsConfig(unverified), isFalse);
+      });
+    }
+
+    test('a Solana protocol under a foreign top-level type stays gated', () {
+      for (final config in [
+        {...sol.protocol.config, 'type': 'UTXO'},
+        {...classic.protocol.config, 'type': 'ERC-20'},
+      ]) {
+        expect(disabled.allowsConfig(config), isFalse);
+      }
+    });
+
+    test('no other catalog protocol is mistaken for Solana', () {
+      // Every `type` / `protocol.type` spelling in the bundled coins config.
+      const types = [
+        'ERC-20', 'BEP-20', 'UTXO', 'Polygon', 'AVX-20', 'Arbitrum', 'KRC-20',
+        'Base', 'Smart Chain', 'QRC-20', 'GRC-20', 'Gnosis', 'TENDERMINT',
+        'Monad', 'Plasma', 'TENDERMINTTOKEN', 'Mantle', 'HyperEVM', 'Flare',
+        'SIA', 'Bittensor', 'TRX', 'TRC-20', 'XDC', 'ZHTLC',
+        'RSK Smart Bitcoin', 'Ethereum Classic', 'EWT', 'Moonriver',
+        'Moonbeam', 'HRC-20', 'SmartBCH', 'ETH', 'Matic', 'FTM-20', //
+      ];
+      const protocolTypes = [
+        'ERC20', 'UTXO', 'ETH', 'QRC20', 'TENDERMINT', 'TENDERMINTTOKEN',
+        'NFT', 'QTUM', 'SIA', 'TRX', 'TRC20', 'ZHTLC', 'BCH', 'SLPTOKEN',
+        'LIGHTNING', //
+      ];
+      for (final type in types) {
+        for (final protocolType in protocolTypes) {
+          final config = <String, dynamic>{
+            'coin': 'OTHER',
+            'type': type,
+            'protocol': {'type': protocolType},
+          };
+          expect(
+            disabled.allowsConfig(config),
+            isTrue,
+            reason: '$type / $protocolType',
+          );
+          expect(disabled.needsTransform(config), isFalse);
+        }
+      }
+      expect(disabled.allowsConfig({'coin': 'UNTYPED'}), isTrue);
+    });
+  });
+
   test('final available and ticker views gate restored custom tokens without deleting storage', () async {
     final auth = _Auth();
     when(() => auth.authStateChanges)

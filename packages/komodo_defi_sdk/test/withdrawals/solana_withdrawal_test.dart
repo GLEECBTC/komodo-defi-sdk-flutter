@@ -28,13 +28,21 @@ class _ManagerClient implements ApiClient {
   final requests = <Map<String, dynamic>>[];
   Future<void> Function(Map<String, dynamic>)? prepareTransport;
 
+  /// Runs once the request has left; a throw here is a lost response.
+  void Function(Map<String, dynamic>)? afterDispatch;
+  WithdrawalPreview Function()? signedPreview;
+
   @override
   Future<Map<String, dynamic>> executeRpc(Map<String, dynamic> request) async {
     await prepareTransport?.call(request);
     RpcDispatchGuard.ensureCurrent(request['method'] as String);
     requests.add(request);
+    afterDispatch?.call(request);
     return switch (request['method']) {
-      'withdraw' => {'mmrpc': '2.0', 'result': _preview().toJson()},
+      'withdraw' => {
+        'mmrpc': '2.0',
+        'result': (signedPreview?.call() ?? _preview()).toJson(),
+      },
       'send_raw_transaction' => {
         'mmrpc': '2.0',
         'result': {'tx_hash': 'AaFreshSignature'},
@@ -48,12 +56,17 @@ class _MemoryStorage implements GaslessTransferKeyValueStorage {
   final values = <String, String>{};
   bool failWrite = false;
   bool failDelete = false;
+  void Function()? beforeRead;
   void Function()? beforeWrite;
   void Function()? beforeDelete;
   @override
   Future<bool> containsKey(String key) async => values.containsKey(key);
   @override
-  Future<String?> read(String key) async => values[key];
+  Future<String?> read(String key) async {
+    beforeRead?.call();
+    return values[key];
+  }
+
   @override
   Future<void> write(String key, String value) async {
     beforeWrite?.call();
@@ -513,7 +526,13 @@ void main() {
         final assertion = expectLater(
           pending,
           throwsA(
-            method == 'withdraw' ? isA<SdkError>() : isA<RpcDispatchRejected>(),
+            method == 'withdraw'
+                ? isA<SdkError>()
+                : isA<SdkError>().having(
+                    (e) => e.source,
+                    'source',
+                    isA<RpcDispatchRejected>(),
+                  ),
           ),
         );
         await preparing.future;
@@ -547,6 +566,198 @@ void main() {
     }
   });
 
+  group('Solana public withdrawal manager outcomes', () {
+    const walletId = WalletId(
+      name: 'solana',
+      pubkeyHash: 'verified-public',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+    );
+    const nameOnly = WalletId(
+      name: 'solana',
+      authOptions: AuthOptions(derivationMethod: DerivationMethod.hdWallet),
+    );
+    late Asset asset;
+    late _ManagerClient client;
+    late SecureSolanaWithdrawalJournal journal;
+    late WithdrawalManager manager;
+    late Future<WalletId?> Function() resolveWallet;
+
+    setUp(() {
+      asset = _solana();
+      resolveWallet = () async => walletId;
+      final assets = _ManagerAssets();
+      when(() => assets.findAssetsByConfigId(asset.id.id)).thenReturn({asset});
+      client = _ManagerClient();
+      journal = SecureSolanaWithdrawalJournal(storage: _MemoryStorage());
+      manager = WithdrawalManager(
+        client,
+        assets,
+        _ManagerFees(),
+        _ManagerActivation(),
+        LegacyWithdrawalManager(client),
+        auth: WithdrawalAuthFixture(walletResolver: () => resolveWallet()),
+        solanaCapabilities: enabled,
+        solanaWithdrawalJournal: journal,
+      );
+      addTearDown(manager.dispose);
+    });
+
+    final submissionUnknown = isA<SdkError>()
+        .having((e) => e.messageKey, 'key', 'withdrawSolanaSubmissionUnknown')
+        .having(
+          (e) => e.source,
+          'source',
+          isA<SolanaWithdrawalSubmissionUnknown>().having(
+            (e) => e.transactionHash,
+            'signature',
+            'AaFreshSignature',
+          ),
+        );
+
+    // The identity read shares the engine whose broadcast answer was lost.
+    for (final (label, identity) in <(String, Future<WalletId?> Function())>[
+      (
+        'unreachable',
+        () async => throw TimeoutException('identity RPC timed out'),
+      ),
+      ('degraded to a name', () async => nameOnly),
+    ]) {
+      test('a lost broadcast answer stays a possible submission when the '
+          'wallet identity is $label', () async {
+        final parameters = _params(asset);
+        final preview = await manager.previewWithdrawal(parameters);
+        client.afterDispatch = (request) {
+          if (request['method'] != 'send_raw_transaction') return;
+          resolveWallet = identity;
+          throw TimeoutException('broadcast response lost');
+        };
+        await expectLater(
+          manager.executeWithdrawal(preview, asset.id.id).toList(),
+          throwsA(submissionUnknown),
+        );
+        expect(
+          client.requests.where(
+            (request) => request['method'] == 'send_raw_transaction',
+          ),
+          hasLength(1),
+        );
+        expect(
+          (await journal.find(walletId, parameters))?.txHash,
+          'AaFreshSignature',
+        );
+      });
+
+      test('a confirmed broadcast completes and settles the journal when the '
+          'wallet identity is $label', () async {
+        final parameters = _params(asset);
+        final preview = await manager.previewWithdrawal(parameters);
+        client.afterDispatch = (request) {
+          if (request['method'] == 'send_raw_transaction') {
+            resolveWallet = identity;
+          }
+        };
+        final progress = await manager
+            .executeWithdrawal(preview, asset.id.id)
+            .toList();
+        expect(progress.last.status, WithdrawalStatus.complete);
+        expect(progress.last.withdrawalResult?.txHash, 'AaFreshSignature');
+        expect(await journal.find(walletId, parameters), isNull);
+        expect(await journal.revision(walletId, parameters), 1);
+      });
+    }
+
+    test(
+      'a changed review reaches the caller as a typed, mapped error',
+      () async {
+        final preview = await manager.previewWithdrawal(_params(asset));
+        client.signedPreview = () => _preview(fee: '0.000006');
+        await expectLater(
+          manager.executeWithdrawal(preview, asset.id.id).toList(),
+          throwsA(
+            isA<SdkError>()
+                .having(
+                  (e) => e.messageKey,
+                  'key',
+                  'withdrawSolanaReviewChanged',
+                )
+                .having(
+                  (e) => e.source,
+                  'source',
+                  isA<SolanaWithdrawalReviewChanged>().having(
+                    (e) => (e.preview.fee as SolanaFeeInfo).feeAmount,
+                    'refreshed fee',
+                    Decimal.parse('0.000006'),
+                  ),
+                ),
+          ),
+        );
+        expect(
+          client.requests.where(
+            (request) => request['method'] == 'send_raw_transaction',
+          ),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'coordinator refusals take the mapped path of the other rails',
+      () async {
+        await manager.previewWithdrawal(_params(asset));
+        await expectLater(
+          manager.executeWithdrawal(_preview(), asset.id.id).toList(),
+          throwsA(
+            isA<SdkError>().having(
+              (e) => e.source,
+              'source',
+              isA<FormatException>(),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('canceling the public stream before refresh sends nothing', () async {
+      final preview = await manager.previewWithdrawal(_params(asset));
+      final confirmation = StreamIterator(
+        manager.executeWithdrawal(preview, asset.id.id),
+      );
+      expect(await confirmation.moveNext(), isTrue);
+      await confirmation.cancel();
+      await Future<void>.delayed(Duration.zero);
+      expect(client.requests.map((request) => request['method']), ['withdraw']);
+      final progress = await manager
+          .executeWithdrawal(preview, asset.id.id)
+          .toList();
+      expect(progress.last.status, WithdrawalStatus.complete);
+      expect(client.requests.map((request) => request['method']), [
+        'withdraw',
+        'withdraw',
+        'send_raw_transaction',
+      ]);
+    });
+
+    test('disposal during a confirmed broadcast settles the journal '
+        'and ends without an error', () async {
+      final parameters = _params(asset);
+      final preview = await manager.previewWithdrawal(parameters);
+      client.afterDispatch = (request) {
+        if (request['method'] == 'send_raw_transaction') {
+          unawaited(manager.dispose());
+        }
+      };
+      final progress = await manager
+          .executeWithdrawal(preview, asset.id.id)
+          .toList();
+      expect(
+        progress.where((event) => event.status == WithdrawalStatus.complete),
+        isEmpty,
+      );
+      expect(await journal.find(walletId, parameters), isNull);
+      expect(await journal.revision(walletId, parameters), 1);
+    });
+  });
+
   group('Solana explicit confirmation', () {
     late SolanaWithdrawalCoordinator coordinator;
     late Asset asset;
@@ -558,10 +769,12 @@ void main() {
     late Future<WithdrawalPreview> Function(WithdrawParameters) respond;
     late Future<SendRawTransactionResponse> Function(String, String) submit;
     var rejectLease = false;
+    Exception? identityFailure;
 
     setUp(() async {
       asset = _solana();
       rejectLease = false;
+      identityFailure = null;
       const walletId = WalletId(
         name: 'solana',
         pubkeyHash: 'hash',
@@ -591,8 +804,10 @@ void main() {
           return submit(coin, hex);
         },
         captureWallet: () async => wallet,
-        requireWalletCurrent: (context) async =>
-            auth.ensureSessionContextCurrent(context.session),
+        requireWalletCurrent: (context) async {
+          auth.ensureSessionContextCurrent(context.session);
+          if (identityFailure case final Exception failure) throw failure;
+        },
         ensureSessionCurrent: (context) =>
             auth.ensureSessionContextCurrent(context.session),
         ensureAllowed: (_) {},
@@ -761,7 +976,7 @@ void main() {
       await first;
       await expectLater(
         coordinator.executeWithdrawal(preview, asset).toList(),
-        throwsA(isA<SolanaWithdrawalSubmissionUnknown>()),
+        throwsStateError,
       );
       expect(broadcasts, hasLength(1));
     });
@@ -1025,26 +1240,46 @@ void main() {
       );
       expect(broadcasts, hasLength(1));
     });
-    test('wallet changes after dispatch preserve journal '
+    test('wallet changes during a confirmed dispatch settle the journal '
         'without exposing old signature', () async {
       final parameters = _params(asset);
       final preview = await coordinator.previewWithdrawal(parameters, asset);
-      submit = (_, __) async {
+      Future<SendRawTransactionResponse> confirm(String _, String __) async =>
+          SendRawTransactionResponse(mmrpc: '2.0', txHash: 'AaFreshSignature');
+      submit = (coin, hex) {
         auth.runtimeSessions.observe(null);
-        return SendRawTransactionResponse(
-          mmrpc: '2.0',
-          txHash: 'AaFreshSignature',
-        );
+        return confirm(coin, hex);
       };
+      final progress = <WithdrawalProgress>[];
       await expectLater(
-        coordinator.executeWithdrawal(preview, asset).toList(),
-        throwsA(isNot(isA<SolanaWithdrawalSubmissionUnknown>())),
+        coordinator.executeWithdrawal(preview, asset).forEach(progress.add),
+        throwsA(isA<AuthSessionChangedException>()),
       );
       expect(
-        (await coordinator.journal!.find(wallet.walletId, parameters))?.txHash,
-        'AaFreshSignature',
+        progress.where((event) => event.status == WithdrawalStatus.complete),
+        isEmpty,
       );
+      final journal = coordinator.journal!;
+      expect(await journal.find(wallet.walletId, parameters), isNull);
+      expect(await journal.revision(wallet.walletId, parameters), 1);
       expect(broadcasts, hasLength(1));
+
+      // The outcome was known, so the same transfer is not blocked for this
+      // wallet once it signs back in.
+      coordinator.clearSession();
+      auth.runtimeSessions.observe(
+        KdfUser(walletId: wallet.walletId, isBip39Seed: false),
+      );
+      wallet = WalletOperationContext(
+        walletId: wallet.walletId,
+        generation: 1,
+        session: await auth.captureSessionContext(),
+      );
+      submit = confirm;
+      final next = await coordinator.previewWithdrawal(parameters, asset);
+      final resent = await coordinator.executeWithdrawal(next, asset).toList();
+      expect(resent.last.status, WithdrawalStatus.complete);
+      expect(broadcasts, hasLength(2));
     });
     test(
       'wallet changes during an uncertain dispatch do not expose its signature',
@@ -1072,10 +1307,8 @@ void main() {
     test(
       'wallet changes during successful journal cleanup suppress completion',
       () async {
-        final preview = await coordinator.previewWithdrawal(
-          _params(asset),
-          asset,
-        );
+        final parameters = _params(asset);
+        final preview = await coordinator.previewWithdrawal(parameters, asset);
         storage.beforeDelete = auth.runtimeSessions.invalidate;
         final progress = <WithdrawalProgress>[];
         await expectLater(
@@ -1086,9 +1319,154 @@ void main() {
           progress.where((event) => event.status == WithdrawalStatus.complete),
           isEmpty,
         );
+        expect(
+          await coordinator.journal!.find(wallet.walletId, parameters),
+          isNull,
+        );
         expect(broadcasts, hasLength(1));
       },
     );
+    for (final (label, failure) in <(String, Exception)>[
+      ('unreachable', TimeoutException('identity RPC timed out')),
+      ('unverified', const AuthIdentityUnavailableException()),
+    ]) {
+      final unknown = isA<SolanaWithdrawalSubmissionUnknown>().having(
+        (e) => e.transactionHash,
+        'signature',
+        'AaFreshSignature',
+      );
+      test('an $label identity cannot replace an uncertain dispatch '
+          'outcome', () async {
+        final parameters = _params(asset);
+        final preview = await coordinator.previewWithdrawal(parameters, asset);
+        submit = (_, __) async {
+          identityFailure = failure;
+          throw TimeoutException('response lost');
+        };
+        await expectLater(
+          coordinator.executeWithdrawal(preview, asset).toList(),
+          throwsA(unknown),
+        );
+        expect(
+          (await coordinator.journal!.find(
+            wallet.walletId,
+            parameters,
+          ))?.txHash,
+          'AaFreshSignature',
+        );
+        expect(broadcasts, hasLength(1));
+      });
+      test(
+        'an $label identity cannot withhold a confirmed broadcast',
+        () async {
+          final parameters = _params(asset);
+          final preview = await coordinator.previewWithdrawal(
+            parameters,
+            asset,
+          );
+          submit = (_, __) async {
+            identityFailure = failure;
+            return SendRawTransactionResponse(
+              mmrpc: '2.0',
+              txHash: 'AaFreshSignature',
+            );
+          };
+          final progress = await coordinator
+              .executeWithdrawal(preview, asset)
+              .toList();
+          expect(progress.last.status, WithdrawalStatus.complete);
+          expect(progress.last.withdrawalResult?.txHash, 'AaFreshSignature');
+          expect(
+            await coordinator.journal!.find(wallet.walletId, parameters),
+            isNull,
+          );
+          expect(
+            await coordinator.journal!.revision(wallet.walletId, parameters),
+            1,
+          );
+        },
+      );
+      test('an $label identity cannot replace a confirmed broadcast whose '
+          'cleanup failed', () async {
+        final parameters = _params(asset);
+        final preview = await coordinator.previewWithdrawal(parameters, asset);
+        storage.failDelete = true;
+        submit = (_, __) async {
+          identityFailure = failure;
+          return SendRawTransactionResponse(
+            mmrpc: '2.0',
+            txHash: 'AaFreshSignature',
+          );
+        };
+        await expectLater(
+          coordinator.executeWithdrawal(preview, asset).toList(),
+          throwsA(unknown),
+        );
+        expect(broadcasts, hasLength(1));
+      });
+      test('an $label identity still refuses a send before dispatch', () async {
+        final parameters = _params(asset);
+        final preview = await coordinator.previewWithdrawal(parameters, asset);
+        respond = (_) async {
+          identityFailure = failure;
+          return _preview();
+        };
+        await expectLater(
+          coordinator.executeWithdrawal(preview, asset).toList(),
+          throwsA(same(failure)),
+        );
+        expect(broadcasts, isEmpty);
+        expect(storage.values, isEmpty);
+      });
+    }
+    test('an unverified identity cannot replace another submission found '
+        'at reservation', () async {
+      final parameters = _params(asset);
+      final preview = await coordinator.previewWithdrawal(parameters, asset);
+      await coordinator.journal!.reserve(
+        wallet.walletId,
+        parameters,
+        contextualizeSolanaWithdrawal(_preview(hash: 'OtherSignature'), asset),
+      );
+      respond = (_) async {
+        // Fails the identity read only once the reservation is being made.
+        storage.beforeRead = () =>
+            identityFailure = const AuthIdentityUnavailableException();
+        return _preview();
+      };
+      await expectLater(
+        coordinator.executeWithdrawal(preview, asset).toList(),
+        throwsA(
+          isA<SolanaWithdrawalSubmissionUnknown>().having(
+            (e) => e.transactionHash,
+            'signature',
+            'OtherSignature',
+          ),
+        ),
+      );
+      expect(identityFailure, isNotNull);
+      expect(broadcasts, isEmpty);
+    });
+    test('a completed preview reports itself as already submitted', () async {
+      final parameters = _params(asset);
+      final preview = await coordinator.previewWithdrawal(parameters, asset);
+      final progress = await coordinator
+          .executeWithdrawal(preview, asset)
+          .toList();
+      expect(progress.last.status, WithdrawalStatus.complete);
+      await expectLater(
+        coordinator.executeWithdrawal(preview, asset).toList(),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('already submitted'),
+          ),
+        ),
+      );
+      expect(broadcasts, hasLength(1));
+      expect(requests, hasLength(2));
+    });
     test(
       'authorization is rechecked after refresh and before dispatch',
       () async {
