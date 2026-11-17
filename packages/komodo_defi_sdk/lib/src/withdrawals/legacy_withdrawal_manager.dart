@@ -14,12 +14,11 @@ class LegacyWithdrawalManager implements WithdrawalManager {
   static const SdkErrorMapper _errorMapper = SdkErrorMapper();
 
   @override
-  Future<bool> discardPendingGaslessTransfer(String journalId) =>
-      Future.error(
-        UnsupportedError(
-          'Legacy withdrawals keep no GasFree journal to discard from',
-        ),
-      );
+  Future<bool> discardPendingGaslessTransfer(String journalId) => Future.error(
+    UnsupportedError(
+      'Legacy withdrawals keep no GasFree journal to discard from',
+    ),
+  );
 
   @override
   Future<GaslessAccountStatusResponse> gaslessAccountStatus(AssetId assetId) =>
@@ -250,10 +249,14 @@ class LegacyWithdrawalManager implements WithdrawalManager {
       beforeBroadcast?.call();
 
       // Broadcast the pre-signed transaction
-      final broadcastResponse = await _client.rpc.withdraw.sendRawTransaction(
-        coin: assetId,
-        txHex: preview.txHex,
-        txJson: preview.txJson,
+      final broadcastResponse = await RpcDispatchGuard.run(
+        () => beforeBroadcast?.call(),
+        () => _client.rpc.withdraw.sendRawTransaction(
+          coin: assetId,
+          txHex: preview.txHex,
+          txJson: preview.txJson,
+        ),
+        methods: const {'send_raw_transaction'},
       );
 
       // Final success update with actual broadcast transaction hash

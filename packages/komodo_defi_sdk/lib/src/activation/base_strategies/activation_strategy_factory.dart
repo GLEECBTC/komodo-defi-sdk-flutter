@@ -1,5 +1,6 @@
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/activation/_activation.dart';
+import 'package:komodo_defi_sdk/src/activation/protocol_strategies/solana_activation_strategy.dart';
 import 'package:komodo_defi_sdk/src/activation_config/activation_config_service.dart';
 import 'package:komodo_defi_sdk/src/assets/activated_assets_cache.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
@@ -22,6 +23,7 @@ class ActivationStrategyFactory {
     ActivationConfigService configService,
     ActivatedAssetsCache activatedAssetsCache, {
     TronGaslessProviderConfig? tronGaslessProvider,
+    SolanaCapabilities solanaCapabilities = const SolanaCapabilities(),
     int? hdGapLimit,
   }) {
     return SmartAssetActivator(
@@ -33,6 +35,7 @@ class ActivationStrategyFactory {
           privKeyPolicy,
           configService,
           tronGaslessProvider: tronGaslessProvider,
+          solanaCapabilities: solanaCapabilities,
           hdGapLimit: hdGapLimit,
         ),
       ),
@@ -48,9 +51,11 @@ class ActivationStrategyFactory {
     PrivateKeyPolicy privKeyPolicy,
     ActivationConfigService configService, {
     TronGaslessProviderConfig? tronGaslessProvider,
+    SolanaCapabilities solanaCapabilities = const SolanaCapabilities(),
     int? hdGapLimit,
   }) {
     return [
+      SolanaActivationStrategy(client, privKeyPolicy, solanaCapabilities),
       UtxoActivationStrategy(client, privKeyPolicy, hdGapLimit: hdGapLimit),
       EthTaskActivationStrategy(
         client,

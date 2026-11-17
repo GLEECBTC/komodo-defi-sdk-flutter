@@ -13,6 +13,7 @@ export 'nft_activation_params.dart';
 export 'qtum_activation_params.dart';
 export 'sia_activation_params.dart';
 export 'slp_activation_params.dart';
+export 'solana_activation_params.dart';
 export 'tendermint_activation_params.dart';
 export 'trc20_activation_params.dart';
 export 'trx_activation_params.dart';

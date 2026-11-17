@@ -29,9 +29,6 @@ class _MockFeeManager extends Mock implements FeeManager {}
 class _MockActivationCoordinator extends Mock
     implements SharedActivationCoordinator {}
 
-class _MockLegacyWithdrawalManager extends Mock
-    implements LegacyWithdrawalManager {}
-
 class _MemoryStorage implements GaslessTransferKeyValueStorage {
   final _values = <String, String>{};
 
@@ -88,12 +85,13 @@ PendingGaslessTransfer _pending() {
 }
 
 WithdrawalManager _manager(PendingGaslessTransferRepository repository) {
+  final client = _MockApiClient();
   final manager = WithdrawalManager(
-    _MockApiClient(),
+    client,
     _MockAssetProvider(),
     _MockFeeManager(),
     _MockActivationCoordinator(),
-    _MockLegacyWithdrawalManager(),
+    LegacyWithdrawalManager(client),
     pendingGaslessTransfers: repository,
     auth: WithdrawalAuthFixture(walletResolver: () async => _wallet),
   );

@@ -7,6 +7,7 @@ import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart' show RpcDispatchGuard;
 
 class KdfOperationsRemote implements IKdfOperations {
   // TODO! Add wallet password and name or add the config object
@@ -130,9 +131,8 @@ class KdfOperationsRemote implements IKdfOperations {
   @override
   Future<StopStatus> kdfStop() async {
     try {
-      final stopResultResponse = await mm2Rpc({
-        'method': 'stop',
-      }).timeout(_stopTimeout);
+      final stopResultResponse = await mm2Rpc({'method': 'stop'})
+          .timeout(_stopTimeout);
 
       _log('KDF stop response received');
 
@@ -180,6 +180,9 @@ class KdfOperationsRemote implements IKdfOperations {
     final client = http.Client();
     _inFlight.add(client);
     try {
+      if (request['method'] case final String method) {
+        RpcDispatchGuard.ensureCurrent(method);
+      }
       response = await client.post(_baseUrl, body: json.encode(request));
     } on http.ClientException {
       // ClientException can include a credential-bearing URL. Keep the public

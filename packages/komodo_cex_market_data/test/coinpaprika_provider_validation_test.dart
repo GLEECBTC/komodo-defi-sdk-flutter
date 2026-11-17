@@ -43,11 +43,15 @@ class TestCoinPaprikaProvider extends CoinPaprikaProvider {
     // If no dates provided, assume recent data request (valid)
     if (startDate == null && endDate == null) return;
 
-    final cutoffDate = apiPlan.getHistoricalDataCutoff();
+    final cutoffDate = apiPlan.getHistoricalDataCutoff(buffer: Duration.zero);
     if (cutoffDate == null) return; // No limitations
 
+    // The API reads each sent date as that day's 00:00 UTC.
+    DateTime dayReadByApi(DateTime date) =>
+        DateTime.utc(date.year, date.month, date.day);
+
     // Check if any requested date is before the cutoff
-    if (startDate != null && startDate.isBefore(cutoffDate)) {
+    if (startDate != null && dayReadByApi(startDate).isBefore(cutoffDate)) {
       throw ArgumentError(
         'Historical data before ${formatDateForApi(cutoffDate)} is not available in the ${apiPlan.planName} plan. '
         'Requested start date: ${formatDateForApi(startDate)}. '
@@ -55,7 +59,7 @@ class TestCoinPaprikaProvider extends CoinPaprikaProvider {
       );
     }
 
-    if (endDate != null && endDate.isBefore(cutoffDate)) {
+    if (endDate != null && dayReadByApi(endDate).isBefore(cutoffDate)) {
       throw ArgumentError(
         'Historical data before ${formatDateForApi(cutoffDate)} is not available in the ${apiPlan.planName} plan. '
         'Requested end date: ${formatDateForApi(endDate)}. '
@@ -80,9 +84,8 @@ void main() {
         // Arrange
         final provider = CoinPaprikaProvider(httpClient: mockHttpClient);
 
-        when(
-          () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-        ).thenAnswer((_) async => http.Response('[]', 200));
+        when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+            .thenAnswer((_) async => http.Response('[]', 200));
 
         // Act
         await provider.fetchCoinList();
@@ -110,9 +113,8 @@ void main() {
           httpClient: mockHttpClient,
         );
 
-        when(
-          () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-        ).thenAnswer((_) async => http.Response('[]', 200));
+        when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+            .thenAnswer((_) async => http.Response('[]', 200));
 
         // Act
         await provider.fetchCoinList();
@@ -139,9 +141,8 @@ void main() {
         httpClient: mockHttpClient,
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act
       await provider.fetchCoinList();
@@ -167,21 +168,18 @@ void main() {
         httpClient: mockHttpClient,
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act - test multiple API methods
       await provider.fetchCoinList();
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
       await provider.fetchCoinMarkets(coinId: 'btc-bitcoin');
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('{"quotes":{}}', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('{"quotes":{}}', 200));
       await provider.fetchCoinTicker(coinId: 'btc-bitcoin');
 
       // Assert - verify all requests include Bearer token
@@ -206,9 +204,8 @@ void main() {
         apiPlan: const CoinPaprikaApiPlan.ultimate(),
       );
 
-      when(
-        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => http.Response('[]', 200));
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
 
       // Act
       await provider.fetchHistoricalOhlc(
@@ -227,6 +224,59 @@ void main() {
               as Map<String, String>;
 
       expect(capturedHeaders['Authorization'], equals('Bearer $testApiKey'));
+    });
+  });
+
+  group('CoinPaprikaProvider free plan start date', () {
+    late MockHttpClient mockHttpClient;
+    late CoinPaprikaProvider provider;
+
+    setUp(() {
+      mockHttpClient = MockHttpClient();
+      registerFallbackValue(Uri());
+      provider = CoinPaprikaProvider(httpClient: mockHttpClient);
+      when(() => mockHttpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('[]', 200));
+    });
+
+    test('rejects a start on the cutoff day without a request', () async {
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 365));
+      final cutoffDay = DateTime.utc(cutoff.year, cutoff.month, cutoff.day);
+
+      // Later than the cutoff when it falls before noon, but the API reads
+      // the sent date as that day's midnight and refuses it.
+      await expectLater(
+        provider.fetchHistoricalOhlc(
+          coinId: 'btcz-bitcoinz',
+          startDate: cutoffDay.add(const Duration(hours: 12)),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      verifyNever(
+        () => mockHttpClient.get(any(), headers: any(named: 'headers')),
+      );
+    });
+
+    test('accepts the earliest start date the plan reports', () async {
+      final earliest = provider.apiPlan.getEarliestStartDate()!;
+
+      await provider.fetchHistoricalOhlc(
+        coinId: 'btcz-bitcoinz',
+        startDate: earliest,
+      );
+
+      final uri =
+          verify(
+                () => mockHttpClient.get(
+                  captureAny(),
+                  headers: any(named: 'headers'),
+                ),
+              ).captured.single
+              as Uri;
+      expect(
+        uri.queryParameters['start'],
+        earliest.toIso8601String().substring(0, 10),
+      );
     });
   });
 

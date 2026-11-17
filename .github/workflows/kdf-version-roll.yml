@@ -26,13 +26,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Dart SDK
-        uses: dart-lang/setup-dart@v1
+      - name: Set up pinned Flutter and Dart
+        uses: ./.github/actions/setup-flutter
 
       - name: Install dependencies
-        run: |
-          cd packages/komodo_wallet_cli
-          dart pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Determine branch from config
         id: determine-branch
@@ -218,13 +216,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Dart SDK
-        uses: dart-lang/setup-dart@v1
+      - name: Set up pinned Flutter and Dart
+        uses: ./.github/actions/setup-flutter
 
       - name: Install dependencies
-        run: |
-          cd packages/komodo_wallet_cli
-          dart pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Create branch for roll
         run: |

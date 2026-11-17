@@ -20,8 +20,8 @@ repository: "https://github.com/GLEECBTC/komodo-defi-sdk-flutter/tree/dev/exampl
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.9.0 <4.0.0"
-  flutter: ">=3.35.0 <4.0.0"
+  sdk: ">=3.14.0 <4.0.0"
+  flutter: ">=3.50.0 <4.0.0"
 
 resolution: workspace
 
@@ -43,7 +43,10 @@ dependencies:
   flutter_json_view: ^1.1.2
   flutter_secure_storage: ^10.0.0-beta.4
   http: ^1.4.0
-  json_editor_flutter: ^1.4.2
+  # Upstream 1.4.2 opts into Dart 2.17, which cannot evaluate Flutter 3.50's
+  # const enum comparisons. See third_party/json_editor_flutter/README.md.
+  json_editor_flutter:
+    path: third_party/json_editor_flutter
 
   komodo_defi_framework:
     # When depending on this package from a real application you should use:

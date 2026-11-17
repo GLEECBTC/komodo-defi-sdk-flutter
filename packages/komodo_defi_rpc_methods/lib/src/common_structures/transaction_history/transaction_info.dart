@@ -19,7 +19,7 @@ class TransactionInfo {
     this.transactionFee,
   });
 
-  factory TransactionInfo.fromJson(JsonMap json) {
+  factory TransactionInfo.fromJson(JsonMap json, {String? feeCoin}) {
     return TransactionInfo(
       txHash: json.value<String>('tx_hash'),
       from: List<String>.from(json.value('from')),
@@ -28,10 +28,9 @@ class TransactionInfo {
       blockHeight: json.value<int>('block_height'),
       confirmations: json.value<int>('confirmations'),
       timestamp: json.value<int>('timestamp'),
-      feeDetails:
-          json.containsKey('fee_details')
-              ? FeeInfo.fromJson(json.value('fee_details'))
-              : null,
+      feeDetails: json.containsKey('fee_details')
+          ? FeeInfo.fromJson(json.value('fee_details'), feeCoin: feeCoin)
+          : null,
       transactionFee: json.valueOrNull<String>('transaction_fee'),
       coin: json.value<String>('coin'),
       internalId: json.value<String>('internal_id'),

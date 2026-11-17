@@ -32,7 +32,9 @@ enum CoinSubClass {
   hecoChain,
   rskSmartBitcoin,
   zhtlc,
-  unknown;
+  unknown,
+  solana,
+  solanaToken;
 
   static String _enumNameLower(CoinSubClass e) {
     // Normalize enum value to its lowercased name without the enum prefix
@@ -42,6 +44,9 @@ enum CoinSubClass {
   // TODO: verify all the tickers.
   String get ticker {
     switch (this) {
+      case CoinSubClass.solana:
+      case CoinSubClass.solanaToken:
+        return 'SOL';
       case CoinSubClass.trx:
         return 'TRX';
       case CoinSubClass.trc20:
@@ -106,6 +111,9 @@ enum CoinSubClass {
 
   String get iconTicker {
     switch (this) {
+      case CoinSubClass.solana:
+      case CoinSubClass.solanaToken:
+        return 'SOL';
       case CoinSubClass.trx:
         return 'TRX';
       case CoinSubClass.trc20:
@@ -189,6 +197,9 @@ enum CoinSubClass {
 
     // Configs stored before the MATIC -> POL rename still carry "Matic".
     if (sanitizedValue == 'matic') return CoinSubClass.polygon;
+    if (sanitizedValue == 'spl' || sanitizedValue == 'spltoken') {
+      return CoinSubClass.solanaToken;
+    }
 
     // First, try to find exact enum name match (highest priority)
     try {
@@ -254,6 +265,10 @@ enum CoinSubClass {
 
   /// Checks if this subclass can be a parent of the given child subclass
   bool canBeParentOf(CoinSubClass child) {
+    if (solanaCoinSubClasses.contains(this) ||
+        solanaCoinSubClasses.contains(child)) {
+      return this == CoinSubClass.solana && child == CoinSubClass.solanaToken;
+    }
     // Tendermint tokens can be a child of Tendermint, but not the
     // other way around. This allows Tendermint to be a parent
     // while keeping the existing parent subclass check intact.
@@ -279,6 +294,10 @@ enum CoinSubClass {
   // subclasses where they don't have a symbol used in coin IDs.
   String get formatted {
     switch (this) {
+      case CoinSubClass.solana:
+        return 'Solana';
+      case CoinSubClass.solanaToken:
+        return 'SPL Token';
       case CoinSubClass.trx:
         return 'TRON';
       case CoinSubClass.trc20:
@@ -342,6 +361,9 @@ enum CoinSubClass {
 
   Color? get color {
     switch (this) {
+      case CoinSubClass.solana:
+      case CoinSubClass.solanaToken:
+        return const Color(0xFF9945FF);
       case CoinSubClass.trx:
       case CoinSubClass.trc20:
         return const Color(0xFFFF060A); // trx: "#ff060a"
@@ -410,6 +432,8 @@ extension CoinSubClassTokenStandard on CoinSubClass {
   /// be appended for the given subclass.
   String? get tokenStandardSuffix {
     switch (this) {
+      case CoinSubClass.solanaToken:
+        return 'SPL';
       case CoinSubClass.trc20:
         return 'TRC20';
       case CoinSubClass.erc20:
@@ -440,6 +464,7 @@ extension CoinSubClassTokenStandard on CoinSubClass {
         return 'HCO20';
       // Subclasses without a canonical short token/network standard suffix
       case CoinSubClass.moonbeam:
+      case CoinSubClass.solana:
       case CoinSubClass.trx:
       case CoinSubClass.slp: // ignore: deprecated_member_use_from_same_package
       case CoinSubClass.sia:
@@ -458,6 +483,11 @@ extension CoinSubClassTokenStandard on CoinSubClass {
     }
   }
 }
+
+const Set<CoinSubClass> solanaCoinSubClasses = {
+  CoinSubClass.solana,
+  CoinSubClass.solanaToken,
+};
 
 const Set<CoinSubClass> evmCoinSubClasses = {
   CoinSubClass.avx20,

@@ -6,3 +6,5 @@ analyzer:
 
     # Required to use jsonserializable with freezed
     invalid_annotation_target: ignore
+  exclude:
+    - build/**

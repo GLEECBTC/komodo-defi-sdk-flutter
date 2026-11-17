@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
+import 'package:komodo_cex_market_data/src/common/api_error_parser.dart';
 import 'package:komodo_cex_market_data/src/models/quote_currency.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -50,6 +51,10 @@ mixin RepositoryFallbackMixin {
   /// Must be implemented by the mixing class
   RepositorySelectionStrategy get selectionStrategy;
 
+  /// Whether provider backoff can hide data that may become available later.
+  bool get hasUnavailableRepositories =>
+      priceRepositories.any((repo) => !_isRepositoryHealthy(repo));
+
   /// Checks if a repository is healthy (not in backoff period)
   bool _isRepositoryHealthy(CexRepository repo) {
     final repoType = repo.runtimeType;
@@ -87,6 +92,8 @@ mixin RepositoryFallbackMixin {
 
   /// Checks if an exception indicates a 429 (Too Many Requests) response
   bool _isRateLimitError(Exception exception) {
+    if (exception is MarketDataApiException) return exception.isRateLimited;
+
     final exceptionString = exception.toString().toLowerCase();
 
     // Check for HTTP 429 status code in various exception formats
@@ -229,7 +236,9 @@ mixin RepositoryFallbackMixin {
 
   /// Generic method to try repositories in order until one succeeds
   /// Uses smart retry logic with maximum 3 total attempts across
-  /// all repositories
+  /// all repositories. When [isComplete] is supplied, successful partial
+  /// results try the remaining repositories once and return the latest result
+  /// if none completes it. The operation can accumulate those partial results.
   Future<T> tryRepositoriesInOrder<T>(
     AssetId assetId,
     QuoteCurrency quoteCurrency,
@@ -237,6 +246,7 @@ mixin RepositoryFallbackMixin {
     Future<T> Function(CexRepository repo) operation,
     String operationName, {
     int maxTotalAttempts = 3,
+    bool Function(T result)? isComplete,
   }) async {
     var repositories = await _getHealthyRepositoriesInOrder(
       assetId,
@@ -253,6 +263,10 @@ mixin RepositoryFallbackMixin {
 
     Exception? lastException;
     var attemptCount = 0;
+    final attempted = <CexRepository>{};
+    final partialRepositories = <CexRepository>{};
+    T? partialResult;
+    var hasPartialResult = false;
 
     // Smart retry logic: try each repository in order first, then retry
     // if needed, but re-evaluate health after rate limit errors
@@ -269,16 +283,24 @@ mixin RepositoryFallbackMixin {
         }
       }
 
-      final repositoryIndex = attempt % repositories.length;
-      final repo = repositories[repositoryIndex];
-
-      // Double-check repository health before attempting
-      if (!_isRepositoryHealthy(repo)) {
-        _logger.fine(
-          'Skipping unhealthy repository ${repo.runtimeType} for $operationName',
-        );
-        continue;
-      }
+      final eligible = repositories
+          .where(
+            (repo) =>
+                _isRepositoryHealthy(repo) &&
+                !partialRepositories.contains(repo),
+          )
+          .toList();
+      if (eligible.isEmpty) break;
+      // Health changes can reorder the list. Pick an untried repository by
+      // identity so a rate-limited primary cannot make us skip its fallback.
+      final repo = eligible.firstWhere(
+        (repo) => !attempted.contains(repo),
+        orElse: () {
+          attempted.clear();
+          return eligible.first;
+        },
+      );
+      attempted.add(repo);
 
       try {
         attemptCount++;
@@ -295,6 +317,13 @@ mixin RepositoryFallbackMixin {
         );
 
         _recordRepositorySuccess(repo);
+
+        if (isComplete != null && !isComplete(result)) {
+          partialResult = result;
+          hasPartialResult = true;
+          partialRepositories.add(repo);
+          continue;
+        }
 
         if (attemptCount > 1) {
           _logger.fine(
@@ -330,6 +359,8 @@ mixin RepositoryFallbackMixin {
           ..finest('Stack trace: $s');
       }
     }
+
+    if (hasPartialResult) return partialResult as T;
 
     _logger.warning(
       'All $attemptCount attempts failed for $operationName '
