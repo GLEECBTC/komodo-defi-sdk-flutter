@@ -1,3 +1,4 @@
+import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
 import 'package:komodo_defi_rpc_methods/komodo_defi_rpc_methods.dart';
 import 'package:komodo_defi_sdk/src/auth/wallet_operation_context.dart';
 import 'package:komodo_defi_sdk/src/storage/wallet_storage_namespace.dart';
@@ -133,6 +134,22 @@ final class SolanaWithdrawalCoordinator {
     return preview;
   }
 
+  /// Checks that [wallet]'s session may still be told what happened to a send.
+  ///
+  /// Only that session ending withholds a result. An identity read that fails
+  /// or cannot be verified does not show another wallet is active, and must
+  /// not replace the outcome of a transfer that may be on chain.
+  Future<void> _requireOutcomeSession(WalletOperationContext wallet) async {
+    try {
+      await requireWalletCurrent(wallet);
+    } on AuthSessionChangedException {
+      rethrow;
+    } on Object {
+      // The session check below is the authority on a wallet change.
+    }
+    ensureSessionCurrent(wallet);
+  }
+
   /// Refreshes once after explicit confirmation, then broadcasts at most once.
   ///
   /// [beforeBroadcast] checks the caller's authorization at both signing and
@@ -156,6 +173,9 @@ final class SolanaWithdrawalCoordinator {
     }
     await requireWalletCurrent(prepared.wallet);
     ensureSessionCurrent(prepared.wallet);
+    if (prepared.completed) {
+      throw StateError('This Solana withdrawal was already submitted');
+    }
     if (prepared.submittedPreview case final WithdrawalPreview previous) {
       throw SolanaWithdrawalSubmissionUnknown(previous);
     }
@@ -237,8 +257,7 @@ final class SolanaWithdrawalCoordinator {
       );
       if (existing != null) {
         prepared.submittedPreview = existing;
-        await requireWalletCurrent(prepared.wallet);
-        ensureSessionCurrent(prepared.wallet);
+        await _requireOutcomeSession(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(existing);
       }
       // This check is provably before dispatch; a local refusal may release
@@ -285,12 +304,12 @@ final class SolanaWithdrawalCoordinator {
         prepared.submittedPreview = null;
         rethrow;
       } on Object {
-        await requireWalletCurrent(prepared.wallet);
-        ensureSessionCurrent(prepared.wallet);
+        await _requireOutcomeSession(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(fresh);
       }
-      // Keep the durable reservation if the active wallet changed.
-      await requireWalletCurrent(prepared.wallet);
+      // The engine confirmed this signature. Its reservation is keyed by the
+      // captured wallet and matched by signature, so settle it even when that
+      // wallet's session has ended: nothing else would ever release the intent.
       try {
         await journal.clear(
           prepared.wallet.walletId,
@@ -299,12 +318,11 @@ final class SolanaWithdrawalCoordinator {
           submitted: true,
         );
       } on Object {
-        await requireWalletCurrent(prepared.wallet);
-        ensureSessionCurrent(prepared.wallet);
+        await _requireOutcomeSession(prepared.wallet);
         throw SolanaWithdrawalSubmissionUnknown(fresh);
       }
-      await requireWalletCurrent(prepared.wallet);
-      ensureSessionCurrent(prepared.wallet);
+      prepared.completed = true;
+      await _requireOutcomeSession(prepared.wallet);
       _submissions.remove(key);
       yield WithdrawalProgress(
         status: WithdrawalStatus.complete,
@@ -339,4 +357,7 @@ final class _PreparedWithdrawal {
   final int generation;
   WithdrawalPreview? replacement;
   WithdrawalPreview? submittedPreview;
+
+  /// The send was confirmed and its reservation settled; never send it again.
+  bool completed = false;
 }

@@ -1288,11 +1288,15 @@ class WithdrawalManager {
     try {
       final asset = _assetProvider.findAssetsByConfigId(assetId).single;
       if (isSolanaWithdrawalAsset(asset)) {
-        yield* _solanaWithdrawals.executeWithdrawal(
+        // Not `yield*`: it would hand the coordinator's errors to the caller
+        // without passing through the mapping below.
+        await for (final progress in _solanaWithdrawals.executeWithdrawal(
           preview,
           asset,
           beforeBroadcast: beforeBroadcast,
-        );
+        )) {
+          yield progress;
+        }
         return;
       }
       _rejectInconsistentGaslessRailShape(preview);
