@@ -192,6 +192,9 @@ extension KdfExtensions on KdfAuthService {
       }
 
       return Mnemonic.fromRpcJson(response.value<JsonMap>('result'));
+    } on RpcDispatchRejected {
+      // Not sent, so not an answer about the password: callers cancel on this.
+      rethrow;
     } catch (error) {
       if (_isIncorrectPasswordRpcError(error)) {
         throw AuthException(
@@ -214,6 +217,55 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
+  /// Dispatches `delete_wallet`, returning once the engine no longer has
+  /// [walletName].
+  ///
+  /// A request that fails without an answer may still have been carried out.
+  /// Reporting that as "not deleted" would strand the removed wallet's local
+  /// record and credentials with nothing left to retry. For a wallet that was
+  /// [listedBefore], a fresh catalog read settles it: gone means this request
+  /// removed it. A refusal to dispatch, an engine error, or a catalog that
+  /// cannot be read keeps the original failure.
+  Future<void> _deleteEngineWallet({
+    required String walletName,
+    required String password,
+    required void Function() ensureAuthorized,
+    required bool listedBefore,
+  }) async {
+    try {
+      await RpcDispatchGuard.run(
+        ensureAuthorized,
+        () => _client.rpc.wallet.deleteWallet(
+          walletName: walletName,
+          password: password,
+        ),
+        methods: const {'delete_wallet'},
+      );
+    } on RpcDispatchRejected {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
+    } on MmRpcException {
+      rethrow;
+    } on GeneralErrorResponse {
+      rethrow;
+    } catch (_) {
+      if (!listedBefore || !await _engineLacksWallet(walletName)) rethrow;
+    }
+  }
+
+  Future<bool> _engineLacksWallet(String walletName) async {
+    try {
+      final catalog = await _runStartupSensitiveRpc(
+        phase: 'deleted wallet catalog',
+        operation: () => _client.rpc.wallet.getWalletNames(),
+      );
+      return !catalog.walletNames.contains(walletName);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Dart2Wasm traps when adapting this optional-named extension tear-off to
   // the zero-argument transition callback. Keep the call shape explicit.
   Future<void> _stopKdf() => _runAuthTransition(
@@ -228,14 +280,27 @@ extension KdfExtensions on KdfAuthService {
     // Invalidate pending exports before cancellation or shutdown can suspend.
     // This also covers restarts and shutdown failures with an unchanged user.
     if (invalidateSession) invalidateAuthSession();
-    await _shutdownSubscription?.cancel();
-    _shutdownSubscription = null;
-    // Every authenticated session ends through here, and "generated this
-    // session" means "first sign-in": once that sign-in is over the marker
-    // must not keep telling the HD gap scan there is nothing to find. A later
-    // sign-in to the same wallet gets the standard gap.
-    _walletsGeneratedThisSession.clear();
-    await _stopEngine(beforeStop: beforeStop);
+    Future<void>? listenerCancelled;
+    try {
+      await _stopEngine(
+        beforeStop: () {
+          // A refusal here leaves the engine running and authenticated, so
+          // nothing that belongs to its session may be torn down before it.
+          beforeStop?.call();
+          // Cancelling takes effect at once: the engine's own shutdown signal
+          // for this stop must not be handled as an external one.
+          listenerCancelled = _shutdownSubscription?.cancel();
+          _shutdownSubscription = null;
+          // Every authenticated session ends through here, and "generated
+          // this session" means "first sign-in": once that sign-in is over
+          // the marker must not keep telling the HD gap scan there is nothing
+          // to find. A later sign-in to the same wallet gets the standard gap.
+          _walletsGeneratedThisSession.clear();
+        },
+      );
+    } finally {
+      await listenerCancelled;
+    }
     _emitAuthStateChange(null);
   }
 

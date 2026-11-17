@@ -107,11 +107,11 @@ void main() {
       },
     );
 
-    test('rethrows when every batch fails', () async {
+    test('stops at the first failed batch and rethrows it', () async {
       whenFetch().thenThrow(Exception('CoinPaprika server error'));
 
       await expectLater(fetchSinceLastYear(), throwsA(isA<Exception>()));
-      expect(requestedStarts(), hasLength(5));
+      expect(requestedStarts(), hasLength(1));
     });
 
     test('stops at a rate limit and rethrows it', () async {
@@ -135,12 +135,14 @@ void main() {
       () async {
         var call = 0;
         whenFetch().thenAnswer((_) async {
-          if (call++ == 0) throw Exception('CoinPaprika server error');
+          if (call++ == 2) throw Exception('CoinPaprika server error');
           return [TestFixtures.createMockOhlc()];
         });
 
+        // Returning the two batches that succeeded would read as "no price"
+        // for every day of the others.
         await expectLater(fetchSinceLastYear(), throwsA(isA<Exception>()));
-        expect(requestedStarts(), hasLength(5));
+        expect(requestedStarts(), hasLength(3));
       },
     );
   });

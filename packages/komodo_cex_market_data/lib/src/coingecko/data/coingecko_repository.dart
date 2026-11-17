@@ -1,6 +1,7 @@
 import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
 import 'package:komodo_cex_market_data/src/coingecko/_coingecko_index.dart';
+import 'package:komodo_cex_market_data/src/common/shared_fetch.dart';
 import 'package:komodo_cex_market_data/src/id_resolution_strategy.dart';
 import 'package:komodo_cex_market_data/src/models/_models_index.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
@@ -28,16 +29,14 @@ class CoinGeckoRepository implements CexRepository {
   final IdResolutionStrategy _idResolutionStrategy;
   final bool _enableMemoization;
 
-  /// Populated only after a successful fetch; failures do not poison retries.
-  List<CexCoin>? _cachedCoinList;
-  Future<List<CexCoin>>? _coinListInFlight;
+  /// Keeps only a successful fetch. After a failure (e.g. rate limiting) the
+  /// fetch is not repeated until a cooldown has passed: every price request
+  /// runs supports(), which calls getCoinList(), so retrying each time would
+  /// be a request storm that exhausts the rate limit.
+  final _coinList = RetryingMemoizer<List<CexCoin>>(
+    name: 'CoinGecko coin list',
+  );
   Set<String>? _cachedFiatCurrencies;
-
-  /// Tracks when the last coin list fetch failed, to prevent API request spam.
-  /// When a fetch fails (e.g. due to rate limiting), we avoid retrying until
-  /// the cooldown period has elapsed.
-  DateTime? _lastCoinListFailure;
-  static const _coinListFailureCooldown = Duration(minutes: 5);
 
   /// Fetches the CoinGecko market data.
   ///
@@ -60,42 +59,7 @@ class CoinGeckoRepository implements CexRepository {
       // and unnecessary network requests. Use this mode sparingly.
       return _fetchCoinListInternal();
     }
-    if (_cachedCoinList != null) {
-      return _cachedCoinList!;
-    }
-
-    // Prevent API spam: don't retry if we recently failed.
-    // Without this guard, every price request triggers supports() which calls
-    // getCoinList(), and each failed call immediately retries the API — causing
-    // a request storm that exhausts rate limits.
-    if (_lastCoinListFailure != null) {
-      final elapsed = DateTime.now().difference(_lastCoinListFailure!);
-      if (elapsed < _coinListFailureCooldown) {
-        throw StateError(
-          'CoinGecko coin list fetch is in cooldown after a recent failure '
-          '(${(_coinListFailureCooldown - elapsed).inSeconds}s remaining)',
-        );
-      }
-      _lastCoinListFailure = null;
-    }
-
-    if (_coinListInFlight != null) {
-      return _coinListInFlight!;
-    }
-    _coinListInFlight = _fetchCoinListInternal()
-        .then((list) {
-          _cachedCoinList = list;
-          _lastCoinListFailure = null;
-          return list;
-        })
-        .catchError((Object error, StackTrace stackTrace) {
-          _lastCoinListFailure = DateTime.now();
-          Error.throwWithStackTrace(error, stackTrace);
-        })
-        .whenComplete(() {
-          _coinListInFlight = null;
-        });
-    return _coinListInFlight!;
+    return _coinList.runOnce(_fetchCoinListInternal);
   }
 
   /// Internal method to fetch coin list data from the API.
@@ -239,6 +203,10 @@ class CoinGeckoRepository implements CexRepository {
     return Decimal.parse(price.toString());
   }
 
+  /// Prices for [dates], keyed by UTC day, from a single request.
+  ///
+  /// Days in the future or older than the plan serves are left out, and no
+  /// request is made when none of the days can be served.
   @override
   Future<Map<DateTime, Decimal>> getCoinFiatPrices(
     AssetId assetId,
@@ -252,56 +220,45 @@ class CoinGeckoRepository implements CexRepository {
       throw ArgumentError('Coin and fiat coin cannot be the same');
     }
 
-    dates.sort();
-
-    if (dates.isEmpty) {
+    // `/ohlc?days=N` always counts back from now, so the window is sized by
+    // how long ago the earliest wanted day is, not by the span of the dates.
+    final now = DateTime.now().toUtc();
+    final earliestServed = now.subtract(
+      Duration(days: _getMaxDaysForDailyData()),
+    );
+    final wantedDays = {
+      for (final date in dates.map(_utcDay))
+        if (!date.isBefore(earliestServed) && !date.isAfter(now)) date,
+    };
+    if (wantedDays.isEmpty) {
       return {};
     }
 
-    final startDate = dates.first.add(const Duration(days: -2));
-    final endDate = dates.last.add(const Duration(days: 2));
-    final daysDiff = endDate.difference(startDate).inDays;
+    final earliestWanted = wantedDays.reduce((a, b) => a.isBefore(b) ? a : b);
+    final daysBack = (now.difference(earliestWanted).inSeconds / secondsInDay)
+        .ceil();
+    final ohlcData = await coinGeckoProvider.fetchCoinOhlc(
+      tradingSymbol,
+      mappedFiatId,
+      _ohlcWindowDays.firstWhere((days) => days >= daysBack),
+    );
 
     final result = <DateTime, Decimal>{};
-
-    // Process in batches to avoid overwhelming the API and stay within API plan limits
-    final maxDaysAllowed = _getMaxDaysForDailyData();
-    for (var i = 0; i <= daysDiff; i += maxDaysAllowed) {
-      final batchStartDate = startDate.add(Duration(days: i));
-      final batchEndDate = i + maxDaysAllowed > daysDiff
-          ? endDate
-          : startDate.add(Duration(days: i + maxDaysAllowed));
-
-      final ohlcData = await getCoinOhlc(
-        assetId,
-        fiatCurrency,
-        GraphInterval.oneDay,
-        startAt: batchStartDate,
-        endAt: batchEndDate,
+    for (final ohlc in ohlcData.ohlc) {
+      final day = _utcDay(
+        DateTime.fromMillisecondsSinceEpoch(ohlc.closeTimeMs, isUtc: true),
       );
-
-      final batchResult = ohlcData.ohlc.fold<Map<DateTime, Decimal>>({}, (
-        map,
-        ohlc,
-      ) {
-        final dateUtc = DateTime.fromMillisecondsSinceEpoch(
-          ohlc.closeTimeMs,
-          isUtc: true,
-        );
-        map[DateTime.utc(dateUtc.year, dateUtc.month, dateUtc.day)] =
-            ohlc.closeDecimal;
-        return map;
-      });
-
-      result.addAll(batchResult);
-
-      // Add a small delay between batch requests to avoid rate limiting
-      if (i + maxDaysAllowed <= daysDiff) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      }
+      if (wantedDays.contains(day)) result[day] = ohlc.closeDecimal;
     }
-
     return result;
+  }
+
+  /// The window lengths the OHLC endpoint documents for its `days` parameter.
+  static const _ohlcWindowDays = [1, 7, 14, 30, 90, 180, 365];
+
+  static DateTime _utcDay(DateTime date) {
+    final utc = date.toUtc();
+    return DateTime.utc(utc.year, utc.month, utc.day);
   }
 
   @override

@@ -45,15 +45,38 @@ mixin RepositoryFallbackMixin {
     withJitter: true,
   );
 
+  /// The waits before a repository that already failed in a lookup is asked
+  /// again within that lookup. Moving on to another repository does not wait.
+  BackoffStrategy get fallbackBackoffStrategy => _fallbackBackoffStrategy;
+
   /// Must be implemented by the mixing class
   List<CexRepository> get priceRepositories;
 
   /// Must be implemented by the mixing class
   RepositorySelectionStrategy get selectionStrategy;
 
-  /// Whether provider backoff can hide data that may become available later.
-  bool get hasUnavailableRepositories =>
-      priceRepositories.any((repo) => !_isRepositoryHealthy(repo));
+  /// Whether a repository that serves this kind of request for [assetId] is
+  /// in backoff, so data missing now may become available later.
+  ///
+  /// A repository in backoff whose support cannot be checked counts as one
+  /// that serves the request.
+  Future<bool> hasUnavailableRepositoriesFor(
+    AssetId assetId,
+    QuoteCurrency quoteCurrency,
+    PriceRequestType requestType,
+  ) async {
+    for (final repo in priceRepositories) {
+      if (_isRepositoryHealthy(repo)) continue;
+      try {
+        if (await repo.supports(assetId, quoteCurrency, requestType)) {
+          return true;
+        }
+      } catch (_) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Checks if a repository is healthy (not in backoff period)
   bool _isRepositoryHealthy(CexRepository repo) {
@@ -101,6 +124,12 @@ mixin RepositoryFallbackMixin {
         exceptionString.contains('too many requests') ||
         exceptionString.contains('rate limit');
   }
+
+  /// Whether [error] rejects the request itself (an asset or date range the
+  /// repository cannot serve) rather than reporting a provider that may
+  /// answer the same request later.
+  bool _isRequestError(Object error) =>
+      error is ArgumentError || error is UnsupportedError;
 
   /// Records a repository failure
   void _recordRepositoryFailure(CexRepository repo, Exception exception) {
@@ -239,6 +268,11 @@ mixin RepositoryFallbackMixin {
   /// all repositories. When [isComplete] is supplied, successful partial
   /// results try the remaining repositories once and return the latest result
   /// if none completes it. The operation can accumulate those partial results.
+  ///
+  /// A repository that failed is asked again only after every other one was
+  /// tried, and then only after a [fallbackBackoffStrategy] wait. One that
+  /// rejected the request itself ([ArgumentError], [UnsupportedError]) is not
+  /// asked again in that lookup.
   Future<T> tryRepositoriesInOrder<T>(
     AssetId assetId,
     QuoteCurrency quoteCurrency,
@@ -264,7 +298,13 @@ mixin RepositoryFallbackMixin {
     Exception? lastException;
     var attemptCount = 0;
     final attempted = <CexRepository>{};
-    final partialRepositories = <CexRepository>{};
+    final failedRepositories = <CexRepository>{};
+    // Repositories with nothing more to give this lookup: they answered in
+    // part, or rejected the request.
+    final finishedRepositories = <CexRepository>{};
+    final backoff = fallbackBackoffStrategy.clone();
+    var retryCount = 0;
+    var retryDelay = Duration.zero;
     T? partialResult;
     var hasPartialResult = false;
 
@@ -287,7 +327,7 @@ mixin RepositoryFallbackMixin {
           .where(
             (repo) =>
                 _isRepositoryHealthy(repo) &&
-                !partialRepositories.contains(repo),
+                !finishedRepositories.contains(repo),
           )
           .toList();
       if (eligible.isEmpty) break;
@@ -302,6 +342,13 @@ mixin RepositoryFallbackMixin {
       );
       attempted.add(repo);
 
+      // Asking again straight away mostly repeats the failure, and every
+      // repeat is charged to the provider's request quota.
+      if (failedRepositories.contains(repo)) {
+        retryDelay = backoff.nextDelay(retryCount++, retryDelay);
+        await Future<void>.delayed(retryDelay);
+      }
+
       try {
         attemptCount++;
         _logger.finer(
@@ -313,7 +360,6 @@ mixin RepositoryFallbackMixin {
         final result = await retry(
           () => operation(repo),
           maxAttempts: 1, // Single attempt per call, we handle retries here
-          backoffStrategy: _fallbackBackoffStrategy,
         );
 
         _recordRepositorySuccess(repo);
@@ -321,7 +367,7 @@ mixin RepositoryFallbackMixin {
         if (isComplete != null && !isComplete(result)) {
           partialResult = result;
           hasPartialResult = true;
-          partialRepositories.add(repo);
+          finishedRepositories.add(repo);
           continue;
         }
 
@@ -337,6 +383,13 @@ mixin RepositoryFallbackMixin {
       } catch (e, s) {
         lastException = e is Exception ? e : Exception(e.toString());
         _recordRepositoryFailure(repo, lastException);
+        // A rejected request would be rejected again, so only a provider
+        // failure leaves the repository open to another attempt.
+        if (_isRequestError(e)) {
+          finishedRepositories.add(repo);
+        } else {
+          failedRepositories.add(repo);
+        }
 
         // If this was a rate limit error, immediately refresh the repository list
         // to exclude the now-unhealthy repository from future attempts

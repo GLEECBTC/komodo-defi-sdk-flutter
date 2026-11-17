@@ -11,16 +11,44 @@ class SolanaCatalogPolicy implements CoinConfigTransform {
   /// Capabilities verified by the SDK host.
   final SolanaCapabilities capabilities;
 
+  // The same few spellings repeat across the whole catalog.
+  static final _resolvedTypes = <String, CoinSubClass?>{};
+
   /// Also filters custom assets, which can be merged after source transforms.
-  bool allows(Asset asset) => allowsConfig(asset.protocol.config);
+  bool allows(Asset asset) => _allows({
+    asset.protocol.subClass,
+    ..._subClasses(asset.protocol.config),
+  }, asset.protocol.config);
 
   /// Unknown programs and Token-2022 fixtures never become classic SPL assets.
-  bool allowsConfig(JsonMap config) {
+  bool allowsConfig(JsonMap config) => _allows(_subClasses(config), config);
+
+  /// Every protocol this entry may be handled as. Assets resolve the top-level
+  /// `type` through the lenient [CoinSubClass.parse] ("Solana", "SOL", "SPL"),
+  /// so it and the engine's `protocol.type` are resolved the same way here
+  /// instead of being matched against one spelling.
+  static Set<CoinSubClass> _subClasses(JsonMap config) {
     final protocol = config['protocol'];
-    final type = protocol is Map ? protocol['type'] : config['type'];
-    if (type != 'SOLANA' && type != 'SOLANATOKEN') return true;
+    final subClasses = <CoinSubClass>{};
+    for (final type in [
+      config['type'],
+      if (protocol is Map) protocol['type'],
+    ]) {
+      if (type is! String) continue;
+      final subClass = _resolvedTypes.putIfAbsent(
+        type,
+        () => CoinSubClass.tryParse(type),
+      );
+      if (subClass != null) subClasses.add(subClass);
+    }
+    return subClasses;
+  }
+
+  bool _allows(Set<CoinSubClass> subClasses, JsonMap config) {
+    if (!subClasses.any(solanaCoinSubClasses.contains)) return true;
     if (!capabilities.enabled) return false;
-    if (type == 'SOLANA') return true;
+    if (!subClasses.contains(CoinSubClass.solanaToken)) return true;
+    final protocol = config['protocol'];
     final data = protocol is Map ? protocol['protocol_data'] : null;
     final program = data is Map ? data['program_id'] : null;
     return program == SolanaTokenProtocol.classicTokenProgramId ||
