@@ -42,13 +42,17 @@ class SolanaActivationStrategy extends ProtocolActivationStrategy {
   @override
   bool get supportsBatchActivation => true;
 
-  // Complete, trusted protocol overrides are supported for both configured
-  // tickers and SDK custom tokens. Arbitrary mint discovery is not supported.
+  // Handles configured tickers and SDK custom tokens. Arbitrary mint discovery
+  // is not supported.
   @override
   bool canHandle(Asset asset) => supportedProtocols.contains(asset.id.subClass);
 
-  JsonMap _tokenProtocol(Asset token) =>
-      token.protocol.config.value<JsonMap>('protocol');
+  /// KDF treats a request `protocol` as a custom-token definition and refuses
+  /// it with `DuplicateTickerInConfig` for any ticker in its coins config,
+  /// which holds every catalog asset. Only custom tokens send one.
+  JsonMap? _tokenProtocol(Asset token) => token.protocol.isCustomToken
+      ? token.protocol.config.value<JsonMap>('protocol')
+      : null;
 
   @override
   Stream<ActivationProgress> activate(

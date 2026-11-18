@@ -71,10 +71,36 @@ class SolanaWalletFixture {
     },
   };
 
+  /// The catalog tickers, which the SDK passes to KDF's coins config.
+  static const configured = {platform, token};
+
   Map<String, dynamic> _balance(String ticker) => {
     'spendable': ticker == platform ? solBalance : tokenBalance,
     'unspendable': '0',
   };
+
+  /// KDF's `coin_conf_with_protocol`: a request `protocol` defines a custom
+  /// token, so KDF refuses it for a configured ticker and needs it otherwise.
+  Map<String, dynamic>? _tokenConfigError(Map<String, dynamic> token) {
+    final ticker = token['ticker'] as String;
+    final isCustom = token.containsKey('protocol');
+    if (isCustom == configured.contains(ticker)) {
+      return {
+        'mmrpc': '2.0',
+        'error': isCustom
+            ? 'Custom token error: Token with the same ticker already exists '
+                  'in coins configs, ticker in config: $ticker'
+            : 'Config of the coin $ticker is not found',
+        'error_type': isCustom ? 'CustomTokenError' : 'ConfigIsNotFound',
+        'error_data': isCustom
+            ? {
+                'DuplicateTickerInConfig': {'ticker_in_config': ticker},
+              }
+            : ticker,
+      };
+    }
+    return null;
+  }
 
   /// Indexed history does not supply a memo or execution-success field.
   /// Incoming ATA receipts can include a SOL fee with no SOL amount received.
@@ -118,6 +144,10 @@ class SolanaWalletFixture {
       ..on('experimental::enable_solana_with_assets', (request) {
         final params = request['params'] as Map<String, dynamic>;
         final tokens = params['tokens_params'] as List<dynamic>;
+        for (final token in tokens.cast<Map<String, dynamic>>()) {
+          final error = _tokenConfigError(token);
+          if (error != null) return error;
+        }
         _enabled.add(platform);
         for (final token in tokens.cast<Map<String, dynamic>>()) {
           _enabled.add(token['ticker'] as String);
@@ -137,14 +167,18 @@ class SolanaWalletFixture {
         };
       })
       ..on('experimental::enable_solana_token', (request) {
-        _enabled.add(token);
+        final params = request['params'] as Map<String, dynamic>;
+        final error = _tokenConfigError(params);
+        if (error != null) return error;
+        final ticker = params['ticker'] as String;
+        _enabled.add(ticker);
         return {
           'mmrpc': '2.0',
           'result': {
-            'ticker': token,
+            'ticker': ticker,
             'address': address,
             'current_block': 42,
-            'balance': _balance(token),
+            'balance': _balance(ticker),
           },
         };
       })
