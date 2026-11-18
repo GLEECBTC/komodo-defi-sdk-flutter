@@ -1,7 +1,7 @@
 {
   "api": {
     "api_commit_hash": "46769c4df3b043669eee59508bf1af017157dcdd",
-    "branch": "local/solana-combined",
+    "branch": "charl-temp/solana-combined",
     "fetch_at_build_enabled": true,
     "concurrent_downloads_enabled": true,
     "require_full_commit_hash": true,
