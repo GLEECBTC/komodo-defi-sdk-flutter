@@ -50,28 +50,41 @@ void main() {
   );
 
   test(
-    'later token activation sends empty params and complete optional protocol',
+    'later token activation sends empty params and an optional protocol',
     () {
-      final request = EnableSolanaTokenRequest(
-        ticker: 'TESTUSDC-TESTSOL',
-        protocol: tokenProtocol,
-      );
-      expect(request.toJson(), {
+      // A protocol defines a custom token; KDF refuses one for a ticker that
+      // is already in its coins config, so catalog tokens omit it.
+      expect(EnableSolanaTokenRequest(ticker: 'TESTUSDC-TESTSOL').toJson(), {
         'method': 'experimental::enable_solana_token',
         'mmrpc': '2.0',
         'params': {
           'ticker': 'TESTUSDC-TESTSOL',
+          'activation_params': <String, dynamic>{},
+        },
+      });
+      final custom = EnableSolanaTokenRequest(
+        ticker: 'CUSTOM-TESTSOL',
+        protocol: tokenProtocol,
+      );
+      expect(custom.toJson(), {
+        'method': 'experimental::enable_solana_token',
+        'mmrpc': '2.0',
+        'params': {
+          'ticker': 'CUSTOM-TESTSOL',
           'activation_params': <String, dynamic>{},
           'protocol': tokenProtocol,
         },
       });
       expect(
         const SolanaTokenRequest(
-          ticker: 'TESTUSDC-TESTSOL',
+          ticker: 'CUSTOM-TESTSOL',
           protocol: tokenProtocol,
         ).toJson(),
-        {'ticker': 'TESTUSDC-TESTSOL', 'protocol': tokenProtocol},
+        {'ticker': 'CUSTOM-TESTSOL', 'protocol': tokenProtocol},
       );
+      expect(const SolanaTokenRequest(ticker: 'TESTUSDC-TESTSOL').toJson(), {
+        'ticker': 'TESTUSDC-TESTSOL',
+      });
     },
   );
 
