@@ -2,55 +2,22 @@ import 'dart:io';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_defi_harness/komodo_defi_harness.dart';
 import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 
-/// Fixed catalog injection exercises the production registry and storage path
-/// without modifying bundled production assets or making update HTTP calls.
-class _FixtureCatalog implements CoinConfigProvider, CoinConfigDataFactory {
-  List<Asset> get assets => const AssetParser().parseAssetsFromConfig({
-    SolanaWalletFixture.platform: SolanaWalletFixture.platformConfig(),
-    SolanaWalletFixture.token: SolanaWalletFixture.tokenConfig(),
-  });
+import 'solana_fixture_catalog.dart';
 
-  @override
-  Future<List<Asset>> getAssets({String? branch}) async => assets;
-
-  @override
-  Future<List<Asset>> getAssetsForCommit(String commit) async => assets;
-
-  @override
-  Future<String> getLatestCommit({
-    String? branch,
-    String? apiBaseUrl,
-    String? githubToken,
-  }) async => 'solana-replay-immutable';
-
-  @override
-  CoinConfigProvider createLocalProvider(
-    AssetRuntimeUpdateConfig config,
-    CoinConfigTransformer transformer,
-  ) => this;
-
-  @override
-  CoinConfigRepository createRepository(
-    AssetRuntimeUpdateConfig config,
-    CoinConfigTransformer transformer,
-  ) => CoinConfigRepository(coinConfigProvider: this);
-}
-
-KomodoDefiSdkConfig _config({bool enabled = true}) => KomodoDefiSdkConfig(
-  defaultAssets: const {},
-  preActivateDefaultAssets: false,
-  preActivateHistoricalAssets: false,
-  preActivateCustomTokenAssets: false,
-  assetsAutoUpdate: false,
-  assetsStorageNamespace: 'solana-replay-only',
-  assetsDataFactory: _FixtureCatalog(),
-  solanaCapabilities: SolanaCapabilities(enabled: enabled),
+KomodoDefiSdkConfig _config({bool enabled = true}) => solanaFixtureSdkConfig(
+  storageNamespace: 'solana-replay-only',
+  enabled: enabled,
 );
+
+/// The tickers KDF's coins config listed at the last start.
+Set<String> _startTickers(KdfHarness harness) => {
+  for (final coin in harness.operations.startParams_['coins'] as List<dynamic>)
+    (coin as Map<String, dynamic>)['coin'] as String,
+};
 
 Asset _asset(KdfHarness harness, String ticker) => harness
     .sdk
@@ -71,6 +38,11 @@ void main() {
           );
           addTearDown(harness.dispose);
           await harness.signIn(walletType: mode);
+          // KDF's coins config is the injected catalog, not the bundled one.
+          expect(_startTickers(harness), {
+            SolanaWalletFixture.platform,
+            SolanaWalletFixture.token,
+          });
           final sol = _asset(harness, SolanaWalletFixture.platform);
           final token = _asset(harness, SolanaWalletFixture.token);
           expect((await harness.sdk.activateAsset(sol)).isSuccess, isTrue);
@@ -231,6 +203,27 @@ void main() {
         },
       );
     }
+
+    test('each SDK starts KDF with its own catalog', () async {
+      // KDF startup once memoized the first catalog it read for the process.
+      final fixture = await KdfHarness.replayed(
+        script: SolanaWalletFixture().build(),
+        config: _config(),
+      );
+      await fixture.signIn(walletType: KdfWalletType.iguana);
+      expect(_startTickers(fixture), hasLength(2));
+      await fixture.dispose();
+      final bundled = await KdfHarness.replayed(
+        script: KdfWalletFixture().build(),
+      );
+      addTearDown(bundled.dispose);
+      await bundled.signIn(walletType: KdfWalletType.iguana);
+      expect(_startTickers(bundled), contains('KMD'));
+      expect(
+        _startTickers(bundled),
+        isNot(contains(SolanaWalletFixture.platform)),
+      );
+    });
 
     test('an unsupported engine cannot dispatch Solana activation', () async {
       final harness = await KdfHarness.replayed(
