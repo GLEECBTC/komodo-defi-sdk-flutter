@@ -35,7 +35,46 @@ void main() {
   final token = solanaToken(sol);
   const verified = SolanaCapabilities(enabled: true);
 
-  test('batch activation retains complete mint metadata and permits zero ATA balance', () async {
+  test(
+    'batch activation names a catalog token and permits zero ATA balance',
+    () async {
+      final client = _Client()
+        ..response = {
+          'mmrpc': '2.0',
+          'result': {
+            'ticker': sol.id.id,
+            'address': 'WalletBase58',
+            'current_block': 42,
+            'balance': {'spendable': '0', 'unspendable': '0'},
+            'tokens_balances': {
+              token.id.id: {'spendable': '0', 'unspendable': '0'},
+            },
+          },
+        };
+      final strategy = SolanaActivationStrategy(
+        client,
+        const PrivateKeyPolicy.contextPrivKey(),
+        verified,
+      );
+      final events = await strategy.activate(sol, [token]).toList();
+      expect(events.last.isSuccess, isTrue);
+      expect(client.requests.single['mmrpc'], '2.0');
+      expect(client.requests.single['params'], {
+        'ticker': 'TESTSOL',
+        'nodes': [
+          {'url': 'https://api.devnet.solana.com'},
+        ],
+        // KDF refuses a request protocol for a ticker in its coins config.
+        'tokens_params': [
+          {'ticker': token.id.id},
+        ],
+        'tx_history': true,
+      });
+    },
+  );
+
+  test('batch activation defines a custom token by its protocol', () async {
+    final custom = solanaToken(sol, custom: true);
     final client = _Client()
       ..response = {
         'mmrpc': '2.0',
@@ -45,7 +84,7 @@ void main() {
           'current_block': 42,
           'balance': {'spendable': '0', 'unspendable': '0'},
           'tokens_balances': {
-            token.id.id: {'spendable': '0', 'unspendable': '0'},
+            custom.id.id: {'spendable': '0', 'unspendable': '0'},
           },
         },
       };
@@ -54,22 +93,16 @@ void main() {
       const PrivateKeyPolicy.contextPrivKey(),
       verified,
     );
-    final events = await strategy.activate(sol, [token]).toList();
-    expect(events.last.isSuccess, isTrue);
-    expect(client.requests.single['mmrpc'], '2.0');
-    expect(client.requests.single['params'], {
-      'ticker': 'TESTSOL',
-      'nodes': [
-        {'url': 'https://api.devnet.solana.com'},
-      ],
-      'tokens_params': [
-        {'ticker': token.id.id, 'protocol': token.protocol.config['protocol']},
-      ],
-      'tx_history': true,
-    });
+    expect(
+      (await strategy.activate(sol, [custom]).toList()).last.isSuccess,
+      isTrue,
+    );
+    expect((client.requests.single['params'] as Map)['tokens_params'], [
+      {'ticker': custom.id.id, 'protocol': custom.protocol.config['protocol']},
+    ]);
   });
 
-  test('later token activation sends a complete protocol override', () async {
+  test('later activation of a catalog token names it by ticker', () async {
     final client = _Client()
       ..response = {
         'mmrpc': '2.0',
@@ -93,7 +126,31 @@ void main() {
     expect(client.requests.single['params'], {
       'ticker': token.id.id,
       'activation_params': <String, dynamic>{},
-      'protocol': token.protocol.config['protocol'],
+    });
+  });
+
+  test('later activation of a custom token sends its protocol', () async {
+    final custom = solanaToken(sol, custom: true);
+    final client = _Client()
+      ..response = {
+        'mmrpc': '2.0',
+        'result': {
+          'ticker': custom.id.id,
+          'address': 'WalletBase58',
+          'current_block': 42,
+          'balance': {'spendable': '0', 'unspendable': '0'},
+        },
+      };
+    final strategy = SolanaActivationStrategy(
+      client,
+      const PrivateKeyPolicy.contextPrivKey(),
+      verified,
+    );
+    expect((await strategy.activate(custom).toList()).last.isSuccess, isTrue);
+    expect(client.requests.single['params'], {
+      'ticker': custom.id.id,
+      'activation_params': <String, dynamic>{},
+      'protocol': custom.protocol.config['protocol'],
     });
   });
 

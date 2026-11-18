@@ -12,9 +12,18 @@ Asset solanaAsset() => Asset.fromJson(const {
   ],
 });
 
-Asset solanaToken(Asset parent, {bool token2022 = false}) => Asset.fromJson(
+Asset solanaToken(
+  Asset parent, {
+  bool token2022 = false,
+  bool custom = false,
+}) => Asset.fromJson(
   {
-    'coin': token2022 ? 'TOKEN2022-TESTSOL' : 'TESTUSDC-TESTSOL',
+    'coin': custom
+        ? 'CUSTOM-TESTSOL'
+        : token2022
+        ? 'TOKEN2022-TESTSOL'
+        : 'TESTUSDC-TESTSOL',
+    if (custom) 'is_custom_token': true,
     'type': 'SOLANATOKEN',
     'fname': 'Solana Token',
     'parent_coin': parent.id.id,

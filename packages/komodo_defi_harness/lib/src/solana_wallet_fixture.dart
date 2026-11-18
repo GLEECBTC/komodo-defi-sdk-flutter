@@ -71,10 +71,167 @@ class SolanaWalletFixture {
     },
   };
 
+  /// The catalog tickers, which the SDK passes to KDF's coins config.
+  ///
+  /// Fixed rather than read from the start params: KDF startup builds its
+  /// coins from the bundled catalog (`StartupCoinsProvider`) and ignores an
+  /// injected `assetsDataFactory`, so a replayed start lists production coins
+  /// only. The app bundles its catalog, where both agree.
+  static const configured = {platform, token};
+
+  /// True while KDF keeps a disabled platform for its still-active tokens.
+  bool _passivized = false;
+
   Map<String, dynamic> _balance(String ticker) => {
     'spendable': ticker == platform ? solBalance : tokenBalance,
     'unspendable': '0',
   };
+
+  Iterable<String> get _enabledTokens =>
+      _enabled.where((ticker) => ticker != platform);
+
+  // The rules and replies below follow KDF 3.2.0-beta_46769c4 as captured on
+  // devnet; `solana_live_capture_test.dart` holds this fixture to them.
+
+  static Map<String, dynamic> _error(
+    String type,
+    Object data,
+    String message,
+    String path,
+    String trace,
+  ) => {
+    'mmrpc': '2.0',
+    'error': message,
+    'error_path': path,
+    'error_trace': trace,
+    'error_type': type,
+    'error_data': data,
+    'id': null,
+  };
+
+  static Map<String, dynamic> _result(Map<String, dynamic> result) => {
+    'mmrpc': '2.0',
+    'result': result,
+    'id': null,
+  };
+
+  /// KDF's `coin_conf_with_protocol`: a request `protocol` defines a custom
+  /// token, so KDF refuses it for a configured ticker and needs it otherwise.
+  /// [batch] selects the platform-with-tokens error location.
+  Map<String, dynamic>? _tokenConfigError(
+    Map<String, dynamic> token, {
+    required bool batch,
+  }) {
+    final ticker = token['ticker'] as String;
+    final isCustom = token.containsKey('protocol');
+    if (isCustom != configured.contains(ticker)) return null;
+    final path = batch ? 'platform_coin_with_tokens.prelude' : 'token.prelude';
+    final via = batch
+        ? 'platform_coin_with_tokens:497] platform_coin_with_tokens:167] '
+              'platform_coin_with_tokens:157]'
+        : 'token:135]';
+    return isCustom
+        ? _error(
+            'CustomTokenError',
+            {
+              'DuplicateTickerInConfig': {'ticker_in_config': ticker},
+            },
+            'Custom token error: Token with the same ticker already exists '
+                'in coins configs, ticker in config: $ticker',
+            path,
+            '$via prelude:102]',
+          )
+        : _error(
+            'TokenConfigIsNotFound',
+            ticker,
+            'Token $ticker config is not found',
+            path,
+            '$via prelude:108]',
+          );
+  }
+
+  Map<String, dynamic> _enablePlatform(Map<String, dynamic> params) {
+    final tokens = (params['tokens_params'] as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+    for (final token in tokens) {
+      final error = _tokenConfigError(token, batch: true);
+      if (error != null) return error;
+    }
+    if (_enabled.contains(platform) && !_passivized) {
+      return _error(
+        'PlatformIsAlreadyActivated',
+        platform,
+        platform,
+        'platform_coin_with_tokens',
+        'platform_coin_with_tokens:475]',
+      );
+    }
+    // Reactivating a passivized platform also reports the tokens it kept.
+    _passivized = false;
+    _enabled.add(platform);
+    for (final token in tokens) {
+      _enabled.add(token['ticker'] as String);
+    }
+    return _result({
+      'ticker': platform,
+      'address': address,
+      'current_block': 42,
+      'balance': _balance(platform),
+      'tokens_balances': {
+        for (final ticker in _enabledTokens) ticker: _balance(ticker),
+      },
+    });
+  }
+
+  Map<String, dynamic> _enableToken(Map<String, dynamic> params) {
+    final ticker = params['ticker'] as String;
+    if (_enabled.contains(ticker)) {
+      return _error(
+        'TokenIsAlreadyActivated',
+        ticker,
+        'Token $ticker is already activated',
+        'token',
+        'token:131]',
+      );
+    }
+    final error = _tokenConfigError(params, batch: false);
+    if (error != null) return error;
+    if (!_enabled.contains(platform)) {
+      return _error(
+        'PlatformCoinIsNotActivated',
+        platform,
+        'Platform coin $platform is not activated',
+        'token.lp_coins',
+        'token:139] lp_coins:5459]',
+      );
+    }
+    _enabled.add(ticker);
+    return _result({
+      'ticker': ticker,
+      'address': address,
+      'current_block': 42,
+      'balance': _balance(ticker),
+    });
+  }
+
+  /// A platform with active tokens is only passivized: KDF keeps listing it
+  /// and its tokens, and the tokens stay usable.
+  Map<String, dynamic> _disable(String ticker) {
+    final passivize = ticker == platform && _enabledTokens.isNotEmpty;
+    if (passivize) {
+      _passivized = true;
+    } else {
+      _enabled.remove(ticker);
+      if (ticker == platform) _passivized = false;
+    }
+    return {
+      'result': {
+        'coin': ticker,
+        'cancelled_orders': <Object>[],
+        'passivized': passivize,
+      },
+    };
+  }
 
   /// Indexed history does not supply a memo or execution-success field.
   /// Incoming ATA receipts can include a SOL fee with no SOL amount received.
@@ -101,53 +258,37 @@ class SolanaWalletFixture {
     },
   };
 
+  /// A fresh engine has nothing enabled.
+  void _onStart() {
+    _enabled.clear();
+    _passivized = false;
+  }
+
   /// Builds a stateful activation/history script on the standard auth fixture.
   KdfScript build() {
-    final script = KdfWalletFixture().build()
+    final script = KdfWalletFixture().build();
+    final inheritedStart = script.onKdfStart;
+    script
+      ..onKdfStart = ((startParams) {
+        inheritedStart?.call(startParams);
+        _onStart();
+      })
       ..on(
         'get_enabled_coins',
-        (_) => {
-          'mmrpc': '2.0',
-          'result': {
-            'coins': [
-              for (final ticker in _enabled) {'ticker': ticker},
-            ],
-          },
-        },
+        (_) => _result({
+          'coins': [
+            for (final ticker in _enabled) {'ticker': ticker},
+          ],
+        }),
       )
-      ..on('experimental::enable_solana_with_assets', (request) {
-        final params = request['params'] as Map<String, dynamic>;
-        final tokens = params['tokens_params'] as List<dynamic>;
-        _enabled.add(platform);
-        for (final token in tokens.cast<Map<String, dynamic>>()) {
-          _enabled.add(token['ticker'] as String);
-        }
-        return {
-          'mmrpc': '2.0',
-          'result': {
-            'ticker': platform,
-            'address': address,
-            'current_block': 42,
-            'balance': _balance(platform),
-            'tokens_balances': {
-              for (final token in tokens.cast<Map<String, dynamic>>())
-                token['ticker'] as String: _balance(token['ticker'] as String),
-            },
-          },
-        };
-      })
-      ..on('experimental::enable_solana_token', (request) {
-        _enabled.add(token);
-        return {
-          'mmrpc': '2.0',
-          'result': {
-            'ticker': token,
-            'address': address,
-            'current_block': 42,
-            'balance': _balance(token),
-          },
-        };
-      })
+      ..on(
+        'experimental::enable_solana_with_assets',
+        (request) => _enablePlatform(request['params'] as Map<String, dynamic>),
+      )
+      ..on(
+        'experimental::enable_solana_token',
+        (request) => _enableToken(request['params'] as Map<String, dynamic>),
+      )
       ..on('my_balance', (request) {
         final ticker = request['coin'] as String;
         if (!_enabled.contains(ticker)) {
@@ -160,14 +301,7 @@ class SolanaWalletFixture {
           'unspendable_balance': '0',
         };
       })
-      ..on('disable_coin', (request) {
-        final ticker = request['coin'] as String;
-        _enabled.remove(ticker);
-        if (ticker == platform) _enabled.remove(token);
-        return {
-          'result': {'coin': ticker},
-        };
-      });
+      ..on('disable_coin', (request) => _disable(request['coin'] as String));
     if (serveHistory) {
       script.on('my_tx_history', (request) {
         final params = request['params'] as Map<String, dynamic>;

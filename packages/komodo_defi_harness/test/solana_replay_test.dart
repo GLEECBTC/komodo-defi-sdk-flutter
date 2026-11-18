@@ -123,10 +123,12 @@ void main() {
                         'experimental::enable_solana_token',
                   )['params']
                   as Map<String, dynamic>;
-          expect(
-            late['protocol'],
-            SolanaWalletFixture.tokenConfig()['protocol'],
-          );
+          // A catalog token is in KDF's coins config, which refuses a
+          // request protocol for it as a duplicate custom token.
+          expect(late, {
+            'ticker': SolanaWalletFixture.token,
+            'activation_params': <String, dynamic>{},
+          });
         },
       );
 
@@ -141,7 +143,11 @@ void main() {
           await harness.signIn(walletType: mode);
           final sol = _asset(harness, SolanaWalletFixture.platform);
           final custom = Asset.fromJson(
-            {...SolanaWalletFixture.tokenConfig(), 'is_custom_token': true},
+            {
+              ...SolanaWalletFixture.tokenConfig(),
+              'coin': 'CUSTOM-TESTSOL',
+              'is_custom_token': true,
+            },
             knownIds: {sol.id},
           );
           expect((await harness.sdk.activateAsset(custom)).isSuccess, isTrue);
