@@ -4,8 +4,8 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_framework/src/config/event_streaming_config.dart';
+import 'package:komodo_defi_framework/src/config/kdf_startup_catalog.dart';
 import 'package:komodo_defi_framework/src/config/seed_node_validator.dart';
 import 'package:komodo_defi_framework/src/services/seed_node_service.dart'
     show SeedNodeService;
@@ -110,6 +110,7 @@ class KdfStartupConfig {
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfStartupCatalog catalog = KdfStartupCatalog.bundled,
   }) async {
     assert(
       !kIsWeb || userHome == null && dbDir == null,
@@ -149,7 +150,7 @@ class KdfStartupConfig {
       allowWeakPassword: allowWeakPassword,
       netid: netid,
       gui: gui,
-      coins: coinsPath ?? await _fetchCoinsData(),
+      coins: coinsPath ?? await _fetchCoinsData(catalog),
       https: https,
       seedNodes: seedNodes,
       disableP2p: disableP2p,
@@ -193,6 +194,7 @@ class KdfStartupConfig {
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfStartupCatalog catalog = KdfStartupCatalog.bundled,
   }) async {
     final (String? home, String? dbDir) = await _getAndSetupUserHome();
 
@@ -209,7 +211,7 @@ class KdfStartupConfig {
       allowWeakPassword: true,
       netid: netId,
       gui: 'komodo-defi-flutter-auth',
-      coins: await _fetchCoinsData(),
+      coins: await _fetchCoinsData(catalog),
       https: false,
       rpcIp: rpcIp,
       rpcPort: rpcPort,
@@ -290,12 +292,11 @@ class KdfStartupConfig {
     };
   }
 
-  static JsonList? _memoizedCoins;
+  /// One read per catalog per process, as before catalogs could be injected:
+  /// the bundled catalog is still read once, and one SDK's fixture catalog
+  /// can no longer become the next SDK's KDF coins.
+  static final Map<KdfStartupCatalog, JsonList> _memoizedCoins = {};
 
-  static Future<JsonList> _fetchCoinsData() async {
-    if (_memoizedCoins != null) return _memoizedCoins!;
-
-    return _memoizedCoins =
-        await StartupCoinsProvider.fetchRawCoinsForStartup();
-  }
+  static Future<JsonList> _fetchCoinsData(KdfStartupCatalog catalog) async =>
+      _memoizedCoins[catalog] ??= await catalog.loadCoins();
 }

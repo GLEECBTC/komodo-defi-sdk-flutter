@@ -38,6 +38,9 @@ class SolanaWalletFixture {
   final Set<String> _enabled = {};
 
   /// Minimal normalized catalog entry, never added to production assets.
+  ///
+  /// KDF refuses a SOLANA protocol without `protocol_data`, even empty
+  /// (`CoinProtocolParseError`), as the coins catalog writes it.
   static Map<String, dynamic> platformConfig() => {
     'coin': platform,
     'type': 'SOLANA',
@@ -46,7 +49,7 @@ class SolanaWalletFixture {
     'wallet_only': true,
     'decimals': 9,
     'derivation_path': "m/44'/501'",
-    'protocol': {'type': 'SOLANA'},
+    'protocol': {'type': 'SOLANA', 'protocol_data': <String, dynamic>{}},
     'nodes': [
       {'url': 'https://api.devnet.solana.com'},
     ],
@@ -71,13 +74,12 @@ class SolanaWalletFixture {
     },
   };
 
-  /// The catalog tickers, which the SDK passes to KDF's coins config.
+  /// The tickers in KDF's coins config, as the last start listed them.
   ///
-  /// Fixed rather than read from the start params: KDF startup builds its
-  /// coins from the bundled catalog (`StartupCoinsProvider`) and ignores an
-  /// injected `assetsDataFactory`, so a replayed start lists production coins
-  /// only. The app bundles its catalog, where both agree.
-  static const configured = {platform, token};
+  /// Read from the start params' `coins`, which come from the SDK's asset
+  /// catalog, so a test that injects a catalog sees what KDF would. Empty
+  /// until the engine starts.
+  final Set<String> _configured = {};
 
   /// True while KDF keeps a disabled platform for its still-active tokens.
   bool _passivized = false;
@@ -124,7 +126,7 @@ class SolanaWalletFixture {
   }) {
     final ticker = token['ticker'] as String;
     final isCustom = token.containsKey('protocol');
-    if (isCustom != configured.contains(ticker)) return null;
+    if (isCustom != _configured.contains(ticker)) return null;
     final path = batch ? 'platform_coin_with_tokens.prelude' : 'token.prelude';
     final via = batch
         ? 'platform_coin_with_tokens:497] platform_coin_with_tokens:167] '
@@ -258,10 +260,16 @@ class SolanaWalletFixture {
     },
   };
 
-  /// A fresh engine has nothing enabled.
-  void _onStart() {
+  /// A fresh engine has nothing enabled and knows only its start-up coins.
+  void _onStart(Map<String, dynamic> startParams) {
     _enabled.clear();
     _passivized = false;
+    _configured
+      ..clear()
+      ..addAll([
+        for (final coin in startParams['coins'] as List<dynamic>)
+          (coin as Map<String, dynamic>)['coin'] as String,
+      ]);
   }
 
   /// Builds a stateful activation/history script on the standard auth fixture.
@@ -271,7 +279,7 @@ class SolanaWalletFixture {
     script
       ..onKdfStart = ((startParams) {
         inheritedStart?.call(startParams);
-        _onStart();
+        _onStart(startParams);
       })
       ..on(
         'get_enabled_coins',

@@ -21,6 +21,14 @@ class _Exchange {
   final String reply;
 }
 
+/// The captured engine's coins config listed the fixture catalog.
+final _captureStartParams = <String, dynamic>{
+  'coins': [
+    SolanaWalletFixture.platformConfig(),
+    SolanaWalletFixture.tokenConfig(),
+  ],
+};
+
 Map<String, dynamic> _decode(String json) =>
     jsonDecode(json) as Map<String, dynamic>;
 
@@ -49,6 +57,7 @@ void main() {
     ]) {
       test(name, () async {
         final script = SolanaWalletFixture().build();
+        script.onKdfStart!(_captureStartParams);
         for (final exchange in exchanges) {
           final actual = await script.respondTo(_decode(exchange.request));
           expect(actual, isNotNull, reason: exchange.name);

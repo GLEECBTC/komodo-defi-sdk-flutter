@@ -215,11 +215,13 @@ class KdfAuthService implements IAuthService {
     SecureLocalStorage? secureStorage,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfStartupCatalog startupCatalog = KdfStartupCatalog.bundled,
     Duration identityRecheckDelay = const Duration(seconds: 2),
     Duration dispatchLeaseTimeout = const Duration(seconds: 10),
   }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
        _lifiProxyUrl = lifiProxyUrl,
        _lifiIntegrator = lifiIntegrator,
+       _startupCatalog = startupCatalog,
        _identityRecheckDelay = identityRecheckDelay,
        _dispatchLeaseTimeout = _positiveLease(dispatchLeaseTimeout) {
     _logger.info('KdfAuthService initialized');
@@ -231,6 +233,9 @@ class KdfAuthService implements IAuthService {
   final IKdfHostConfig _hostConfig;
   final String? _lifiProxyUrl;
   final LifiIntegratorConfig? _lifiIntegrator;
+
+  /// Lists KDF's coins at every start; see [KdfStartupCatalog].
+  final KdfStartupCatalog _startupCatalog;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage;
@@ -1491,6 +1496,7 @@ class KdfAuthService implements IAuthService {
         rpcPort: _hostConfig.port,
         lifiProxyUrl: _lifiProxyUrl,
         lifiIntegrator: _lifiIntegrator,
+        catalog: _startupCatalog,
       );
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
