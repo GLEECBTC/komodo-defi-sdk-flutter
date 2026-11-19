@@ -7,6 +7,15 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ### Fixes
 
+- **iOS backups leave out the KDF data directory** ([@CharlVS]) —
+  `KdfStartupConfig` marks `Documents/.kdf` as excluded from iCloud and
+  Finder device backups at every start. The directory holds each wallet's
+  password-encrypted seed. Standard iCloud Backup is encrypted with keys
+  Apple holds, so anyone who took over the Apple Account could restore the
+  file and guess the password offline. A new or restored iPhone now starts
+  without the wallet, as Android already does, and the recovery phrase
+  restores it. macOS keeps its backups: there the flag would opt out of Time
+  Machine, whose disks the user holds.
 - **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests
   start at the first UTC midnight the plan accepts. CoinPaprika reads a
   date-only start as 00:00 UTC, so the first 90-day batch of a year was always
