@@ -426,19 +426,22 @@ abstract interface class KomodoDefiAuth {
 
 class KomodoDefiLocalAuth implements KomodoDefiAuth {
   /// [lifiProxyUrl] reaches every KDF start; see
-  /// `KdfStartupConfig.lifiProxyUrl`.
+  /// `KdfStartupConfig.lifiProxyUrl`. So does [desktopDataDirectory]; see
+  /// [KdfDesktopDataDirectory].
   KomodoDefiLocalAuth({
     required KomodoDefiFramework kdf,
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfDesktopDataDirectory? desktopDataDirectory,
   }) : _allowRegistrations = allowRegistrations,
        _authService = KdfAuthService(
          kdf,
          hostConfig,
          lifiProxyUrl: lifiProxyUrl,
          lifiIntegrator: lifiIntegrator,
+         desktopDataDirectory: desktopDataDirectory,
        ) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }
