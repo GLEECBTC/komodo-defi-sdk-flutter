@@ -16,6 +16,19 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   without the wallet, as Android already does, and the recovery phrase
   restores it. macOS keeps its backups: there the flag would opt out of Time
   Machine, whose disks the user holds.
+- **KDF data leaves Documents on Windows and Linux** ([@CharlVS]) — With the
+  new `KomodoDefiSdkConfig.desktopDataDirectory`, KDF keeps its data in
+  `%LOCALAPPDATA%\<windowsFolder>\kdf` or `$XDG_DATA_HOME/<linuxFolder>/kdf`
+  instead of `Documents/.kdf`. Windows often backs Documents up to OneDrive,
+  which uploaded each wallet's password-encrypted seed and synced KDF's
+  databases while they were written. Before KDF first starts, the old folder
+  is renamed `.kdf.moved` and a README takes its place; its data is copied,
+  every file is read back and compared, and one rename commits the copy.
+  Nothing moves while a KDF answers on the RPC port. `.kdf.moved` is deleted
+  seven days after KDF first opens a wallet from the new folder, and only files
+  still identical to the copy are deleted. A failure before the commit puts the
+  old folder back, and the next start tries again. Without the setting,
+  nothing changes.
 - **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests
   start at the first UTC midnight the plan accepts. CoinPaprika reads a
   date-only start as 00:00 UTC, so the first 90-day batch of a year was always

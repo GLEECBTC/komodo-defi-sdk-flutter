@@ -36,6 +36,7 @@ class KomodoDefiSdkConfig {
     this.initialActivationPolicy,
     this.lifiProxyUrl,
     this.lifiIntegrator,
+    this.desktopDataDirectory,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -135,6 +136,10 @@ class KomodoDefiSdkConfig {
   /// Optional deployment commission policy; null requests no commission.
   final LifiIntegratorConfig? lifiIntegrator;
 
+  /// Where KDF keeps its data on Windows and Linux. Null keeps it in
+  /// `Documents/.kdf`, which Windows often backs up to OneDrive.
+  final KdfDesktopDataDirectory? desktopDataDirectory;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -159,6 +164,7 @@ class KomodoDefiSdkConfig {
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
     bool clearLifiIntegrator = false,
+    KdfDesktopDataDirectory? desktopDataDirectory,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -197,6 +203,7 @@ class KomodoDefiSdkConfig {
       lifiIntegrator: clearLifiIntegrator
           ? null
           : lifiIntegrator ?? this.lifiIntegrator,
+      desktopDataDirectory: desktopDataDirectory ?? this.desktopDataDirectory,
     );
   }
 }
