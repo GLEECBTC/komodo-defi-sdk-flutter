@@ -17,11 +17,11 @@ KdfDesktopDataResolver platformKdfDesktopDataResolver() =>
 KdfDataStartRecorder platformKdfDataStartRecorder() =>
     KdfDataMigration.recordVerifiedStart;
 
-Future<String>? _resolution;
+final _resolutions = <String, Future<String>>{};
 
 /// KDF's data directory on Windows and Linux, or null on other platforms.
 ///
-/// The first call in a process moves any data out of `Documents/.kdf`. KDF
+/// The first call for each app data root moves any data out of Documents. KDF
 /// runs inside the app, so this process hasn't started one yet. Another app's
 /// KDF answering on [rpcPort] may be using that data, so then nothing moves.
 Future<String?> resolveKdfDesktopData(
@@ -29,26 +29,45 @@ Future<String?> resolveKdfDesktopData(
   int rpcPort,
 ) async {
   if (!Platform.isWindows && !Platform.isLinux) return null;
-  try {
-    return await (_resolution ??= _resolve(config, rpcPort));
-  } on Object {
-    _resolution = null;
-    rethrow;
-  }
+  final folder = Platform.isWindows
+      ? config.windowsFolder.toLowerCase()
+      : config.linuxFolder;
+  return resolveKdfDataForFolder(
+    folder,
+    dataRoot: () => kdfDesktopDataRoot(config),
+    legacyDirectory: _legacyDirectory,
+    engineRunning: () => _answers(rpcPort),
+  );
 }
 
-Future<String> _resolve(KdfDesktopDataDirectory config, int rpcPort) async {
-  final legacy = await _legacyDirectory();
-  final root = await kdfDesktopDataRoot(config);
-  if (root == null) return kdfLegacyFallback(legacy, 'No app data folder');
+@visibleForTesting
+Future<String> resolveKdfDataForFolder(
+  String folder, {
+  required Future<String?> Function() dataRoot,
+  required Future<Directory?> Function() legacyDirectory,
+  required Future<bool> Function() engineRunning,
+}) async {
+  final attempt = _resolutions.putIfAbsent(folder, () async {
+    final root = await dataRoot();
+    if (root == null) {
+      return kdfLegacyFallback(await legacyDirectory(), 'No app data folder');
+    }
+    try {
+      final migration = KdfDataMigration(
+        root: Directory(root),
+        legacyDirectory: legacyDirectory,
+        engineRunning: engineRunning,
+      );
+      return (await migration.run()).path;
+    } on KdfDataRootException catch (error) {
+      return kdfLegacyFallback(await legacyDirectory(), '$error');
+    }
+  });
   try {
-    return (await KdfDataMigration(
-      root: Directory(root),
-      legacy: legacy,
-      engineRunning: () => _answers(rpcPort),
-    ).run()).path;
-  } on KdfDataRootException catch (error) {
-    return kdfLegacyFallback(legacy, '$error');
+    return await attempt;
+  } on Object {
+    if (identical(_resolutions[folder], attempt)) _resolutions.remove(folder);
+    rethrow;
   }
 }
 
@@ -137,4 +156,4 @@ Future<String?> _windowsLocalAppData() async {
 }
 
 @visibleForTesting
-void resetKdfDesktopDataResolution() => _resolution = null;
+void resetKdfDesktopDataResolution() => _resolutions.clear();

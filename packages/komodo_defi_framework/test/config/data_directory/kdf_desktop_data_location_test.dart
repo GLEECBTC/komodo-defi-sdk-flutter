@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_native.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
   final config = KdfDesktopDataDirectory(
@@ -59,6 +61,92 @@ void main() {
     test('has no folder without an absolute HOME', () async {
       expect(await rootFor({}), isNull);
       expect(await rootFor({'HOME': 'home/ada'}), isNull);
+    });
+  });
+
+  group('resolving local data roots', () {
+    late Directory sandbox;
+
+    setUp(() async {
+      resetKdfDesktopDataResolution();
+      sandbox = await Directory.systemTemp.createTemp('kdf_data_roots_');
+    });
+    tearDown(() async {
+      resetKdfDesktopDataResolution();
+      await sandbox.delete(recursive: true);
+    });
+
+    Future<String> resolve(
+      String root,
+      Future<Directory?> Function() legacyDirectory, {
+      Future<String?> Function()? dataRoot,
+    }) => resolveKdfDataForFolder(
+      p.basename(root),
+      dataRoot: dataRoot ?? () async => root,
+      legacyDirectory: legacyDirectory,
+      engineRunning: () async => false,
+    );
+
+    Future<Directory?> offlineDocuments() async =>
+        throw const FileSystemException('Documents is offline');
+
+    test('opens migrated wallets without looking up Documents', () async {
+      final root = p.join(sandbox.path, 'existing');
+      final target = await Directory(p.join(root, 'kdf'))
+          .create(recursive: true);
+      final wallet = File(p.join(target.path, 'wallet.json'));
+      await wallet.writeAsString('wallet');
+
+      expect(await resolve(root, offlineDocuments), target.path);
+      expect(await wallet.readAsString(), 'wallet');
+    });
+
+    test('shares one resolution per root and keeps roots separate', () async {
+      final first = p.join(sandbox.path, 'first');
+      final second = p.join(sandbox.path, 'second');
+      final legacy = Completer<Directory?>();
+      final resolved = Future.wait([
+        resolve(first, () => legacy.future),
+        resolve(first, offlineDocuments),
+        resolve(second, () async => null),
+      ]);
+      legacy.complete(null);
+
+      expect(await resolved, [
+        p.join(first, 'kdf'),
+        p.join(first, 'kdf'),
+        p.join(second, 'kdf'),
+      ]);
+    });
+
+    test(
+      'keeps the original resolution if Local AppData returns later',
+      () async {
+        final root = p.join(sandbox.path, 'existing');
+        final legacy = await Directory(p.join(sandbox.path, '.kdf')).create();
+        await File(p.join(legacy.path, 'wallet.json')).writeAsString('wallet');
+
+        expect(
+          await resolve(root, () async => legacy, dataRoot: () async => null),
+          legacy.path,
+        );
+        expect(await resolve(root, offlineDocuments), legacy.path);
+        expect(await Directory(p.join(root, 'kdf')).exists(), isFalse);
+      },
+    );
+
+    test('a failed root retries without clearing another root', () async {
+      final first = p.join(sandbox.path, 'first');
+      final second = p.join(sandbox.path, 'second');
+      final secondTarget = await resolve(second, () async => null);
+
+      await expectLater(
+        resolve(first, offlineDocuments),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(await Directory(p.join(first, 'kdf')).exists(), isFalse);
+      expect(await resolve(first, () async => null), p.join(first, 'kdf'));
+      expect(await resolve(second, offlineDocuments), secondTarget);
     });
   });
 

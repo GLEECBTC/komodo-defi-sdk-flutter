@@ -41,13 +41,14 @@ class KdfDataRootException implements Exception {
 final class KdfDataMigration {
   KdfDataMigration({
     required this.root,
-    this.legacy,
+    required Future<Directory?> Function() legacyDirectory,
     DateTime Function()? clock,
     Future<bool> Function()? engineRunning,
     this.gracePeriod = const Duration(days: 7),
     this.lockTimeout = const Duration(seconds: 30),
     this.copyFile = copyKdfDataFile,
-  }) : _clock = clock ?? DateTime.now,
+  }) : _legacyDirectory = legacyDirectory,
+       _clock = clock ?? DateTime.now,
        _engineRunning = engineRunning ?? _noEngine;
 
   /// The data directory's name under [root].
@@ -59,8 +60,8 @@ final class KdfDataMigration {
   /// The app's data folder, which holds the new data directory.
   final Directory root;
 
-  /// The old data directory, `Documents/.kdf`, when Documents exists.
-  final Directory? legacy;
+  /// Looks up Documents only when the target still needs to be created.
+  final Future<Directory?> Function() _legacyDirectory;
 
   final Duration gracePeriod;
   final Duration lockTimeout;
@@ -74,10 +75,6 @@ final class KdfDataMigration {
   final Future<void> Function(File source, File destination) copyFile;
 
   Directory get target => Directory(p.join(root.path, targetName));
-
-  /// Where the old data directory goes while its data is copied.
-  Directory? get retired =>
-      legacy == null ? null : Directory('${legacy!.path}.moved');
 
   Directory get _staging => Directory(p.join(root.path, '$targetName.partial'));
   File get _recordFile => File(p.join(root.path, KdfDataRecord.fileName));
@@ -114,9 +111,9 @@ final class KdfDataMigration {
         await _tidyUp();
         return target;
       }
-      final legacy = this.legacy;
+      final legacy = await _legacyDirectory();
       if (legacy == null) return _createEmptyTarget();
-      final retired = this.retired!;
+      final retired = Directory('${legacy.path}.moved');
       await _requireReachable(legacy.parent);
       await _requireReachable(legacy);
       final bool legacyHolds;
@@ -149,7 +146,7 @@ final class KdfDataMigration {
         return legacy;
       }
       if (legacyHolds) return _moveLegacy(legacy, retired);
-      if (retiredHolds) return _copyRetired(retired);
+      if (retiredHolds) return _copyRetired(legacy, retired);
       return _createEmptyTarget();
     });
   }
@@ -207,7 +204,7 @@ final class KdfDataMigration {
       _log.warning('${legacy.path} could not be moved, so KDF uses it: $error');
       return legacy;
     }
-    await _writeReadme();
+    await _writeReadme(legacy, retired);
     try {
       await _copy(retired);
       return target;
@@ -219,13 +216,13 @@ final class KdfDataMigration {
   }
 
   /// Copies a directory an earlier start, or another device, put aside.
-  Future<Directory> _copyRetired(Directory retired) async {
+  Future<Directory> _copyRetired(Directory legacy, Directory retired) async {
     if (await isKdfDataLink(retired.path)) return retired;
     if (await _engineRunning()) {
       _log.info('A KDF is running and may use ${retired.path}; not copying it');
       return retired;
     }
-    if (legacy != null && !await legacy!.exists()) await _writeReadme();
+    if (!await legacy.exists()) await _writeReadme(legacy, retired);
     try {
       await _copy(retired);
       return target;
@@ -382,9 +379,7 @@ final class KdfDataMigration {
       ? 0
       : 1;
 
-  Future<void> _writeReadme() async {
-    final legacy = this.legacy;
-    if (legacy == null) return;
+  Future<void> _writeReadme(Directory legacy, Directory retired) async {
     final date = _clock().toUtc().toIso8601String().substring(0, 10);
     final text = [
       'Wallet data moved',
@@ -394,7 +389,7 @@ final class KdfDataMigration {
       '    ${target.path}',
       '',
       'Documents is often synced to cloud storage, and wallet data',
-      'should not be. Unchanged files in ${p.basename(retired!.path)} are',
+      'should not be. Unchanged files in ${p.basename(retired.path)} are',
       'removed after a seven-day grace period from the first wallet open',
       'in the new folder. Cleanup waits while a wallet engine is running.',
       '',

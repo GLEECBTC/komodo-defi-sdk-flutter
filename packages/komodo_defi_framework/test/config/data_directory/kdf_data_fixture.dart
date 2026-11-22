@@ -31,7 +31,7 @@ class KdfDataSandbox {
         copyKdfDataFile,
   }) => KdfDataMigration(
     root: appData,
-    legacy: legacy,
+    legacyDirectory: () async => legacy,
     clock: () => now,
     engineRunning: () async => engineRunning,
     lockTimeout: const Duration(seconds: 2),
