@@ -61,6 +61,23 @@ void main() {
       expect((await sandbox.record())!.cleanedAt, sandbox.now);
     });
 
+    test(
+      'defers cleanup while a KDF may still be using retired data',
+      () async {
+        await sandbox.verifyStart();
+        sandbox.engineRunning = true;
+
+        await later(const Duration(days: 8));
+        expect(await readTree(sandbox.retired), kdfData());
+        expect((await sandbox.record())!.cleanedAt, isNull);
+
+        sandbox.engineRunning = false;
+        await sandbox.run();
+        expect(await sandbox.retired.exists(), isFalse);
+        expect(await readTree(sandbox.target), kdfData());
+      },
+    );
+
     test('keeps every top-level entry that changed after the move', () async {
       await File(p.join(sandbox.retired.path, 'alpha.json'))
           .writeAsString('written by an older app');

@@ -24,9 +24,9 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   databases while they were written. Before KDF first starts, the old folder
   is renamed `.kdf.moved` and a README takes its place; its data is copied,
   every file is read back and compared, and one rename commits the copy.
-  Nothing moves while a KDF answers on the RPC port. `.kdf.moved` is deleted
-  seven days after KDF first opens a wallet from the new folder, and only files
-  still identical to the copy are deleted. A failure before the commit puts the
+  A running KDF defers migration and cleanup. After the first successful wallet
+  open from the new folder and a seven-day grace period, cleanup removes only
+  the unchanged files in `.kdf.moved`. A failure before the commit puts the
   old folder back, and the next start tries again. Without the setting,
   nothing changes.
 - **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests

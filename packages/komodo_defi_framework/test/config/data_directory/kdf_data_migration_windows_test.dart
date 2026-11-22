@@ -93,6 +93,26 @@ void main() {
     expect(await readTree(real), kdfData());
   });
 
+  test(
+    'unavailable legacy junction cannot select an empty directory',
+    () async {
+      final real = Directory(p.join(sandbox.base.path, 'real-kdf'));
+      await plant(real, kdfData());
+      await sandbox.documents.create(recursive: true);
+      await _junction(sandbox.legacy.path, real.path);
+      final offline = await real.rename(
+        p.join(sandbox.base.path, 'offline-kdf'),
+      );
+
+      await expectLater(sandbox.run(), throwsA(isA<FileSystemException>()));
+      expect(await sandbox.target.exists(), isFalse);
+
+      await offline.rename(real.path);
+      expect((await sandbox.run()).path, sandbox.legacy.path);
+      expect(await readTree(real), kdfData());
+    },
+  );
+
   test('finds Local AppData through the known-folder API', () async {
     final root = await kdfDesktopDataRoot(
       KdfDesktopDataDirectory(windowsFolder: 'Gleec', linuxFolder: 'unused'),

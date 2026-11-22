@@ -227,6 +227,41 @@ void main() {
     expect(await readTree(real), kdfData());
   });
 
+  for (final folder in ['legacy', 'retired']) {
+    test(
+      'an unavailable $folder link cannot select an empty directory',
+      () async {
+        final linked = folder == 'legacy' ? sandbox.legacy : sandbox.retired;
+        final volume = Directory(p.join(sandbox.base.path, 'offline-volume'));
+        await sandbox.documents.create(recursive: true);
+        await Link(linked.path).create(volume.path);
+
+        await expectLater(sandbox.run(), throwsA(isA<FileSystemException>()));
+        expect(await sandbox.target.exists(), isFalse);
+
+        await plant(volume, kdfData());
+        expect((await sandbox.run()).path, linked.path);
+        expect(await sandbox.target.exists(), isFalse);
+        expect(await readTree(volume), kdfData());
+      },
+    );
+  }
+
+  test('a running KDF keeps retired data where it is', () async {
+    await plant(sandbox.retired, kdfData());
+    sandbox.engineRunning = true;
+
+    expect((await sandbox.run()).path, sandbox.retired.path);
+    expect(await sandbox.target.exists(), isFalse);
+    expect(await sandbox.legacy.exists(), isFalse);
+    expect(await sandbox.record(), isNull);
+    expect(await readTree(sandbox.retired), kdfData());
+
+    sandbox.engineRunning = false;
+    expect((await sandbox.run()).path, sandbox.target.path);
+    expect(await readTree(sandbox.target), kdfData());
+  });
+
   test('moves a copy another device put aside', () async {
     await plant(sandbox.retired, kdfData());
 

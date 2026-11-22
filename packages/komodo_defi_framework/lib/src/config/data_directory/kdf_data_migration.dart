@@ -101,8 +101,8 @@ final class KdfDataMigration {
   /// Returns the directory KDF uses for this run.
   ///
   /// Throws [KdfDataRootException] if [root] can't be created, and a
-  /// [FileSystemException] if Documents is a link to a missing target, such
-  /// as a volume that isn't mounted yet.
+  /// [FileSystemException] if Documents or a migration source is a link
+  /// to a missing directory, such as a volume that isn't mounted yet.
   Future<Directory> run() async {
     try {
       await root.create(recursive: true);
@@ -116,6 +116,11 @@ final class KdfDataMigration {
       }
       final legacy = this.legacy;
       final retired = this.retired;
+      if (legacy != null) {
+        await _requireReachable(legacy.parent);
+        await _requireReachable(legacy);
+        await _requireReachable(retired!);
+      }
       final bool legacyHolds;
       final bool retiredHolds;
       try {
@@ -162,6 +167,15 @@ final class KdfDataMigration {
     }
   }
 
+  Future<void> _requireReachable(Directory directory) async {
+    if (!await directory.exists() && await isKdfDataLink(directory.path)) {
+      throw FileSystemException(
+        'KDF data path is not reachable',
+        directory.path,
+      );
+    }
+  }
+
   Future<bool> _holdsData(Directory directory) async {
     if (!await directory.exists()) return false;
     await for (final entity in directory.list(followLinks: false)) {
@@ -199,6 +213,10 @@ final class KdfDataMigration {
   /// Copies a directory an earlier start, or another device, put aside.
   Future<Directory> _copyRetired(Directory retired) async {
     if (await isKdfDataLink(retired.path)) return retired;
+    if (await _engineRunning()) {
+      _log.info('A KDF is running and may use ${retired.path}; not copying it');
+      return retired;
+    }
     if (legacy != null && !await legacy!.exists()) await _writeReadme();
     try {
       await _copy(retired);
@@ -252,14 +270,6 @@ final class KdfDataMigration {
   }
 
   Future<Directory> _createEmptyTarget() async {
-    final documents = legacy?.parent.path;
-    // A Documents link whose target is missing is a volume that isn't
-    // mounted yet, not a folder without wallets.
-    if (documents != null &&
-        await FileSystemEntity.isLink(documents) &&
-        !await Directory(documents).exists()) {
-      throw FileSystemException('Documents is not reachable', documents);
-    }
     await _discardStaging();
     await _staging.create();
     await _restrictToUser(_staging);
@@ -292,6 +302,7 @@ final class KdfDataMigration {
           ? verifiedAt
           : record.copiedAt;
       if (_clock().difference(since) < gracePeriod) return;
+      if (await _engineRunning()) return;
       await _cleanUp(Directory(record.source), record);
       await record.copyWith(cleanedAt: _clock()).write(_recordFile);
     } on Object catch (error) {
@@ -375,8 +386,9 @@ final class KdfDataMigration {
       '    ${target.path}',
       '',
       'Documents is often synced to cloud storage, and wallet data',
-      'should not be. The copy left in ${p.basename(retired!.path)} is deleted',
-      'a week after a wallet first opens from the new folder.',
+      'should not be. Unchanged files in ${p.basename(retired!.path)} are',
+      'removed after a seven-day grace period from the first wallet open',
+      'in the new folder. Cleanup waits while a wallet engine is running.',
       '',
       'To back up a wallet, keep its recovery phrase, or export the',
       'wallet file from the app. To restore a wallet, import its',
