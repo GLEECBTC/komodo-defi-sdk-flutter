@@ -274,6 +274,33 @@ void main() {
     expect((await sandbox.record())!.source, sandbox.retired.path);
   });
 
+  test('unreadable retired data cannot fall back to a README', () async {
+    await plant(sandbox.retired, kdfData());
+    await sandbox.legacy.create();
+    await File(p.join(sandbox.legacy.path, KdfDataMigration.readmeName))
+        .writeAsString('Migration in progress');
+    await setMode(sandbox.retired, '000');
+
+    await expectLater(sandbox.run(), throwsA(isA<FileSystemException>()));
+    expect(await sandbox.target.exists(), isFalse);
+    expect(await topLevel(sandbox.legacy), ['README.txt']);
+    expect(await sandbox.record(), isNull);
+
+    await setMode(sandbox.retired, '755');
+    expect((await sandbox.run()).path, sandbox.target.path);
+    expect(await readTree(sandbox.target), kdfData());
+  });
+
+  test('unreadable retired data preserves a usable legacy directory', () async {
+    await plant(sandbox.retired, kdfData());
+    await plant(sandbox.legacy, kdfData());
+    await setMode(sandbox.retired, '000');
+
+    expect((await sandbox.run()).path, sandbox.legacy.path);
+    expect(await readTree(sandbox.legacy), kdfData());
+    expect(await sandbox.target.exists(), isFalse);
+  });
+
   test('leaves two copies alone and keeps using the old one', () async {
     final otherDevice = {'gamma.json': 'from another device'.codeUnits};
     await plant(sandbox.retired, otherDevice);

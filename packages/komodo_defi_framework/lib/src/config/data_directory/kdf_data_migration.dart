@@ -115,22 +115,30 @@ final class KdfDataMigration {
         return target;
       }
       final legacy = this.legacy;
-      final retired = this.retired;
-      if (legacy != null) {
-        await _requireReachable(legacy.parent);
-        await _requireReachable(legacy);
-        await _requireReachable(retired!);
-      }
+      if (legacy == null) return _createEmptyTarget();
+      final retired = this.retired!;
+      await _requireReachable(legacy.parent);
+      await _requireReachable(legacy);
       final bool legacyHolds;
-      final bool retiredHolds;
       try {
-        legacyHolds = legacy != null && await _holdsData(legacy);
-        retiredHolds = retired != null && await _holdsData(retired);
+        legacyHolds = await _holdsData(legacy);
       } on FileSystemException catch (error) {
         // OneDrive may not be running yet, or Documents may be on a share that
         // is down. KDF would have used the old directory anyway.
-        if (legacy == null) rethrow;
         _log.warning('Could not read ${legacy.path}, so KDF uses it: $error');
+        return legacy;
+      }
+      final bool retiredHolds;
+      try {
+        await _requireReachable(retired);
+        retiredHolds = await _holdsData(retired);
+      } on FileSystemException catch (error) {
+        // An absent legacy folder or one containing only the README cannot
+        // stand in for the retired copy while that copy is unavailable.
+        if (!legacyHolds) rethrow;
+        _log.warning(
+          'Could not read ${retired.path}, so KDF uses ${legacy.path}: $error',
+        );
         return legacy;
       }
       if (legacyHolds && retiredHolds) {
@@ -140,7 +148,7 @@ final class KdfDataMigration {
         );
         return legacy;
       }
-      if (legacyHolds) return _moveLegacy(legacy, retired!);
+      if (legacyHolds) return _moveLegacy(legacy, retired);
       if (retiredHolds) return _copyRetired(retired);
       return _createEmptyTarget();
     });
