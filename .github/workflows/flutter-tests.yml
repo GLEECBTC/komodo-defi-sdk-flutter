@@ -271,3 +271,23 @@ jobs:
             test_summary.md
             test_logs/*.log
           retention-days: 30
+
+  # KDF's data directory moves out of Documents on Windows, where NTFS paths,
+  # junctions and the known-folder lookup behave differently from Linux.
+  kdf-data-directory-windows:
+    name: KDF data directory (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: ./.github/actions/setup-flutter
+
+      - name: Install locked workspace dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Test the data-directory move
+        working-directory: packages/komodo_defi_framework
+        run: flutter test --no-pub --no-test-assets test/config/data_directory
