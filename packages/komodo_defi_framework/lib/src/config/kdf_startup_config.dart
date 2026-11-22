@@ -7,6 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:komodo_coins/komodo_coins.dart';
 import 'package:komodo_defi_framework/src/config/event_streaming_config.dart';
 import 'package:komodo_defi_framework/src/config/seed_node_validator.dart';
+import 'package:komodo_defi_framework/src/native/backup_exclusion.dart';
+import 'package:komodo_defi_framework/src/native/backup_exclusion_stub.dart'
+    if (dart.library.io) 'package:komodo_defi_framework/src/native/backup_exclusion_native.dart';
 import 'package:komodo_defi_framework/src/services/seed_node_service.dart'
     show SeedNodeService;
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -169,6 +172,10 @@ class KdfStartupConfig {
     );
   }
 
+  /// Keeps the KDF data directory out of device backups on every start.
+  @visibleForTesting
+  static BackupExclusion backupExclusion = platformBackupExclusion();
+
   static Future<(String? home, String? dbDir)> _getAndSetupUserHome({
     String? userHome,
     String? dbHome,
@@ -182,6 +189,9 @@ class KdfStartupConfig {
     if (!await Directory(dbDir).exists()) {
       await Directory(dbDir).create(recursive: true);
     }
+    // KDF keeps each wallet's password-encrypted seed here. Marking it again
+    // at every start restores the flag if the directory was replaced.
+    backupExclusion(dbDir);
 
     return (home, dbDir);
   }
