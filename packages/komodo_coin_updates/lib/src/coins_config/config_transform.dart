@@ -220,8 +220,12 @@ class CoinFilter {
   }
 }
 
-/// Filters out non-wss electrum/server URLs from the given coin config for
-/// the web platform as only wss connections are supported.
+/// Orders `electrum` entries by platform: WSS only on web, where it is the
+/// only transport the browser can open, and WSS first on native.
+///
+/// Native KDF cannot dial WSS itself; `ElectrumBridgingKdfOperations` routes
+/// those entries through a loopback bridge, because ElectrumX paces replies on
+/// its TCP/SSL ports but not on WSS. The remaining entries stay as fallback.
 class WssWebsocketTransform implements CoinConfigTransform {
   const WssWebsocketTransform();
 
@@ -234,24 +238,22 @@ class WssWebsocketTransform implements CoinConfigTransform {
   }
 
   @override
-  /// Filters `electrum` entries based on the platform: WSS-only on web and
-  /// non-WSS on native platforms.
+  /// Shapes `electrum` entries for the platform: WSS-only on web and WSS
+  /// first on native platforms.
   JsonMap transform(JsonMap config) {
     final electrum = JsonList.of(config.value<JsonList>('electrum'));
-    // On native, only non-WSS servers are supported. On web, only WSS servers
-    // are supported.
     final filteredElectrums = filterElectrums(
       electrum,
       serverType: kIsWeb
           ? ElectrumServerType.wssOnly
-          : ElectrumServerType.nonWssOnly,
+          : ElectrumServerType.wssFirst,
     );
 
     return config..['electrum'] = filteredElectrums;
   }
 
-  /// Returns a filtered copy of [electrums] keeping only entries allowed by
-  /// [serverType]. For WSS entries, `ws_url` is normalized to match `url`.
+  /// Returns a copy of [electrums] shaped by [serverType]. For WSS entries,
+  /// `ws_url` is normalized to match `url`.
   JsonList filterElectrums(
     JsonList electrums, {
     required ElectrumServerType serverType,
@@ -264,16 +266,28 @@ class WssWebsocketTransform implements CoinConfigTransform {
       }
     }
 
-    return electrumsCopy..removeWhere(
-      (JsonMap e) => serverType == ElectrumServerType.wssOnly
-          ? e['ws_url'] == null
-          : e['ws_url'] != null,
-    );
+    bool isWss(JsonMap e) => e['ws_url'] != null;
+    return switch (serverType) {
+      ElectrumServerType.wssOnly => electrumsCopy.where(isWss).toList(),
+      ElectrumServerType.nonWssOnly =>
+        electrumsCopy.where((e) => !isWss(e)).toList(),
+      // KDF tries servers in list order, so WSS must lead to be preferred.
+      ElectrumServerType.wssFirst => [
+        ...electrumsCopy.where(isWss),
+        ...electrumsCopy.where((e) => !isWss(e)),
+      ],
+    };
   }
 }
 
-/// Specifies which type of Electrum servers to retain
-enum ElectrumServerType { wssOnly, nonWssOnly }
+/// Specifies which type of Electrum servers to retain, and in what order.
+enum ElectrumServerType {
+  wssOnly,
+  nonWssOnly,
+
+  /// Every entry, WSS ones first.
+  wssFirst,
+}
 
 /// Adds Gleec's QuickNode proxy as the preferred mainnet TRON RPC endpoint.
 ///
@@ -353,8 +367,8 @@ class TronQuickNodeTransform implements CoinConfigTransform {
 
 /// Filters out insecure connections on non-web platforms, emulating the
 /// filtering applied to the coins_config_ssl.json file in GLEECBTC/coins
-/// On non-web platforms, only SSL electrum servers and HTTPS URLs are
-/// supported for security.
+/// On non-web platforms, only TLS electrum servers (SSL, and WSS for the
+/// loopback bridge) and HTTPS URLs are supported for security.
 // TODO: move this to a build-time step via the coins config and/or the
 // komodo_wallet_build_transformer package
 class SslElectrumTransform implements CoinConfigTransform {
@@ -383,19 +397,19 @@ class SslElectrumTransform implements CoinConfigTransform {
   JsonMap transform(JsonMap config) {
     final result = JsonMap.of(config);
     final coin = config.valueOrNull<String>('coin') ?? 'unknown';
-    // Filter electrum servers - keep only SSL protocol
+    // Filter electrum servers - keep only TLS protocols
     final electrum = config.valueOrNull<JsonList>('electrum');
     if (electrum != null) {
       final originalCount = electrum.length;
       final filteredElectrums = electrum.where((JsonMap e) {
         final protocol = e.valueOrNull<String>('protocol');
-        return protocol == 'SSL';
+        return protocol == 'SSL' || protocol == 'WSS';
       }).toList();
 
       if (filteredElectrums.isEmpty && originalCount > 0) {
         _log.warning(
           'SslElectrumTransform: All $originalCount electrum servers filtered '
-          'out for $coin (no SSL servers available)',
+          'out for $coin (no SSL or WSS servers available)',
         );
       }
 
