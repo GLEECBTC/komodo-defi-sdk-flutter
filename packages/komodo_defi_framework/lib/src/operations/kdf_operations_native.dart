@@ -10,6 +10,9 @@ import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 import 'package:komodo_defi_framework/src/native/komodo_defi_framework_bindings_generated.dart';
+import 'package:komodo_defi_framework/src/operations/electrum/electrum_bridging_kdf_operations.dart';
+import 'package:komodo_defi_framework/src/operations/electrum/electrum_web_socket_bridge.dart';
+import 'package:komodo_defi_framework/src/operations/electrum/native_wss_electrum_routing.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_operations_interface.dart';
 import 'package:komodo_defi_framework/src/operations/kdf_response_body.dart';
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -20,8 +23,9 @@ IKdfOperations createLocalKdfOperations({
   required void Function(String) logCallback,
   required LocalConfig config,
 }) {
+  final KdfOperationsNativeLibrary operations;
   try {
-    return KdfOperationsNativeLibrary.create(
+    operations = KdfOperationsNativeLibrary.create(
       logCallback: logCallback,
       config: config,
     );
@@ -35,6 +39,12 @@ IKdfOperations createLocalKdfOperations({
       type: KdfExceptionType.configurationError,
     );
   }
+  return ElectrumBridgingKdfOperations(
+    operations,
+    routing: kElectrumWebSocketBridgeEnabled
+        ? ElectrumWebSocketBridge(log: logCallback)
+        : const DropWssElectrumRouting(),
+  );
 }
 
 class KdfOperationsNativeLibrary implements IKdfOperations {
