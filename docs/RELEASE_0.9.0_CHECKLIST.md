@@ -1,7 +1,7 @@
 # SDK 0.9.0 release checklist
 
-Prepared 28 October 2026; build-input roll prepared 29 October. This is a
-candidate record, not publication approval.
+Prepared 28 October 2026; build-input rolls prepared 29 October and 3 November.
+This is a candidate record, not publication approval.
 
 ## Scope and immutable inputs
 
@@ -22,11 +22,11 @@ candidate record, not publication approval.
   branch's earlier main-history sync is not expected to survive its squash.
   Review the final promotion diff and merge result instead of requiring that
   this source-branch sync become an ancestor of `dev`.
-- KDF: `e40ac2fb4319d352bf9c93683eb2518ce9f939e0` on `dev`; specs:
+- KDF: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
-  `2b0aefb78b184091ab086c66e513d8b03f5d5a01`.
+  `cc8249e85e54467bc2684c2712857711eab55fd2` (final roll, 4 November).
 - All seven archive checksums are in `app_build/build_config.json` with
-  [29 October provenance](KDF_ARTIFACTS_2026-10-29.json). The prior
+  [3 November provenance](KDF_ARTIFACTS_2026-11-03.json). The prior
   [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
   historical evidence. Build-time coin
   advancement is disabled; runtime updates remain enabled.
@@ -35,6 +35,35 @@ candidate record, not publication approval.
   checks the ERC-20 payment amount outside the watcher-reward branch, as in
   [KDF 3.1.1-beta](https://github.com/GLEECBTC/kdf-internal/commit/2023112fa67b28cbebc2a7064d22267fed40310f).
   The branches diverge; this source check does not certify every later main fix.
+
+## Feature defaults and consumer policy — 29 October
+
+These entries record a source audit, not new live-swap or signed-platform
+test results.
+
+- [x] `sdk.routedSwaps` exposes implemented LI.FI exact/Max quotes,
+  cheapest/fastest ordering, approval/execution progress, history, recovery and
+  eligible cancellation without a feature opt-in. Remote engines must support
+  the pinned contract; asset eligibility and runtime execution checks apply.
+- [x] Gleec Wallet registers routed swaps by default. Its integrator flag
+  controls commission configuration and does not enable/disable routing.
+  Native-Max gas headroom remains the wallet's separate quote policy.
+- [x] Legal consent is consumer-owned. Ordinary Gleec builds require available
+  wallet/LI.FI documents before routed Start; their availability bypass defaults
+  to false. Only the isolated manual RC preview has the recorded exception,
+  retaining warnings and refusing to record unavailable terms as accepted.
+- [x] The pinned routed requests support LI.FI and eligible EVM assets and have
+  no external-recipient parameter. Additional provider backends, expanded chain
+  support and hardware signing require implementation or validation. Gleec
+  hardware-wallet trading was wallet-only in 0.9.7-1 and remains so.
+- [x] Gleec Wallet [#3579](https://github.com/GLEECBTC/gleec-wallet/pull/3579)
+  restores the previous atomic EVM-token behavior and describes engine-managed
+  permission in the existing review, with no new modal or confirmation step.
+  The engine may reuse or grant an unlimited allowance after matching. LI.FI
+  token routes retain their separate exact-approval/reset and funding checks.
+- [x] Keep the owner's RC-only KDF failure acceptance separate from production
+  disposition. The wallet's usability/live-fiat deferrals and post-0.10.0 Banxa
+  follow-up are recorded deferrals, not completed execution evidence.
 
 ## Preparation gates
 
@@ -261,3 +290,54 @@ failure and Sia Max balance assertion. One retry of the six failed jobs was
 requested; pending results do not waive the original failures. Merge the dev
 PR with squash, then carry only its reviewed diff into frozen `release-0.9.0`
 through a focused PR after tests and review pass. SDK #416 remains open.
+
+## Final coins roll — 4 November 2026
+
+Coins `cc8249e85e54467bc2684c2712857711eab55fd2` (coins master after #2093)
+replaces `efd3a6471709f7e13e0b03277e37548e11840aae`: 22 commits. It adds
+Yenten (YTN); sets L2 fee models for AVAX (`avalanche`), ETH-BASE
+(`op_stack`), MNT (`mantle`) and MON (`monad`); makes the fork-id signature
+version explicit for BCH, XEC, XRG and tBCH; drops signature versions and
+decimals that matched the defaults for CRNC, MAZA and XEP-segwit; and refreshes
+WAM electrums, seed nodes and the generated configs. No coin is removed.
+
+KDF `a51d69a` parses all four fee models (`EthFeeModel` in
+`coins/eth/actual_fee.rs`); they change only how the actual fee is read from a
+receipt. Its signature-version default is fork-id for BCH and fork-id chains,
+otherwise base, and its decimals default is 8, so the dropped values change
+nothing; segwit inputs always sign as WitnessV0. KDF and specs are unchanged.
+
+## Full engine and coins roll — 3 November 2026
+
+Exact KDF `a51d69a11ff937ecf9678e9b37632af578252846` replaces `e40ac2f`;
+coins `efd3a6471709f7e13e0b03277e37548e11840aae` replaces `2b0aefb7`.
+The [immutable record](KDF_ARTIFACTS_2026-11-03.json) includes the source delta,
+archive identities, coin-file/icon checks and original failure dispositions.
+The historical 29 October record remains unchanged.
+
+- [x] Full build [41650681364](https://github.com/GLEECBTC/kdf-internal/actions/runs/41650681364),
+  attempt 9: all ten platform jobs passed; Docker push and deployment commit disabled.
+- [x] Full tests [41650695853](https://github.com/GLEECBTC/kdf-internal/actions/runs/41650695853),
+  attempt 10: all 17 jobs passed. Original Linux
+  `tendermint::tendermint_coin::tests::test_htlc_create_and_claim` timeout and
+  macOS `lp_message_service::telegram::telegram_tests::test_send_message`
+  assertion failure each passed one actual retry. Capacity cancellations
+  acquired no runner; successful jobs were preserved.
+- [x] All seven SDK archives matched independent GitHub artifact digests,
+  ZIP integrity and ordinary primary/fallback mirror downloads. Strict CLI
+  validation against those trusted hashes passed on all seven platforms.
+- [x] Fresh-unfunded native Arbitrum/Base quote, funding, fee and Max smoke
+  passed with engine `3.2.0-beta_a51d69a`; no funds were submitted.
+- [x] Three mapped coin files match exact-commit raw bytes; all 445 icons
+  match published SHA-256. Local provider loads 736/772 versus 734/770,
+  with the same 36 filtered/testnet/unsupported omissions and no new omissions.
+- [x] Enforced offline bootstrap and repeated prepare passed without tracked drift.
+  All 16 native suites passed: **3,112 tests / 14 skipped**. Core Chrome/WASM
+  passed **249**, framework **10**, and auth dispatch lease **10**. The core
+  gate includes the accepted offer-session and browser persistence regressions.
+  Full consumer analysis: zero errors, 55 existing warnings and 2,144 infos.
+- [ ] Focused dev squash and accepted normal-merge carry into `release-0.9.0`.
+
+Upstream maintainers independently merged KDF #40 as `f9632e0e`; only
+`CHANGELOG.md` differs from this requested revision. This roll retains `a51d69a`.
+SDK #416 remains open; no main promotion, tag or publication is performed.

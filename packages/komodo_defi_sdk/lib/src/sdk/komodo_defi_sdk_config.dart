@@ -1,4 +1,5 @@
 // sdk_config.dart
+import 'package:komodo_coin_updates/komodo_coin_updates.dart';
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_sdk/src/transaction_history/transaction_history_cache_policy.dart';
@@ -26,10 +27,16 @@ class KomodoDefiSdkConfig {
     this.marketDataConfig = const MarketDataConfig(),
     this.tronProApiKey,
     this.tronGaslessProvider,
+    this.solanaCapabilities = const SolanaCapabilities(),
     this.assetConfigTransform,
+    this.assetsAutoUpdate = true,
+    this.assetsStorageNamespace,
+    this.assetsRuntimeUpdateConfig,
+    this.assetsDataFactory,
     this.initialActivationPolicy,
     this.lifiProxyUrl,
     this.lifiIntegrator,
+    this.desktopDataDirectory,
   });
 
   /// Set of asset IDs that should be enabled by default
@@ -88,6 +95,11 @@ class KomodoDefiSdkConfig {
   /// token. Held in memory only — never persisted.
   final TronGaslessProviderConfig? tronGaslessProvider;
 
+  /// Capabilities verified for the exact Solana engine bundled by the host.
+  /// Disabled by default: recognizing a protocol does not establish support in
+  /// an older engine or readiness of experimental withdrawal/trading paths.
+  final SolanaCapabilities solanaCapabilities;
+
   /// Optional application policy applied to each normalized asset config
   /// before it enters the SDK asset registry.
   ///
@@ -95,6 +107,19 @@ class KomodoDefiSdkConfig {
   /// logic. SDK bootstrap applies the transform to bundled, remote, and cached
   /// registry views without persisting its result.
   final AssetConfigTransform? assetConfigTransform;
+
+  /// Whether catalog background updates are enabled. Candidate snapshots must
+  /// explicitly disable this, independently of runtime config metadata.
+  final bool assetsAutoUpdate;
+
+  /// Isolates cached catalogs and custom tokens from production storage.
+  final String? assetsStorageNamespace;
+
+  /// Explicit catalog source configuration for immutable candidate snapshots.
+  final AssetRuntimeUpdateConfig? assetsRuntimeUpdateConfig;
+
+  /// Injectable catalog sources, including isolated local fixture catalogs.
+  final CoinConfigDataFactory? assetsDataFactory;
 
   /// Policy installed before SDK services can react to a restored session.
   ///
@@ -111,6 +136,10 @@ class KomodoDefiSdkConfig {
   /// Optional deployment commission policy; null requests no commission.
   final LifiIntegratorConfig? lifiIntegrator;
 
+  /// Where KDF keeps its data on Windows and Linux. Null keeps it in
+  /// `Documents/.kdf`, which Windows often backs up to OneDrive.
+  final KdfDesktopDataDirectory? desktopDataDirectory;
+
   KomodoDefiSdkConfig copyWith({
     Set<String>? defaultAssets,
     bool? preActivateDefaultAssets,
@@ -125,11 +154,17 @@ class KomodoDefiSdkConfig {
     MarketDataConfig? marketDataConfig,
     String? tronProApiKey,
     TronGaslessProviderConfig? tronGaslessProvider,
+    SolanaCapabilities? solanaCapabilities,
     AssetConfigTransform? assetConfigTransform,
+    bool? assetsAutoUpdate,
+    String? assetsStorageNamespace,
+    AssetRuntimeUpdateConfig? assetsRuntimeUpdateConfig,
+    CoinConfigDataFactory? assetsDataFactory,
     ActivationPolicySnapshot? initialActivationPolicy,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
     bool clearLifiIntegrator = false,
+    KdfDesktopDataDirectory? desktopDataDirectory,
   }) {
     return KomodoDefiSdkConfig(
       defaultAssets: defaultAssets ?? this.defaultAssets,
@@ -154,13 +189,21 @@ class KomodoDefiSdkConfig {
       marketDataConfig: marketDataConfig ?? this.marketDataConfig,
       tronProApiKey: tronProApiKey ?? this.tronProApiKey,
       tronGaslessProvider: tronGaslessProvider ?? this.tronGaslessProvider,
+      solanaCapabilities: solanaCapabilities ?? this.solanaCapabilities,
       assetConfigTransform: assetConfigTransform ?? this.assetConfigTransform,
+      assetsAutoUpdate: assetsAutoUpdate ?? this.assetsAutoUpdate,
+      assetsStorageNamespace:
+          assetsStorageNamespace ?? this.assetsStorageNamespace,
+      assetsRuntimeUpdateConfig:
+          assetsRuntimeUpdateConfig ?? this.assetsRuntimeUpdateConfig,
+      assetsDataFactory: assetsDataFactory ?? this.assetsDataFactory,
       initialActivationPolicy:
           initialActivationPolicy ?? this.initialActivationPolicy,
       lifiProxyUrl: lifiProxyUrl ?? this.lifiProxyUrl,
       lifiIntegrator: clearLifiIntegrator
           ? null
           : lifiIntegrator ?? this.lifiIntegrator,
+      desktopDataDirectory: desktopDataDirectory ?? this.desktopDataDirectory,
     );
   }
 }

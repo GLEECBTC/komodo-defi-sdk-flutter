@@ -1,5 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:komodo_cex_market_data/src/cex_repository.dart';
+import 'package:komodo_cex_market_data/src/common/shared_fetch.dart';
 import 'package:komodo_cex_market_data/src/komodo/prices/komodo_price_provider.dart';
 import 'package:komodo_cex_market_data/src/models/_models_index.dart';
 import 'package:komodo_cex_market_data/src/repository_selection_strategy.dart';
@@ -8,11 +9,15 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// A repository for fetching the prices of coins from the Komodo Defi API.
 class KomodoPriceRepository extends CexRepository {
   /// Creates a new instance of [KomodoPriceRepository].
-  KomodoPriceRepository({required IKomodoPriceProvider cexPriceProvider})
-    : _cexPriceProvider = cexPriceProvider;
+  KomodoPriceRepository({
+    required IKomodoPriceProvider cexPriceProvider,
+    DateTime Function() clock = DateTime.now,
+  }) : _cexPriceProvider = cexPriceProvider,
+       _clock = clock;
 
   /// The price provider to fetch the prices from.
   final IKomodoPriceProvider _cexPriceProvider;
+  final DateTime Function() _clock;
 
   // Supported coins and vs currencies are not expected to change regularly,
   // so this in-memory cache is acceptable for now until a more complete and
@@ -24,8 +29,8 @@ class KomodoPriceRepository extends CexRepository {
   Map<String, AssetMarketInformation>? _cachedPrices;
   DateTime? _cacheTimestamp;
 
-  /// Future for pending cache refresh to prevent concurrent fetches
-  Future<Map<String, AssetMarketInformation>>? _pendingFetch;
+  /// The cache refresh in progress, shared so lookups don't fetch twice.
+  final _refresh = SharedFetch<Map<String, AssetMarketInformation>>();
 
   /// Cache lifetime in minutes
   static const int _cacheLifetimeMinutes = 5;
@@ -63,35 +68,32 @@ class KomodoPriceRepository extends CexRepository {
   }
 
   /// Gets cached Komodo prices or fetches fresh data if cache is expired.
-  /// Prevents concurrent cache refreshes by using a shared future.
+  /// Concurrent lookups share one refresh.
   Future<Map<String, AssetMarketInformation>> _getCachedKomodoPrices() async {
-    // Check if a fetch is already in progress
-    if (_pendingFetch != null) {
-      return _pendingFetch!;
-    }
-
-    // Check if cache is valid
-    if (_cachedPrices != null && _cacheTimestamp != null) {
-      final now = DateTime.now();
-      final cacheAge = now.difference(_cacheTimestamp!);
-      if (cacheAge.inMinutes < _cacheLifetimeMinutes) {
-        return _cachedPrices!;
+    final cachedPrices = _cachedPrices;
+    final cacheTimestamp = _cacheTimestamp;
+    if (cachedPrices != null && cacheTimestamp != null) {
+      // A clock that moved backwards counts as expired rather than fresh.
+      final cacheAge = _clock().difference(cacheTimestamp);
+      if (!cacheAge.isNegative && cacheAge.inMinutes < _cacheLifetimeMinutes) {
+        return cachedPrices;
       }
     }
 
-    // Start fetch and store the future
-    _pendingFetch = _cexPriceProvider.getKomodoPrices();
-
-    try {
-      final prices = await _pendingFetch!;
+    return _refresh.run(() async {
+      final fetched = await _cexPriceProvider.getKomodoPrices();
+      // A dead or delisted ticker can stay in the feed with a price of zero.
+      // Leaving it out makes the price unknown, so another repository can
+      // answer, instead of valuing the holding at nothing.
+      final prices = {
+        for (final MapEntry(:key, :value) in fetched.entries)
+          if (value.lastPrice > Decimal.zero) key: value,
+      };
       _cachedPrices = prices;
-      _cacheTimestamp = DateTime.now();
-      // Update coin list cache when prices are refreshed
+      _cacheTimestamp = _clock();
       _updateCoinListCache(prices);
       return prices;
-    } finally {
-      _pendingFetch = null;
-    }
+    });
   }
 
   void _updateCoinListCache(Map<String, AssetMarketInformation> prices) {
@@ -243,6 +245,5 @@ class KomodoPriceRepository extends CexRepository {
     _cacheTimestamp = null;
     _cachedCoinsList = null;
     _cachedFiatCurrencies = null;
-    _pendingFetch = null;
   }
 }

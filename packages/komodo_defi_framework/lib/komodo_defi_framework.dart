@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_stub.dart'
+    if (dart.library.io) 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_native.dart';
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_startup_config.dart';
@@ -148,12 +151,36 @@ class KomodoDefiFramework implements ApiClient {
     final startParams = startupConfig.encodeStartParams();
     final result = await _kdfOperations.kdfMain(startParams);
     _log('KDF main result: $result');
+    // KDF opens a wallet's databases before it serves RPC, so RPC coming up
+    // after a wallet start proves the data directory works.
+    _unconfirmedDataDirectory = result.isOk && startupConfig.walletName != null
+        ? startupConfig.dbDir
+        : null;
     return result;
+  }
+
+  /// Records the first time KDF comes up on a moved data directory.
+  @visibleForTesting
+  static KdfDataStartRecorder dataStartRecorder =
+      platformKdfDataStartRecorder();
+
+  String? _unconfirmedDataDirectory;
+
+  void _confirmDataDirectory() {
+    final directory = _unconfirmedDataDirectory;
+    if (directory == null) return;
+    _unconfirmedDataDirectory = null;
+    unawaited(
+      dataStartRecorder(directory).catchError(
+        (Object error) => _logger.warning('KDF start not recorded: $error'),
+      ),
+    );
   }
 
   Future<MainStatus> kdfMainStatus() async {
     final status = await _kdfOperations.kdfMainStatus();
     _log('KDF main status: $status');
+    if (status == MainStatus.rpcIsUp) _confirmDataDirectory();
 
     // Checking if KDF is running using `version` method covers the case
     // where implementations do not run as a singleton. E.g. `kdfMainStatus`

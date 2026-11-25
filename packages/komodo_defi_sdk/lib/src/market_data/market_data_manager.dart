@@ -40,7 +40,9 @@ abstract class MarketDataManager {
 
   /// Gets historical fiat prices for an asset at specified dates
   ///
-  /// Returns a map of dates to prices
+  /// Returns a map of dates to prices, keyed by the UTC day each date falls
+  /// on. A day with no known price is absent, so check for the days you need.
+  /// Throws only when a fetch failed and no price is known for any day.
   Future<Map<DateTime, Decimal>> fiatPriceHistory(
     AssetId assetId,
     List<DateTime> dates, {
@@ -75,6 +77,7 @@ class CexMarketDataManager
     required List<CexRepository> priceRepositories,
     RepositorySelectionStrategy? selectionStrategy,
     Duration cacheClearInterval = _defaultCacheClearInterval,
+    DateTime Function() clock = DateTime.now,
   }) : assert(
          cacheClearInterval > Duration.zero,
          'cacheClearInterval must be greater than zero',
@@ -82,11 +85,13 @@ class CexMarketDataManager
        _cacheClearInterval = cacheClearInterval,
        _priceRepositories = priceRepositories,
        _selectionStrategy =
-           selectionStrategy ?? DefaultRepositorySelectionStrategy();
+           selectionStrategy ?? DefaultRepositorySelectionStrategy(),
+       _clock = clock;
 
   static final _logger = Logger('CexMarketDataManager');
   static const _defaultCacheClearInterval = Duration(minutes: 5);
   final Duration _cacheClearInterval;
+  final DateTime Function() _clock;
   Timer? _cacheTimer;
 
   @override
@@ -150,12 +155,82 @@ class CexMarketDataManager
   // Cache to store 24h price changes
   final Map<String, Decimal> _priceChangeCache = {};
 
+  /// Prices of days before today, which no longer change. They outlive the
+  /// live cache rotation, so repeated history lookups don't refetch them.
+  final Map<String, Decimal> _pastDayPriceCache = {};
+
+  /// Bounds [_pastDayPriceCache]; the oldest insertion is evicted first.
+  static const _maxPastDayPrices = 25000;
+
+  /// Past days no repository priced, and when that was learnt. A plan's
+  /// history window or a delisting leaves the same gaps on every lookup.
+  final Map<String, DateTime> _unpricedPastDays = {};
+  static const _unpricedPastDayRetryInterval = Duration(hours: 1);
+
+  /// The day in progress, when neither a current price nor history priced it.
+  /// Kept briefly: a price for today can appear at any moment.
+  final Map<String, DateTime> _unpricedCurrentDays = {};
+  static const _unpricedCurrentDayRetryInterval = Duration(minutes: 5);
+
   /// Clears all cached data to ensure fresh values are fetched
   void _clearCaches() {
     if (_isDisposed) return;
     _logger.finer('Clearing price and price change caches');
     _priceCache.clear();
     _priceChangeCache.clear();
+    _unpricedPastDays.removeWhere(
+      (_, learntAt) => !_isWithin(learntAt, _unpricedPastDayRetryInterval),
+    );
+    _unpricedCurrentDays.removeWhere(
+      (_, learntAt) => !_isWithin(learntAt, _unpricedCurrentDayRetryInterval),
+    );
+  }
+
+  /// A clock that moved backwards counts as expired rather than fresh.
+  bool _isWithin(DateTime at, Duration window) {
+    final age = _clock().difference(at);
+    return !age.isNegative && age < window;
+  }
+
+  /// The UTC day [date] falls on, at midnight. Prices are daily in UTC, so a
+  /// local time's own calendar date would file it under the wrong day for the
+  /// hours the device's clock is on a different date than UTC.
+  DateTime _normalizeDate(DateTime date) {
+    final utc = date.toUtc();
+    return DateTime.utc(utc.year, utc.month, utc.day);
+  }
+
+  DateTime _utcToday() => _normalizeDate(_clock());
+
+  /// [normalizedDate] decides the cache: a past day's price never changes.
+  void _cacheDatedPrice(
+    String cacheKey,
+    DateTime normalizedDate,
+    Decimal price, {
+    required DateTime requestDay,
+  }) {
+    if (!normalizedDate.isBefore(requestDay)) {
+      _priceCache[cacheKey] = price;
+      _unpricedCurrentDays.remove(cacheKey);
+      return;
+    }
+    _pastDayPriceCache[cacheKey] = price;
+    _unpricedPastDays.remove(cacheKey);
+    if (_pastDayPriceCache.length > _maxPastDayPrices) {
+      _pastDayPriceCache.remove(_pastDayPriceCache.keys.first);
+    }
+  }
+
+  bool _isKnownUnpriced(String cacheKey) {
+    final learntAt = _unpricedPastDays[cacheKey];
+    return learntAt != null &&
+        _isWithin(learntAt, _unpricedPastDayRetryInterval);
+  }
+
+  bool _isKnownUnpricedToday(String cacheKey) {
+    final learntAt = _unpricedCurrentDays[cacheKey];
+    return learntAt != null &&
+        _isWithin(learntAt, _unpricedCurrentDayRetryInterval);
   }
 
   // Helper method to generate canonical string cache keys
@@ -165,10 +240,7 @@ class CexMarketDataManager
     QuoteCurrency quoteCurrency = Stablecoin.usdt,
   }) {
     final basePrefix = assetId.baseCacheKeyPrefix;
-    // Normalize input dates to UTC midnight before lookups to avoid timezone issues
-    final normalizedDate = priceDate != null
-        ? DateTime.utc(priceDate.year, priceDate.month, priceDate.day)
-        : null;
+    final normalizedDate = priceDate != null ? _normalizeDate(priceDate) : null;
     return canonicalCacheKeyFromBasePrefix(basePrefix, {
       'quote': quoteCurrency.symbol,
       'kind': 'price',
@@ -206,7 +278,7 @@ class CexMarketDataManager
 
   /// Gets cached price if available, returns null otherwise
   Decimal? _getCachedPrice(String cacheKey) {
-    final cachedPrice = _priceCache[cacheKey];
+    final cachedPrice = _priceCache[cacheKey] ?? _pastDayPriceCache[cacheKey];
     if (cachedPrice != null) {
       _logger.finer('Cache hit for $cacheKey');
     }
@@ -221,14 +293,22 @@ class CexMarketDataManager
     DateTime? priceDate,
     QuoteCurrency quoteCurrency = Stablecoin.usdt,
   }) async {
+    final requestDay = _utcToday();
     final price = await repo.getCoinFiatPrice(
       assetId,
       priceDate: priceDate,
       fiatCurrency: quoteCurrency,
     );
-    _priceCache[cacheKey] = price;
     if (priceDate == null) {
+      _priceCache[cacheKey] = price;
       _lastKnownCurrentPriceCache[cacheKey] = price;
+    } else {
+      _cacheDatedPrice(
+        cacheKey,
+        _normalizeDate(priceDate),
+        price,
+        requestDay: requestDay,
+      );
     }
     _logger.finer(
       'Fetched price from ${repo.runtimeType} for '
@@ -262,7 +342,7 @@ class CexMarketDataManager
       return cachedPrice;
     }
 
-    // Historical prices are expected to expire from the live cache.
+    // Only current prices have a last-known fallback.
     if (priceDate != null) {
       return null;
     }
@@ -392,61 +472,128 @@ class CexMarketDataManager
     _checkNotDisposed();
     _assertInitialized();
 
-    // Normalize input dates to UTC midnight to avoid timezone issues
-    final normalizedDates = dates
-        .map((date) => DateTime.utc(date.year, date.month, date.day))
-        .toList();
+    String cacheKeyFor(DateTime date) =>
+        _getCacheKey(assetId, priceDate: date, quoteCurrency: quoteCurrency);
 
-    final cached = <DateTime, Decimal>{};
+    final today = _utcToday();
+    final prices = <DateTime, Decimal>{};
+    final currentDays = <DateTime>[];
     final missingDates = <DateTime>[];
 
-    // Check cache for each normalized date
-    for (final date in normalizedDates) {
-      final cacheKey = _getCacheKey(
-        assetId,
-        priceDate: date,
-        quoteCurrency: quoteCurrency,
-      );
+    for (final date in {for (final date in dates) _normalizeDate(date)}) {
+      if (date.isAfter(today)) continue;
+      final cacheKey = cacheKeyFor(date);
       final cachedPrice = _getCachedPrice(cacheKey);
       if (cachedPrice != null) {
-        cached[date] = cachedPrice;
-      } else {
+        prices[date] = cachedPrice;
+      } else if (date == today) {
+        currentDays.add(date);
+      } else if (!_isKnownUnpriced(cacheKey)) {
         missingDates.add(date);
       }
     }
 
-    if (missingDates.isEmpty) {
-      return cached;
-    }
-
-    // Use mixin method for fetching missing prices
-    final priceDoubleMap = await tryRepositoriesInOrder(
-      assetId,
-      quoteCurrency,
-      PriceRequestType.priceHistory,
-      (repo) => repo.getCoinFiatPrices(
+    // Daily history may not include the day in progress (CoinPaprika never
+    // does), while the current price always describes it.
+    if (currentDays.isNotEmpty) {
+      final currentPrice = await maybeFiatPrice(
         assetId,
-        missingDates,
-        fiatCurrency: quoteCurrency,
-      ),
-      'fiatPriceHistory',
-    );
-
-    // Convert to Decimal, cache, and merge with cached
-    final priceMap = priceDoubleMap.map((date, value) {
-      final dec = Decimal.parse(value.toString());
-      // Normalize the date from the repository response to UTC midnight
-      final normalizedDate = DateTime.utc(date.year, date.month, date.day);
-      final cacheKey = _getCacheKey(
-        assetId,
-        priceDate: normalizedDate,
         quoteCurrency: quoteCurrency,
       );
-      _priceCache[cacheKey] = dec;
-      return MapEntry(normalizedDate, dec);
-    });
+      if (currentPrice == null) {
+        missingDates.addAll(
+          currentDays.where(
+            (date) => !_isKnownUnpricedToday(cacheKeyFor(date)),
+          ),
+        );
+      } else {
+        for (final date in currentDays) {
+          prices[date] = currentPrice;
+        }
+      }
+    }
 
-    return {...cached, ...priceMap};
+    if (missingDates.isNotEmpty) {
+      final accumulated = <DateTime, Decimal>{};
+      var hadFailure = false;
+      Map<DateTime, Decimal> fetched;
+      try {
+        fetched = await tryRepositoriesInOrder(
+          assetId,
+          quoteCurrency,
+          PriceRequestType.priceHistory,
+          (repo) async {
+            final remaining = missingDates
+                .where((date) => !accumulated.containsKey(date))
+                .toList();
+            final remainingSet = remaining.toSet();
+            try {
+              final result = await repo.getCoinFiatPrices(
+                assetId,
+                remaining,
+                fiatCurrency: quoteCurrency,
+              );
+              for (final entry in result.entries) {
+                final date = _normalizeDate(entry.key);
+                if (remainingSet.contains(date)) {
+                  accumulated[date] = entry.value;
+                }
+              }
+            } catch (_) {
+              hadFailure = true;
+              rethrow;
+            }
+            return accumulated;
+          },
+          'fiatPriceHistory',
+          maxTotalAttempts: priceRepositories.length > 3
+              ? priceRepositories.length
+              : 3,
+          isComplete: (result) => missingDates.every(result.containsKey),
+        );
+      } catch (e) {
+        // The days already priced (cache hits, today's price) are still
+        // right. The rest stay unknown, not unpriced, so they are asked for
+        // again next time.
+        if (prices.isEmpty && accumulated.isEmpty) rethrow;
+        _logger.fine(
+          'Returning the ${prices.length + accumulated.length} known prices '
+          'for ${assetId.symbol.assetConfigId}; the rest failed: $e',
+        );
+        hadFailure = true;
+        fetched = accumulated;
+      }
+
+      fetched.forEach((date, price) {
+        final normalizedDate = _normalizeDate(date);
+        _cacheDatedPrice(
+          cacheKeyFor(normalizedDate),
+          normalizedDate,
+          price,
+          requestDay: today,
+        );
+        prices[normalizedDate] = price;
+      });
+      final unpriced = missingDates.where((date) => !prices.containsKey(date));
+      if (!hadFailure &&
+          unpriced.isNotEmpty &&
+          !await hasUnavailableRepositoriesFor(
+            assetId,
+            quoteCurrency,
+            PriceRequestType.priceHistory,
+          )) {
+        final learntAt = _clock();
+        for (final date in unpriced) {
+          final memo = date.isBefore(today)
+              ? _unpricedPastDays
+              : _unpricedCurrentDays;
+          memo[cacheKeyFor(date)] = learntAt;
+        }
+      }
+    }
+
+    final sortedDates = prices.keys.toList()..sort();
+    return {for (final date in sortedDates) date: prices[date]!};
   }
 
   @override
@@ -456,6 +603,9 @@ class CexMarketDataManager
     _cacheTimer?.cancel();
     _cacheTimer = null;
     _priceCache.clear();
+    _pastDayPriceCache.clear();
+    _unpricedPastDays.clear();
+    _unpricedCurrentDays.clear();
     _lastKnownCurrentPriceCache.clear();
     _priceChangeCache.clear();
     clearRepositoryHealthData(); // Clear mixin data

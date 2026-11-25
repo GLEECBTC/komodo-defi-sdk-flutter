@@ -44,6 +44,28 @@ abstract interface class KomodoDefiAuth {
   void ensureSessionContextCurrent(AuthSessionContext context);
   Stream<AuthSessionContext?> watchSessionContext();
 
+  /// Dispatches one request against [expected]'s engine, holding off for a
+  /// bounded time any authentication transition that would replace it. An
+  /// ended session is rejected before [dispatch] runs, including one revoked
+  /// while waiting for the lease.
+  ///
+  /// [dispatch] must perform only the raw request: it must not call auth APIs,
+  /// acquire another session lease, or include polling/recovery. The lease is
+  /// held until its actual transport settles, for at most a bounded time, and
+  /// only stopping or starting the engine, or resetting its transport, waits
+  /// for it: identity reads never delay a dispatch, and recovering from a
+  /// failed read never aborts one. Past the bound a transition may stop the
+  /// engine, which fails the unanswered request and resets the transport
+  /// before a replacement starts, so a request the engine never answers
+  /// cannot hold off sign-out or wallet switching.
+  ///
+  /// Once [dispatch] begins, a later session change does not prove
+  /// cancellation; callers must preserve uncertainty about acceptance.
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  );
+
   /// Merges metadata atomically after fresh identity verification. Null values
   /// remove keys. Throws [AuthIdentityUnavailableException] for retryable proof
   /// loss and [AuthSessionChangedException] when the original session ended.
@@ -103,7 +125,8 @@ abstract interface class KomodoDefiAuth {
   });
 
   /// Creates a new wallet and saves [initialMetadata] before publishing it.
-  /// Existing names always fail with [AuthExceptionType.walletAlreadyExists].
+  /// Existing names fail with [AuthExceptionType.walletAlreadyExists] unless
+  /// resuming the same [provisioningId].
   ///
   /// By default, the system will launch in HD mode (enabled in the [AuthOptions]),
   /// which may differ from the non-HD mode used in other areas of the KDF API.
@@ -112,6 +135,15 @@ abstract interface class KomodoDefiAuth {
   ///
   /// Throws [AuthException] if registration is disabled or if an error occurs
   /// during registration.
+  ///
+  /// [provisioningId] is a caller-persisted random identifier (16–128 URL-safe
+  /// characters) for one recoverable creation. Persist its password first and
+  /// reuse the same name, password and options on retry. A matching operation
+  /// resumes an existing engine wallet without generating another seed; all
+  /// other collisions still fail. It also becomes the immutable entry ID.
+  /// A collision permits choosing a different name only when the exception's
+  /// `canRetryWithDifferentName` detail is explicitly true. Otherwise preserve
+  /// the pending operation: it may already own the wallet under its old name.
   Future<KdfUser> register({
     required String walletName,
     required String password,
@@ -120,6 +152,7 @@ abstract interface class KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   });
 
   /// Creates a new wallet and saves [initialMetadata] before publishing it.
@@ -184,19 +217,41 @@ abstract interface class KomodoDefiAuth {
   ///
   /// A [walletPassword] must be provided to decrypt the mnemonic.
   /// Throws [AuthException] if an error occurs during retrieval or if no user
-  /// is signed in.
+  /// is signed in, and [RpcDispatchRejected] when the caller's dispatch guard
+  /// refused the request, which was then never sent.
   Future<Mnemonic> getMnemonicPlainText(String walletPassword);
+
+  /// Freshly verifies [password] for this exact wallet and runtime session.
+  /// Does not return or publish the decrypted mnemonic.
+  ///
+  /// Throws [AuthIdentityUnavailableException] when the same wallet's identity
+  /// proof is missing and the call may be retried, the base
+  /// [WalletChangedDisconnectException] for a different wallet, and
+  /// [RpcDispatchRejected] when the caller's dispatch guard refused the
+  /// request. An engine that could not be reached leaves the session signed in
+  /// and throws [AuthException] with [AuthExceptionType.apiConnectionError].
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  });
 
   /// Changes the password used to encrypt/decrypt the mnemonic.
   ///
   /// This is used to change the password that protects the wallet's seed phrase.
   /// Both the current and new passwords must be provided.
+  /// Capture and pass [expectedWalletId] and [expectedSession] before awaiting
+  /// authorization or durable journal writes to reject a switched wallet.
   ///
   /// Throws [AuthException] if the current password is incorrect or if no user
-  /// is signed in.
+  /// is signed in. [RpcDispatchRejected] means the caller's dispatch guard
+  /// refused the request and the password is unchanged; identity failures are
+  /// reported as for [verifyPassword].
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   });
 
   /// Deletes the specified wallet.
@@ -205,6 +260,13 @@ abstract interface class KomodoDefiAuth {
     required String password,
     WalletDeletionPermit? permit,
   });
+
+  /// Retries non-secret metadata cleanup after a committed engine deletion.
+  /// Returns false if the name or immutable entry is now owned by another
+  /// wallet. Never deletes credential-vault data or a running engine wallet.
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  );
 
   /// Sets the value of a single key in the active user's metadata.
   ///
@@ -249,9 +311,11 @@ abstract interface class KomodoDefiAuth {
 
   /// [expectedWalletId] must be the verified identity captured when the
   /// operation began, before any asynchronous work whose result is being saved.
-  /// A missing public-key hash in either identity, or a mismatch with the
-  /// freshly resolved active wallet, throws [WalletChangedDisconnectException]
-  /// before metadata is changed. Do not retry against a replacement wallet.
+  /// A mismatch with the freshly resolved active wallet throws
+  /// [WalletChangedDisconnectException] before metadata is changed, and a
+  /// missing public-key hash in either identity of the same wallet throws its
+  /// retryable subtype [AuthIdentityUnavailableException]. Do not retry against
+  /// a replacement wallet.
   Future<void> setOrRemoveActiveUserKeyValue(
     String key,
     dynamic value, {
@@ -362,19 +426,22 @@ abstract interface class KomodoDefiAuth {
 
 class KomodoDefiLocalAuth implements KomodoDefiAuth {
   /// [lifiProxyUrl] reaches every KDF start; see
-  /// `KdfStartupConfig.lifiProxyUrl`.
+  /// `KdfStartupConfig.lifiProxyUrl`. So does [desktopDataDirectory]; see
+  /// [KdfDesktopDataDirectory].
   KomodoDefiLocalAuth({
     required KomodoDefiFramework kdf,
     required IKdfHostConfig hostConfig,
     bool allowRegistrations = true,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfDesktopDataDirectory? desktopDataDirectory,
   }) : _allowRegistrations = allowRegistrations,
        _authService = KdfAuthService(
          kdf,
          hostConfig,
          lifiProxyUrl: lifiProxyUrl,
          lifiIntegrator: lifiIntegrator,
+         desktopDataDirectory: desktopDataDirectory,
        ) {
     _trezorAuthService = TrezorAuthService(_authService, TrezorRepository(kdf));
   }
@@ -423,6 +490,12 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   @override
   Stream<AuthSessionContext?> watchSessionContext() =>
       _authService.watchSessionContext();
+
+  @override
+  Future<T> runWithSession<T>(
+    AuthSessionContext expected,
+    Future<T> Function() dispatch,
+  ) => _authService.runWithSession(expected, dispatch);
 
   @override
   Future<KdfUser> updateMetadataForSession(
@@ -559,6 +632,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) => _runAuthTransition(
     () => _register(
       walletName: walletName,
@@ -566,6 +640,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       options: options,
       mnemonic: mnemonic,
       initialMetadata: initialMetadata,
+      provisioningId: provisioningId,
     ),
   );
 
@@ -577,9 +652,16 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
     ),
     Mnemonic? mnemonic,
     Map<String, dynamic> initialMetadata = const {},
+    String? provisioningId,
   }) async {
     await ensureInitialized();
-    await _assertAuthState(false);
+    // An interrupted creation can leave its own engine session running. Only
+    // that same target may resume; the service still verifies the reservation
+    // and password under its catalog/write locks.
+    if (provisioningId == null ||
+        (await _authService.getActiveUser())?.walletId.name != walletName) {
+      await _assertAuthState(false);
+    }
 
     if (!_allowRegistrations) {
       throw AuthException(
@@ -603,6 +685,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       options: options,
       mnemonic: mnemonic,
       initialMetadata: initialMetadata,
+      provisioningId: provisioningId,
     );
 
     return user;
@@ -771,6 +854,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         encrypted: true,
         walletPassword: null,
       );
+    } on RpcDispatchRejected {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (_) {
@@ -791,6 +876,8 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
         encrypted: false,
         walletPassword: walletPassword,
       );
+    } on RpcDispatchRejected {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (_) {
@@ -802,9 +889,25 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
   }
 
   @override
+  Future<void> verifyPassword({
+    required String password,
+    required WalletId expectedWalletId,
+    AuthSessionContext? expectedSession,
+  }) async {
+    await ensureInitialized();
+    await _authService.verifyPassword(
+      password: password,
+      expectedWalletId: expectedWalletId,
+      expectedSession: expectedSession,
+    );
+  }
+
+  @override
   Future<void> updatePassword({
     required String currentPassword,
     required String newPassword,
+    WalletId? expectedWalletId,
+    AuthSessionContext? expectedSession,
   }) async {
     await ensureInitialized();
     await _assertAuthState(true);
@@ -813,12 +916,20 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       await _authService.updatePassword(
         currentPassword: currentPassword,
         newPassword: newPassword,
+        expectedWalletId: expectedWalletId,
+        expectedSession: expectedSession,
       );
+    } on RpcDispatchRejected {
+      rethrow;
+    } on AuthSessionChangedException {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
     } on AuthException {
       rethrow;
-    } catch (e) {
+    } catch (_) {
       throw AuthException(
-        'An unexpected error occurred while changing the password: $e',
+        'An unexpected error occurred while changing the password',
         type: AuthExceptionType.generalAuthError,
       );
     }
@@ -852,6 +963,7 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
       await _authService.deleteWallet(
         walletName: walletName,
         password: password,
+        allowActiveWallet: permit != null,
         beforeDelete: (target) async {
           deleted = target.walletId;
           try {
@@ -880,15 +992,29 @@ class KomodoDefiLocalAuth implements KomodoDefiAuth {
           }
         },
       );
+    } on WalletDeletionCommittedException {
+      rethrow;
+    } on RpcDispatchRejected {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
     } on AuthException {
       rethrow;
     } catch (e) {
       if (identical(e, reviewError)) rethrow;
       throw AuthException(
-        'An unexpected error occurred while deleting the wallet: $e',
+        'An unexpected error occurred while deleting the wallet',
         type: AuthExceptionType.generalAuthError,
       );
     }
+  }
+
+  @override
+  Future<bool> retryWalletDeletionCleanup(
+    WalletDeletionCommittedException deleted,
+  ) async {
+    await ensureInitialized();
+    return _authService.retryWalletDeletionCleanup(deleted);
   }
 
   @override

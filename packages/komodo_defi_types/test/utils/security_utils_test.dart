@@ -674,6 +674,27 @@ void main() {
   });
 
   group('Diagnostic JSON redaction', () {
+    test('removes passkey derivation and credential containers', () {
+      const canary = 'QWxwaGFHdWFyZFRlc3RDYW5hcnk=';
+      final input = <String, dynamic>{
+        'prf': {
+          'results': {'first': canary},
+        },
+        'prfOutput': canary,
+        'PRFResult': canary,
+        'device_prf_output': canary,
+        'wrapping-key': canary,
+        'derivedKey': canary,
+        'credentialId': canary,
+        'credential': {'value': canary},
+        'rotationEnvelope': canary,
+        'protection': 'passkey',
+      };
+      final censored = input.censored();
+      expect(censored.toString(), isNot(contains(canary)));
+      expect(censored['protection'], 'passkey');
+      expect(input['prfOutput'], canary);
+    });
     test('recursively removes credentials and signed relay payloads', () {
       final request = <String, dynamic>{
         'method': 'send_raw_transaction',

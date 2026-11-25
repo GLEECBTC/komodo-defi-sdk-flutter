@@ -5,3 +5,11 @@ analyzer:
   errors:
     public_member_api_docs: ignore
     use_if_null_to_convert_nulls_to_bools: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**

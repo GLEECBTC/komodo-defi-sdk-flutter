@@ -157,6 +157,10 @@ const _sensitiveLogKeys = <String>{
   'authorization_context',
   'bearer_token',
   'cookie',
+  'credential',
+  'credential_id',
+  'credential_response',
+  'derived_key',
   'expected_authorization',
   'gasless_authorization',
   'id_token',
@@ -165,6 +169,9 @@ const _sensitiveLogKeys = <String>{
   'password',
   'pin',
   'plaintext_mnemonic',
+  'prf',
+  'prf_output',
+  'prf_result',
   'priv_key',
   'priv_keys',
   'private_key',
@@ -173,6 +180,7 @@ const _sensitiveLogKeys = <String>{
   'refresh_token',
   'rpc_password',
   'rpc_pass',
+  'rotation_envelope',
   'seed',
   'secret',
   'secret_key',
@@ -188,6 +196,7 @@ const _sensitiveLogKeys = <String>{
   'view_key',
   'viewing_key',
   'wallet_password',
+  'wrapping_key',
   'wif',
 };
 
@@ -220,6 +229,9 @@ bool _isSensitiveLogKey(Object? key) {
       normalized.endsWith('_passphrase') ||
       normalized.endsWith('_private_key') ||
       normalized.endsWith('_priv_key') ||
+      normalized.endsWith('_prf_output') ||
+      normalized.endsWith('_prf_result') ||
+      normalized.endsWith('_wrapping_key') ||
       normalized.endsWith('_secret') ||
       normalized.endsWith('_signature');
 }

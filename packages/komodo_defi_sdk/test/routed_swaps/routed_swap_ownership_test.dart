@@ -114,6 +114,12 @@ void main() {
       () async {
         var task = 0;
         final kdf = ScriptedKdf()
+          ..always(
+            'routed_swap::quote',
+            (_) => ok({
+              'routes': [routeJson()],
+            }),
+          )
           ..always('task::routed_swap::init', (_) => ok({'task_id': ++task}))
           ..always('task::routed_swap::status', dropped)
           ..always(
@@ -127,7 +133,12 @@ void main() {
         addTearDown(manager.dispose);
         Future<Object> attempt() async {
           try {
-            return await manager.start(offerOf());
+            final offer = await manager.quote(
+              from: usdc,
+              to: usdt,
+              amount: d('100'),
+            );
+            return await manager.start(offer);
           } on Object catch (error) {
             return error;
           }
@@ -203,11 +214,21 @@ void main() {
       final auth = HeldSessionStreamAuth(_a);
       final init = Completer<Map<String, dynamic>>();
       final kdf = ScriptedKdf()
+        ..always(
+          'routed_swap::quote',
+          (_) => ok({
+            'routes': [routeJson()],
+          }),
+        )
         ..always('task::routed_swap::init', (_) => init.future);
       final manager = managerFor(kdf, auth: auth);
+      final offer = awaited(
+        async,
+        manager.quote(from: usdc, to: usdt, amount: d('100')),
+      );
       Object? error;
       manager
-          .start(offerOf())
+          .start(offer)
           .then<void>(
             (_) {},
             onError: (Object e) {

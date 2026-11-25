@@ -4,6 +4,7 @@ part of 'routed_swap_manager.dart';
 extension _RoutedSwapProgressMapping on RoutedSwapManager {
   RoutedSwapProgress _progressFromStatus(
     rpc.RoutedSwapStatus status, {
+    required AuthSessionContext session,
     RoutedSwapOffer? accepted,
     RoutedSwapOffer? previousExecuted,
     List<String> approvalTxHashes = const [],
@@ -12,6 +13,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
     final executed = _offerFromExecuted(
       status.executedRoute,
       accepted,
+      session: session,
       previous: previousExecuted,
     );
     switch (status) {
@@ -67,6 +69,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
       case rpc.RoutedSwapErrored():
         final failure = _failureFrom(
           status,
+          session: session,
           accepted: accepted ?? executed,
           approvalTxHashes: approvalTxHashes,
         );
@@ -98,6 +101,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
 
   RoutedSwapProgress _progressFromEntry(
     rpc.RoutedSwapHistoryEntry entry, {
+    required AuthSessionContext session,
     RoutedSwapOffer? accepted,
     RoutedSwapProgress? previous,
   }) {
@@ -106,6 +110,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
         : previous?.approvalTxHashes ?? const <String>[];
     final base = _progressFromStatus(
       entry.swap,
+      session: session,
       accepted: accepted,
       previousExecuted: previous?.executedOffer,
       approvalTxHashes: hashes,
@@ -147,6 +152,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
 
   RoutedSwapFailure _failureFrom(
     rpc.RoutedSwapErrored status, {
+    required AuthSessionContext session,
     required List<String> approvalTxHashes,
     RoutedSwapOffer? accepted,
   }) {
@@ -192,6 +198,7 @@ extension _RoutedSwapProgressMapping on RoutedSwapManager {
         // Accepting it starts a swap, so it carries a guard like a quote.
         freshOffer = _offerFrom(
           freshRoute,
+          session: session,
           from: from,
           to: to,
           order: accepted?.order,

@@ -44,6 +44,20 @@ void main() {
   File script(String body) =>
       File('${sandbox.path}/kdf')..writeAsStringSync('#!/bin/sh\n$body\n');
 
+  for (final key in ['wallet_password', 'rpc_password', 'passphrase']) {
+    test('rejects $key before locating or launching an executable', () async {
+      var lookedUp = false;
+      final result = await operations(() async {
+        lookedUp = true;
+        return null;
+      }).kdfMain({..._params, key: 'SECRET_CANARY'});
+      expect(result, KdfStartupResult.spawnError);
+      expect(lookedUp, isFalse);
+      expect(logs.join('\n'), isNot(contains('SECRET_CANARY')));
+      expect(logs.join('\n'), contains('type=configurationError'));
+    });
+  }
+
   Future<void> exitCleanup() async {
     for (var i = 0; i < 100; i++) {
       if (logs.contains('Temporary directory deleted successfully.')) return;
@@ -62,163 +76,150 @@ void main() {
     expect(logs.join('\n'), isNot(contains(sandbox.path)));
   }
 
-  group(
-    'KdfOperationsLocalExecutable.kdfMain',
-    () {
-      test(
-        'creates a temporary directory that path_provider only names',
-        () async {
-          // path_provider_foundation 2.6.0 names Library/Caches/<bundle id>
-          // in the macOS sandbox without creating it.
-          final caches = Directory(
-            '${sandbox.path}/Library/Caches/com.example',
-          );
-          final kdf = script(_copyCoinsThenExit2);
+  group('KdfOperationsLocalExecutable.kdfMain', () {
+    test(
+      'creates a temporary directory that path_provider only names',
+      () async {
+        // path_provider_foundation 2.6.0 names Library/Caches/<bundle id>
+        // in the macOS sandbox without creating it.
+        final caches = Directory('${sandbox.path}/Library/Caches/com.example');
+        final kdf = script(_copyCoinsThenExit2);
 
-          final result = await operations(
-            () async => kdf,
-            temporaryDirectory: caches,
-          ).kdfMain(_params);
+        final result = await operations(
+          () async => kdf,
+          temporaryDirectory: caches,
+        ).kdfMain(_params);
 
-          // Only the executable's own exit status yields configError here.
-          expect(result, KdfStartupResult.configError);
-          expect(caches.existsSync(), isTrue);
-          expect(
-            jsonDecode(File('${sandbox.path}/coins.json').readAsStringSync()),
-            _params['coins'],
-          );
-          await exitCleanup();
-          expect(caches.listSync(), isEmpty);
-        },
-      );
-
-      test('returns the exit status of a KDF that exits on start', () async {
-        final kdf = script('exit 4');
-
-        final result = await operations(() async => kdf).kdfMain(_params);
-
-        expect(result, KdfStartupResult.initError);
+        // Only the executable's own exit status yields configError here.
+        expect(result, KdfStartupResult.configError);
+        expect(caches.existsSync(), isTrue);
+        expect(
+          jsonDecode(File('${sandbox.path}/coins.json').readAsStringSync()),
+          _params['coins'],
+        );
         await exitCleanup();
-      });
+        expect(caches.listSync(), isEmpty);
+      },
+    );
 
-      test('reports a start without a coins list as invalid params', () async {
-        final kdf = script('exit 0');
+    test('returns the exit status of a KDF that exits on start', () async {
+      final kdf = script('exit 4');
 
-        final result = await operations(
-          () async => kdf,
-        ).kdfMain(<String, dynamic>{});
+      final result = await operations(() async => kdf).kdfMain(_params);
 
-        expect(result, KdfStartupResult.invalidParams);
-        expect(logs, contains('KDF process startup failed'));
-      });
-    },
-    skip: Platform.isWindows ? 'the fake KDF is a POSIX shell script' : null,
-  );
+      expect(result, KdfStartupResult.initError);
+      await exitCleanup();
+    });
 
-  group(
-    'KdfOperationsLocalExecutable.kdfMain when KDF never launched',
-    () {
-      test('reports a missing executable as a spawn error', () async {
-        final result = await operations(() async => null).kdfMain(_params);
+    test('reports a start without a coins list as invalid params', () async {
+      final kdf = script('exit 0');
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          equals('KDF process launch failed type=executableNotFound'),
-        );
-      });
+      final result = await operations(() async => kdf)
+          .kdfMain(<String, dynamic>{});
 
-      test('reports an executable it cannot mark runnable', () async {
-        final absent = File('${sandbox.path}/absent/kdf');
+      expect(result, KdfStartupResult.invalidParams);
+      expect(logs, contains('KDF process startup failed'));
+    });
+  }, skip: Platform.isWindows ? 'the fake KDF is a POSIX shell script' : null);
 
-        final result = await operations(() async => absent).kdfMain(_params);
+  group('KdfOperationsLocalExecutable.kdfMain when KDF never launched', () {
+    test('reports a missing executable as a spawn error', () async {
+      final result = await operations(() async => null).kdfMain(_params);
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          equals('KDF process launch failed type=permissionError'),
-        );
-      });
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        equals('KDF process launch failed type=executableNotFound'),
+      );
+    });
 
-      test('reports a temporary directory it cannot create', () async {
-        final kdf = script('exit 0');
-        final notADirectory = File('${sandbox.path}/tmp')
-          ..writeAsStringSync('');
+    test('reports an executable it cannot mark runnable', () async {
+      final absent = File('${sandbox.path}/absent/kdf');
 
-        final result = await operations(
-          () async => kdf,
-          temporaryDirectory: Directory(notADirectory.path),
-        ).kdfMain(_params);
+      final result = await operations(() async => absent).kdfMain(_params);
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          matches(
-            '^KDF process launch failed type=startupFailed '
-            r'cause=file_system os_error=\d+$',
-          ),
-        );
-      });
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        equals('KDF process launch failed type=permissionError'),
+      );
+    });
 
-      test('reports an executable the OS refuses to run', () async {
-        final directory = Directory('${sandbox.path}/kdf')..createSync();
-        final temporary = Directory('${sandbox.path}/tmp');
+    test('reports a temporary directory it cannot create', () async {
+      final kdf = script('exit 0');
+      final notADirectory = File('${sandbox.path}/tmp')..writeAsStringSync('');
 
-        final result = await operations(
-          () async => File(directory.path),
-          temporaryDirectory: temporary,
-        ).kdfMain(_params);
+      final result = await operations(
+        () async => kdf,
+        temporaryDirectory: Directory(notADirectory.path),
+      ).kdfMain(_params);
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          matches(
-            '^KDF process launch failed type=startupFailed '
-            r'cause=process os_error=\d+$',
-          ),
-        );
-        expect(temporary.listSync(), isEmpty);
-      });
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        matches(
+          '^KDF process launch failed type=startupFailed '
+          r'cause=file_system os_error=\d+$',
+        ),
+      );
+    });
 
-      test('reports a coins list it cannot read', () async {
-        final kdf = script('exit 0');
+    test('reports an executable the OS refuses to run', () async {
+      final directory = Directory('${sandbox.path}/kdf')..createSync();
+      final temporary = Directory('${sandbox.path}/tmp');
 
-        final result = await operations(
-          () async => kdf,
-        ).kdfMain(<String, dynamic>{'coins': 'not-a-list'});
+      final result = await operations(
+        () async => File(directory.path),
+        temporaryDirectory: temporary,
+      ).kdfMain(_params);
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          equals('KDF process launch failed type=startupFailed cause=argument'),
-        );
-      });
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        matches(
+          '^KDF process launch failed type=startupFailed '
+          r'cause=process os_error=\d+$',
+        ),
+      );
+      expect(temporary.listSync(), isEmpty);
+    });
 
-      test('reports a failing executable lookup', () async {
-        final result = await operations(
-          () async => throw FileSystemException('lookup failed', sandbox.path),
-        ).kdfMain(_params);
+    test('reports a coins list it cannot read', () async {
+      final kdf = script('exit 0');
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          equals(
-            'KDF process launch failed type=startupFailed cause=file_system',
-          ),
-        );
-      });
+      final result = await operations(() async => kdf)
+          .kdfMain(<String, dynamic>{'coins': 'not-a-list'});
 
-      test('logs only the type of an injected KdfException', () async {
-        final result = await operations(
-          () async => throw KdfException(
-            'lookup failed',
-            type: KdfExceptionType.configurationError,
-            details: {'reason': sandbox.path},
-          ),
-        ).kdfMain(_params);
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        equals('KDF process launch failed type=startupFailed cause=argument'),
+      );
+    });
 
-        expect(result, KdfStartupResult.spawnError);
-        expectLaunchFailureLog(
-          equals('KDF process launch failed type=configurationError'),
-        );
-      });
-    },
-    skip: Platform.isWindows ? 'the fake KDF is a POSIX shell script' : null,
-  );
+    test('reports a failing executable lookup', () async {
+      final result = await operations(
+        () async => throw FileSystemException('lookup failed', sandbox.path),
+      ).kdfMain(_params);
+
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        equals(
+          'KDF process launch failed type=startupFailed cause=file_system',
+        ),
+      );
+    });
+
+    test('logs only the type of an injected KdfException', () async {
+      final result = await operations(
+        () async => throw KdfException(
+          'lookup failed',
+          type: KdfExceptionType.configurationError,
+          details: {'reason': sandbox.path},
+        ),
+      ).kdfMain(_params);
+
+      expect(result, KdfStartupResult.spawnError);
+      expectLaunchFailureLog(
+        equals('KDF process launch failed type=configurationError'),
+      );
+    });
+  }, skip: Platform.isWindows ? 'the fake KDF is a POSIX shell script' : null);
 }
 
 final _params = <String, dynamic>{

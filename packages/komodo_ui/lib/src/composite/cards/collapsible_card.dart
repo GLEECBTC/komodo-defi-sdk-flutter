@@ -228,9 +228,12 @@ class _CollapsibleCardState extends State<CollapsibleCard>
         child: Container(
           margin: widget.childrenMargin,
           decoration: widget.childrenDecoration,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: _generateDividedChildWidgets(),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _generateDividedChildWidgets(),
+            ),
           ),
         ),
       ),
@@ -273,10 +276,9 @@ class _CollapsibleCardState extends State<CollapsibleCard>
         turns: _iconTurns,
         child: Icon(
           Icons.expand_more,
-          color:
-              hasChildren
-                  ? (iconTheme.color ?? theme.colorScheme.onSurface)
-                  : theme.colorScheme.onSurface.withOpacity(0.38),
+          color: hasChildren
+              ? (iconTheme.color ?? theme.colorScheme.onSurface)
+              : theme.colorScheme.onSurface.withOpacity(0.38),
         ),
       ),
     );

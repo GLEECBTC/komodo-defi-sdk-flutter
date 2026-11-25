@@ -64,30 +64,31 @@ class TrezorRepository {
         devicePubkey: devicePubkey,
       );
 
-      taskId = initResponse.taskId;
+      final initializationTaskId = initResponse.taskId;
+      taskId = initializationTaskId;
       controller = StreamController<TrezorInitializationState>();
-      _activeInitializations[taskId] = controller;
+      _activeInitializations[initializationTaskId] = controller;
 
       yield TrezorInitializationState(
         status: AuthenticationStatus.initializing,
         message: 'Initialization started, checking status...',
-        taskId: taskId,
+        taskId: initializationTaskId,
       );
 
       var isComplete = false;
 
       Future<void> pollStatus() async {
-        if (isComplete || taskId == null) return;
+        if (isComplete) return;
 
         try {
           final statusResponse = await _client.rpc.trezor.status(
-            taskId: taskId,
+            taskId: initializationTaskId,
             forgetIfFinished: false,
           );
 
           final state = TrezorInitializationState.fromStatusResponse(
             statusResponse,
-            taskId,
+            initializationTaskId,
           );
 
           if (!controller!.isClosed) {

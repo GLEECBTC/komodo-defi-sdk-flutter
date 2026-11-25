@@ -205,6 +205,7 @@ class _RoutedSwapSession {
     }
     final progress = _manager._progressFromStatus(
       response.details,
+      session: walletSession,
       accepted: offer,
       previousExecuted: _latest.executedOffer,
       approvalTxHashes: _latest.approvalTxHashes,
@@ -225,6 +226,7 @@ class _RoutedSwapSession {
       if (entry != null && entry.swap.isTerminal) {
         return _manager._progressFromEntry(
           entry,
+          session: walletSession,
           accepted: offer,
           previous: terminal,
         );
@@ -247,7 +249,12 @@ class _RoutedSwapSession {
     final entry = await _manager._entryFor(uuid, walletSession);
     if (entry == null) throw RoutedSwapNotFoundException(uuid);
     _emit(
-      _manager._progressFromEntry(entry, accepted: offer, previous: _latest),
+      _manager._progressFromEntry(
+        entry,
+        session: walletSession,
+        accepted: offer,
+        previous: _latest,
+      ),
     );
   }
 
@@ -257,9 +264,16 @@ class _RoutedSwapSession {
     _taskId = null;
     try {
       _manager._requireCurrent(walletSession);
-      await _manager._client.rpc.routedSwap.status(
-        taskId,
-        forgetIfFinished: true,
+      await _manager._auth.runWithSession(
+        walletSession,
+        () => RpcDispatchGuard.run(
+          () => _manager._requireCurrent(walletSession),
+          () => _manager._client.rpc.routedSwap.status(
+            taskId,
+            forgetIfFinished: true,
+          ),
+          methods: const {'task::routed_swap::status'},
+        ),
       );
     } on Object {
       // Already gone is the same outcome.
@@ -309,6 +323,7 @@ class _RoutedSwapSession {
       throw RoutedSwapNotCancellableException(uuid, _latest.phase);
     }
 
+    var dispatched = false;
     try {
       // A restart can reuse this id between polls. Re-read and verify the
       // UUID before addressing a cancellation to it.
@@ -325,8 +340,18 @@ class _RoutedSwapSession {
         );
       }
       _manager._requireCurrent(walletSession);
-      await _manager._client.rpc.routedSwap.cancel(taskId);
+      await _manager._auth.runWithSession(walletSession, () {
+        _manager._requireCurrent(walletSession);
+        dispatched = true;
+        return RpcDispatchGuard.run(
+          () => _manager._requireCurrent(walletSession),
+          () => _manager._client.rpc.routedSwap.cancel(taskId),
+          methods: const {'task::routed_swap::cancel'},
+        );
+      });
       _manager._requireCurrent(walletSession);
+    } on RpcDispatchRejected {
+      rethrow;
     } on RoutedSwapNotCancellableException {
       rethrow;
     } on rpc.RoutedSwapTaskAlreadyBroadcastException {
@@ -353,6 +378,7 @@ class _RoutedSwapSession {
             : RoutedSwapCancelRefusal.notAddressable,
       );
     } on Object catch (error) {
+      if (!dispatched && error is AuthSessionChangedException) rethrow;
       _refreshSoon();
       throw RoutedSwapCancelUnconfirmedException(uuid, error);
     }

@@ -14,3 +14,4 @@ export 'src/process_kdf_operations.dart';
 export 'src/replay_kdf_operations.dart';
 export 'src/routed_swap_fixture.dart';
 export 'src/secret.dart';
+export 'src/solana_wallet_fixture.dart';

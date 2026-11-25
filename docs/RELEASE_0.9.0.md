@@ -48,6 +48,12 @@ wallet invalidates existing sessions and rejects late responses. An unanswered
 initial status remains `RoutedSwapStartUnconfirmedException` with its task ID;
 matching amounts or minima in history never establish which swap was started.
 
+Start only offers the manager issued in the current session: from `quote`,
+`quoteMax`, `maxSellAmount` or a failure's `freshOffer`, or a `copyWith` or
+`keepingMinimum` copy of one. For an offer priced before a sign-out, a wallet
+switch or same-wallet reauthentication, and for one constructed directly,
+`start` throws `AuthSessionChangedException` having sent nothing; quote again.
+
 The [manager](../packages/komodo_defi_sdk/lib/src/routed_swaps/routed_swap_manager.dart)
 and [typed requests](../packages/komodo_defi_rpc_methods/lib/src/rpc_methods/routed_swap/routed_swap_requests.dart)
 define the supported parameters. Preserve typed errors, approval hashes,
@@ -63,21 +69,72 @@ separate, bounded quote policy and is not introduced into the reusable SDK.
 
 ## Startup and engine compatibility
 
+### Submission ownership
+
+Executable routed offers must come from the same `RoutedSwapManager` that
+executes them, in the same uninterrupted wallet session. Directly constructed
+offers are display-only. `copyWith` and `keepingMinimum` preserve private
+issuance; there is no public session-rebinding API. Reauthentication, including
+the same wallet, requires a fresh quote and confirmation.
+
+Custom auth implementations must implement
+`runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+Validate the original session before waiting and after acquiring the engine
+lease. Hold that lease until the raw request settles; only engine stops,
+starts and transport resets take the corresponding write lease, so identity
+reads never delay a dispatch and recovering from a failed read never aborts
+one. The callback must not re-enter authentication or await status polling.
+The lease is bounded (`dispatchLeaseTimeout`, 10 seconds by default): past it
+a transition may stop the engine, which fails the unanswered request and
+resets the HTTP client before any replacement engine starts, so the request
+never reaches another wallet's engine. A lost answer remains an unconfirmed
+start.
+
+That guarantee rests on `IKdfOperations.resetHttpClient` aborting every
+request in flight, including one still connecting. The native, remote and
+local-executable operations do; a custom implementation must too. WASM
+hands a request to its engine within microtasks of the dispatch, long before
+the bound, so it has nothing left to abort.
+
+A stop runs while the engine is held, and recovery waits for it, so a stop
+must not wait for good. The remote and local-executable operations give up on
+a `stop` request the engine never answers after `stopTimeout`, 5 seconds by
+default. A stop that fails still resets the transport before the engine is
+released.
+
+`RoutedSwapManager.start` accepts an optional synchronous `beforeDispatch`
+callback for a caller's revocable confirmation. It runs under the session lease
+immediately before raw init. A callback failure sends nothing and propagates
+unchanged. Once dispatch may have occurred, retain the existing unconfirmed
+handling and recover through task/history lookup rather than retrying.
+
+### Engine inputs
+
 `KomodoDefiSdkConfig.lifiProxyUrl` is optional. A proxy must be HTTP(S), without
 credentials/query/fragment, and requires P2P enabled because KDF signs requests.
 The proxy owns its API key. Leave it unset to use KDF's public provider path.
 Optional `LifiIntegratorConfig` sets validated global commission at startup;
 the SDK default is unset. Preserve it through registration, sign-in and restart.
 
-Use the seven-platform KDF manifest at merged `dev` source `e40ac2f` and the contract at
-specs `7c388ea`. A remote KDF must implement that contract too. The frozen coins
-pin is `2b0aefb7`; runtime coin updates remain enabled independently of the
-bundle pin. Never replace a verified checksum with a freshly calculated value
-without independent rebuild provenance. The [29 October roll record](KDF_ARTIFACTS_2026-10-29.json)
-compares every published archive with the matching GitHub Actions artifact.
-The LI.FI squash merge is tree-identical to the prior pin; only three test/helper
-files differ at the selected dev revision. Upstream test failures remain
-explicit in that record and are not waived by a successful build.
+Use the seven-platform KDF manifest at exact `dev` source `a51d69a` and the
+contract at specs `7c388ea`. A remote KDF must implement that contract too.
+The frozen coins pin is `cc8249e8`; runtime coin updates remain enabled and
+build-time revision advancement stays disabled. Never replace a checksum
+without independent artifact provenance. The [3 November roll record](KDF_ARTIFACTS_2026-11-03.json)
+compares all seven archives with GitHub artifact digests and ordinary mirrors.
+
+The two KDF commits after `e40ac2f` bump the engine to `3.2.0-beta` and repair
+CI fixtures, shared-wallet test races, test endpoints and proving performance
+in development/test profiles. All ten platform builds and all 17 test jobs
+passed. The original Linux Tendermint timeout and macOS Telegram assertion
+failure remain recorded alongside their passing retries. The upstream main
+merge later changed only `CHANGELOG.md`; this pin retains the exact requested
+and validated revision.
+
+The coins bundle adds TAR, TAR-segwit and TEL-BASE, removes TEL-KRC20 and
+updates TEL ERC-20/Polygon contracts and decimals. It also refreshes GLEEC/GRC-20
+Trezor metadata, ARRR activation data, endpoints and verified icons. Review
+existing TEL integrations against these network-specific migrations.
 
 Trezor asset selection now includes configured GLEEC/GRC-20 assets; this does
 not establish routed hardware signing, all-EVM support or funded device QA.

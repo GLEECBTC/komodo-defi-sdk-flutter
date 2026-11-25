@@ -21,6 +21,9 @@ Maintained by [GLEEC](https://www.gleec.com).
 
 Supported platforms: Android, iOS, macOS, Windows, Linux, and Web (WASM).
 
+Development uses Flutter **3.50.0** and its bundled Dart **3.14.0**, pinned in
+`.fvmrc`. See [toolchain setup and validation](docs/FLUTTER_VERSION.md).
+
 See the Komodo DeFi Framework (API) source at `https://github.com/KomodoPlatform/komodo-defi-framework` and a hosted demo at `https://gleec-sdk-playground.web.app`.
 
 ## SDK 0.9.0 release candidate

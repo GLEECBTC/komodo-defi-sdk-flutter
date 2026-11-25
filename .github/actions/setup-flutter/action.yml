@@ -1,0 +1,25 @@
+name: Set up pinned Flutter
+description: Install the Flutter and Dart toolchain selected by the SDK workspace.
+runs:
+  using: composite
+  steps:
+    - name: Read the workspace Flutter version
+      id: version
+      shell: bash
+      run: |
+        # Windows runners provide python but not python3.
+        "$(command -v python3 || command -v python)" - <<'PY' >> "$GITHUB_OUTPUT"
+        import json
+        import re
+        from pathlib import Path
+
+        version = json.loads(Path('.fvmrc').read_text())['flutter']
+        if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+            raise SystemExit('.fvmrc must pin a stable Flutter release')
+        print(f'version={version}')
+        PY
+    - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      with:
+        channel: stable
+        flutter-version: ${{ steps.version.outputs.version }}
+        cache: true

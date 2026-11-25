@@ -1,5 +1,7 @@
 ## 0.5.1 (2026-10-28)
 
+ - **FIX**(github): keep authentication tokens out of failed API request logs.
+
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
 
  - **FIX**(assets): frozen coin builds use the pinned raw source and metadata,

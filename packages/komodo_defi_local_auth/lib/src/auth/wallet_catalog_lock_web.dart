@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
@@ -19,15 +20,22 @@ Future<T> _withNamedLock<T>(String name, Future<T> Function() operation) async {
   await web.window.navigator.locks
       .request(
         name,
-        ((web.Lock? _) => Future<void>.sync(() async {
-          try {
-            result = await operation();
-            completed = true;
-          } catch (error, stack) {
-            failure = error;
-            stackTrace = stack;
-          }
-        }).toJS).toJS,
+        // The browser grants the lock from its own event loop, in the root
+        // zone. The caller's zone carries its RPC dispatch guard, so the
+        // operation must run there or every guarded request goes unchecked.
+        Zone.current
+            .bindUnaryCallback(
+              (web.Lock? _) => Future<void>.sync(() async {
+                try {
+                  result = await operation();
+                  completed = true;
+                } catch (error, stack) {
+                  failure = error;
+                  stackTrace = stack;
+                }
+              }).toJS,
+            )
+            .toJS,
       )
       .toDart;
   if (failure != null) Error.throwWithStackTrace(failure!, stackTrace!);
