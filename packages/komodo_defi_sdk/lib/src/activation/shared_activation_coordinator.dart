@@ -237,7 +237,9 @@ class SharedActivationCoordinator {
     if (startedMeanwhile != null) {
       return _allowedResult((await startedMeanwhile.future).unwrap());
     }
-    final deferral = _failureBackoff.deferralFor(asset.id);
+    // An active asset only gets here to refresh its GasFree status, which a
+    // failure streak from earlier activation attempts must not block.
+    final deferral = isActive ? null : _failureBackoff.deferralFor(asset.id);
     if (deferral != null) {
       return ActivationResult.failure(
         asset.id,
@@ -287,6 +289,11 @@ class SharedActivationCoordinator {
     }
     if (result.isSuccess) {
       _failureBackoff.recordSuccess(assetId);
+      return;
+    }
+    // Not the asset's own failure: a cancellation, or a policy that stopped
+    // being ready mid-attempt (hosts publish `loading` before every refresh).
+    if (outcome._cancelled || result.cause is ActivationPolicyException) {
       return;
     }
     final deferral = _failureBackoff.recordFailure(
@@ -402,7 +409,14 @@ class SharedActivationCoordinator {
               progress.errorMessage ?? 'Unknown activation error',
             );
             if (!completer.isCompleted) {
-              completer.complete(_ActivationOutcome.result(result));
+              completer.complete(
+                _ActivationOutcome.result(
+                  result,
+                  cancelled:
+                      progress.progressDetails?.errorCode ==
+                      'ACTIVATION_CANCELLED',
+                ),
+              );
             }
           }
           break;
@@ -693,11 +707,19 @@ final class AssetActivationException implements Exception {
 /// each caller's own zone is the same remedy `PubkeyManager` applies to its
 /// shared pubkey fetch.
 class _ActivationOutcome {
-  const _ActivationOutcome._(this._result, this._error, this._stackTrace);
+  const _ActivationOutcome._(
+    this._result,
+    this._error,
+    this._stackTrace, {
+    bool cancelled = false,
+  }) : _cancelled = cancelled;
 
-  /// The attempt reached a terminal state, successful or not.
-  factory _ActivationOutcome.result(ActivationResult result) =>
-      _ActivationOutcome._(result, null, null);
+  /// The attempt reached a terminal state, successful or not. [cancelled]
+  /// marks a failure that was a cancellation rather than the asset failing.
+  factory _ActivationOutcome.result(
+    ActivationResult result, {
+    bool cancelled = false,
+  }) => _ActivationOutcome._(result, null, null, cancelled: cancelled);
 
   /// The attempt was terminated without a result, e.g. by a wallet change.
   factory _ActivationOutcome.error(Object error, StackTrace stackTrace) =>
@@ -706,6 +728,7 @@ class _ActivationOutcome {
   final ActivationResult? _result;
   final Object? _error;
   final StackTrace? _stackTrace;
+  final bool _cancelled;
 
   /// Returns the result, or rethrows the original error in the caller's zone.
   ActivationResult unwrap() {

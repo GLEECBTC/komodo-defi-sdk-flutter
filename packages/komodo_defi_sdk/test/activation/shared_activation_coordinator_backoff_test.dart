@@ -155,6 +155,51 @@ void main() {
     expect(kdfAttempts, 4);
   });
 
+  test('an asset found active skips its deferral and clears it', () async {
+    await failTimes(3);
+    when(() => manager.isAssetActive(any())).thenAnswer((_) async => true);
+
+    final result = await coordinator.activateAsset(clc);
+
+    expect(result.isSuccess, isTrue);
+    expect(kdfAttempts, 3);
+    expect(coordinator.activationDeferral(clc.id), isNull);
+  });
+
+  test('a GasFree refresh of an active asset is not held back', () async {
+    await failTimes(3);
+    when(() => manager.isAssetActive(any())).thenAnswer((_) async => true);
+    when(() => manager.shouldRefreshTronGaslessActivation(any()))
+        .thenReturn(true);
+
+    await coordinator.activateAsset(clc);
+
+    expect(kdfAttempts, 4);
+  });
+
+  test('cancellations and policy rejections do not count', () async {
+    when(() => manager.activateAsset(any())).thenAnswer((_) {
+      kdfAttempts++;
+      return Stream.value(
+        ActivationProgress.error(
+          message: 'Asset activation is restricted',
+          errorCode: 'ACTIVATION_CANCELLED',
+        ),
+      );
+    });
+    await failTimes(3);
+    when(() => manager.activateAsset(any())).thenAnswer((_) {
+      kdfAttempts++;
+      return Stream.error(
+        ActivationPolicyException(clc.id, ActivationPolicyStatus.loading),
+      );
+    });
+    await failTimes(3);
+
+    expect(kdfAttempts, 6);
+    expect(coordinator.activationDeferral(clc.id), isNull);
+  });
+
   group('policy', () {
     Future<void> publish(
       ActivationPolicyStatus status, {
