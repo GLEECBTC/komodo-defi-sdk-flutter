@@ -1,10 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    # "/" reaches .github/workflows only; the composite actions hold pins too.
+    # Updates land on dev; release branches receive them through carries.
+    target-branch: dev
+    # "/" covers .github/workflows only. Composite actions are scanned only
+    # when their directories are listed, so list each one.
     directories:
       - /
-      - /.github/actions/*
+      - /.github/actions/firebase-hosting-deploy
+      - /.github/actions/setup-flutter
     schedule:
       interval: weekly
     groups:
