@@ -28,6 +28,8 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
 
     try {
       return switch (primaryType) {
+        CoinSubClass.solana => SolanaProtocol.fromJson(json),
+        CoinSubClass.solanaToken => SolanaTokenProtocol.fromJson(json),
         CoinSubClass.trx => TrxProtocol.fromJson(json, subClass: primaryType),
         CoinSubClass.trc20 => Trc20Protocol.fromJson(
           json,
@@ -113,6 +115,9 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
   /// Whether this protocol requires HD wallet mode
   bool get requiresHdWallet;
 
+  /// Solana uses a single Ed25519 address even in a global HD wallet.
+  bool get isSolana => solanaCoinSubClasses.contains(subClass);
+
   /// Core protocol properties that all protocols must implement
   String? get derivationPath => config.valueOrNull<String>('derivation_path');
   bool get isTestnet => config.valueOrNull<bool>('is_testnet') ?? false;
@@ -191,9 +196,9 @@ abstract class ProtocolClass with ExplorerUrlMixin implements Equatable {
   ActivationParams defaultActivationParams({
     PrivateKeyPolicy privKeyPolicy = const PrivateKeyPolicy.contextPrivKey(),
     int? gapLimit,
-  }) => ActivationParams.fromConfigJson(
-    config,
-  ).genericCopyWith(privKeyPolicy: privKeyPolicy);
+  }) =>
+      ActivationParams.fromConfigJson(config)
+          .genericCopyWith(privKeyPolicy: privKeyPolicy);
 
   String? get contractAddress =>
       config.valueOrNull<String>('contract_address') ??

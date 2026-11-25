@@ -13,16 +13,15 @@ topics:
   - wallet
 
 environment:
-  sdk: '>=3.9.0 <4.0.0'
-  # Minimum Flutter version is set quite high for build transformer capabilities.
-  # If this is too high for your project, this can be lowered by commenting out
-  # the following line and running the build transformer manually via CLI.
-  flutter: ">=3.35.0"
+  sdk: '>=3.14.0 <4.0.0'
+  # Keep the framework on the toolchain selected by the workspace .fvmrc.
+  flutter: ">=3.50.0 <4.0.0"
 
 resolution: workspace
 
 dependencies:
   # aws_client: ^0.6.0
+  crypto: ^3.0.6
   decimal: ^3.2.1
   ffi: ^2.1.3
   flutter:
@@ -39,6 +38,7 @@ dependencies:
   mutex: ^3.1.0
   path: ^1.9.1
   path_provider: ^2.1.5
+  path_provider_windows: ^2.3.0
   plugin_platform_interface: ^2.0.2
   web: ^1.1.0
 

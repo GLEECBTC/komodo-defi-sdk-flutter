@@ -2,6 +2,12 @@ include: package:very_good_analysis/analysis_options.6.0.0.yaml
 analyzer:
   exclude:
     - lib/gen/*
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
 linter:
   rules:
     public_member_api_docs: false

@@ -357,6 +357,19 @@ abstract final class FeeRecordCodec {
         'signed_max_fee': signedMaxFee.toString(),
         'activation_fee': activationFee?.toString(),
       },
+    SolanaFeeInfo(
+      :final coin,
+      :final feeAmount,
+      :final rentAmount,
+      :final totalAmount,
+    ) =>
+      {
+        'k': 'solana',
+        'coin': coin,
+        'fee_amount': feeAmount.toString(),
+        'rent_amount': rentAmount.toString(),
+        'total_amount': totalAmount.toString(),
+      },
     FeeInfoSia(:final coin, :final amount, :final policy) => {
       'k': 'sia',
       'coin': coin,
@@ -431,6 +444,12 @@ abstract final class FeeRecordCodec {
         totalTokenFee: _decimal(json, 'total_token_fee'),
         signedMaxFee: _decimal(json, 'signed_max_fee'),
         activationFee: _optionalDecimal(json, 'activation_fee'),
+      ),
+      'solana' => FeeInfo.solana(
+        coin: _string(json, 'coin'),
+        feeAmount: _decimal(json, 'fee_amount'),
+        rentAmount: _decimal(json, 'rent_amount'),
+        totalAmount: _decimal(json, 'total_amount'),
       ),
       'sia' => FeeInfo.sia(
         coin: _string(json, 'coin'),

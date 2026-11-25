@@ -162,6 +162,9 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
 
   final IKdfHostConfig? _hostConfig;
   final KomodoDefiSdkConfig _config;
+
+  /// Engine capabilities selected by this SDK instance.
+  SolanaCapabilities get solanaCapabilities => _config.solanaCapabilities;
   KomodoDefiFramework? _kdfFramework;
   late final GetIt _container;
   bool _isInitialized = false;
@@ -244,6 +247,20 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     return coordinator.activateAsset(asset, timeout: timeout);
   }
 
+  /// When [assetId]'s activation keeps failing with the same error, the
+  /// deferral that makes [activateAsset] refuse it without contacting KDF.
+  /// Null when an attempt would run now.
+  ActivationDeferredException? activationDeferral(AssetId assetId) =>
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .activationDeferral(assetId);
+
+  /// Lets the next activation of [assetIds], or of every asset when null,
+  /// start at once despite earlier failures. Call it for an explicit user
+  /// request, or when something that could fix the failure has changed.
+  void resetActivationBackoff([Iterable<AssetId>? assetIds]) =>
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .resetActivationBackoff(assetIds);
+
   /// Whether [activateAsset] succeeded; use its typed outcome for recovery UI.
   Future<bool> ensureAssetActivated(Asset asset, {Duration? timeout}) async =>
       (await activateAsset(asset, timeout: timeout)).isSuccess;
@@ -252,9 +269,8 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   ///
   /// Assets absent from this map are neither activating, active nor failed.
   Map<AssetId, AssetActivationState> get activationStates =>
-      _assertSdkInitialized(
-        _container<SharedActivationCoordinator>(),
-      ).activationStates;
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .activationStates;
 
   /// Current activation states, then every subsequent change.
   ///
@@ -264,17 +280,15 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
   /// activations performed by other SDK subsystems, which no caller could
   /// otherwise see.
   Stream<Map<AssetId, AssetActivationState>> watchActivationStates() =>
-      _assertSdkInitialized(
-        _container<SharedActivationCoordinator>(),
-      ).watchActivationStates();
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .watchActivationStates();
 
   /// Current state for [assetId], then every subsequent change to it.
   ///
   /// Emits null while the asset is not tracked.
   Stream<AssetActivationState?> watchActivationStateOf(AssetId assetId) =>
-      _assertSdkInitialized(
-        _container<SharedActivationCoordinator>(),
-      ).watchActivationStateOf(assetId);
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .watchActivationStateOf(assetId);
 
   /// Deletes a persisted custom token from SDK-managed storage.
   ///

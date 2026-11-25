@@ -9,9 +9,6 @@ PODS:
   - komodo_defi_framework (0.0.1):
     - FlutterMacOS
   - OrderedSet (6.0.3)
-  - path_provider_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
   - url_launcher_macos (0.0.1):
     - FlutterMacOS
 
@@ -20,7 +17,6 @@ DEPENDENCIES:
   - flutter_secure_storage_darwin (from `Flutter/ephemeral/.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - komodo_defi_framework (from `Flutter/ephemeral/.symlinks/plugins/komodo_defi_framework/macos`)
-  - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
   - url_launcher_macos (from `Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos`)
 
 SPEC REPOS:
@@ -36,20 +32,17 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   komodo_defi_framework:
     :path: Flutter/ephemeral/.symlinks/plugins/komodo_defi_framework/macos
-  path_provider_foundation:
-    :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
   url_launcher_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos
 
 SPEC CHECKSUMS:
   flutter_inappwebview_macos: c2d68649f9f8f1831bfcd98d73fd6256366d9d1d
-  flutter_secure_storage_darwin: ce237a8775b39723566dc72571190a3769d70468
-  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  komodo_defi_framework: 1eb76cee957ff7598498a87bb0d1c470da0f0980
+  flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  komodo_defi_framework: 2c5ba265f0a969326344d817d99716fc5f93fc23
   OrderedSet: e539b66b644ff081c73a262d24ad552a69be3a94
-  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
-  url_launcher_macos: 0fba8ddabfc33ce0a9afe7c5fef5aab3d8d2d673
+  url_launcher_macos: f87a979182d112f911de6820aefddaf56ee9fbfd
 
-PODFILE CHECKSUM: 9ebaf0ce3d369aaa26a9ea0e159195ed94724cf3
+PODFILE CHECKSUM: f0c21717cb7ee9112f915044c74bfceb5b12e02a
 
 COCOAPODS: 1.16.2

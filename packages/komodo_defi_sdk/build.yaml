@@ -1,10 +1,14 @@
 targets:
   $default:
     sources:
+      - $package$
       - lib/**
       - pubspec.yaml
     builders:
-      hive_ce_generator:
+      freezed:
+        options:
+          format: true
+      hive_ce_generator:hive_adapters_generator:
         enabled: true
         generate_for:
           - lib/src/**.dart

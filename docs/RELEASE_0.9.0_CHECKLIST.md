@@ -24,7 +24,7 @@ This is a candidate record, not publication approval.
   this source-branch sync become an ancestor of `dev`.
 - KDF: `a51d69a11ff937ecf9678e9b37632af578252846` on `dev`; specs:
   `7c388ea7b91cb7c657435d416bc03e5349b46162`; coins:
-  `efd3a6471709f7e13e0b03277e37548e11840aae`.
+  `cc8249e85e54467bc2684c2712857711eab55fd2` (final roll, 4 November).
 - All seven archive checksums are in `app_build/build_config.json` with
   [3 November provenance](KDF_ARTIFACTS_2026-11-03.json). The prior
   [feature-branch rebuild record](KDF_ARTIFACTS_2026-10-28.json) remains
@@ -290,6 +290,22 @@ failure and Sia Max balance assertion. One retry of the six failed jobs was
 requested; pending results do not waive the original failures. Merge the dev
 PR with squash, then carry only its reviewed diff into frozen `release-0.9.0`
 through a focused PR after tests and review pass. SDK #416 remains open.
+
+## Final coins roll — 4 November 2026
+
+Coins `cc8249e85e54467bc2684c2712857711eab55fd2` (coins master after #2093)
+replaces `efd3a6471709f7e13e0b03277e37548e11840aae`: 22 commits. It adds
+Yenten (YTN); sets L2 fee models for AVAX (`avalanche`), ETH-BASE
+(`op_stack`), MNT (`mantle`) and MON (`monad`); makes the fork-id signature
+version explicit for BCH, XEC, XRG and tBCH; drops signature versions and
+decimals that matched the defaults for CRNC, MAZA and XEP-segwit; and refreshes
+WAM electrums, seed nodes and the generated configs. No coin is removed.
+
+KDF `a51d69a` parses all four fee models (`EthFeeModel` in
+`coins/eth/actual_fee.rs`); they change only how the actual fee is read from a
+receipt. Its signature-version default is fork-id for BCH and fork-id chains,
+otherwise base, and its decimals default is 8, so the dropped values change
+nothing; segwit inputs always sign as WitnessV0. KDF and specs are unchanged.
 
 ## Full engine and coins roll — 3 November 2026
 

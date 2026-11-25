@@ -11,7 +11,7 @@ topics:
 version: 0.8.0
 
 environment:
-  sdk: ">=3.9.0 <4.0.0"
+  sdk: ">=3.14.0 <4.0.0"
 
 resolution: workspace
 
@@ -21,14 +21,14 @@ dependencies:
   rational: ^2.2.3
   equatable: ^2.0.7
   freezed_annotation: ^3.0.0
-  json_annotation: ^4.9.0
+  json_annotation: ^4.12.0
   komodo_defi_types: ^0.7.0
   meta: ^1.15.0
   path: ^1.9.1
 
 dev_dependencies:
   build_runner: ^2.4.14
-  freezed: ^3.0.4
+  freezed: ^4.0.3
   index_generator: ^4.0.1
   json_serializable: ^6.7.1
   mocktail: ^1.0.4

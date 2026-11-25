@@ -1,0 +1,6 @@
+# Keep standalone and vendored SDK analysis independent of a consumer's options.
+# Packages with their own analysis_options.yaml retain their existing lint rules.
+analyzer:
+  exclude:
+    - '**/build/**'
+    - '**/.dart_tool/**'

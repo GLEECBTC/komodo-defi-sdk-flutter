@@ -1,15 +1,6 @@
 part of 'auth_service.dart';
 
 extension KdfExtensions on KdfAuthService {
-  Future<bool> _walletExists(String walletName) async {
-    if (!await _kdfFramework.isRunning()) return false;
-
-    // The caller owns the auth write lock. Avoid re-entering the public
-    // lock-protected API from the registration transaction.
-    final users = await _getUsersWithinAuthLock();
-    return users.any((user) => user.walletId.name == walletName);
-  }
-
   Future<KdfUser?> _getActiveUser() async {
     if (!await _kdfFramework.isRunning()) {
       return null;
@@ -201,6 +192,9 @@ extension KdfExtensions on KdfAuthService {
       }
 
       return Mnemonic.fromRpcJson(response.value<JsonMap>('result'));
+    } on RpcDispatchRejected {
+      // Not sent, so not an answer about the password: callers cancel on this.
+      rethrow;
     } catch (error) {
       if (_isIncorrectPasswordRpcError(error)) {
         throw AuthException(
@@ -223,21 +217,90 @@ extension KdfExtensions on KdfAuthService {
     }
   }
 
-  Future<void> _stopKdf() => _runAuthTransition(_stopKdfWithinTransition);
+  /// Dispatches `delete_wallet`, returning once the engine no longer has
+  /// [walletName].
+  ///
+  /// A request that fails without an answer may still have been carried out.
+  /// Reporting that as "not deleted" would strand the removed wallet's local
+  /// record and credentials with nothing left to retry. For a wallet that was
+  /// [listedBefore], a fresh catalog read settles it: gone means this request
+  /// removed it. A refusal to dispatch, an engine error, or a catalog that
+  /// cannot be read keeps the original failure.
+  Future<void> _deleteEngineWallet({
+    required String walletName,
+    required String password,
+    required void Function() ensureAuthorized,
+    required bool listedBefore,
+  }) async {
+    try {
+      await RpcDispatchGuard.run(
+        ensureAuthorized,
+        () => _client.rpc.wallet.deleteWallet(
+          walletName: walletName,
+          password: password,
+        ),
+        methods: const {'delete_wallet'},
+      );
+    } on RpcDispatchRejected {
+      rethrow;
+    } on WalletChangedDisconnectException {
+      rethrow;
+    } on MmRpcException {
+      rethrow;
+    } on GeneralErrorResponse {
+      rethrow;
+    } catch (_) {
+      if (!listedBefore || !await _engineLacksWallet(walletName)) rethrow;
+    }
+  }
 
-  Future<void> _stopKdfWithinTransition() async {
+  Future<bool> _engineLacksWallet(String walletName) async {
+    try {
+      final catalog = await _runStartupSensitiveRpc(
+        phase: 'deleted wallet catalog',
+        operation: () => _client.rpc.wallet.getWalletNames(),
+      );
+      return !catalog.walletNames.contains(walletName);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Dart2Wasm traps when adapting this optional-named extension tear-off to
+  // the zero-argument transition callback. Keep the call shape explicit.
+  Future<void> _stopKdf() => _runAuthTransition(
+    // ignore: unnecessary_lambdas
+    () => _stopKdfWithinTransition(),
+  );
+
+  Future<void> _stopKdfWithinTransition({
+    bool invalidateSession = true,
+    void Function()? beforeStop,
+  }) async {
     // Invalidate pending exports before cancellation or shutdown can suspend.
     // This also covers restarts and shutdown failures with an unchanged user.
-    invalidateAuthSession();
-    await _shutdownSubscription?.cancel();
-    _shutdownSubscription = null;
-    // Every authenticated session ends through here, and "generated this
-    // session" means "first sign-in": once that sign-in is over the marker
-    // must not keep telling the HD gap scan there is nothing to find. A later
-    // sign-in to the same wallet gets the standard gap.
-    _walletsGeneratedThisSession.clear();
-    await _kdfFramework.kdfStop();
-    _kdfFramework.resetHttpClient();
+    if (invalidateSession) invalidateAuthSession();
+    Future<void>? listenerCancelled;
+    try {
+      await _stopEngine(
+        beforeStop: () {
+          // A refusal here leaves the engine running and authenticated, so
+          // nothing that belongs to its session may be torn down before it.
+          beforeStop?.call();
+          // Cancelling takes effect at once: the engine's own shutdown signal
+          // for this stop must not be handled as an external one.
+          listenerCancelled = _shutdownSubscription?.cancel();
+          _shutdownSubscription = null;
+          // Every authenticated session ends through here, and "generated
+          // this session" means "first sign-in": once that sign-in is over
+          // the marker must not keep telling the HD gap scan there is nothing
+          // to find. A later sign-in to the same wallet gets the standard gap.
+          _walletsGeneratedThisSession.clear();
+        },
+      );
+    } finally {
+      await listenerCancelled;
+    }
     _emitAuthStateChange(null);
   }
 
@@ -270,7 +333,7 @@ extension KdfExtensions on KdfAuthService {
   Future<void> _startNoAuthKdfWithinTransition() async {
     final startStopwatch = Stopwatch()..start();
     final config = await _noAuthConfig;
-    final kdfResult = await _kdfFramework.startKdf(config);
+    final kdfResult = await _lockEngine(() => _kdfFramework.startKdf(config));
     startStopwatch.stop();
     _logger.info(
       '_ensureKdfRunning: startKdf(no-auth) returned ${kdfResult.name} in '
@@ -284,7 +347,7 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    _kdfFramework.resetHttpClient();
+    await _resetTransport();
     await _waitUntilKdfRpcReady();
     await _subscribeToShutdownSignals();
   }
@@ -300,7 +363,7 @@ extension KdfExtensions on KdfAuthService {
     );
 
     final startStopwatch = Stopwatch()..start();
-    final kdfResult = await _kdfFramework.startKdf(config);
+    final kdfResult = await _lockEngine(() => _kdfFramework.startKdf(config));
     startStopwatch.stop();
     _logger.info(
       '_restartKdf: auth start returned ${kdfResult.name} in '
@@ -314,7 +377,7 @@ extension KdfExtensions on KdfAuthService {
       );
     }
 
-    _kdfFramework.resetHttpClient();
+    await _resetTransport();
     final readyStopwatch = Stopwatch()..start();
     await _waitUntilKdfRpcReady();
     await _subscribeToShutdownSignals();
@@ -393,7 +456,7 @@ extension KdfExtensions on KdfAuthService {
         '_runStartupSensitiveRpc: omitted failed on first attempt, '
         'resetting HTTP client and retrying',
       );
-      _kdfFramework.resetHttpClient();
+      await _resetTransport();
       await _waitUntilKdfRpcReady();
 
       try {
@@ -515,6 +578,7 @@ extension KdfExtensions on KdfAuthService {
       netid: netId,
       lifiProxyUrl: _lifiProxyUrl,
       lifiIntegrator: _lifiIntegrator,
+      desktopDataDirectory: _desktopDataDirectory,
     );
   }
 }

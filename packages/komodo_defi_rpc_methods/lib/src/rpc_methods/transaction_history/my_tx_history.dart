@@ -111,7 +111,7 @@ class MyTxHistoryResponse extends BaseResponse {
           : null,
       transactions: result
           .value<JsonList>('transactions')
-          .map(TransactionInfo.fromJson)
+          .map(_parseHistoryRow)
           .toList(),
     );
   }
@@ -129,6 +129,19 @@ class MyTxHistoryResponse extends BaseResponse {
     pagingOptions: null,
     transactions: const [],
   );
+
+  /// A history fee is only displayed. The strict Solana fee contract guards
+  /// what a withdrawal signs; one indexed row that does not meet it loses its
+  /// fee instead of failing the page and all paging behind it.
+  static TransactionInfo _parseHistoryRow(JsonMap row) {
+    try {
+      return TransactionInfo.fromJson(row);
+    } on FormatException {
+      final fee = row['fee_details'];
+      if (fee is! Map || fee['type'] != 'Solana') rethrow;
+      return TransactionInfo.fromJson(JsonMap.of(row)..remove('fee_details'));
+    }
+  }
 
   final int currentBlock;
   final String? fromId;

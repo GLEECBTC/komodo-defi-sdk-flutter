@@ -1,5 +1,4 @@
 import 'package:decimal/decimal.dart';
-import 'package:http/http.dart' as http;
 import 'package:komodo_cex_market_data/komodo_cex_market_data.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
 import 'package:mocktail/mocktail.dart';
@@ -66,13 +65,11 @@ void main() {
 
       // Setup default supports behavior for all repositories
       // (assuming they support all assets unless explicitly set otherwise)
-      when(
-        () => primaryRepo.supports(any(), any(), any()),
-      ).thenAnswer((_) async => true);
+      when(() => primaryRepo.supports(any(), any(), any()))
+          .thenAnswer((_) async => true);
 
-      when(
-        () => fallbackRepo.supports(any(), any(), any()),
-      ).thenAnswer((_) async => true);
+      when(() => fallbackRepo.supports(any(), any(), any()))
+          .thenAnswer((_) async => true);
     });
 
     group('Repository Health Tracking', () {
@@ -178,10 +175,63 @@ void main() {
 
         // Verify
         expect(result, equals(Decimal.parse('49000.0')));
-        verify(
-          () => primaryRepo.getCoinFiatPrice(testAsset),
-        ).called(1); // Called once, then fallback is tried
+        verify(() => primaryRepo.getCoinFiatPrice(testAsset))
+            .called(1); // Called once, then fallback is tried
         verify(() => fallbackRepo.getCoinFiatPrice(testAsset)).called(1);
+      });
+
+      test('benches a repository whose API error is a rate limit', () async {
+        when(
+          () => mockStrategy.selectRepository(
+            assetId: any(named: 'assetId'),
+            fiatCurrency: any(named: 'fiatCurrency'),
+            requestType: any(named: 'requestType'),
+            availableRepositories: any(named: 'availableRepositories'),
+          ),
+        ).thenAnswer((invocation) async {
+          final available =
+              invocation.namedArguments[#availableRepositories]
+                  as List<CexRepository>;
+          return available.contains(primaryRepo) ? primaryRepo : fallbackRepo;
+        });
+        // No "429" or "rate limit" in the text: only the type says so.
+        when(
+          () => primaryRepo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenThrow(
+          const MarketDataApiException(
+            ApiError(
+              statusCode: 402,
+              message: 'Payment required',
+              isRateLimitError: true,
+            ),
+            service: 'CoinPaprika',
+          ),
+        );
+        when(
+          () => fallbackRepo.getCoinFiatPrice(
+            any(),
+            fiatCurrency: any(named: 'fiatCurrency'),
+          ),
+        ).thenAnswer((_) async => Decimal.parse('49000.0'));
+
+        for (var lookup = 0; lookup < 2; lookup++) {
+          final result = await manager.tryRepositoriesInOrder(
+            testAsset,
+            Stablecoin.usdt,
+            PriceRequestType.currentPrice,
+            (repo) => repo.getCoinFiatPrice(testAsset),
+            'test',
+            maxTotalAttempts: 2,
+          );
+          expect(result, equals(Decimal.parse('49000.0')));
+        }
+
+        // A plain failure would leave it healthy for the second lookup.
+        verify(() => primaryRepo.getCoinFiatPrice(testAsset)).called(1);
+        verify(() => fallbackRepo.getCoinFiatPrice(testAsset)).called(2);
       });
 
       test('throws when all repositories fail', () async {
@@ -264,9 +314,8 @@ void main() {
     group('Repository Ordering', () {
       test('prefers healthy repositories over unhealthy ones', () async {
         // Make primary repo unhealthy by causing failures
-        when(
-          () => primaryRepo.getCoinFiatPrice(testAsset),
-        ).thenThrow(Exception('Primary failed'));
+        when(() => primaryRepo.getCoinFiatPrice(testAsset))
+            .thenThrow(Exception('Primary failed'));
 
         // Make multiple requests to make primary unhealthy
         for (int i = 0; i < 4; i++) {
@@ -470,12 +519,9 @@ void main() {
 
         // Verify fallback was used
         expect(result, equals(Decimal.parse('50000.0')));
-        verify(() => primaryRepo.getCoinFiatPrice(testAsset)).called(
-          2,
-        ); // Called once for maxTotalAttempts=1 test and once for maxTotalAttempts=2 test
-        verify(
-          () => fallbackRepo.getCoinFiatPrice(testAsset),
-        ).called(1); // Called once in second test
+        verify(() => primaryRepo.getCoinFiatPrice(testAsset)).called(2); // Called once for maxTotalAttempts=1 test and once for maxTotalAttempts=2 test
+        verify(() => fallbackRepo.getCoinFiatPrice(testAsset))
+            .called(1); // Called once in second test
       });
 
       test('handles maxTotalAttempts edge cases', () async {

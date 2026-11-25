@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_stub.dart'
+    if (dart.library.io) 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_native.dart';
 import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_startup_config.dart';
@@ -24,6 +27,14 @@ export 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 // own implementation instead of reimplementing its lifecycle. See
 // `komodo_defi_harness/lib/src/process_kdf_operations.dart`.
 export 'src/native/kdf_executable_finder.dart' show KdfExecutableFinder;
+// The Electrum bridge decorates native operations; exported so the harness
+// can run the real binary with the same routing the apps use.
+export 'src/operations/electrum/electrum_bridging_kdf_operations.dart'
+    show ElectrumBridgingKdfOperations, kElectrumWebSocketBridgeEnabled;
+export 'src/operations/electrum/electrum_web_socket_bridge.dart'
+    show ElectrumWebSocketBridge;
+export 'src/operations/electrum/native_wss_electrum_routing.dart'
+    show DropWssElectrumRouting, NativeWssElectrumRouting;
 export 'src/operations/kdf_operations_interface.dart';
 export 'src/operations/kdf_operations_local_executable.dart'
     show KdfOperationsLocalExecutable;
@@ -148,12 +159,36 @@ class KomodoDefiFramework implements ApiClient {
     final startParams = startupConfig.encodeStartParams();
     final result = await _kdfOperations.kdfMain(startParams);
     _log('KDF main result: $result');
+    // KDF opens a wallet's databases before it serves RPC, so RPC coming up
+    // after a wallet start proves the data directory works.
+    _unconfirmedDataDirectory = result.isOk && startupConfig.walletName != null
+        ? startupConfig.dbDir
+        : null;
     return result;
+  }
+
+  /// Records the first time KDF comes up on a moved data directory.
+  @visibleForTesting
+  static KdfDataStartRecorder dataStartRecorder =
+      platformKdfDataStartRecorder();
+
+  String? _unconfirmedDataDirectory;
+
+  void _confirmDataDirectory() {
+    final directory = _unconfirmedDataDirectory;
+    if (directory == null) return;
+    _unconfirmedDataDirectory = null;
+    unawaited(
+      dataStartRecorder(directory).catchError(
+        (Object error) => _logger.warning('KDF start not recorded: $error'),
+      ),
+    );
   }
 
   Future<MainStatus> kdfMainStatus() async {
     final status = await _kdfOperations.kdfMainStatus();
     _log('KDF main status: $status');
+    if (status == MainStatus.rpcIsUp) _confirmDataDirectory();
 
     // Checking if KDF is running using `version` method covers the case
     // where implementations do not run as a singleton. E.g. `kdfMainStatus`

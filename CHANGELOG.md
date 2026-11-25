@@ -3,6 +3,74 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## Unreleased
+
+### Fixes
+
+- **Native Electrum servers are no longer paced** ([@CharlVS]) — ElectrumX
+  1.18+ pads replies on its TCP/SSL ports and, once a session has received
+  about 1 KB, holds small replies until a second has passed since its last
+  send. Native KDF waits for each reply, so activation, balances and UTXO
+  history ran at one request per second, while the web build, on WSS, did
+  not. Native builds now reach WSS servers through a loopback bridge in the
+  framework (`ElectrumBridgingKdfOperations`), keeping SSL as fallback. The
+  first KMD balance went from 13.3 s to 1.2–1.5 s, and a 43-address BTC
+  wallet's from 91 s to 3.7–4.2 s. Build with
+  `--dart-define=KDF_ELECTRUM_WS_BRIDGE=false` to keep the SSL servers alone.
+- **iOS backups leave out the KDF data directory** ([@CharlVS]) —
+  `KdfStartupConfig` marks `Documents/.kdf` as excluded from iCloud and
+  Finder device backups at every start. The directory holds each wallet's
+  password-encrypted seed. Standard iCloud Backup is encrypted with keys
+  Apple holds, so anyone who took over the Apple Account could restore the
+  file and guess the password offline. A new or restored iPhone now starts
+  without the wallet, as Android already does, and the recovery phrase
+  restores it. macOS keeps its backups: there the flag would opt out of Time
+  Machine, whose disks the user holds.
+- **More open files for native KDF** ([@CharlVS]) — Before KDF starts, the
+  framework raises the process's open-file soft limit to 10240, capped at the
+  hard limit and never lowered. iOS and macOS apps start at 256, or 2560 once
+  Foundation initializes `NSFileHandle`, and KDF shares that budget with the
+  app. 10240 is the kernel's per-process ceiling on devices with less than
+  12 GB of RAM.
+- **KDF data leaves Documents on Windows and Linux** ([@CharlVS]) — With the
+  new `KomodoDefiSdkConfig.desktopDataDirectory`, KDF keeps its data in
+  `%LOCALAPPDATA%\<windowsFolder>\kdf` or `$XDG_DATA_HOME/<linuxFolder>/kdf`
+  instead of `Documents/.kdf`. Windows often backs Documents up to OneDrive,
+  which uploaded each wallet's password-encrypted seed and synced KDF's
+  databases while they were written. Before KDF first starts, the old folder
+  is renamed `.kdf.moved` and a README takes its place; its data is copied,
+  every file is read back and compared, and one rename commits the copy.
+  A running KDF defers migration and cleanup. After the first successful wallet
+  open from the new folder and a seven-day grace period, cleanup removes only
+  the unchanged files in `.kdf.moved`. A failure before the commit puts the
+  old folder back, and the next start tries again. Without the setting,
+  nothing changes.
+- **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests
+  start at the first UTC midnight the plan accepts. CoinPaprika reads a
+  date-only start as 00:00 UTC, so the first 90-day batch of a year was always
+  refused. A 402 "not allowed in this plan" is a plan limitation; any other 402
+  is a rate limit, thrown as a typed `MarketDataApiException` that repository
+  fallback backs off from. Failed history batches throw so fallback
+  repositories are tried and temporary gaps are not cached as unavailable.
+  `CexMarketDataManager` keeps past days' prices across its five-minute cache
+  rotation, waits an hour before asking again for a past day no repository
+  priced, and prices today with the current price. Repeated
+  `fiatPriceHistory` calls no longer re-request a coin's whole history.
+  Partial history is completed from other providers; rate-limit reordering
+  does not skip healthy providers. Future dates remain unavailable, and a
+  request spanning midnight cannot permanently cache an unfinished day.
+- **Activation backs off from assets that keep failing** ([@CharlVS]) —
+  After three consecutive activation failures with the same error,
+  `SharedActivationCoordinator` refuses further attempts for that asset
+  without contacting KDF, with an `ActivationDeferredException`. It waits one
+  minute, doubling up to 30 minutes. A success, a different error, a wallet
+  change, a policy lookup that recovers from `unavailable`, changed
+  restrictions or `KomodoDefiSdk.resetActivationBackoff` starts over.
+  `activationDeferral` reports the deferral in force. Balance recovery for an
+  asset that failed to activate now polls alone instead of also running a
+  stale-balance guard on the same 30-second interval. Concurrent callers that
+  both missed the pending-activation check now share one attempt.
+
 ## 2026-10-28 — SDK 0.9.0 release preparation
 
 
@@ -61,6 +129,9 @@ The harness remains unpublished. All version constraints move together.
 
 ### Features and fixes
 
+- **Build-log privacy** — failed GitHub API requests report whether authentication
+  was used without printing authorization headers.
+
 - **Trezor sign-in** ([@CharlVS]) — sign in to a "My Trezor" wallet file
   that has no saved record, in any letter case, after giving the record the
   Trezor policy. A software wallet with that name is never used. When the
@@ -90,11 +161,23 @@ The harness remains unpublished. All version constraints move together.
   before a sign-out, a wallet switch or same-wallet reauthentication, or one
   constructed directly or issued by another manager. Supported copies retain
   private issuance; callers cannot rebind an old offer to a new session.
-- **Session-owned dispatch** ([@CharlVS]): `runWithSession` holds the auth read
-  lease until a raw submission request settles. Wallet switching cannot replace
-  the engine beneath that request. Routed starts recheck caller intent under
-  the lease through `beforeDispatch`; failures before dispatch are rejections,
-  while lost answers after dispatch remain unconfirmed and are never retried.
+  Equality is over the numbers alone: an issued offer equals the same offer
+  constructed directly, which still cannot start.
+- **Session-owned dispatch** ([@CharlVS]): `runWithSession` leases the engine
+  until a raw submission request settles, for at most 10 seconds. Only engine
+  stops, starts and transport resets wait for that lease, so identity reads
+  never delay a start, recovering from a failed read never aborts one, and
+  wallet switching cannot replace the engine beneath a request in flight.
+  Past the bound, stopping the engine fails the unanswered request and resets
+  the transport before a replacement engine can start, so a request the
+  engine never answers cannot hold off sign-out. The remote and
+  local-executable transport now honours that reset: it aborts its requests
+  in flight, including one still connecting, as the native transport does.
+  A stop holds the engine, so that transport gives up on a `stop` the engine
+  never answers after 5 seconds, and a stop that fails still resets the
+  transport. Routed starts recheck caller intent under the lease through
+  `beforeDispatch`; failures before dispatch are rejections, while lost
+  answers after dispatch remain unconfirmed and are never retried.
 - **Melos generation** ([@CharlVS]): exclude conditional platform implementations
   and routed-swap part files from generated indexes. Refresh tracked indexes
   and Hive registrar imports so bootstrap produces compilable native/web code.
@@ -131,11 +214,15 @@ The harness remains unpublished. All version constraints move together.
   proving performance. All ten platform builds and 17 test jobs passed.
   [Artifact provenance](docs/KDF_ARTIFACTS_2026-11-03.json) records seven
   independently verified archives and the original failures/passing retries.
-- Bundled coins: `efd3a6471709f7e13e0b03277e37548e11840aae`;
+- Bundled coins: `cc8249e85e54467bc2684c2712857711eab55fd2`;
   `update_commit_on_build: false`; runtime updates remain enabled. Adds TAR,
-  TAR-segwit and TEL-BASE, removes TEL-KRC20, updates TEL ERC-20/Polygon
-  contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR activation data,
-  endpoints and verified icons.
+  TAR-segwit, TEL-BASE and Yenten (YTN), removes TEL-KRC20, updates TEL
+  ERC-20/Polygon contracts/decimals, GLEEC/GRC-20 Trezor metadata, ARRR
+  activation data, endpoints and verified icons. Sets L2 fee models for AVAX,
+  ETH-BASE, MNT and MON, which KDF `a51d69a` uses to read the actual fee of a
+  transaction; makes the fork-id signature version explicit for BCH, XEC, XRG
+  and tBCH, and drops signature versions and decimals that matched KDF's
+  defaults.
 - Contract: specs `7c388ea7b91cb7c657435d416bc03e5349b46162`.
   Validation uses Flutter 3.41.4 / Dart 3.11.1; declared toolchain ranges stay
   unchanged. Source and archive identity are separate release evidence.

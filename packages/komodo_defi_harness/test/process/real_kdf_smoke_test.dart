@@ -150,4 +150,48 @@ void main() {
       timeout: const Timeout(Duration(minutes: 6)),
     );
   });
+
+  group('Electrum WebSocket bridge', () {
+    // Informational: ElectrumX paces small replies on its TCP/SSL ports, so
+    // the gap is largest for HD wallets with several used addresses.
+    for (final ticker in ['KMD', 'BTC-segwit']) {
+      test(
+        'first HD balance with the bridge off and on ($ticker)',
+        () async {
+          for (final bridge in [false, true]) {
+            final harness = await KdfHarness.process(
+              walletType: KdfWalletType.hd,
+              electrumWebSocketBridge: bridge,
+            );
+            if (harness == null) {
+              markTestSkipped(requirements.skipReason);
+              return;
+            }
+            try {
+              final asset = harness.sdk.assets.available.values.firstWhere(
+                (a) => a.id.id == ticker,
+              );
+              await harness.measureFirstBalance(
+                asset.id,
+                timeout: const Duration(minutes: 5),
+              );
+              // The comparison is read from the log; it never gates.
+              // ignore: avoid_print
+              print(
+                'ELECTRUM BRIDGE ${bridge ? 'on' : 'off'} ($ticker): '
+                '${harness.metrics}',
+              );
+              expect(
+                harness.metrics['first_post_activation_balance_ms'],
+                isNotNull,
+              );
+            } finally {
+              await harness.dispose();
+            }
+          }
+        },
+        timeout: const Timeout(Duration(minutes: 12)),
+      );
+    }
+  });
 }

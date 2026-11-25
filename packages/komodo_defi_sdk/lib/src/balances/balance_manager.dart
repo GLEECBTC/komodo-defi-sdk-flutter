@@ -326,7 +326,10 @@ class BalanceManager implements IBalanceManager {
     _pubkeyManager = manager;
   }
 
-  bool _supportsBalanceStreaming(Asset asset) => asset.supportsBalanceStreaming;
+  bool _supportsBalanceStreaming(Asset asset) =>
+      asset.supportsBalanceStreaming ||
+      (asset.id.subClass == CoinSubClass.solanaToken &&
+          asset.id.parentId?.subClass == CoinSubClass.solana);
 
   /// The coin whose KDF balance streamer already reports [asset]'s balance, or
   /// null when [asset] needs a streamer of its own.
@@ -342,7 +345,8 @@ class BalanceManager implements IBalanceManager {
   /// where 35 would do - and it is the only *permanent* background load the
   /// wallet puts on an EVM node.
   ///
-  /// Deliberately EVM-only:
+  /// Solana similarly reports its tokens on the platform stream.
+  /// Other protocol families remain excluded:
   ///  * TRON is excluded even though its payload has the same shape. Gas-free
   ///    TRC-20 balances live at a derived custody address rather than the
   ///    account's own, so whether the platform streamer's `all_addresses()`
@@ -353,6 +357,10 @@ class BalanceManager implements IBalanceManager {
   AssetId? _balanceStreamerHostFor(Asset asset) {
     final parentId = asset.id.parentId;
     if (parentId == null) return null;
+    if (asset.id.subClass == CoinSubClass.solanaToken &&
+        parentId.subClass == CoinSubClass.solana) {
+      return parentId;
+    }
     if (!evmCoinSubClasses.contains(asset.id.subClass)) return null;
     if (!evmCoinSubClasses.contains(parentId.subClass)) return null;
     return parentId;
@@ -950,16 +958,14 @@ class BalanceManager implements IBalanceManager {
 
         // Recovery mode: keep this watcher alive and retry in the background
         // so callers do not need to re-subscribe after startup races.
+        //
+        // Polling alone: each tick already re-requests activation and forces a
+        // balance read. A stale guard alongside it did the same work on the
+        // same 30s interval, doubling the attempts for an asset that cannot
+        // activate. The coordinator's backoff spaces those attempts out.
         _logger.warning(
           'Activation unavailable for asset; '
-          'starting recovery watchers',
-        );
-        _startStaleBalanceGuard(
-          asset: asset,
-          assetId: assetId,
-          controller: controller,
-          activateIfNeeded: activateIfNeeded,
-          walletContext: walletContext,
+          'starting recovery polling',
         );
         await _startBalancePolling(
           asset: asset,

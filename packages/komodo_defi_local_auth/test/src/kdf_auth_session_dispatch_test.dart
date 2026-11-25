@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_framework/komodo_defi_framework.dart';
@@ -11,13 +14,53 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 const _walletName = 'dispatch-wallet';
 const _hash = '05aab5342166f8594baf17a7d9bef5d567443327';
 
+/// Long enough that a slow machine finishes every step a test takes before
+/// it, short enough to wait out.
+const _leaseBound = Duration(seconds: 1);
+
+const _pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+
+/// Serves package assets from source, and a build config whose coins URL is
+/// invalid so seed nodes come from the local fallback, without a request.
+Future<ByteData?> _sourceAssets(ByteData? message) async {
+  final key = utf8.decode(message!.buffer.asUint8List());
+  if (key.endsWith('app_build/build_config.json')) {
+    return ByteData.sublistView(
+      Uint8List.fromList(
+        utf8.encode(
+          '{"coins":{"coins_repo_content_url":"http://[",'
+          '"cdn_branch_mirrors":{}}}',
+        ),
+      ),
+    );
+  }
+  if (!key.startsWith('packages/')) return null;
+  final source = File('../${key.substring('packages/'.length)}');
+  if (!source.existsSync()) return null;
+  return ByteData.sublistView(await source.readAsBytes());
+}
+
 /// The engine is replaceable only through the real auth service's write lock.
 /// Identity and dispatch gates put tests at exact asynchronous boundaries.
 class _Engine implements IKdfOperations {
   bool running = true;
+  int starts = 0;
+  Completer<void>? startEntered;
   int stops = 0;
+
+  /// Thrown by the next stops, as by an engine that fails to stop.
+  Object? stopError;
+  int resets = 0;
   Completer<void>? identityEntered;
   Completer<void>? identityGate;
+
+  /// Identity reads still to answer with a retryable error.
+  int identityFailures = 0;
+  Completer<void>? identityFailed;
+
+  /// Runs on every reset. A real reset closes the HTTP client and aborts
+  /// every request it still carries.
+  void Function()? onReset;
 
   @override
   String get operationsName => 'session-dispatch-test';
@@ -27,6 +70,9 @@ class _Engine implements IKdfOperations {
     Map<String, dynamic> startParams, {
     int? logLevel,
   }) async {
+    starts++;
+    final entered = startEntered;
+    if (entered != null && !entered.isCompleted) entered.complete();
     running = true;
     return KdfStartupResult.ok;
   }
@@ -38,6 +84,8 @@ class _Engine implements IKdfOperations {
   @override
   Future<StopStatus> kdfStop() async {
     stops++;
+    final error = stopError;
+    if (error != null) throw error;
     running = false;
     return StopStatus.ok;
   }
@@ -60,6 +108,12 @@ class _Engine implements IKdfOperations {
           },
         };
       case 'get_public_key_hash':
+        if (identityFailures > 0) {
+          identityFailures--;
+          final failed = identityFailed;
+          if (failed != null && !failed.isCompleted) failed.complete();
+          return {'mmrpc': '2.0', 'error': 'identity is unavailable'};
+        }
         final entered = identityEntered;
         if (entered != null && !entered.isCompleted) entered.complete();
         await identityGate?.future;
@@ -79,14 +133,17 @@ class _Engine implements IKdfOperations {
   Future<bool> isAvailable(IKdfHostConfig hostConfig) async => true;
 
   @override
-  void resetHttpClient() {}
+  void resetHttpClient() {
+    resets++;
+    onReset?.call();
+  }
 
   @override
   void dispose() {}
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
 
   late _Engine engine;
   late KomodoDefiFramework framework;
@@ -111,7 +168,7 @@ void main() {
       hostConfig: config,
       kdfOperations: engine,
     );
-    auth = KdfAuthService(framework, config);
+    auth = KdfAuthService(framework, config, dispatchLeaseTimeout: _leaseBound);
     session = await auth.captureSessionContext();
   });
 
@@ -131,25 +188,164 @@ void main() {
     expect(calls, 0);
   });
 
-  test('a queued dispatch is rechecked after acquiring the lease', () async {
+  test('an identity read in progress does not delay a dispatch', () async {
     engine
       ..identityEntered = Completer<void>()
       ..identityGate = Completer<void>();
     final identityRead = auth.getActiveUser();
     await engine.identityEntered!.future;
-    var calls = 0;
-    final pending = auth.runWithSession(session, () async => calls++);
-    final rejected = expectLater(
-      pending,
-      throwsA(isA<AuthSessionChangedException>()),
-    );
-    final signOut = auth.signOut();
-    expect(auth.isSessionContextCurrent(session), isFalse);
-    engine.identityGate!.complete();
-    await identityRead;
-    await rejected;
-    await signOut;
-    expect(calls, 0);
+
+    try {
+      final sent = auth.runWithSession(session, () async => 'sent');
+      expect(await sent.timeout(_leaseBound), 'sent');
+    } finally {
+      engine.identityGate!.complete();
+      await identityRead;
+    }
+  });
+
+  test(
+    'a session revoked while the lease is acquired stops the dispatch',
+    () async {
+      var calls = 0;
+      final pending = auth.runWithSession(session, () async => calls++);
+      final rejected = expectLater(
+        pending,
+        throwsA(isA<AuthSessionChangedException>()),
+      );
+      final signOut = auth.signOut();
+      expect(auth.isSessionContextCurrent(session), isFalse);
+      await rejected;
+      await signOut;
+      expect(calls, 0);
+    },
+  );
+
+  test(
+    'an unanswered dispatch holds off sign-out only for its bound',
+    () async {
+      final entered = Completer<void>();
+      final response = Completer<String>();
+      final pending = auth.runWithSession(session, () {
+        entered.complete();
+        return response.future;
+      });
+      await entered.future;
+
+      try {
+        final signOut = auth.signOut();
+        await Future<void>.delayed(Duration.zero);
+        expect(engine.stops, 0);
+        await signOut.timeout(_leaseBound * 10);
+        expect(engine.stops, 1);
+        expect(engine.running, isFalse);
+      } finally {
+        // The caller still holds the request's own answer, however late.
+        response.complete('late');
+      }
+      expect(await pending, 'late');
+    },
+  );
+
+  test('a stop past the bound aborts the unanswered dispatch', () async {
+    final entered = Completer<void>();
+    final response = Completer<String>();
+    engine.onReset = () {
+      if (!response.isCompleted) {
+        response.completeError(StateError('aborted by a reset'));
+      }
+    };
+    final pending = auth.runWithSession(session, () {
+      entered.complete();
+      return response.future;
+    });
+    final aborted = expectLater(pending, throwsA(isA<StateError>()));
+    await entered.future;
+
+    try {
+      await auth.signOut().timeout(_leaseBound * 10);
+      expect(engine.stops, 1);
+      expect(response.isCompleted, isTrue);
+    } finally {
+      if (!response.isCompleted) {
+        response.completeError(StateError('the test gave up'));
+      }
+    }
+    await aborted;
+  });
+
+  test('a failed stop still resets the transport', () async {
+    final entered = Completer<void>();
+    final response = Completer<String>();
+    final failure = StateError('the engine did not stop');
+    engine
+      ..stopError = failure
+      ..onReset = () {
+        if (!response.isCompleted) {
+          response.completeError(StateError('aborted by a reset'));
+        }
+      };
+    final pending = auth.runWithSession(session, () {
+      entered.complete();
+      return response.future;
+    });
+    final aborted = expectLater(pending, throwsA(isA<StateError>()));
+    await entered.future;
+
+    try {
+      await expectLater(
+        auth.signOut().timeout(_leaseBound * 10),
+        throwsA(same(failure)),
+      );
+      expect(engine.resets, 1);
+    } finally {
+      engine.stopError = null;
+      if (!response.isCompleted) response.complete('answered');
+    }
+    await aborted;
+  });
+
+  test(
+    'recovering from a failed identity read waits for the dispatch',
+    () async {
+      final entered = Completer<void>();
+      final response = Completer<String>();
+      final pending = auth.runWithSession(session, () {
+        entered.complete();
+        return response.future;
+      });
+      await entered.future;
+      engine
+        ..identityFailures = 1
+        ..identityFailed = Completer<void>()
+        ..onReset = () {
+          if (!response.isCompleted) {
+            response.completeError(StateError('aborted by a reset'));
+          }
+        };
+
+      final identityRead = auth.getActiveUser();
+      try {
+        await engine.identityFailed!.future.timeout(_leaseBound);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        // The retry resets the transport, which would abort the dispatch.
+        expect(engine.resets, 0);
+      } finally {
+        if (!response.isCompleted) response.complete('accepted');
+      }
+      expect(await pending, 'accepted');
+      expect((await identityRead)?.walletId.pubkeyHash, _hash);
+      expect(engine.resets, 1);
+    },
+  );
+
+  test('a lease that expires at once is refused', () {
+    for (final timeout in [Duration.zero, const Duration(seconds: -1)]) {
+      expect(
+        () => KdfAuthService(framework, config, dispatchLeaseTimeout: timeout),
+        throwsArgumentError,
+      );
+    }
   });
 
   test('sign-out revokes immediately but waits for dispatched work', () async {
@@ -174,7 +370,7 @@ void main() {
     expect(engine.stops, 1);
   });
 
-  test('disposal waits for the actual dispatch future to settle', () async {
+  test('disposal waits for a dispatch answered within its bound', () async {
     final entered = Completer<void>();
     final response = Completer<void>();
     final pending = auth.runWithSession(session, () {
@@ -304,5 +500,58 @@ void main() {
     await pending;
     await disposal;
     expect(disposed, isTrue);
+  });
+
+  group('with a startup environment', () {
+    late Directory home;
+
+    setUpAll(() async {
+      home = await Directory.systemTemp.createTemp('kdf-dispatch-start-');
+      binding.defaultBinaryMessenger
+        ..setMockMethodCallHandler(_pathProvider, (_) async => home.path)
+        ..setMockMessageHandler('flutter/assets', _sourceAssets);
+    });
+
+    tearDownAll(() async {
+      binding.defaultBinaryMessenger
+        ..setMockMethodCallHandler(_pathProvider, null)
+        ..setMockMessageHandler('flutter/assets', null);
+      await home.delete(recursive: true);
+    });
+
+    test('an engine start waits for an unanswered dispatch', () async {
+      // Build the start-up config once, so the start below reaches the engine
+      // lock straight away.
+      engine.running = false;
+      await auth.getUsers();
+      expect(engine.starts, 1);
+      final current = await auth.captureSessionContext();
+
+      final entered = Completer<void>();
+      final response = Completer<String>();
+      final pending = auth.runWithSession(current, () {
+        entered.complete();
+        return response.future;
+      });
+      await entered.future;
+      // The engine dies beneath the request, with no transition to revoke it.
+      engine
+        ..running = false
+        ..startEntered = Completer<void>();
+
+      final users = auth.getUsers();
+      try {
+        await Future.any([
+          engine.startEntered!.future,
+          Future<void>.delayed(const Duration(milliseconds: 300)),
+        ]);
+        expect(engine.starts, 1);
+      } finally {
+        response.complete('answered');
+      }
+      expect(await pending, 'answered');
+      await users.timeout(_leaseBound * 10);
+      expect(engine.starts, 2);
+    });
   });
 }

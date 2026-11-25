@@ -1,7 +1,10 @@
 targets:
   $default:
     builders:
-      hive_ce_generator|hive_generator:
+      freezed:
+        options:
+          format: true
+      hive_ce_generator:hive_adapters_generator:
         enabled: true
         generate_for:
           - lib/**.dart

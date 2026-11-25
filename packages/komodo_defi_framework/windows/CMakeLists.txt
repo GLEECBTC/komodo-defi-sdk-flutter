@@ -8,6 +8,11 @@ cmake_minimum_required(VERSION 3.15)
 set(PROJECT_NAME "komodo_defi_framework")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+# Production startup uses the bundled DLL. An executable-only or stale archive
+# must fail during packaging rather than strand generated-password wallets.
+set(KDF_FRAMEWORK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+include("${CMAKE_CURRENT_SOURCE_DIR}/validate_native_library.cmake")
+
 set(PLUGIN_NAME "${PROJECT_NAME}_plugin")
 
 add_library(${PLUGIN_NAME} SHARED

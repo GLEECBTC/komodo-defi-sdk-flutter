@@ -3,9 +3,9 @@
 # Reference mirror of build_config.json. The JSON file remains canonical.
 
 api:
-  api_commit_hash: "a51d69a11ff937ecf9678e9b37632af578252846"
+  api_commit_hash: "fd8249c904ae1c75d66fce1c1e361686f13d723c"
 
-  branch: "dev"
+  branch: "charl-temp/solana-combined"
 
   fetch_at_build_enabled: true
   concurrent_downloads_enabled: true
@@ -21,6 +21,7 @@ api:
     - "windows"
 
   source_urls:
+    - "https://kdf-dev-builds.nitride.app"
     - "https://devbuilds.gleec.com"
     - "https://nebula.decker.im"
 
@@ -28,52 +29,49 @@ api:
     web:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-wasm|mm2_[a-f0-9]{7,40}-wasm|mm2-[a-f0-9]{7,40}-wasm)\\.zip$"
       valid_zip_sha256_checksums:
-        - "5389d81b8ab6f126caa24782e4f8f15c5205cc7b5103c9602d8e5b554e390c51"
+        - "c0b40c4e771f4a21dbd7bbbf369e4cd64fa0c9694de5ac36151997055677a914"
       path: "web/kdf/bin"
 
     ios:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-ios-aarch64|mm2_[a-f0-9]{7,40}-ios-aarch64|mm2-[a-f0-9]{7,40}-ios-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "fb6f7a42cf43506478cd4cc7e398f0bde3a118778e03c2694ddefefc5e4c9c37"
+        - "235cc066ac0a88271ece56c5e8ba286d502ba2521fbc56e7818404183f540ea5"
       path: "ios"
 
     macos:
-      matching_pattern: "^(?:kdf-macos-universal2-[a-f0-9]{7,40}|kdf_[a-f0-9]{7,40}-mac-universal)\\.zip$"
-      matching_preference:
-        - "kdf-macos-universal2-"
-        - "mac-universal"
+      matching_pattern: "^kdf-macos-universal2-[a-f0-9]{40}-native-v1\\.zip$"
       valid_zip_sha256_checksums:
-        - "62fe0d767548987ecb901e4182f6d88efb65d019ceba20ab8510ce4d7a1e8626"
+        - "f44104961a18b2b45feb5fb83d2e09cb3b2bd8c38592582448914887cccab62a"
       path: "macos/bin"
 
     android-armv7:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-armv7|mm2_[a-f0-9]{7,40}-android-armv7|mm2-[a-f0-9]{7,40}-android-armv7-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "f5daf08c2089cefaa9c78ad9bdfb4895f452cfd0f27e368f4306298064797b3b"
+        - "c3c23ff1d083f1714464a705f0f35e3c472e86806dd312fcb20f0dba0ad74db9"
       path: "android/app/src/main/cpp/libs/armeabi-v7a"
 
     android-aarch64:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-android-aarch64|mm2_[a-f0-9]{7,40}-android-aarch64|mm2-[a-f0-9]{7,40}-android-aarch64-CI)\\.zip$"
       valid_zip_sha256_checksums:
-        - "7b4b30d98ecc4b0a9fdc1a9b9a7a562c6269450f16087f82459239fe61dfe738"
+        - "d421e740fade65aab332963bece4fec6a964cb32f780e745fe28f7c005dbb2ef"
       path: "android/app/src/main/cpp/libs/arm64-v8a"
 
     linux:
-      matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-linux-x86-64|mm2_[a-f0-9]{7,40}-linux-x86-64|mm2-[a-f0-9]{7,40}-Linux-Release)\\.zip$"
+      matching_pattern: "^kdf_[a-f0-9]{40}-linux-x86-64-native-v1\\.zip$"
       valid_zip_sha256_checksums:
-        - "522fb3a5ec0524588be10a2fc71085b87d9333b459e68e52baef64f7ff13eb52"
+        - "5151e94d7778890a1c6e78f0bfc364c13d507dd55187d5452aacd840bcdb35b7"
       path: "linux/bin"
 
     windows:
       matching_pattern: "^(?:kdf_[a-f0-9]{7,40}-win-x86-64|mm2_[a-f0-9]{7,40}-win-x86-64|mm2-[a-f0-9]{7,40}-Win64)\\.zip$"
       valid_zip_sha256_checksums:
-        - "2f8a7f7ba3c659aaa685db9363b1d42cef5574a8a945e0d63b2e4bbcd222a0ef"
+        - "025a370624982f2af7b078ba9b6a8ed117ca827002a050c619415fcce6fcfd3e"
       path: "windows/bin"
 
 coins:
   fetch_at_build_enabled: true
   update_commit_on_build: false
-  bundled_coins_repo_commit: "efd3a6471709f7e13e0b03277e37548e11840aae"
+  bundled_coins_repo_commit: "cc8249e85e54467bc2684c2712857711eab55fd2"
   coins_repo_api_url: "https://api.github.com/repos/GLEECBTC/coins"
   coins_repo_content_url: "https://raw.githubusercontent.com/GLEECBTC/coins"
   coins_repo_branch: "master"

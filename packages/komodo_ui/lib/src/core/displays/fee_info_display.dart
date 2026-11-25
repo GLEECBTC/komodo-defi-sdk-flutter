@@ -51,9 +51,8 @@ class FeeInfoDisplay extends StatelessWidget {
               if (fee.isHighFee)
                 Text(
                   'Warning: High gas price',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               Text(
                 'Estimated Time: ${fee.estimatedTime}',
@@ -86,9 +85,8 @@ class FeeInfoDisplay extends StatelessWidget {
               if (_isEip1559HighFee(fee))
                 Text(
                   'Warning: High gas price',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               Text(
                 'Estimated Time: ${_getEip1559EstimatedTime(fee)}',
@@ -237,6 +235,27 @@ class FeeInfoDisplay extends StatelessWidget {
               ),
             ],
 
+            final SolanaFeeInfo fee => [
+              Text(
+                'Network Fee:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${fee.feeAmount} ${fee.coin}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              if (fee.rentAmount > Decimal.zero) ...[
+                Text(
+                  'Account Creation Deposit:',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                Text(
+                  '${fee.rentAmount} ${fee.coin}',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ],
+            ],
+
             final FeeInfoSia fee => [
               Text('Policy:', style: Theme.of(context).textTheme.bodyMedium),
               Text(fee.policy, style: Theme.of(context).textTheme.labelLarge),
@@ -253,7 +272,9 @@ class FeeInfoDisplay extends StatelessWidget {
 
         // Always show total fee
         Text(
-          'Total Fee: ${feeInfo.formatTotal()}',
+          feeInfo is SolanaFeeInfo
+              ? 'Total SOL Required: ${feeInfo.formatTotal(precision: 9)}'
+              : 'Total Fee: ${feeInfo.formatTotal()}',
           style: Theme.of(context).textTheme.titleSmall,
         ),
 
@@ -261,9 +282,8 @@ class FeeInfoDisplay extends StatelessWidget {
         if (feeInfo.isHighFee)
           Text(
             'Warning: This fee seems unusually high',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.error,
-            ),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
           ),
       ],
     );
