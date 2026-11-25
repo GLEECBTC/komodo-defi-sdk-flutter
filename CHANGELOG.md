@@ -59,6 +59,17 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   Partial history is completed from other providers; rate-limit reordering
   does not skip healthy providers. Future dates remain unavailable, and a
   request spanning midnight cannot permanently cache an unfinished day.
+- **Activation backs off from assets that keep failing** ([@CharlVS]) —
+  After three consecutive activation failures with the same error,
+  `SharedActivationCoordinator` refuses further attempts for that asset
+  without contacting KDF, with an `ActivationDeferredException`. It waits one
+  minute, doubling up to 30 minutes. A success, a different error, a wallet
+  change, a policy lookup that recovers from `unavailable`, changed
+  restrictions or `KomodoDefiSdk.resetActivationBackoff` starts over.
+  `activationDeferral` reports the deferral in force. Balance recovery for an
+  asset that failed to activate now polls alone instead of also running a
+  stale-balance guard on the same 30-second interval. Concurrent callers that
+  both missed the pending-activation check now share one attempt.
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 

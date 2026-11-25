@@ -362,6 +362,7 @@ Future<void> bootstrap({
     final coordinator = SharedActivationCoordinator(
       activationManager,
       await container.getAsync<KomodoDefiLocalAuth>(),
+      activationPolicy: container<ActivationPolicy>(),
     );
 
     if (balanceManager.activationCoordinator == null) {

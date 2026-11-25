@@ -247,6 +247,20 @@ class KomodoDefiSdk with SecureRpcPasswordMixin {
     return coordinator.activateAsset(asset, timeout: timeout);
   }
 
+  /// When [assetId]'s activation keeps failing with the same error, the
+  /// deferral that makes [activateAsset] refuse it without contacting KDF.
+  /// Null when an attempt would run now.
+  ActivationDeferredException? activationDeferral(AssetId assetId) =>
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .activationDeferral(assetId);
+
+  /// Lets the next activation of [assetIds], or of every asset when null,
+  /// start at once despite earlier failures. Call it for an explicit user
+  /// request, or when something that could fix the failure has changed.
+  void resetActivationBackoff([Iterable<AssetId>? assetIds]) =>
+      _assertSdkInitialized(_container<SharedActivationCoordinator>())
+          .resetActivationBackoff(assetIds);
+
   /// Whether [activateAsset] succeeded; use its typed outcome for recovery UI.
   Future<bool> ensureAssetActivated(Asset asset, {Duration? timeout}) async =>
       (await activateAsset(asset, timeout: timeout)).isSuccess;

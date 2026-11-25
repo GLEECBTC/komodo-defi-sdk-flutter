@@ -107,6 +107,8 @@ export 'package:komodo_defi_types/komodo_defi_types.dart'
         WithdrawalSubmission,
         WithdrawalSubmissionType;
 
+export 'src/activation/activation_failure_backoff.dart'
+    show ActivationDeferredException;
 export 'src/activation/activation_policy.dart';
 export 'src/activation/nft_activation_service.dart' show NftActivationService;
 export 'src/activation/shared_activation_coordinator.dart'

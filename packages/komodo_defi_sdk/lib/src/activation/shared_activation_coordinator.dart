@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:developer' show log;
 
 import 'package:komodo_defi_local_auth/komodo_defi_local_auth.dart';
+import 'package:komodo_defi_sdk/src/activation/activation_failure_backoff.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_manager.dart';
 import 'package:komodo_defi_sdk/src/activation/activation_policy.dart';
 import 'package:komodo_defi_types/komodo_defi_types.dart';
+import 'package:logging/logging.dart';
 
 /// Shared coordinator for asset activations across all managers.
 /// Prevents race conditions by ensuring only one activation per asset at a time
@@ -17,15 +19,34 @@ import 'package:komodo_defi_types/komodo_defi_types.dart';
 /// fail with "No such coin" errors. The coordinator waits for coin availability
 /// verification before declaring activation successful.
 class SharedActivationCoordinator {
-  SharedActivationCoordinator(this._activationManager, this._auth) {
+  /// [activationPolicy] lets a recovered policy lookup or changed restrictions
+  /// clear [failureBackoff]; without it only a session change, a success or
+  /// [resetActivationBackoff] does.
+  SharedActivationCoordinator(
+    this._activationManager,
+    this._auth, {
+    ActivationPolicy? activationPolicy,
+    ActivationFailureBackoff? failureBackoff,
+  }) : _failureBackoff = failureBackoff ?? ActivationFailureBackoff() {
     _authSubscription = _auth.watchSessionContext().listen(
       _handleSessionChanged,
     );
+    if (activationPolicy != null) {
+      _observePolicy(activationPolicy.current);
+      _policySubscription = activationPolicy.changes.listen(_observePolicy);
+    }
   }
+
+  static final Logger _logger = Logger('SharedActivationCoordinator');
 
   final ActivationManager _activationManager;
   final KomodoDefiLocalAuth _auth;
+  final ActivationFailureBackoff _failureBackoff;
   StreamSubscription<AuthSessionContext?>? _authSubscription;
+  StreamSubscription<ActivationPolicySnapshot>? _policySubscription;
+
+  /// The last policy answer that was not `loading`.
+  ActivationPolicySnapshot? _settledPolicy;
 
   /// Track pending activations to prevent duplicates.
   ///
@@ -63,7 +84,39 @@ class SharedActivationCoordinator {
       }
     }
     _pendingActivations.clear();
+    _failureBackoff.reset();
   }
+
+  /// Clears activation backoff when the conditions behind it may have changed.
+  ///
+  /// A host refreshes its policy on a timer and publishes `loading` before each
+  /// answer, so only settled answers are compared. A lookup that recovers from
+  /// `unavailable` is the nearest signal of regained connectivity the SDK has.
+  void _observePolicy(ActivationPolicySnapshot snapshot) {
+    if (_isDisposed || snapshot.status == ActivationPolicyStatus.loading) {
+      return;
+    }
+    final previous = _settledPolicy;
+    _settledPolicy = snapshot;
+    if (previous == null) return;
+    final recovered =
+        previous.status == ActivationPolicyStatus.unavailable &&
+        snapshot.status == ActivationPolicyStatus.ready;
+    final restrictionsChanged =
+        previous.blockedAssets.length != snapshot.blockedAssets.length ||
+        !previous.blockedAssets.containsAll(snapshot.blockedAssets);
+    if (recovered || restrictionsChanged) _failureBackoff.reset();
+  }
+
+  /// The deferral in force for [assetId], or null if [activateAsset] would
+  /// make a real attempt now.
+  ActivationDeferredException? activationDeferral(AssetId assetId) =>
+      _failureBackoff.deferralFor(assetId);
+
+  /// Lets the next activation of [assetIds], or of every asset when null,
+  /// start at once. For explicit user requests and other real changes.
+  void resetActivationBackoff([Iterable<AssetId>? assetIds]) =>
+      _failureBackoff.reset(assetIds);
 
   /// Upper bound on one activation attempt, for assets whose activation is
   /// expected to complete promptly.
@@ -172,10 +225,28 @@ class SharedActivationCoordinator {
     }
     if (isActive && !shouldRefreshTronGaslessActivation) {
       _activationManager.ensureActiveAssetAllowed(asset.id);
+      _failureBackoff.recordSuccess(asset.id);
       return ActivationResult.alreadyActive(asset.id);
     }
 
     _activationManager.ensureActivationAllowed(asset.id);
+    // Re-checked because a concurrent caller can register an attempt while
+    // this one awaited the active check; starting a second one would issue a
+    // duplicate activation and count its failure twice.
+    final startedMeanwhile = _pendingActivations[asset.id];
+    if (startedMeanwhile != null) {
+      return _allowedResult((await startedMeanwhile.future).unwrap());
+    }
+    // An active asset only gets here to refresh its GasFree status, which a
+    // failure streak from earlier activation attempts must not block.
+    final deferral = isActive ? null : _failureBackoff.deferralFor(asset.id);
+    if (deferral != null) {
+      return ActivationResult.failure(
+        asset.id,
+        deferral.toString(),
+        cause: deferral,
+      );
+    }
     // Never completed with an error - see [_ActivationOutcome]. That also
     // removes the need for a side listener on an attempt nobody is waiting on:
     // the caller only gets this future if it reaches the `return` below, and
@@ -197,7 +268,45 @@ class SharedActivationCoordinator {
     // the initiating caller would still wait forever. Joiners were unaffected,
     // which is what made it easy to miss.
     unawaited(_driveActivation(asset, completer, deadline, session));
-    return _allowedResult((await completer.future).unwrap());
+    final outcome = await completer.future;
+    // Only the caller that started the attempt gets here, so each attempt is
+    // counted once however many callers joined it.
+    _recordOutcome(asset.id, outcome, session);
+    return _allowedResult(outcome.unwrap());
+  }
+
+  void _recordOutcome(
+    AssetId assetId,
+    _ActivationOutcome outcome,
+    AuthSessionContext session,
+  ) {
+    final result = outcome._result;
+    // No result means the attempt was torn down, e.g. by a wallet change.
+    if (_isDisposed ||
+        result == null ||
+        !_auth.isSessionContextCurrent(session)) {
+      return;
+    }
+    if (result.isSuccess) {
+      _failureBackoff.recordSuccess(assetId);
+      return;
+    }
+    // Not the asset's own failure: a cancellation, or a policy that stopped
+    // being ready mid-attempt (hosts publish `loading` before every refresh).
+    if (outcome._cancelled || result.cause is ActivationPolicyException) {
+      return;
+    }
+    final deferral = _failureBackoff.recordFailure(
+      assetId,
+      result.errorMessage ?? 'Unknown activation error',
+    );
+    if (deferral != null) {
+      _logger.warning(
+        'Activation failed ${deferral.consecutiveFailures} times in a row '
+        'with the same error; next attempt not before '
+        '${deferral.retryAfter.toIso8601String()}',
+      );
+    }
   }
 
   /// Rechecks a shared success against the policy as each caller receives it.
@@ -300,7 +409,14 @@ class SharedActivationCoordinator {
               progress.errorMessage ?? 'Unknown activation error',
             );
             if (!completer.isCompleted) {
-              completer.complete(_ActivationOutcome.result(result));
+              completer.complete(
+                _ActivationOutcome.result(
+                  result,
+                  cancelled:
+                      progress.progressDetails?.errorCode ==
+                      'ACTIVATION_CANCELLED',
+                ),
+              );
             }
           }
           break;
@@ -463,6 +579,8 @@ class SharedActivationCoordinator {
     // Cancel auth subscription
     await _authSubscription?.cancel();
     _authSubscription = null;
+    await _policySubscription?.cancel();
+    _policySubscription = null;
 
     // Cancel all pending activations
     for (final completer in _pendingActivations.values) {
@@ -589,11 +707,19 @@ final class AssetActivationException implements Exception {
 /// each caller's own zone is the same remedy `PubkeyManager` applies to its
 /// shared pubkey fetch.
 class _ActivationOutcome {
-  const _ActivationOutcome._(this._result, this._error, this._stackTrace);
+  const _ActivationOutcome._(
+    this._result,
+    this._error,
+    this._stackTrace, {
+    bool cancelled = false,
+  }) : _cancelled = cancelled;
 
-  /// The attempt reached a terminal state, successful or not.
-  factory _ActivationOutcome.result(ActivationResult result) =>
-      _ActivationOutcome._(result, null, null);
+  /// The attempt reached a terminal state, successful or not. [cancelled]
+  /// marks a failure that was a cancellation rather than the asset failing.
+  factory _ActivationOutcome.result(
+    ActivationResult result, {
+    bool cancelled = false,
+  }) => _ActivationOutcome._(result, null, null, cancelled: cancelled);
 
   /// The attempt was terminated without a result, e.g. by a wallet change.
   factory _ActivationOutcome.error(Object error, StackTrace stackTrace) =>
@@ -602,6 +728,7 @@ class _ActivationOutcome {
   final ActivationResult? _result;
   final Object? _error;
   final StackTrace? _stackTrace;
+  final bool _cancelled;
 
   /// Returns the result, or rethrows the original error in the caller's zone.
   ActivationResult unwrap() {
