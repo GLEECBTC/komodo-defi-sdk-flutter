@@ -1,0 +1,246 @@
+{
+  "verified_on": "2026-11-13",
+  "repository": "GLEECBTC/kdf-internal",
+  "branch": "main",
+  "commit": "f9632e0ec771668a6f21b37aede01a30110141cb",
+  "release": "https://github.com/GLEECBTC/kdf-internal/releases/tag/v3.2.0-beta",
+  "release_published_at": "2026-11-04T07:21:07Z",
+  "source_comparison": {
+    "base": "a51d69a11ff937ecf9678e9b37632af578252846",
+    "head": "f9632e0ec771668a6f21b37aede01a30110141cb",
+    "changed_files": [
+      "CHANGELOG.md"
+    ]
+  },
+  "native_version": "Komodo DeFi Framework: 3.2.0-beta_f9632e0",
+  "artifacts": [
+    {
+      "platform": "web",
+      "filename": "kdf_f9632e0-wasm.zip",
+      "bytes": 11971525,
+      "sha256": "a661362498a434ef29b4578bbab80edfc65086045cf19a3b8abb882f3d5e61f1",
+      "github_release_digest": "sha256:a661362498a434ef29b4578bbab80edfc65086045cf19a3b8abb882f3d5e61f1",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-wasm.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "kdflib_bg.wasm"
+      ],
+      "members": [
+        {
+          "path": "kdflib.d.ts",
+          "size": 34409,
+          "sha256": "f5fe0b1a44d35cc28ee3ee29b55a162a6fbb65ae4f2eaa1e4afe53e5ba636851"
+        },
+        {
+          "path": "kdflib.js",
+          "size": 108301,
+          "sha256": "cbeda42d407d11d59730f4b5ec85bd18e2a6c2eb2e2fc7e65c0381788de91776"
+        },
+        {
+          "path": ".gitignore",
+          "size": 1,
+          "sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1"
+        },
+        {
+          "path": "package.json",
+          "size": 654,
+          "sha256": "6ea6bbaa7ba699935182b3096d984a6f7f733e93c5cf07315c7f15dd9a818be6"
+        },
+        {
+          "path": "kdflib_bg.wasm.d.ts",
+          "size": 23232,
+          "sha256": "b21c15e4c0af09ea3ba14bf2c388f98bb5772595dcd8245df992354ccefdec05"
+        },
+        {
+          "path": "snippets/libp2p-wasm-ext-7e5f5edb880ee0f5/src/websockets.js",
+          "size": 5945,
+          "sha256": "bd1472d656c119fdbe76333c56098c0295d913e5c532ef583efda1a59db41a5a"
+        },
+        {
+          "path": "snippets/hw_common-c933ea30ea0fef0d/inline1.js",
+          "size": 431,
+          "sha256": "e8bccdb5f7ea2a2affcc10bfff045989d40490101a0575290a30d53009902f0a"
+        },
+        {
+          "path": "snippets/hw_common-c933ea30ea0fef0d/inline0.js",
+          "size": 54,
+          "sha256": "fcaa05077e433b5cfb174377954dfe44cd466be81336b965c8e885395ca9f90e"
+        },
+        {
+          "path": "snippets/web3-3a881fca17d19cd8/inline0.js",
+          "size": 58,
+          "sha256": "e0bb201521f4b8f1376499755278783ad46f4cc7a86bc803fef2dc5b6d264ba9"
+        },
+        {
+          "path": "kdflib_bg.wasm",
+          "size": 35978481,
+          "sha256": "4e54b31ee12b43b023c3c63eb9533d8da41710ae793b39fe5a6504e79217be8a"
+        }
+      ]
+    },
+    {
+      "platform": "ios",
+      "filename": "kdf_f9632e0-ios-aarch64.zip",
+      "bytes": 50307914,
+      "sha256": "d59f17e446854d5de6fc57ac2831e89dc4c7ee7f1f9266a2abce1cfe9e21ec93",
+      "github_release_digest": "sha256:d59f17e446854d5de6fc57ac2831e89dc4c7ee7f1f9266a2abce1cfe9e21ec93",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-ios-aarch64.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "libkdf.a"
+      ],
+      "members": [
+        {
+          "path": "libkdf.a",
+          "size": 157594616,
+          "sha256": "0852cc464691299e43d74155a194011ba85426525a2a6ae523bc74b9e9f7b763"
+        }
+      ]
+    },
+    {
+      "platform": "macos",
+      "filename": "kdf_f9632e0-mac-universal.zip",
+      "bytes": 55991315,
+      "sha256": "6dfc9149ac7b1017e518163788fe8c8a6d45c1270aae66cc74b83f8e20d34835",
+      "github_release_digest": "sha256:6dfc9149ac7b1017e518163788fe8c8a6d45c1270aae66cc74b83f8e20d34835",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-mac-universal.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "kdf"
+      ],
+      "members": [
+        {
+          "path": "kdf",
+          "size": 123882016,
+          "sha256": "36f83bce35d7227ef4a2d71f5f42e0ce7704b9bdb9984cff9a9d78665edbf17b"
+        }
+      ]
+    },
+    {
+      "platform": "android-armv7",
+      "filename": "kdf_f9632e0-android-armv7.zip",
+      "bytes": 54483784,
+      "sha256": "4ed0faff8d258f1db77c5babeca24b0a861878ec3babc48fdff8558db0fe0e46",
+      "github_release_digest": "sha256:4ed0faff8d258f1db77c5babeca24b0a861878ec3babc48fdff8558db0fe0e46",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-android-armv7.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "libkdf.a"
+      ],
+      "members": [
+        {
+          "path": "libkdf.a",
+          "size": 196452782,
+          "sha256": "1b3c5bb48355a2d6a53e8030af081119ec375d049e7530ed51d08b8838b4add4"
+        }
+      ]
+    },
+    {
+      "platform": "android-aarch64",
+      "filename": "kdf_f9632e0-android-aarch64.zip",
+      "bytes": 55710068,
+      "sha256": "661c98a26e846c9be5d3b387e0c82a7d5d043b61188deda643ec6a58db317d89",
+      "github_release_digest": "sha256:661c98a26e846c9be5d3b387e0c82a7d5d043b61188deda643ec6a58db317d89",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-android-aarch64.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "libkdf.a"
+      ],
+      "members": [
+        {
+          "path": "libkdf.a",
+          "size": 245057276,
+          "sha256": "414e05f5a96d00d163655ba5bc0b16968e4fc06e97312d3b2672b21b3ee9145b"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "filename": "kdf_f9632e0-linux-x86-64.zip",
+      "bytes": 29708903,
+      "sha256": "dac943647d2f307204a6a01a6a5c34e33c00e8695b88e1ceaf2a7893eba50ff2",
+      "github_release_digest": "sha256:dac943647d2f307204a6a01a6a5c34e33c00e8695b88e1ceaf2a7893eba50ff2",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-linux-x86-64.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "kdf"
+      ],
+      "members": [
+        {
+          "path": "kdf",
+          "size": 70452944,
+          "sha256": "d561ce7fed4ff564917d2f6b63cee3c44b2bdb7bd600296d3457870a91283c6a"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "filename": "kdf_f9632e0-win-x86-64.zip",
+      "bytes": 64464376,
+      "sha256": "61b9b981744f6d252cb36dbdc125b9d98ee4896bede6053f19426c93a56004e6",
+      "github_release_digest": "sha256:61b9b981744f6d252cb36dbdc125b9d98ee4896bede6053f19426c93a56004e6",
+      "mirror_url": "https://devbuilds.gleec.com/main/kdf_f9632e0-win-x86-64.zip",
+      "sidecar_verified": true,
+      "zip_integrity_checked": true,
+      "compiled_commit_marker": "f9632e0",
+      "commit_marker_members": [
+        "kdf.exe",
+        "kdflib.dll"
+      ],
+      "members": [
+        {
+          "path": "enum_derives.dll",
+          "size": 1730048,
+          "sha256": "3e4edce977ffcd3fad816a65f582d9726ee9bc2a2b2c290cf2fb1b718c4b4a08"
+        },
+        {
+          "path": "kdf.exe",
+          "size": 85701120,
+          "sha256": "3fc281d6fe1d2b366fe75a8971734921105024f8c383a8808bad4a92f4599234"
+        },
+        {
+          "path": "kdflib.dll",
+          "size": 94122496,
+          "sha256": "e13f443d6040680e2a10e87662de80d5023838dd756e019937f1f95d46ed460e"
+        },
+        {
+          "path": "serialization_derive.dll",
+          "size": 603648,
+          "sha256": "451d697f05cf0f3c18acd9f33994a9529d642633807c06e9050f17bdd2a8f360"
+        },
+        {
+          "path": "ser_error_derive.dll",
+          "size": 1555456,
+          "sha256": "81fd3976a3a4e45e3ac30650b65462740077e6562048334446f95cbf23daf47e"
+        }
+      ]
+    }
+  ],
+  "coins_commit": "cc8249e85e54467bc2684c2712857711eab55fd2",
+  "qualification": "Artifact identity and archive contents only; signed app installation and funded swap checks remain separate.",
+  "manifest_carry": {
+    "source_pr": 433,
+    "accepted_dev_commit": "7ce3962dbbdd9240c2977c49ece1f0076a85e822",
+    "sdk_main_base": "09bde8c6978433d509ffabe6696d495fe5923745",
+    "app_release": "0.10.0+0",
+    "sdk_version": "0.9.0"
+  },
+  "analysis": {
+    "error": 0,
+    "warning": 41,
+    "info": 1824,
+    "note": "Existing SDK diagnostics; the carry changes build manifests and documentation only."
+  }
+}

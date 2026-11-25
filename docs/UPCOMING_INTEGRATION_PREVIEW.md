@@ -52,7 +52,10 @@ serially: concurrent transformers share framework output paths. Complete
 package, WebAssembly, preview and native packaging checks are also required
 on the published integration head; their final results are recorded in the PR.
 
-The production KDF/catalog pins and capability gates remain in effect. An
+When this preview was cut, the production KDF/catalog pins and capability
+gates remained in effect. SDK `dev` has since pinned the temporary combined KDF
+build on `charl-temp/solana-combined` (#452, #453, #457) for dev use only; a
+release must repin to a merged kdf-internal build. An
 integration preview does not satisfy SDK merge/repin, physical credential,
 trusted signing, funded Solana/swap, uncertain-signature, combined artifact,
 bot policy or historical-log/credential review gates. No release promotion is
