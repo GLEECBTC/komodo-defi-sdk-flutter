@@ -958,16 +958,14 @@ class BalanceManager implements IBalanceManager {
 
         // Recovery mode: keep this watcher alive and retry in the background
         // so callers do not need to re-subscribe after startup races.
+        //
+        // Polling alone: each tick already re-requests activation and forces a
+        // balance read. A stale guard alongside it did the same work on the
+        // same 30s interval, doubling the attempts for an asset that cannot
+        // activate. The coordinator's backoff spaces those attempts out.
         _logger.warning(
           'Activation unavailable for asset; '
-          'starting recovery watchers',
-        );
-        _startStaleBalanceGuard(
-          asset: asset,
-          assetId: assetId,
-          controller: controller,
-          activateIfNeeded: activateIfNeeded,
-          walletContext: walletContext,
+          'starting recovery polling',
         );
         await _startBalancePolling(
           asset: asset,

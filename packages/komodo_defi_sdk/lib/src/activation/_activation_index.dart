@@ -4,6 +4,7 @@
 library _activation;
 
 export 'activation_exceptions.dart';
+export 'activation_failure_backoff.dart';
 export 'activation_manager.dart';
 export 'activation_policy.dart';
 export 'base_strategies/activation_strategy_base.dart';
