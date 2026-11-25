@@ -1,5 +1,33 @@
 ## 0.7.0 (2026-10-28)
 
+Unpublished SDK 0.9.0 candidate; updated 4 November 2026 for accepted RC changes.
+
+ - **FIX**(trezor): recover a hardware wallet file without a saved record,
+   including case-insensitive names, while refusing a software wallet with the
+   same name. Restore the prior record if a claim fails; retry a known wallet
+   before using a new remembered `My Trezor N` wallet when its existing file
+   cannot be opened. Existing files remain untouched (#424, RC #425).
+ - **FIX**(trezor): require successful device initialization and a readable
+   active wallet before completing sign-in, and preserve remembered credentials
+   across the supported recovery paths (#424, RC #425).
+ - **BREAKING** **FEAT**(auth): custom auth implementations must provide
+   `runWithSession<T>(AuthSessionContext expected, Future<T> Function() dispatch)`.
+   Validate ownership before and after taking the engine lease, and hold it
+   while the raw request is answered, for at most `dispatchLeaseTimeout` (10
+   seconds by default; it must be positive). Only engine stops, starts and
+   transport resets wait for that lease, so identity reads never delay a
+   dispatch. See the
+   [submission-ownership migration](../../docs/RELEASE_0.9.0.md#submission-ownership)
+   for reentrancy and pending-request restrictions (#426, RC #427; #437,
+   RC #438).
+ - **FIX**(auth): a transport reset waits for the dispatch lease, so recovering
+   from a failed identity read never aborts a swap submission. A stop resets
+   the transport before it releases the engine, even when the stop fails, so a
+   request a lapsed lease left pending cannot reach a replacement engine
+   (#437, RC #438).
+ - **TEST**(auth): cover dispatch versus wallet transitions and the completed
+   Trezor claim, rollback, retry and initialization-completion paths (#424, #428).
+
  - **FIX**(build): keep Melos-generated indexes platform-safe and exclude Dart
    part files from standalone exports; regenerate release output.
  - **CHORE**(deps): align SDK 0.9.0 workspace dependency constraints.
