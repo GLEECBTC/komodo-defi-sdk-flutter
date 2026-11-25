@@ -579,6 +579,7 @@ extension KdfExtensions on KdfAuthService {
       lifiProxyUrl: _lifiProxyUrl,
       lifiIntegrator: _lifiIntegrator,
       desktopDataDirectory: _desktopDataDirectory,
+      catalog: _startupCatalog,
     );
   }
 }

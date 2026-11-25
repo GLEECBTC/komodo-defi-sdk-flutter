@@ -3,6 +3,10 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:komodo_defi_harness/komodo_defi_harness.dart';
+import 'package:komodo_defi_sdk/komodo_defi_sdk.dart';
+import 'package:komodo_defi_types/komodo_defi_types.dart';
+
+import '../solana_fixture_catalog.dart';
 
 /// The real-KDF tier. Informational, never gating.
 ///
@@ -22,6 +26,9 @@ import 'package:komodo_defi_harness/komodo_defi_harness.dart';
 /// The seed is read from the environment only, wrapped in `Secret`, and
 /// redacted out of the captured log stream. The workspace holds a real wallet
 /// database: never upload it as a CI artifact.
+///
+/// The Solana test needs only an unfunded seed: it activates on devnet and
+/// never sends. Run it with a fresh throwaway mnemonic, never a real one.
 void main() {
   late KdfProcessRequirements requirements;
 
@@ -88,6 +95,78 @@ void main() {
             harness.metrics['first_post_activation_balance_ms'],
             isNotNull,
             reason: 'the asset never produced a balance after activation',
+          );
+        },
+        timeout: const Timeout(Duration(minutes: 6)),
+      );
+    }
+
+    for (final walletType in harnessWalletTypes) {
+      test(
+        'activates catalog Solana tokens by ticker on devnet '
+        '(${walletType.name})',
+        () async {
+          // KDF's start-up coins come from this injected catalog: the bundled
+          // one has neither ticker, so KDF would refuse both as unknown.
+          final harness = await KdfHarness.process(
+            walletType: walletType,
+            config: solanaFixtureSdkConfig(
+              storageNamespace: 'solana-process-only',
+            ).copyWith(activatedAssetsCacheTtl: _enabledCoinsTtl),
+          );
+          if (harness == null) {
+            markTestSkipped(requirements.skipReason);
+            return;
+          }
+          addTearDown(harness.dispose);
+          final sol = _asset(harness, SolanaWalletFixture.platform);
+          final token = _asset(harness, SolanaWalletFixture.token);
+
+          await _activateOnDevnet(harness, sol);
+          await _activateOnDevnet(harness, token);
+          expect(
+            await _enabledTickers(harness),
+            containsAll([sol.id.id, token.id.id]),
+          );
+
+          // An active token answers TokenIsAlreadyActivated before KDF reads
+          // its coins config, so disable it to reach the config check.
+          final disabled = await harness.sdk.client.executeRpc({
+            'method': 'disable_coin',
+            'coin': token.id.id,
+          });
+          expect(disabled['error'], isNull, reason: '$disabled');
+          final refused = await harness.sdk.client.executeRpc({
+            'mmrpc': '2.0',
+            'method': 'experimental::enable_solana_token',
+            'params': {
+              'ticker': token.id.id,
+              'activation_params': <String, dynamic>{},
+              'protocol': token.protocol.config['protocol'],
+            },
+          });
+          expect(refused['error_type'], 'CustomTokenError', reason: '$refused');
+          expect(refused['error_data'], {
+            'DuplicateTickerInConfig': {'ticker_in_config': token.id.id},
+          });
+
+          // Outlive the SDK's enabled-coins cache, which still lists the
+          // token, so the SDK asks KDF again rather than reporting it active.
+          await Future<void>.delayed(_enabledCoinsTtl * 2);
+          final tokenRequests = harness.callsTo(
+            'experimental::enable_solana_token',
+          );
+          final again = await _activateOnDevnet(harness, token);
+          expect(again.wasAlreadyActive, isFalse);
+          expect(
+            harness.callsTo('experimental::enable_solana_token'),
+            greaterThan(tokenRequests),
+          );
+          expect(await _enabledTickers(harness), contains(token.id.id));
+          // ignore: avoid_print
+          print(
+            'PROCESS TIER Solana (${walletType.name}): '
+            '${harness.processOperations!.invocationCounts}',
           );
         },
         timeout: const Timeout(Duration(minutes: 6)),
@@ -194,4 +273,41 @@ void main() {
       );
     }
   });
+}
+
+/// Short, so the Solana test need not wait out the 10 s default.
+const _enabledCoinsTtl = Duration(seconds: 1);
+
+Asset _asset(KdfHarness harness, String ticker) => harness
+    .sdk
+    .assets
+    .available
+    .values
+    .singleWhere((asset) => asset.id.id == ticker);
+
+/// The public devnet RPC rate-limits (429) under load, so one failed
+/// activation is retried once before it fails the test.
+Future<ActivationResult> _activateOnDevnet(
+  KdfHarness harness,
+  Asset asset,
+) async {
+  var result = await harness.sdk.activateAsset(asset);
+  if (!result.isSuccess) {
+    // ignore: avoid_print
+    print('Solana devnet: ${asset.id.id} failed, retrying once');
+    await Future<void>.delayed(const Duration(seconds: 10));
+    result = await harness.sdk.activateAsset(asset);
+  }
+  expect(result.isSuccess, isTrue, reason: result.errorMessage);
+  return result;
+}
+
+Future<Set<String>> _enabledTickers(KdfHarness harness) async {
+  final reply = await harness.sdk.client.executeRpc({
+    'mmrpc': '2.0',
+    'method': 'get_enabled_coins',
+    'params': <String, dynamic>{},
+  });
+  final coins = (reply['result'] as Map<String, dynamic>)['coins'] as List;
+  return {for (final coin in coins) (coin as Map)['ticker'] as String};
 }

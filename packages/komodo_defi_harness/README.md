@@ -89,7 +89,7 @@ to 7783. The wrapper keeps only what a *measurement* harness needs and an app
 must not have: per-method RPC counting, kill-by-pid signal handlers, and
 `disable_p2p`.
 
-Two things that only a real KDF teaches you, both now encoded:
+Three things that only a real KDF teaches you, all now encoded:
 
 - Disabling p2p is not a one-flag change. KDF prechecks the combination and
   refuses to start with `Cannot disable P2P while seed nodes are configured.`,
@@ -97,6 +97,11 @@ Two things that only a real KDF teaches you, both now encoded:
 - The rpc password may not contain the word "password" (`Password can't contain
   the word password`). The replay tier never validates it, so it cannot catch
   this.
+- KDF activates only the coins it was started with, and the start lists the
+  SDK's own catalog (`KdfStartupCatalog`), so a test that injects
+  `assetsDataFactory` gives KDF those tickers too. The Solana devnet test relies
+  on that, and its first run found that KDF refuses a `SOLANA` protocol without
+  `protocol_data`, which the replay fixture had left out.
 
 `disableP2p` defaults to **true** here, and that is stated rather than assumed:
 **never do this in the app**, which ships a DEX and for which p2p *is* the

@@ -216,12 +216,14 @@ class KdfAuthService implements IAuthService {
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
     KdfDesktopDataDirectory? desktopDataDirectory,
+    KdfStartupCatalog startupCatalog = KdfStartupCatalog.bundled,
     Duration identityRecheckDelay = const Duration(seconds: 2),
     Duration dispatchLeaseTimeout = const Duration(seconds: 10),
   }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
        _lifiProxyUrl = lifiProxyUrl,
        _lifiIntegrator = lifiIntegrator,
        _desktopDataDirectory = desktopDataDirectory,
+       _startupCatalog = startupCatalog,
        _identityRecheckDelay = identityRecheckDelay,
        _dispatchLeaseTimeout = _positiveLease(dispatchLeaseTimeout) {
     _logger.info('KdfAuthService initialized');
@@ -234,6 +236,9 @@ class KdfAuthService implements IAuthService {
   final String? _lifiProxyUrl;
   final LifiIntegratorConfig? _lifiIntegrator;
   final KdfDesktopDataDirectory? _desktopDataDirectory;
+
+  /// Lists KDF's coins at every start; see [KdfStartupCatalog].
+  final KdfStartupCatalog _startupCatalog;
   final StreamController<KdfUser?> _authStateController =
       StreamController.broadcast();
   final SecureLocalStorage _secureStorage;
@@ -1499,6 +1504,7 @@ class KdfAuthService implements IAuthService {
         lifiProxyUrl: _lifiProxyUrl,
         lifiIntegrator: _lifiIntegrator,
         desktopDataDirectory: _desktopDataDirectory,
+        catalog: _startupCatalog,
       ).catchError((Object error, StackTrace stackTrace) {
         _noAuthConfigFuture = null;
         Error.throwWithStackTrace(error, stackTrace);

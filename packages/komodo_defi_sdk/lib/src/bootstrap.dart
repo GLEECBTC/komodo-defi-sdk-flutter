@@ -189,6 +189,13 @@ Future<void> bootstrap({
       lifiProxyUrl: config.lifiProxyUrl,
       lifiIntegrator: config.lifiIntegrator,
       desktopDataDirectory: config.desktopDataDirectory,
+      // The sources the asset manager below reads, so KDF lists every asset
+      // the SDK offers. All null is the bundled catalog, as before.
+      startupCatalog: KdfStartupCatalog(
+        dataFactory: config.assetsDataFactory,
+        storageNamespace: config.assetsStorageNamespace,
+        runtimeUpdateConfig: config.assetsRuntimeUpdateConfig,
+      ),
     );
     await auth.ensureInitialized();
     return auth;
