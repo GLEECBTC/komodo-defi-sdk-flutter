@@ -50,9 +50,9 @@ void main() {
   group('ApiBuildConfig artifact policy', () {
     test('reference YAML matches the canonical frozen build configuration', () {
       const base = '../komodo_defi_framework/app_build/build_config';
-      final canonical =
-          jsonDecode(File('$base.json').readAsStringSync())
-              as Map<String, dynamic>;
+      final canonical = jsonDecode(
+        File('$base.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       final reference = loadYaml(File('$base.yaml').readAsStringSync());
       expect(reference, canonical);
       final coins = canonical['coins'] as Map<String, dynamic>;
