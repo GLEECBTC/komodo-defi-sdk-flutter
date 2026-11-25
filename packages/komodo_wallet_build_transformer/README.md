@@ -37,6 +37,16 @@ flutter:
 
 Artifacts and checksums are configured in `packages/komodo_defi_framework/app_build/build_config.json`.
 
+Keep the reference `build_config.yaml` in the same directory semantically equal
+to the canonical JSON. The artifact-policy tests compare both complete manifests
+and enforce frozen coin selection, so a KDF/coin roll must update both files.
+
+The consolidated SDK test workflow installs the committed workspace `pubspec.lock`
+with `--enforce-lockfile`, then keeps that lockfile, the Flutter version, the SDK
+commit and the canonical build configuration with its test logs for 30 days.
+Builds and tests use `--no-pub` after that record. Copy the evidence to the
+release record before the artifact expires.
+
 ## CLI
 
 You can run the transformer directly for local testing:
