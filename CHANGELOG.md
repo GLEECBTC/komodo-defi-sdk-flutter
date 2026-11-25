@@ -7,6 +7,44 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ### Fixes
 
+- **Native Electrum servers are no longer paced** ([@CharlVS]) — ElectrumX
+  1.18+ pads replies on its TCP/SSL ports and, once a session has received
+  about 1 KB, holds small replies until a second has passed since its last
+  send. Native KDF waits for each reply, so activation, balances and UTXO
+  history ran at one request per second, while the web build, on WSS, did
+  not. Native builds now reach WSS servers through a loopback bridge in the
+  framework (`ElectrumBridgingKdfOperations`), keeping SSL as fallback. The
+  first KMD balance went from 13.3 s to 1.2–1.5 s, and a 43-address BTC
+  wallet's from 91 s to 3.7–4.2 s. Build with
+  `--dart-define=KDF_ELECTRUM_WS_BRIDGE=false` to keep the SSL servers alone.
+- **iOS backups leave out the KDF data directory** ([@CharlVS]) —
+  `KdfStartupConfig` marks `Documents/.kdf` as excluded from iCloud and
+  Finder device backups at every start. The directory holds each wallet's
+  password-encrypted seed. Standard iCloud Backup is encrypted with keys
+  Apple holds, so anyone who took over the Apple Account could restore the
+  file and guess the password offline. A new or restored iPhone now starts
+  without the wallet, as Android already does, and the recovery phrase
+  restores it. macOS keeps its backups: there the flag would opt out of Time
+  Machine, whose disks the user holds.
+- **More open files for native KDF** ([@CharlVS]) — Before KDF starts, the
+  framework raises the process's open-file soft limit to 10240, capped at the
+  hard limit and never lowered. iOS and macOS apps start at 256, or 2560 once
+  Foundation initializes `NSFileHandle`, and KDF shares that budget with the
+  app. 10240 is the kernel's per-process ceiling on devices with less than
+  12 GB of RAM.
+- **KDF data leaves Documents on Windows and Linux** ([@CharlVS]) — With the
+  new `KomodoDefiSdkConfig.desktopDataDirectory`, KDF keeps its data in
+  `%LOCALAPPDATA%\<windowsFolder>\kdf` or `$XDG_DATA_HOME/<linuxFolder>/kdf`
+  instead of `Documents/.kdf`. Windows often backs Documents up to OneDrive,
+  which uploaded each wallet's password-encrypted seed and synced KDF's
+  databases while they were written. Before KDF first starts, the old folder
+  is renamed `.kdf.moved` and a README takes its place; its data is copied,
+  every file is read back and compared, and one rename commits the copy.
+  A running KDF defers migration and cleanup. After the first successful wallet
+  open from the new folder and a seven-day grace period, cleanup removes only
+  the unchanged files in `.kdf.moved`. A failure before the commit puts the
+  old folder back, and the next start tries again. Without the setting,
+  nothing changes.
 - **Market-data history retries** ([@CharlVS]) — CoinPaprika history requests
   start at the first UTC midnight the plan accepts. CoinPaprika reads a
   date-only start as 00:00 UTC, so the first 90-day batch of a year was always
@@ -21,6 +59,17 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   Partial history is completed from other providers; rate-limit reordering
   does not skip healthy providers. Future dates remain unavailable, and a
   request spanning midnight cannot permanently cache an unfinished day.
+- **Activation backs off from assets that keep failing** ([@CharlVS]) —
+  After three consecutive activation failures with the same error,
+  `SharedActivationCoordinator` refuses further attempts for that asset
+  without contacting KDF, with an `ActivationDeferredException`. It waits one
+  minute, doubling up to 30 minutes. A success, a different error, a wallet
+  change, a policy lookup that recovers from `unavailable`, changed
+  restrictions or `KomodoDefiSdk.resetActivationBackoff` starts over.
+  `activationDeferral` reports the deferral in force. Balance recovery for an
+  asset that failed to activate now polls alone instead of also running a
+  stale-balance guard on the same 30-second interval. Concurrent callers that
+  both missed the pending-activation check now share one attempt.
 
 ## 2026-10-28 — SDK 0.9.0 release preparation
 

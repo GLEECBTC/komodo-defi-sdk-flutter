@@ -188,6 +188,7 @@ Future<void> bootstrap({
           hostConfig ?? LocalConfig(https: false, rpcPassword: rpcPassword),
       lifiProxyUrl: config.lifiProxyUrl,
       lifiIntegrator: config.lifiIntegrator,
+      desktopDataDirectory: config.desktopDataDirectory,
       // The sources the asset manager below reads, so KDF lists every asset
       // the SDK offers. All null is the bundled catalog, as before.
       startupCatalog: KdfStartupCatalog(
@@ -368,6 +369,7 @@ Future<void> bootstrap({
     final coordinator = SharedActivationCoordinator(
       activationManager,
       await container.getAsync<KomodoDefiLocalAuth>(),
+      activationPolicy: container<ActivationPolicy>(),
     );
 
     if (balanceManager.activationCoordinator == null) {

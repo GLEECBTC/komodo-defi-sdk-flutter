@@ -7,7 +7,8 @@ runs:
       id: version
       shell: bash
       run: |
-        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        # Windows runners provide python but not python3.
+        "$(command -v python3 || command -v python)" - <<'PY' >> "$GITHUB_OUTPUT"
         import json
         import re
         from pathlib import Path

@@ -3024,6 +3024,78 @@ void main() {
       );
     },
   );
+
+  test(
+    'every start, signed in or not, uses the desktop data directory',
+    () async {
+      final platformResolver = KdfStartupConfig.desktopDataResolver;
+      addTearDown(
+        () => KdfStartupConfig.desktopDataResolver = platformResolver,
+      );
+      final dataDir = await Directory.systemTemp.createTemp('kdf_auth_data_');
+      addTearDown(() => dataDir.delete(recursive: true));
+      final desktop = KdfDesktopDataDirectory(
+        windowsFolder: 'Gleec',
+        linuxFolder: 'com.gleec.GleecDEX',
+      );
+      final asked = <KdfDesktopDataDirectory>[];
+      KdfStartupConfig.desktopDataResolver = (config, rpcPort) async {
+        asked.add(config);
+        return dataDir.path;
+      };
+      late _FakeKdfOperations operations;
+      final service = _createService(
+        desktopDataDirectory: desktop,
+        onOperationsCreated: (created) {
+          operations = created;
+          _acceptRegistrations(created);
+        },
+      );
+      addTearDown(service.dispose);
+
+      await service.register(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+      );
+      await service.signOut();
+      await service.signIn(
+        walletName: 'new-wallet',
+        password: 'correct horse battery staple',
+        options: _testUser().walletId.authOptions,
+      );
+
+      expect(operations.starts.length, greaterThan(2));
+      expect(
+        operations.starts.map((params) => params['dbdir']),
+        everyElement(dataDir.path),
+      );
+      expect(asked, everyElement(desktop));
+    },
+  );
+}
+
+/// Lets [operations] register wallets, listing each one it was started with.
+void _acceptRegistrations(_FakeKdfOperations operations) {
+  final createdNames = <String>{};
+  operations
+    .._isRunning = false
+    ..onStart = (params) {
+      final name = params['wallet_name'] as String?;
+      if (name != null && params['allow_registrations'] == true) {
+        createdNames.add(name);
+      }
+      operations.responsesByMethod['get_wallet_names'] = {
+        'mmrpc': '2.0',
+        'result': {
+          'wallet_names': createdNames.toList(),
+          'activated_wallet': params['wallet_name'],
+        },
+      };
+    }
+    ..responsesByMethod['get_wallet_names'] = {
+      'mmrpc': '2.0',
+      'result': {'wallet_names': <String>[], 'activated_wallet': null},
+    };
 }
 
 const _publicKeyHash = '05aab5342166f8594baf17a7d9bef5d567443327';
@@ -3083,6 +3155,7 @@ KdfAuthService _createService({
   SecureLocalStorage? secureStorage,
   String? lifiProxyUrl,
   LifiIntegratorConfig? lifiIntegrator,
+  KdfDesktopDataDirectory? desktopDataDirectory,
 }) {
   final hostConfig = LocalConfig(https: false, rpcPassword: 'rpc-pass');
   final operations = _FakeKdfOperations(
@@ -3139,6 +3212,7 @@ KdfAuthService _createService({
     secureStorage: secureStorage,
     lifiProxyUrl: lifiProxyUrl,
     lifiIntegrator: lifiIntegrator,
+    desktopDataDirectory: desktopDataDirectory,
   );
 }
 

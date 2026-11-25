@@ -215,12 +215,14 @@ class KdfAuthService implements IAuthService {
     SecureLocalStorage? secureStorage,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfDesktopDataDirectory? desktopDataDirectory,
     KdfStartupCatalog startupCatalog = KdfStartupCatalog.bundled,
     Duration identityRecheckDelay = const Duration(seconds: 2),
     Duration dispatchLeaseTimeout = const Duration(seconds: 10),
   }) : _secureStorage = secureStorage ?? SecureLocalStorage(),
        _lifiProxyUrl = lifiProxyUrl,
        _lifiIntegrator = lifiIntegrator,
+       _desktopDataDirectory = desktopDataDirectory,
        _startupCatalog = startupCatalog,
        _identityRecheckDelay = identityRecheckDelay,
        _dispatchLeaseTimeout = _positiveLease(dispatchLeaseTimeout) {
@@ -233,6 +235,7 @@ class KdfAuthService implements IAuthService {
   final IKdfHostConfig _hostConfig;
   final String? _lifiProxyUrl;
   final LifiIntegratorConfig? _lifiIntegrator;
+  final KdfDesktopDataDirectory? _desktopDataDirectory;
 
   /// Lists KDF's coins at every start; see [KdfStartupCatalog].
   final KdfStartupCatalog _startupCatalog;
@@ -1490,14 +1493,22 @@ class KdfAuthService implements IAuthService {
     });
   }
 
-  late final Future<KdfStartupConfig> _noAuthConfig =
+  Future<KdfStartupConfig>? _noAuthConfigFuture;
+
+  /// Built once. A failure, such as Documents being unavailable for a moment,
+  /// is retried at the next start instead of blocking KDF for the session.
+  Future<KdfStartupConfig> get _noAuthConfig => _noAuthConfigFuture ??=
       KdfStartupConfig.noAuthStartup(
         rpcPassword: _hostConfig.rpcPassword,
         rpcPort: _hostConfig.port,
         lifiProxyUrl: _lifiProxyUrl,
         lifiIntegrator: _lifiIntegrator,
+        desktopDataDirectory: _desktopDataDirectory,
         catalog: _startupCatalog,
-      );
+      ).catchError((Object error, StackTrace stackTrace) {
+        _noAuthConfigFuture = null;
+        Error.throwWithStackTrace(error, stackTrace);
+      });
 
   Future<bool> verifyEncryptedSeedBip39Compatibility(String password) async {
     final mnemonic = await getMnemonic(

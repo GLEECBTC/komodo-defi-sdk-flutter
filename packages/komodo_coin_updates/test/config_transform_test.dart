@@ -102,10 +102,44 @@ void main() {
         final list = JsonList.of(
           List<Map<String, dynamic>>.from(out['electrum'] as List),
         );
-        expect(list.length, 1);
-        expect(list.first['protocol'] != 'WSS', isTrue);
+        expect(list.map((e) => e['protocol']), ['WSS', 'TCP']);
+        expect(list.first['ws_url'], 'wss://wss.example');
       }
     });
+
+    test('native keeps every entry and puts WSS first, in order', () {
+      final out = const WssWebsocketTransform().filterElectrums([
+        {'url': 'a.example:20001', 'protocol': 'SSL'},
+        {'url': 'a.example:30001', 'protocol': 'WSS'},
+        {'url': 'b.example:20001', 'protocol': 'SSL'},
+        {'url': 'b.example:30001', 'protocol': 'WSS'},
+      ], serverType: ElectrumServerType.wssFirst);
+
+      expect(out.map((e) => e['url']), [
+        'a.example:30001',
+        'b.example:30001',
+        'a.example:20001',
+        'b.example:20001',
+      ]);
+    });
+  });
+
+  group('SslElectrumTransform', () {
+    test('keeps SSL and WSS electrum servers on native, in order', () {
+      final out = const SslElectrumTransform().transform({
+        'coin': 'KMD',
+        'electrum': [
+          {'url': 'a.example:30001', 'protocol': 'WSS'},
+          {'url': 'a.example:10001', 'protocol': 'TCP'},
+          {'url': 'a.example:20001', 'protocol': 'SSL'},
+        ],
+      });
+
+      expect((out['electrum'] as List).map((e) => (e as Map)['protocol']), [
+        'WSS',
+        'SSL',
+      ]);
+    }, skip: kIsWeb ? 'the transform only runs on native' : false);
   });
 
   group('TronQuickNodeTransform', () {

@@ -578,6 +578,7 @@ extension KdfExtensions on KdfAuthService {
       netid: netId,
       lifiProxyUrl: _lifiProxyUrl,
       lifiIntegrator: _lifiIntegrator,
+      desktopDataDirectory: _desktopDataDirectory,
       catalog: _startupCatalog,
     );
   }

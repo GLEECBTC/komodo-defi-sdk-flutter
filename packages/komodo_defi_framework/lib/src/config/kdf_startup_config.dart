@@ -4,9 +4,15 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location.dart';
+import 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_stub.dart'
+    if (dart.library.io) 'package:komodo_defi_framework/src/config/data_directory/kdf_desktop_data_location_native.dart';
 import 'package:komodo_defi_framework/src/config/event_streaming_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_startup_catalog.dart';
 import 'package:komodo_defi_framework/src/config/seed_node_validator.dart';
+import 'package:komodo_defi_framework/src/native/backup_exclusion.dart';
+import 'package:komodo_defi_framework/src/native/backup_exclusion_stub.dart'
+    if (dart.library.io) 'package:komodo_defi_framework/src/native/backup_exclusion_native.dart';
 import 'package:komodo_defi_framework/src/services/seed_node_service.dart'
     show SeedNodeService;
 import 'package:komodo_defi_types/komodo_defi_type_utils.dart';
@@ -110,6 +116,7 @@ class KdfStartupConfig {
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfDesktopDataDirectory? desktopDataDirectory,
     KdfStartupCatalog catalog = KdfStartupCatalog.bundled,
   }) async {
     assert(
@@ -124,6 +131,8 @@ class KdfStartupConfig {
     final (String? userHomePath, String? dbPath) = await _getAndSetupUserHome(
       userHome: userHome,
       dbHome: dbDir,
+      desktopDataDirectory: desktopDataDirectory,
+      rpcPort: rpcPort,
     );
 
     assert(
@@ -170,19 +179,42 @@ class KdfStartupConfig {
     );
   }
 
+  /// Keeps the KDF data directory out of device backups on every start.
+  @visibleForTesting
+  static BackupExclusion backupExclusion = platformBackupExclusion();
+
+  /// Finds KDF's data directory on Windows and Linux, moving it out of
+  /// Documents the first time. See [KdfDesktopDataDirectory].
+  @visibleForTesting
+  static KdfDesktopDataResolver desktopDataResolver =
+      platformKdfDesktopDataResolver();
+
   static Future<(String? home, String? dbDir)> _getAndSetupUserHome({
+    required int rpcPort,
     String? userHome,
     String? dbHome,
+    KdfDesktopDataDirectory? desktopDataDirectory,
   }) async {
     if (kIsWeb) return (null, null);
 
-    final home = userHome ?? (await getApplicationDocumentsDirectory()).path;
-    final dbDir = dbHome ?? path.join(home, '.kdf');
+    final desktopDir =
+        userHome == null && dbHome == null && desktopDataDirectory != null
+        ? await desktopDataResolver(desktopDataDirectory, rpcPort)
+        : null;
+    final home =
+        userHome ??
+        (desktopDir != null
+            ? path.dirname(desktopDir)
+            : (await getApplicationDocumentsDirectory()).path);
+    final dbDir = dbHome ?? desktopDir ?? path.join(home, '.kdf');
 
     // ignore: avoid_slow_async_io
     if (!await Directory(dbDir).exists()) {
       await Directory(dbDir).create(recursive: true);
     }
+    // KDF keeps each wallet's password-encrypted seed here. Marking it again
+    // at every start restores the flag if the directory was replaced.
+    backupExclusion(dbDir);
 
     return (home, dbDir);
   }
@@ -194,9 +226,13 @@ class KdfStartupConfig {
     EventStreamingConfiguration? eventStreamingConfiguration,
     String? lifiProxyUrl,
     LifiIntegratorConfig? lifiIntegrator,
+    KdfDesktopDataDirectory? desktopDataDirectory,
     KdfStartupCatalog catalog = KdfStartupCatalog.bundled,
   }) async {
-    final (String? home, String? dbDir) = await _getAndSetupUserHome();
+    final (String? home, String? dbDir) = await _getAndSetupUserHome(
+      desktopDataDirectory: desktopDataDirectory,
+      rpcPort: rpcPort,
+    );
 
     final (seedNodes: seeds, netId: netId) =
         await SeedNodeService.fetchSeedNodes();
