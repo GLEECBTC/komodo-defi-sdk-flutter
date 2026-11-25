@@ -7,6 +7,16 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
 
 ### Fixes
 
+- **Native Electrum servers are no longer paced** ([@CharlVS]) — ElectrumX
+  1.18+ pads replies on its TCP/SSL ports and, once a session has received
+  about 1 KB, holds small replies until a second has passed since its last
+  send. Native KDF waits for each reply, so activation, balances and UTXO
+  history ran at one request per second, while the web build, on WSS, did
+  not. Native builds now reach WSS servers through a loopback bridge in the
+  framework (`ElectrumBridgingKdfOperations`), keeping SSL as fallback. The
+  first KMD balance went from 13.3 s to 1.2–1.5 s, and a 43-address BTC
+  wallet's from 91 s to 3.7–4.2 s. Build with
+  `--dart-define=KDF_ELECTRUM_WS_BRIDGE=false` to keep the SSL servers alone.
 - **iOS backups leave out the KDF data directory** ([@CharlVS]) —
   `KdfStartupConfig` marks `Documents/.kdf` as excluded from iCloud and
   Finder device backups at every start. The directory holds each wallet's

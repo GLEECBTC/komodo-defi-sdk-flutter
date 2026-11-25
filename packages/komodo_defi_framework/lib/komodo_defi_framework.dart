@@ -27,6 +27,14 @@ export 'package:komodo_defi_framework/src/streaming/events/kdf_event.dart';
 // own implementation instead of reimplementing its lifecycle. See
 // `komodo_defi_harness/lib/src/process_kdf_operations.dart`.
 export 'src/native/kdf_executable_finder.dart' show KdfExecutableFinder;
+// The Electrum bridge decorates native operations; exported so the harness
+// can run the real binary with the same routing the apps use.
+export 'src/operations/electrum/electrum_bridging_kdf_operations.dart'
+    show ElectrumBridgingKdfOperations, kElectrumWebSocketBridgeEnabled;
+export 'src/operations/electrum/electrum_web_socket_bridge.dart'
+    show ElectrumWebSocketBridge;
+export 'src/operations/electrum/native_wss_electrum_routing.dart'
+    show DropWssElectrumRouting, NativeWssElectrumRouting;
 export 'src/operations/kdf_operations_interface.dart';
 export 'src/operations/kdf_operations_local_executable.dart'
     show KdfOperationsLocalExecutable;

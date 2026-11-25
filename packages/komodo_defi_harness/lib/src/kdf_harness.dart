@@ -289,6 +289,10 @@ class KdfHarness {
   /// The seed comes only from the environment ([KdfTestSeed.fromEnv]) and is
   /// wrapped in [Secret]. Never log it, never commit it, and never upload the
   /// workspace as a CI artifact - it contains the wallet database.
+  ///
+  /// [electrumWebSocketBridge] mirrors the native apps: on, `WSS` Electrum
+  /// servers are reached through [ElectrumWebSocketBridge]; off, they are
+  /// dropped and KDF uses the SSL servers alone.
   static Future<KdfHarness?> process({
     required KdfWalletType walletType,
     String walletName = 'harness-wallet',
@@ -297,6 +301,7 @@ class KdfHarness {
     bool disableP2p = true,
     Duration startupTimeout = const Duration(seconds: 60),
     int rpcPort = kDefaultKdfRpcPort,
+    bool electrumWebSocketBridge = kElectrumWebSocketBridgeEnabled,
   }) async {
     TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -362,7 +367,12 @@ class KdfHarness {
     final metrics = KdfHarnessMetrics();
     final framework = KomodoDefiFramework.createWithOperations(
       hostConfig: hostConfig,
-      kdfOperations: operations,
+      kdfOperations: ElectrumBridgingKdfOperations(
+        operations,
+        routing: electrumWebSocketBridge
+            ? ElectrumWebSocketBridge(log: log)
+            : const DropWssElectrumRouting(),
+      ),
       externalLogger: log,
     );
 
