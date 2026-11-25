@@ -10,6 +10,7 @@ import 'package:komodo_defi_framework/src/config/kdf_config.dart';
 import 'package:komodo_defi_framework/src/config/kdf_logging_config.dart';
 import 'package:komodo_defi_framework/src/exceptions/kdf_exception.dart';
 import 'package:komodo_defi_framework/src/native/komodo_defi_framework_bindings_generated.dart';
+import 'package:komodo_defi_framework/src/native/open_file_limit.dart';
 import 'package:komodo_defi_framework/src/operations/electrum/electrum_bridging_kdf_operations.dart';
 import 'package:komodo_defi_framework/src/operations/electrum/electrum_web_socket_bridge.dart';
 import 'package:komodo_defi_framework/src/operations/electrum/native_wss_electrum_routing.dart';
@@ -113,6 +114,10 @@ class KdfOperationsNativeLibrary implements IKdfOperations {
 
   @override
   Future<KdfStartupResult> kdfMain(JsonMap startParams, {int? logLevel}) async {
+    // KDF runs in this process and shares its open-file limit.
+    final openFileLimit = raiseOpenFileSoftLimit();
+    if (openFileLimit != null) _log('KDF $openFileLimit');
+
     final startParamsPtr = startParams
         .toJsonString()
         .toNativeUtf8()

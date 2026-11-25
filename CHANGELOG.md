@@ -26,6 +26,12 @@ See [Conventional Commits](https://conventionalcommits.org) for commit guideline
   without the wallet, as Android already does, and the recovery phrase
   restores it. macOS keeps its backups: there the flag would opt out of Time
   Machine, whose disks the user holds.
+- **More open files for native KDF** ([@CharlVS]) — Before KDF starts, the
+  framework raises the process's open-file soft limit to 10240, capped at the
+  hard limit and never lowered. iOS and macOS apps start at 256, or 2560 once
+  Foundation initializes `NSFileHandle`, and KDF shares that budget with the
+  app. 10240 is the kernel's per-process ceiling on devices with less than
+  12 GB of RAM.
 - **KDF data leaves Documents on Windows and Linux** ([@CharlVS]) — With the
   new `KomodoDefiSdkConfig.desktopDataDirectory`, KDF keeps its data in
   `%LOCALAPPDATA%\<windowsFolder>\kdf` or `$XDG_DATA_HOME/<linuxFolder>/kdf`
